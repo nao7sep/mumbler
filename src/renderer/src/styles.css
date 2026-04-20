@@ -588,6 +588,19 @@ textarea:disabled {
   background: rgba(255, 255, 255, 0.62);
 }
 
+.shortcut-item--editable {
+  align-items: center;
+}
+
+.shortcut-item--editable input {
+  width: min(180px, 100%);
+  border: 1px solid rgba(53, 43, 31, 0.12);
+  border-radius: 999px;
+  padding: 0.52rem 0.8rem;
+  background: rgba(255, 255, 255, 0.82);
+  text-align: right;
+}
+
 .shortcut-item kbd {
   border-radius: 999px;
   padding: 0.25rem 0.55rem;

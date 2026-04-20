@@ -1,6 +1,6 @@
 import { useMemo, type ReactElement } from "react";
 
-import type { SettingsDraft } from "@shared/app-shell";
+import type { CommandDefinition, CommandId, SettingsDraft } from "@shared/app-shell";
 
 function parseEntries(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
@@ -9,6 +9,7 @@ function parseEntries(value: string): string[] {
 export function SettingsModal({
   draft,
   timezones,
+  commands,
   isSaving,
   isPickingOutputDirectory,
   errorMessage,
@@ -19,6 +20,7 @@ export function SettingsModal({
 }: {
   draft: SettingsDraft;
   timezones: string[];
+  commands: CommandDefinition[];
   isSaving: boolean;
   isPickingOutputDirectory: boolean;
   errorMessage: string | null;
@@ -384,6 +386,31 @@ export function SettingsModal({
                   }
                 />
               </label>
+            </div>
+          </section>
+
+          <section className="detail-card detail-card--nested settings-section settings-section--wide">
+            <div className="detail-card__header">
+              <h3>Keyboard Shortcuts</h3>
+            </div>
+            <div className="shortcut-list">
+              {commands.map((command) => (
+                <label key={command.id} className="shortcut-item shortcut-item--editable">
+                  <span>{command.label}</span>
+                  <input
+                    value={draft.shortcuts[command.id]}
+                    onChange={(event) =>
+                      onChange({
+                        ...draft,
+                        shortcuts: {
+                          ...draft.shortcuts,
+                          [command.id as CommandId]: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </label>
+              ))}
             </div>
           </section>
         </div>

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import {
   APP_SHELL_CHANNELS,
+  APP_SHELL_EVENTS,
   type AppSnapshot,
   type CardTrim,
   type ImportOperationResult,
@@ -52,6 +53,17 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.saveCard, cardId, resolution) as Promise<SaveCardResult>,
   removeCard: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.removeCard, cardId) as Promise<AppSnapshot>,
+  respondToWindowClose: (shouldClose: boolean) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.respondToWindowClose, shouldClose) as Promise<void>,
+  onWindowCloseRequested: (listener: () => void) => {
+    const wrapped = () => {
+      listener();
+    };
+    ipcRenderer.on(APP_SHELL_EVENTS.windowCloseRequested, wrapped);
+    return () => {
+      ipcRenderer.removeListener(APP_SHELL_EVENTS.windowCloseRequested, wrapped);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld("mumbler", api);

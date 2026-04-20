@@ -1,5 +1,7 @@
 import {
+  forwardRef,
   useEffect,
+  useImperativeHandle,
   useRef,
   useState,
   type KeyboardEvent,
@@ -24,14 +26,22 @@ interface WaveformEditorProps {
   onError: (message: string) => void;
 }
 
-export function WaveformEditor({
+export interface WaveformEditorHandle {
+  playPause(): Promise<void>;
+  setFrontMarkerAtCursor(): Promise<void>;
+  setBackMarkerAtCursor(): Promise<void>;
+  playFirstSnippet(): Promise<void>;
+  playLastSnippet(): Promise<void>;
+}
+
+export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorProps>(function WaveformEditor({
   card,
   previewSnippetSeconds,
   disabled,
   onDuplicateCard,
   onTrimCommit,
   onError,
-}: WaveformEditorProps): ReactElement {
+}, ref): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const waveSurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
@@ -336,6 +346,18 @@ export function WaveformEditor({
     void handleMarkerInputCommit(side);
   }
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      playPause,
+      setFrontMarkerAtCursor: () => setMarkerAtCursor("front"),
+      setBackMarkerAtCursor: () => setMarkerAtCursor("back"),
+      playFirstSnippet: () => playSnippet("first"),
+      playLastSnippet: () => playSnippet("last"),
+    }),
+    [cursorSec, draftTrim.backMarkerSec, draftTrim.frontMarkerSec, previewSnippetSeconds, resolvedDurationSec],
+  );
+
   const durationLabel = formatDurationLabel(resolvedDurationSec);
   const trimSummary = describeTrim(draftTrim);
 
@@ -508,7 +530,7 @@ export function WaveformEditor({
       </div>
     </div>
   );
-}
+});
 
 function syncRegionToTrim(
   regions: RegionsPlugin,

@@ -16,6 +16,11 @@ export const APP_SHELL_CHANNELS = {
   chooseOutputDirectory: "app-shell:choose-output-directory",
   saveCard: "app-shell:save-card",
   removeCard: "app-shell:remove-card",
+  respondToWindowClose: "app-shell:respond-to-window-close",
+} as const;
+
+export const APP_SHELL_EVENTS = {
+  windowCloseRequested: "app-shell:event-window-close-requested",
 } as const;
 
 export type CardStatus =
@@ -211,6 +216,7 @@ export interface SettingsSummary {
   timestampPatternCount: number;
   previewSnippetSeconds: number;
   concurrencyLimit: number;
+  shortcuts: Record<CommandId, string>;
 }
 
 export interface SettingsDraft {
@@ -236,6 +242,7 @@ export interface SettingsDraft {
   transcriptionTimeoutMs: number;
   titleTimeoutMs: number;
   slugTimeoutMs: number;
+  shortcuts: Record<CommandId, string>;
 }
 
 export interface QueueSummary {
@@ -314,4 +321,6 @@ export interface MumblerShellApi {
   chooseOutputDirectory(): Promise<AppSnapshot>;
   saveCard(cardId: string, resolution?: SaveConflictResolution): Promise<SaveCardResult>;
   removeCard(cardId: string): Promise<AppSnapshot>;
+  respondToWindowClose(shouldClose: boolean): Promise<void>;
+  onWindowCloseRequested(listener: () => void): () => void;
 }

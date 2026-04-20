@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from "react";
 
 import type {
   AppSnapshot,
@@ -17,8 +17,9 @@ import {
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
-import { WaveformEditor } from "./WaveformEditor";
+import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
 import { SettingsModal } from "./SettingsModal";
+import { findMatchingCommand, isTypingTarget } from "./shortcut-utils";
 
 interface StatusChipProps {
   label: CardStatus;
@@ -407,6 +408,8 @@ export function App(): ReactElement {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isPickingSettingsOutputDirectory, setIsPickingSettingsOutputDirectory] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
+  const [pendingCloseConfirmation, setPendingCloseConfirmation] = useState(false);
+  const waveformEditorRef = useRef<WaveformEditorHandle | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -456,6 +459,12 @@ export function App(): ReactElement {
     };
   }, [activePipelineCards]);
 
+  useEffect(() => {
+    return window.mumbler.onWindowCloseRequested(() => {
+      setPendingCloseConfirmation(true);
+    });
+  }, []);
+
   const selectedCard =
     snapshot?.state?.cards.find((card) => card.id === snapshot.state?.selectedCardId) ?? null;
   const selectedCardIsBusy =
@@ -463,6 +472,12 @@ export function App(): ReactElement {
     (activePipelineCards.includes(selectedCard.id) ||
       selectedCard.status === "Transcribing" ||
       selectedCard.status === "Generating Metadata");
+  const modalIsOpen =
+    settingsDraft !== null ||
+    pendingReviewDrafts.length > 0 ||
+    pendingSaveConflict !== null ||
+    pendingRemoveCardId !== null ||
+    pendingCloseConfirmation;
   const languageOptions = useMemo(() => {
     const configuredLanguages = snapshot?.settingsSummary?.languages ?? [];
     if (selectedCard === null) {
@@ -685,6 +700,100 @@ export function App(): ReactElement {
     }
   }
 
+  async function handleShortcutCommand(commandId: string): Promise<void> {
+    if (selectedCard === null) {
+      if (commandId === "select-previous" || commandId === "select-next") {
+        return;
+      }
+      return;
+    }
+
+    switch (commandId) {
+      case "play-pause":
+        await waveformEditorRef.current?.playPause();
+        return;
+      case "set-front-marker":
+        if (!selectedCardIsBusy) {
+          await waveformEditorRef.current?.setFrontMarkerAtCursor();
+        }
+        return;
+      case "set-back-marker":
+        if (!selectedCardIsBusy) {
+          await waveformEditorRef.current?.setBackMarkerAtCursor();
+        }
+        return;
+      case "play-first-snippet":
+        await waveformEditorRef.current?.playFirstSnippet();
+        return;
+      case "play-last-snippet":
+        await waveformEditorRef.current?.playLastSnippet();
+        return;
+      case "transcribe-selected":
+        if (snapshot?.settingsSummary?.hasGeminiApiKey && !selectedCardIsBusy) {
+          handleTranscribeCard(selectedCard.id);
+        }
+        return;
+      case "save-selected":
+        if (
+          selectedCard.status === "Ready to Save" &&
+          !selectedCardIsBusy &&
+          snapshot?.settingsSummary?.outputDirectory
+        ) {
+          await handleSaveCard(selectedCard.id);
+        }
+        return;
+      case "retry-selected":
+        if (selectedCard.status === "Error" && !selectedCardIsBusy) {
+          handleRetryCard(selectedCard.id);
+        }
+        return;
+      case "remove-selected":
+        if (!selectedCardIsBusy) {
+          setPendingRemoveCardId(selectedCard.id);
+        }
+        return;
+      case "select-previous":
+      case "select-next": {
+        const cards = snapshot?.state?.cards ?? [];
+        const currentIndex = cards.findIndex((card) => card.id === selectedCard.id);
+        if (currentIndex === -1) {
+          return;
+        }
+
+        const delta = commandId === "select-previous" ? -1 : 1;
+        const nextCard = cards[currentIndex + delta];
+        if (nextCard) {
+          await handleCardSelect(nextCard.id);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      const settingsSummary = snapshot?.settingsSummary;
+      if (modalIsOpen || isTypingTarget(event.target) || settingsSummary == null) {
+        return;
+      }
+
+      const commandId = findMatchingCommand(event, settingsSummary.shortcuts);
+      if (commandId === null) {
+        return;
+      }
+
+      event.preventDefault();
+      void handleShortcutCommand(commandId);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [modalIsOpen, selectedCard, selectedCardIsBusy, snapshot]);
+
   async function handleSaveCard(
     cardId: string,
     resolution?: "overwrite" | "suffix" | "cancel",
@@ -757,7 +866,7 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          <span className="pill">Phase 8 Settings</span>
+          <span className="pill">Phase 9 Commands</span>
           {snapshot ? (
             <span className="pill pill--quiet">
               {snapshot.appVersion} · {snapshot.platform}
@@ -893,8 +1002,8 @@ export function App(): ReactElement {
               <h2>Selection Workspace</h2>
             </div>
             <p className="panel__note">
-              Phase 8 adds editable settings, per-card language control, and keeps the existing
-              trim, Gemini, save, and remove workflow intact.
+              Phase 9 activates the shortcut registry and custom close confirmation while keeping
+              the existing trim, Gemini, save, and remove workflow intact.
             </p>
           </div>
 
@@ -1033,6 +1142,7 @@ export function App(): ReactElement {
                   <span className="muted-tag">Trim first, then transcribe</span>
                 </div>
                 <WaveformEditor
+                  ref={waveformEditorRef}
                   card={selectedCard}
                   previewSnippetSeconds={snapshot?.settingsSummary?.previewSnippetSeconds ?? 10}
                   disabled={selectedCardIsBusy}
@@ -1260,6 +1370,7 @@ export function App(): ReactElement {
         <SettingsModal
           draft={settingsDraft}
           timezones={snapshot?.supportedTimezones ?? []}
+          commands={snapshot?.commands ?? []}
           isSaving={isSavingSettings}
           isPickingOutputDirectory={isPickingSettingsOutputDirectory}
           errorMessage={settingsErrorMessage}
@@ -1340,6 +1451,30 @@ export function App(): ReactElement {
               label: "Cancel",
               onClick: () => {
                 setPendingSaveConflict(null);
+              },
+            },
+          ]}
+        />
+      ) : null}
+
+      {pendingCloseConfirmation ? (
+        <DecisionModal
+          title="Close Mumbler"
+          body="Close the app window now? In-progress work will be restored as interrupted errors on next launch."
+          actions={[
+            {
+              label: "Close App",
+              variant: "danger",
+              onClick: () => {
+                setPendingCloseConfirmation(false);
+                void window.mumbler.respondToWindowClose(true);
+              },
+            },
+            {
+              label: "Cancel",
+              onClick: () => {
+                setPendingCloseConfirmation(false);
+                void window.mumbler.respondToWindowClose(false);
               },
             },
           ]}

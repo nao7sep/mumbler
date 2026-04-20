@@ -1283,6 +1283,7 @@ function summarizeSettings(settings: MumblerSettings): SettingsSummary {
     timestampPatternCount: settings.timestampPatterns.length,
     previewSnippetSeconds: settings.previewSnippetSeconds,
     concurrencyLimit: settings.concurrencyLimit,
+    shortcuts: { ...settings.shortcuts },
   };
 }
 
@@ -1310,6 +1311,7 @@ function buildSettingsDraft(settings: MumblerSettings): SettingsDraft {
     transcriptionTimeoutMs: settings.timeouts.transcriptionMs,
     titleTimeoutMs: settings.timeouts.titleMs,
     slugTimeoutMs: settings.timeouts.slugMs,
+    shortcuts: { ...settings.shortcuts },
   };
 }
 
@@ -1369,6 +1371,7 @@ function applySettingsDraft(current: MumblerSettings, draft: SettingsDraft): Mum
   );
   const titleTimeoutMs = requirePositiveInteger(draft.titleTimeoutMs, "Title timeout");
   const slugTimeoutMs = requirePositiveInteger(draft.slugTimeoutMs, "Slug timeout");
+  const shortcuts = normalizeDraftShortcuts(draft.shortcuts, current.shortcuts);
 
   if (retryMaxDelayMs < retryInitialDelayMs) {
     throw new Error("Retry max delay must be greater than or equal to retry initial delay.");
@@ -1405,6 +1408,7 @@ function applySettingsDraft(current: MumblerSettings, draft: SettingsDraft): Mum
       titleMs: titleTimeoutMs,
       slugMs: slugTimeoutMs,
     },
+    shortcuts,
   };
 }
 
@@ -1435,6 +1439,23 @@ function parseSettingsEntries(value: string): string[] {
 
 function deduplicateStrings(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function normalizeDraftShortcuts(
+  shortcuts: Record<string, string>,
+  defaults: Record<string, string>,
+): Record<string, string> {
+  const normalized = { ...defaults };
+
+  for (const command of COMMAND_DEFINITIONS) {
+    const value = shortcuts[command.id]?.trim();
+    if (!value) {
+      throw new Error(`Shortcut for ${command.label} is required.`);
+    }
+    normalized[command.id] = value;
+  }
+
+  return normalized;
 }
 
 function requirePromptPlaceholders(
