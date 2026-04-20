@@ -193,6 +193,30 @@ textarea:disabled {
   color: var(--text);
 }
 
+.queue-row--imported {
+  background:
+    linear-gradient(180deg, rgba(255, 252, 246, 0.92), rgba(245, 238, 228, 0.92));
+}
+
+.queue-row--transcribing,
+.queue-row--generating-metadata {
+  border-color: rgba(29, 97, 118, 0.2);
+  background:
+    linear-gradient(180deg, rgba(242, 249, 252, 0.94), rgba(234, 244, 248, 0.94));
+}
+
+.queue-row--ready-to-save {
+  border-color: rgba(32, 104, 79, 0.24);
+  background:
+    linear-gradient(180deg, rgba(240, 250, 245, 0.95), rgba(233, 246, 239, 0.95));
+}
+
+.queue-row--error {
+  border-color: rgba(166, 59, 43, 0.24);
+  background:
+    linear-gradient(180deg, rgba(253, 245, 243, 0.95), rgba(250, 238, 234, 0.95));
+}
+
 .queue-row--selected {
   border-color: rgba(29, 97, 118, 0.36);
   box-shadow: inset 0 0 0 1px rgba(29, 97, 118, 0.2);
@@ -356,6 +380,33 @@ textarea:disabled {
   padding: 18px;
 }
 
+.detail-card--status {
+  position: relative;
+  overflow: hidden;
+}
+
+.detail-card--status::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  background: rgba(98, 82, 66, 0.18);
+}
+
+.detail-card--transcribing::before,
+.detail-card--generating-metadata::before {
+  background: rgba(29, 97, 118, 0.52);
+}
+
+.detail-card--ready-to-save::before {
+  background: rgba(32, 104, 79, 0.56);
+}
+
+.detail-card--error::before {
+  background: rgba(166, 59, 43, 0.56);
+}
+
 .detail-card--nested {
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.72);
@@ -370,6 +421,37 @@ textarea:disabled {
   display: grid;
   gap: 16px;
   margin: 18px 0 0;
+}
+
+.status-summary {
+  display: grid;
+  gap: 4px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(98, 82, 66, 0.08);
+}
+
+.status-summary strong {
+  font-size: 0.94rem;
+}
+
+.status-summary span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.status-summary--transcribing,
+.status-summary--generating-metadata {
+  background: rgba(29, 97, 118, 0.08);
+}
+
+.status-summary--ready-to-save {
+  background: rgba(32, 104, 79, 0.1);
+}
+
+.status-summary--error {
+  background: rgba(166, 59, 43, 0.1);
 }
 
 .meta-list div {

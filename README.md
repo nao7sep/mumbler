@@ -33,6 +33,7 @@ The current implementation provides:
 - Retry flow that resumes from the failed Gemini step when possible
 - Per-card language override that clears stale results before retranscription
 - Ready-to-save card states with per-artifact model provenance in app state
+- Status-driven color cues across queue rows and selected-card detail panels
 - Output-directory selection through the desktop shell
 - Atomic audio plus JSON finalization with filename collision handling
 - Remove workflow that trashes app-managed working audio after confirmation

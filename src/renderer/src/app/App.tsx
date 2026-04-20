@@ -33,6 +33,10 @@ function slugify(value: string): string {
   return value.toLowerCase().replaceAll(" ", "-");
 }
 
+function statusModifier(status: CardStatus): string {
+  return slugify(status);
+}
+
 function formatBytes(value: number): string {
   if (value < 1024) {
     return `${value} B`;
@@ -200,7 +204,7 @@ function QueueList({
         <button
           key={card.id}
           type="button"
-          className={`queue-row${card.id === selectedCardId ? " queue-row--selected" : ""}`}
+          className={`queue-row queue-row--${statusModifier(card.status)}${card.id === selectedCardId ? " queue-row--selected" : ""}`}
           onClick={() => onSelect(card.id)}
         >
           <div className="queue-row__top">
@@ -1021,7 +1025,7 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          <span className="pill">Phase 10 Reliability</span>
+          <span className="pill">Phase 13 Visual States</span>
           {snapshot ? (
             <span className="pill pill--quiet">
               {snapshot.appVersion} · {snapshot.platform}
@@ -1167,17 +1171,21 @@ export function App(): ReactElement {
               <h2>Selection Workspace</h2>
             </div>
             <p className="panel__note">
-              Phase 10 adds app-wide error surfacing and startup recovery while keeping the
-              existing trim, Gemini, save, and remove workflow intact.
+              Phase 13 strengthens status-driven color cues in the queue and detail pane while
+              keeping the existing trim, Gemini, save, and remove workflow intact.
             </p>
           </div>
 
           {selectedCard ? (
             <div className="detail-grid">
-              <section className="detail-card">
+              <section className={`detail-card detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
                 <div className="detail-card__header">
                   <h3>Identity</h3>
                   <StatusChip label={selectedCard.status} />
+                </div>
+                <div className={`status-summary status-summary--${statusModifier(selectedCard.status)}`}>
+                  <strong>{selectedCard.status}</strong>
+                  <span>{describeCardStep(selectedCard)}</span>
                 </div>
                 <dl className="meta-list">
                   <div>
@@ -1373,7 +1381,7 @@ export function App(): ReactElement {
                 </dl>
               </section>
 
-              <section className="detail-card detail-card--wide">
+              <section className={`detail-card detail-card--wide detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
                 <div className="detail-card__header">
                   <div>
                     <h3>Actions and Status</h3>
