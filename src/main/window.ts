@@ -2,7 +2,7 @@ import { BrowserWindow } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const WINDOW_BACKGROUND = "#f3ede1";
+const WINDOW_BACKGROUND = "#f8f9fb";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function createMainWindow(): BrowserWindow {
@@ -13,10 +13,10 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 760,
     show: false,
     backgroundColor: WINDOW_BACKGROUND,
-    titleBarStyle: "hiddenInset",
+    titleBarStyle: "default",
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.mjs"),
+      preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

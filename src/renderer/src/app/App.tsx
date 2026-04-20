@@ -781,7 +781,6 @@ export function App(): ReactElement {
     <div className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Desktop Audio Transcription</p>
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
