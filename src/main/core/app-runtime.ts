@@ -834,8 +834,8 @@ function createDefaultSettings(systemTimezone: string): MumblerSettings {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     geminiApiKeyObfuscated: "",
     outputDirectory: null,
-    transcriptionModel: "gemini-3-pro-preview",
-    metadataModel: "gemini-3-pro-preview",
+    transcriptionModel: "gemini-3.1-pro-preview",
+    metadataModel: "gemini-3.1-pro-preview",
     defaultLanguage: "English",
     languages: [
       "English",
@@ -860,9 +860,9 @@ function createDefaultSettings(systemTimezone: string): MumblerSettings {
     ],
     prompts: {
       title:
-        "Read the following transcript in {language} and produce a concise, accurate title in {language}. Transcript:\n\n{transcript}",
+        "Read the following transcript in {language} and produce a concise, accurate title in {language}. Return plain text only, with no markdown, quotes, bullets, or extra commentary. Transcript:\n\n{transcript}",
       slug:
-        "Create a short English slug using lowercase letters, numbers, and hyphens only. Base it on this title:\n\n{title}",
+        "Create a short English slug using lowercase letters, numbers, and hyphens only. Return only the slug text, with no markdown, quotes, or commentary. Base it on this title:\n\n{title}",
     },
     previewSnippetSeconds: 10,
     concurrencyLimit: 3,
@@ -1405,6 +1405,8 @@ function renderPromptTemplate(
 
 function sanitizeTitle(value: string): string {
   return value
+    .replaceAll(/\*\*/g, "")
+    .replaceAll(/\*/g, "")
     .replace(/^\s*["'`]+|["'`]+\s*$/g, "")
     .replace(/\s+/g, " ")
     .trim();
