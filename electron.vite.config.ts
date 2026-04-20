@@ -1,0 +1,42 @@
+import { resolve } from "node:path";
+
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "electron-vite";
+
+export default defineConfig({
+  main: {
+    build: {
+      outDir: "out/main",
+    },
+    resolve: {
+      alias: {
+        "@shared": resolve("src/shared"),
+      },
+    },
+  },
+  preload: {
+    build: {
+      outDir: "out/preload",
+    },
+    resolve: {
+      alias: {
+        "@shared": resolve("src/shared"),
+      },
+    },
+  },
+  renderer: {
+    root: resolve("src/renderer"),
+    build: {
+      outDir: resolve("out/renderer"),
+      emptyOutDir: true,
+    },
+    resolve: {
+      alias: {
+        "@renderer": resolve("src/renderer/src"),
+        "@shared": resolve("src/shared"),
+      },
+    },
+    plugins: [react()],
+  },
+});
+
