@@ -1,4 +1,6 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, protocol } from "electron";
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
 
 import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { ApplicationRuntime } from "./core/app-runtime";
@@ -8,7 +10,44 @@ import { attachWindowCloseHandling, registerWindowCloseIpc } from "./window-clos
 
 app.setName("Mumbler");
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "mumbler-asset",
+    privileges: { secure: true, standard: true, stream: true, bypassCSP: true, supportFetchAPI: true, corsEnabled: true },
+  },
+]);
+
+const AUDIO_MIME_TYPES: Record<string, string> = {
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".flac": "audio/flac",
+  ".webm": "audio/webm",
+  ".opus": "audio/ogg",
+};
+
 async function bootstrap(): Promise<void> {
+  protocol.handle("mumbler-asset", async (request) => {
+    const url = new URL(request.url);
+    const filePath = url.searchParams.get("path") ?? "";
+    if (!filePath) {
+      return new Response("Not found", { status: 404 });
+    }
+    try {
+      const data = await readFile(filePath);
+      return new Response(data, {
+        status: 200,
+        headers: {
+          "Content-Type": AUDIO_MIME_TYPES[extname(filePath).toLowerCase()] ?? "application/octet-stream",
+          "Content-Length": String(data.byteLength),
+        },
+      });
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
+  });
   const runtime = await ApplicationRuntime.initialize();
   registerAppShellIpc(runtime);
   registerWindowCloseIpc();

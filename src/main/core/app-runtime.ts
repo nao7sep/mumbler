@@ -9,7 +9,6 @@ import {
 import { constants as fsConstants } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { homedir } from "node:os";
-import { pathToFileURL } from "node:url";
 
 import { nanoid } from "nanoid";
 
@@ -548,7 +547,7 @@ export class ApplicationRuntime {
       throw new Error("Card media source no longer exists.");
     }
 
-    return pathToFileURL(card.sourceFilePath).href;
+    return `mumbler-asset://local?path=${encodeURIComponent(card.sourceFilePath)}`;
   }
 
   async transcribeCard(cardId: string): Promise<AppSnapshot> {

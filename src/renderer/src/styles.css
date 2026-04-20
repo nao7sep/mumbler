@@ -230,6 +230,7 @@ textarea:focus-visible,
   gap: 12px;
   max-height: calc(100vh - 100px);
   overflow-y: auto;
+  align-self: start;
 }
 
 .queue-list {
@@ -356,6 +357,61 @@ textarea:focus-visible,
 .button--compact {
   padding: 0.3rem 0.6rem;
   font-size: 0.75rem;
+}
+
+.button--icon {
+  padding: 0.3rem 0.55rem;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.app-menu-anchor {
+  position: relative;
+}
+
+.app-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+.app-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 100;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.app-menu-item:hover:not(:disabled) {
+  background: #f1f3f5;
+}
+
+.app-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .button--danger {

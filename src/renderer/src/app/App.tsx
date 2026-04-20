@@ -26,8 +26,10 @@ import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
 import { SettingsModal } from "./SettingsModal";
 import { findMatchingCommand, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
-import { QueueList, StatusChip, formatBytes, formatDuration, statusModifier } from "./QueueList";
+import { QueueList, formatBytes, formatDuration, statusModifier } from "./QueueList";
 import { BannerCard, DecisionModal } from "./DecisionModal";
+import { AboutModal } from "./AboutModal";
+import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 
 function formatOptionalSeconds(value: number | null): string {
   if (value === null) {
@@ -177,6 +179,9 @@ export function App(): ReactElement {
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
   const [isResettingState, setIsResettingState] = useState(false);
   const [pendingCloseConfirmation, setPendingCloseConfirmation] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const waveformEditorRef = useRef<WaveformEditorHandle | null>(null);
 
   useEffect(() => {
@@ -355,6 +360,8 @@ export function App(): ReactElement {
     pendingSaveConflict !== null ||
     pendingRemoveCardId !== null ||
     pendingCloseConfirmation ||
+    showAbout ||
+    showShortcutsHelp ||
     snapshot?.startupDiagnostic != null ||
     snapshot?.appWideError != null;
   const languageOptions = useMemo(() => {
@@ -694,7 +701,13 @@ export function App(): ReactElement {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
-        if (pendingRemoveCardId !== null) {
+        if (isMenuOpen) {
+          setIsMenuOpen(false);
+        } else if (showAbout) {
+          setShowAbout(false);
+        } else if (showShortcutsHelp) {
+          setShowShortcutsHelp(false);
+        } else if (pendingRemoveCardId !== null) {
           setPendingRemoveCardId(null);
         } else if (pendingSaveConflict !== null) {
           setPendingSaveConflict(null);
@@ -723,7 +736,7 @@ export function App(): ReactElement {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [modalIsOpen, selectedCard, selectedCardIsBusy, snapshot, settingsDraft, isSavingSettings, pendingRemoveCardId, pendingSaveConflict]);
+  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsDraft, isSavingSettings, pendingRemoveCardId, pendingSaveConflict]);
 
   async function handleSaveCard(
     cardId: string,
@@ -798,7 +811,6 @@ export function App(): ReactElement {
         <div className="topbar__meta">
           {snapshot ? (
             <>
-              <span className="pill">{queueCards.length}</span>
               {pendingImportCount > 0 ? (
                 <span className="pill pill--quiet">{pendingImportCount} pending</span>
               ) : null}
@@ -811,9 +823,48 @@ export function App(): ReactElement {
               {errorCount > 0 ? (
                 <span className="pill pill--danger">{errorCount} error</span>
               ) : null}
-              <span className="pill pill--quiet">v{snapshot.appVersion}</span>
             </>
           ) : null}
+          <div className="app-menu-anchor">
+            <button
+              type="button"
+              className="button button--ghost button--icon"
+              aria-label="Open menu"
+              onClick={() => setIsMenuOpen((prev) => !prev)}
+            >
+              ☰
+            </button>
+            {isMenuOpen && (
+              <>
+                <div className="app-menu-overlay" onClick={() => setIsMenuOpen(false)} />
+                <div className="app-menu">
+                  <button
+                    type="button"
+                    className="app-menu-item"
+                    onClick={() => { setIsMenuOpen(false); void handleOpenSettings(); }}
+                    disabled={isImporting || isLoadingSettings}
+                  >
+                    Settings
+                  </button>
+                  <button
+                    type="button"
+                    className="app-menu-item"
+                    onClick={() => { setIsMenuOpen(false); setShowShortcutsHelp(true); }}
+                    disabled={snapshot === null}
+                  >
+                    Keyboard Shortcuts
+                  </button>
+                  <button
+                    type="button"
+                    className="app-menu-item"
+                    onClick={() => { setIsMenuOpen(false); setShowAbout(true); }}
+                  >
+                    About
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
@@ -834,14 +885,6 @@ export function App(): ReactElement {
                 disabled={isImporting}
               >
                 {isImporting ? "Importing..." : "Import"}
-              </button>
-              <button
-                type="button"
-                className="button button--ghost"
-                onClick={() => void handleOpenSettings()}
-                disabled={isImporting || isLoadingSettings}
-              >
-                Settings
               </button>
             </div>
           </div>
@@ -928,7 +971,6 @@ export function App(): ReactElement {
               <section className={`detail-card detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
                 <div className="detail-card__header">
                   <h3>Identity</h3>
-                  <StatusChip label={selectedCard.status} />
                 </div>
                 <div className={`status-summary status-summary--${statusModifier(selectedCard.status)}`}>
                   <strong>{selectedCard.status}</strong>
@@ -1122,7 +1164,6 @@ export function App(): ReactElement {
               <section className={`detail-card detail-card--wide detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
                 <div className="detail-card__header">
                   <h3>Actions</h3>
-                  <StatusChip label={selectedCard.status} />
                 </div>
                 <div className="action-grid">
                   <button
@@ -1462,6 +1503,18 @@ export function App(): ReactElement {
               },
             },
           ]}
+        />
+      ) : null}
+
+      {showAbout && snapshot ? (
+        <AboutModal version={snapshot.appVersion} onClose={() => setShowAbout(false)} />
+      ) : null}
+
+      {showShortcutsHelp && snapshot?.settingsSummary ? (
+        <ShortcutsHelpModal
+          commands={snapshot.commands}
+          shortcuts={snapshot.settingsSummary.shortcuts}
+          onClose={() => setShowShortcutsHelp(false)}
         />
       ) : null}
     </div>
