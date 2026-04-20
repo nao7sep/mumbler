@@ -31,9 +31,8 @@ import {
   type SaveCardResult,
   type SaveConflictResolution,
   type SettingsDraft,
-  type SettingsSummary,
 } from "@shared/app-shell";
-import { COMMAND_DEFINITIONS, buildDefaultShortcutMap } from "@shared/commands";
+import { COMMAND_DEFINITIONS } from "@shared/commands";
 import {
   analyzeTrimDecision,
   assertFfmpegToolingPresent,
@@ -56,7 +55,7 @@ import {
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
-import { formatError, readJsonFile, uniquePathInDirectory, writeJsonFile } from "./file-io";
+import { formatError, uniquePathInDirectory, writeJsonFile } from "./file-io";
 import { moveImportedSourceToTrash, reconcileWorkingState } from "./working-files";
 import {
   buildOutputPayload,
@@ -66,8 +65,8 @@ import {
   pathsConflict,
 } from "./file-output";
 
-const SETTINGS_SCHEMA_VERSION = 1;
-const STATE_SCHEMA_VERSION = 1;
+import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, decodeGeminiApiKey, getSecretsForRedaction, getSystemTimezone, loadSettings, loadState, summarizeSettings } from "./settings-schema";
+
 const LOG_RETENTION_DAYS = 30;
 
 interface AppLogger {
@@ -658,6 +657,11 @@ export class ApplicationRuntime {
 
       const conflictExists = await pathsConflict(initialTargets.audioPath, initialTargets.jsonPath);
       if (conflictExists && resolution === undefined) {
+        await logger.info("save.conflict", "Output path conflict detected, awaiting resolution.", {
+          cardId,
+          audioPath: initialTargets.audioPath,
+          jsonPath: initialTargets.jsonPath,
+        });
         return {
           kind: "conflict",
           snapshot: this.getSnapshot(),
@@ -667,6 +671,7 @@ export class ApplicationRuntime {
       }
 
       if (resolution === "cancel") {
+        await logger.info("save.cancelled", "Save cancelled by user.", { cardId });
         return {
           kind: "cancelled",
           snapshot: this.getSnapshot(),
@@ -811,6 +816,12 @@ export class ApplicationRuntime {
       throw error;
     }
 
+    await this.runtime.logger!.debug("import.file", "Staged file to working storage.", {
+      originalFilename,
+      fileSizeBytes: sourceStats.size,
+      importSource,
+    });
+
     const filenameStem = basename(originalFilename, extname(originalFilename));
     const parsed = parseTimestampFromFilename(filenameStem, settings.timestampPatterns);
     const utcResult =
@@ -872,6 +883,11 @@ export class ApplicationRuntime {
     }
 
     const startStep = resolvePipelineStartStep(card, mode);
+    await logger.info("pipeline.start", "Starting card pipeline.", {
+      cardId,
+      mode,
+      startStep,
+    });
     let activeStep: Exclude<CardProcessingStep, null> = startStep;
 
     this.activeCardOperations.add(cardId);
@@ -1093,6 +1109,12 @@ export class ApplicationRuntime {
         }
 
         const delayMs = computeRetryDelayMs(attempt, retryPolicy);
+        await logger.debug(params.op, "Retrying Gemini step after delay.", {
+          cardId: params.cardId,
+          step: params.step,
+          nextAttempt: attempt + 1,
+          delayMs,
+        });
         await sleep(delayMs);
         attempt += 1;
       }
@@ -1162,38 +1184,6 @@ export class ApplicationRuntime {
   }
 }
 
-async function loadSettings(paths: AppPaths): Promise<MumblerSettings> {
-  const systemTimezone = getSystemTimezone();
-  const defaults = createDefaultSettings(systemTimezone);
-  const raw = await readJsonFile<Record<string, unknown> | null>(paths.settingsPath);
-
-  if (raw === null) {
-    await writeJsonFile(paths.settingsPath, defaults);
-    return defaults;
-  }
-
-  const normalized = normalizeSettings(raw, defaults);
-  await writeJsonFile(paths.settingsPath, normalized);
-  return normalized;
-}
-
-async function loadState(
-  paths: AppPaths,
-): Promise<{ state: MumblerState; recoveredInterruptedCards: number }> {
-  const raw = await readJsonFile<Record<string, unknown> | null>(paths.statePath);
-  const defaults = createEmptyState();
-
-  if (raw === null) {
-    await writeJsonFile(paths.statePath, defaults);
-    return { state: defaults, recoveredInterruptedCards: 0 };
-  }
-
-  const normalized = normalizeState(raw, defaults);
-  const { state, recoveredInterruptedCards } = recoverInterruptedCards(normalized);
-  await writeJsonFile(paths.statePath, state);
-  return { state, recoveredInterruptedCards };
-}
-
 function getAppPaths(): AppPaths {
   const homeDir = process.env.MUMBLER_HOME ?? join(homedir(), ".mumbler");
 
@@ -1212,480 +1202,6 @@ async function ensureDirectories(paths: AppPaths): Promise<void> {
   await mkdir(paths.workingDir, { recursive: true });
   await mkdir(join(paths.workingDir, "trash-staging"), { recursive: true });
 }
-
-function createDefaultSettings(systemTimezone: string): MumblerSettings {
-  return {
-    schemaVersion: SETTINGS_SCHEMA_VERSION,
-    geminiApiKeyObfuscated: "",
-    outputDirectory: null,
-    transcriptionModel: "gemini-3.1-pro-preview",
-    metadataModel: "gemini-3.1-pro-preview",
-    defaultLanguage: "English",
-    languages: [
-      "English",
-      "Japanese",
-      "Spanish",
-      "French",
-      "German",
-      "Mandarin Chinese",
-      "Korean",
-      "Portuguese",
-      "Russian",
-      "Arabic",
-      "Hindi",
-      "Italian",
-    ],
-    defaultTimezone: systemTimezone,
-    timestampPatterns: [
-      "(?<year>\\d{4})(?<month>\\d{2})(?<day>\\d{2})[-_ ](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})",
-      "(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})[ T](?<hour>\\d{2})\\.(?<minute>\\d{2})\\.(?<second>\\d{2})",
-      "(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})[ T](?<hour>\\d{2})-(?<minute>\\d{2})-(?<second>\\d{2})",
-      "(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})[ T](?<hour>\\d{2}):(?<minute>\\d{2}):(?<second>\\d{2})",
-    ],
-    prompts: {
-      title:
-        "Read the following transcript in {language} and produce a concise, accurate title in {language}. Return plain text only, with no markdown, quotes, bullets, or extra commentary. Transcript:\n\n{transcript}",
-      slug:
-        "Create a short English slug using lowercase letters, numbers, and hyphens only. Return only the slug text, with no markdown, quotes, or commentary. Base it on this title:\n\n{title}",
-    },
-    previewSnippetSeconds: 10,
-    concurrencyLimit: 3,
-    retryPolicy: {
-      maxRetries: 3,
-      initialDelayMs: 1000,
-      maxDelayMs: 16000,
-      jitterRatio: 0.2,
-    },
-    timeouts: {
-      transcriptionMs: 5 * 60 * 1000,
-      titleMs: 2 * 60 * 1000,
-      slugMs: 2 * 60 * 1000,
-    },
-    shortcuts: buildDefaultShortcutMap(),
-  };
-}
-
-function createEmptyState(): MumblerState {
-  return {
-    schemaVersion: STATE_SCHEMA_VERSION,
-    pendingImports: [],
-    cards: [],
-    selectedCardId: null,
-    updatedAtUtc: nowUtcMarker(),
-  };
-}
-
-function normalizeSettings(
-  raw: Record<string, unknown>,
-  defaults: MumblerSettings,
-): MumblerSettings {
-  const prompts = asRecord(raw.prompts);
-  const retryPolicy = asRecord(raw.retryPolicy);
-  const timeouts = asRecord(raw.timeouts);
-  const shortcuts = asRecord(raw.shortcuts);
-
-  return {
-    schemaVersion: SETTINGS_SCHEMA_VERSION,
-    geminiApiKeyObfuscated: asString(raw.geminiApiKeyObfuscated) ?? defaults.geminiApiKeyObfuscated,
-    outputDirectory: asNullableString(raw.outputDirectory),
-    transcriptionModel: asString(raw.transcriptionModel) ?? defaults.transcriptionModel,
-    metadataModel: asString(raw.metadataModel) ?? defaults.metadataModel,
-    defaultLanguage: asString(raw.defaultLanguage) ?? defaults.defaultLanguage,
-    languages: asStringArray(raw.languages) ?? defaults.languages,
-    defaultTimezone:
-      asString(raw.defaultTimezone) && isSupportedTimezone(asString(raw.defaultTimezone)!)
-        ? (asString(raw.defaultTimezone) as string)
-        : defaults.defaultTimezone,
-    timestampPatterns: asStringArray(raw.timestampPatterns) ?? defaults.timestampPatterns,
-    prompts: {
-      title: asString(prompts?.title) ?? defaults.prompts.title,
-      slug: asString(prompts?.slug) ?? defaults.prompts.slug,
-    },
-    previewSnippetSeconds:
-      asPositiveInteger(raw.previewSnippetSeconds) ?? defaults.previewSnippetSeconds,
-    concurrencyLimit: asPositiveInteger(raw.concurrencyLimit) ?? defaults.concurrencyLimit,
-    retryPolicy: {
-      maxRetries: asPositiveInteger(retryPolicy?.maxRetries) ?? defaults.retryPolicy.maxRetries,
-      initialDelayMs:
-        asPositiveInteger(retryPolicy?.initialDelayMs) ?? defaults.retryPolicy.initialDelayMs,
-      maxDelayMs: asPositiveInteger(retryPolicy?.maxDelayMs) ?? defaults.retryPolicy.maxDelayMs,
-      jitterRatio: asRatio(retryPolicy?.jitterRatio) ?? defaults.retryPolicy.jitterRatio,
-    },
-    timeouts: {
-      transcriptionMs:
-        asPositiveInteger(timeouts?.transcriptionMs) ?? defaults.timeouts.transcriptionMs,
-      titleMs: asPositiveInteger(timeouts?.titleMs) ?? defaults.timeouts.titleMs,
-      slugMs: asPositiveInteger(timeouts?.slugMs) ?? defaults.timeouts.slugMs,
-    },
-    shortcuts: normalizeShortcuts(shortcuts, defaults.shortcuts),
-  };
-}
-
-function normalizeState(raw: Record<string, unknown>, defaults: MumblerState): MumblerState {
-  return {
-    schemaVersion: STATE_SCHEMA_VERSION,
-    pendingImports: Array.isArray(raw.pendingImports)
-      ? (raw.pendingImports as PendingImportReviewItem[]).map(normalizePendingImportRecord)
-      : defaults.pendingImports,
-    cards: Array.isArray(raw.cards)
-      ? (raw.cards as MumblerCard[]).map(normalizeCardRecord)
-      : defaults.cards,
-    selectedCardId: asNullableString(raw.selectedCardId),
-    updatedAtUtc: normalizeUtcMarkerText(asString(raw.updatedAtUtc) ?? defaults.updatedAtUtc),
-  };
-}
-
-function normalizePendingImportRecord(item: PendingImportReviewItem): PendingImportReviewItem {
-  const createdAtUtc = normalizeUtcMarkerText(item.createdAtUtc);
-
-  return {
-    ...item,
-    createdAtUtc,
-    updatedAtUtc: normalizeUtcMarkerText(item.updatedAtUtc, createdAtUtc),
-  };
-}
-
-function normalizeCardRecord(card: MumblerCard): MumblerCard {
-  const createdAtUtc = normalizeUtcMarkerText(card.createdAtUtc);
-  const confirmedUtc = normalizeUtcMarkerText(card.timestamps.confirmedUtc);
-
-  return {
-    ...card,
-    audioProfile: card.audioProfile ?? null,
-    timestamps: {
-      ...card.timestamps,
-      confirmedUtc,
-      effectiveUtc: normalizeUtcMarkerText(card.timestamps.effectiveUtc, confirmedUtc),
-    },
-    trimDecision: normalizeTrimDecisionRecord(card.trimDecision),
-    ai: {
-      transcription: normalizeAiRunInfo(card.ai?.transcription),
-      title: normalizeAiRunInfo(card.ai?.title),
-      slug: normalizeAiRunInfo(card.ai?.slug),
-    },
-    lastError: normalizeCardError(card.lastError),
-    createdAtUtc,
-    updatedAtUtc: normalizeUtcMarkerText(card.updatedAtUtc, createdAtUtc),
-  };
-}
-
-function normalizeTrimDecisionRecord(cardTrimDecision: MumblerCard["trimDecision"]): MumblerCard["trimDecision"] {
-  if (cardTrimDecision === null) {
-    return null;
-  }
-
-  return {
-    ...cardTrimDecision,
-    analyzedAtUtc: normalizeUtcMarkerText(cardTrimDecision.analyzedAtUtc),
-  };
-}
-
-function normalizeAiRunInfo(run: MumblerCard["ai"]["transcription"]): MumblerCard["ai"]["transcription"] {
-  if (run === null) {
-    return null;
-  }
-
-  return {
-    ...run,
-    generatedAtUtc: normalizeUtcMarkerText(run.generatedAtUtc),
-  };
-}
-
-function normalizeCardError(error: MumblerCard["lastError"]): MumblerCard["lastError"] {
-  if (error === null) {
-    return null;
-  }
-
-  return {
-    ...error,
-    occurredAtUtc: normalizeUtcMarkerText(error.occurredAtUtc),
-  };
-}
-
-function normalizeShortcuts(
-  raw: Record<string, unknown> | null,
-  defaults: Record<string, string>,
-): Record<string, string> {
-  if (raw === null) {
-    return defaults;
-  }
-
-  const output: Record<string, string> = { ...defaults };
-
-  for (const command of COMMAND_DEFINITIONS) {
-    const candidate = raw[command.id];
-    if (typeof candidate === "string" && candidate.trim().length > 0) {
-      output[command.id] = candidate;
-    }
-  }
-
-  return output;
-}
-
-function recoverInterruptedCards(
-  state: MumblerState,
-): { state: MumblerState; recoveredInterruptedCards: number } {
-  let recoveredInterruptedCards = 0;
-
-  const cards = state.cards.map((card) => {
-    if (card.status !== "Transcribing" && card.status !== "Generating Metadata") {
-      return card;
-    }
-
-    recoveredInterruptedCards += 1;
-    return {
-      ...card,
-      status: "Error" as const,
-      activeStep: null,
-      lastError: {
-        message: "Interrupted — retry to resume",
-        occurredAtUtc: nowUtcMarker(),
-        failedStep: "startup-recovery" as const,
-      },
-      updatedAtUtc: nowUtcMarker(),
-    };
-  });
-
-  return {
-    state: {
-      ...state,
-      cards,
-      updatedAtUtc: nowUtcMarker(),
-    },
-    recoveredInterruptedCards,
-  };
-}
-
-function summarizeSettings(settings: MumblerSettings): SettingsSummary {
-  return {
-    hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
-    outputDirectory: settings.outputDirectory,
-    transcriptionModel: settings.transcriptionModel,
-    metadataModel: settings.metadataModel,
-    defaultLanguage: settings.defaultLanguage,
-    languages: [...settings.languages],
-    defaultTimezone: settings.defaultTimezone,
-    languageCount: settings.languages.length,
-    timestampPatternCount: settings.timestampPatterns.length,
-    previewSnippetSeconds: settings.previewSnippetSeconds,
-    concurrencyLimit: settings.concurrencyLimit,
-    shortcuts: { ...settings.shortcuts },
-  };
-}
-
-function buildSettingsDraft(settings: MumblerSettings): SettingsDraft {
-  return {
-    schemaVersion: SETTINGS_SCHEMA_VERSION,
-    hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
-    geminiApiKeyInput: "",
-    clearGeminiApiKey: false,
-    outputDirectory: settings.outputDirectory ?? "",
-    transcriptionModel: settings.transcriptionModel,
-    metadataModel: settings.metadataModel,
-    defaultLanguage: settings.defaultLanguage,
-    languagesText: settings.languages.join("\n"),
-    defaultTimezone: settings.defaultTimezone,
-    timestampPatternsText: settings.timestampPatterns.join("\n"),
-    titlePrompt: settings.prompts.title,
-    slugPrompt: settings.prompts.slug,
-    previewSnippetSeconds: settings.previewSnippetSeconds,
-    concurrencyLimit: settings.concurrencyLimit,
-    retryMaxRetries: settings.retryPolicy.maxRetries,
-    retryInitialDelayMs: settings.retryPolicy.initialDelayMs,
-    retryMaxDelayMs: settings.retryPolicy.maxDelayMs,
-    retryJitterRatio: settings.retryPolicy.jitterRatio,
-    transcriptionTimeoutMs: settings.timeouts.transcriptionMs,
-    titleTimeoutMs: settings.timeouts.titleMs,
-    slugTimeoutMs: settings.timeouts.slugMs,
-    shortcuts: { ...settings.shortcuts },
-  };
-}
-
-function applySettingsDraft(current: MumblerSettings, draft: SettingsDraft): MumblerSettings {
-  const transcriptionModel = draft.transcriptionModel.trim();
-  const metadataModel = draft.metadataModel.trim();
-  const defaultLanguage = draft.defaultLanguage.trim();
-  const defaultTimezone = draft.defaultTimezone.trim();
-  const titlePrompt = draft.titlePrompt.trim();
-  const slugPrompt = draft.slugPrompt.trim();
-  const outputDirectory = draft.outputDirectory.trim();
-  const languages = deduplicateStrings(parseSettingsEntries(draft.languagesText));
-  const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
-
-  if (transcriptionModel.length === 0) {
-    throw new Error("Transcription model is required.");
-  }
-
-  if (metadataModel.length === 0) {
-    throw new Error("Metadata model is required.");
-  }
-
-  if (defaultLanguage.length === 0) {
-    throw new Error("Default language is required.");
-  }
-
-  if (!isSupportedTimezone(defaultTimezone)) {
-    throw new Error("Default timezone must be a valid IANA timezone.");
-  }
-
-  if (languages.length === 0) {
-    throw new Error("Add at least one language.");
-  }
-
-  if (timestampPatterns.length === 0) {
-    throw new Error("Add at least one timestamp regex pattern.");
-  }
-
-  requirePromptPlaceholders(titlePrompt, ["{transcript}", "{language}"], "Title prompt");
-  requirePromptPlaceholders(slugPrompt, ["{title}"], "Slug prompt");
-
-  const previewSnippetSeconds = requirePositiveInteger(
-    draft.previewSnippetSeconds,
-    "Preview snippet seconds",
-  );
-  const concurrencyLimit = requirePositiveInteger(draft.concurrencyLimit, "Concurrency limit");
-  const retryMaxRetries = requirePositiveInteger(draft.retryMaxRetries, "Retry max retries");
-  const retryInitialDelayMs = requirePositiveInteger(
-    draft.retryInitialDelayMs,
-    "Retry initial delay",
-  );
-  const retryMaxDelayMs = requirePositiveInteger(draft.retryMaxDelayMs, "Retry max delay");
-  const retryJitterRatio = requireRatio(draft.retryJitterRatio, "Retry jitter ratio");
-  const transcriptionTimeoutMs = requirePositiveInteger(
-    draft.transcriptionTimeoutMs,
-    "Transcription timeout",
-  );
-  const titleTimeoutMs = requirePositiveInteger(draft.titleTimeoutMs, "Title timeout");
-  const slugTimeoutMs = requirePositiveInteger(draft.slugTimeoutMs, "Slug timeout");
-  const shortcuts = normalizeDraftShortcuts(draft.shortcuts, current.shortcuts);
-
-  if (retryMaxDelayMs < retryInitialDelayMs) {
-    throw new Error("Retry max delay must be greater than or equal to retry initial delay.");
-  }
-
-  const normalizedLanguages = languages.includes(defaultLanguage)
-    ? languages
-    : [defaultLanguage, ...languages];
-
-  return {
-    ...current,
-    geminiApiKeyObfuscated: resolveGeminiApiKeyObfuscated(current, draft),
-    outputDirectory: outputDirectory.length === 0 ? null : outputDirectory,
-    transcriptionModel,
-    metadataModel,
-    defaultLanguage,
-    languages: normalizedLanguages,
-    defaultTimezone,
-    timestampPatterns,
-    prompts: {
-      title: titlePrompt,
-      slug: slugPrompt,
-    },
-    previewSnippetSeconds,
-    concurrencyLimit,
-    retryPolicy: {
-      maxRetries: retryMaxRetries,
-      initialDelayMs: retryInitialDelayMs,
-      maxDelayMs: retryMaxDelayMs,
-      jitterRatio: retryJitterRatio,
-    },
-    timeouts: {
-      transcriptionMs: transcriptionTimeoutMs,
-      titleMs: titleTimeoutMs,
-      slugMs: slugTimeoutMs,
-    },
-    shortcuts,
-  };
-}
-
-function resolveGeminiApiKeyObfuscated(current: MumblerSettings, draft: SettingsDraft): string {
-  const nextApiKey = draft.geminiApiKeyInput.trim();
-
-  if (draft.clearGeminiApiKey && nextApiKey.length > 0) {
-    throw new Error("Enter a new Gemini API key or clear the saved key, not both.");
-  }
-
-  if (draft.clearGeminiApiKey) {
-    return "";
-  }
-
-  if (nextApiKey.length === 0) {
-    return current.geminiApiKeyObfuscated;
-  }
-
-  return encodeGeminiApiKey(nextApiKey);
-}
-
-function parseSettingsEntries(value: string): string[] {
-  return value
-    .split(/[\n,]/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-}
-
-function deduplicateStrings(values: string[]): string[] {
-  return [...new Set(values)];
-}
-
-function normalizeDraftShortcuts(
-  shortcuts: Record<string, string>,
-  defaults: Record<string, string>,
-): Record<string, string> {
-  const normalized = { ...defaults };
-
-  for (const command of COMMAND_DEFINITIONS) {
-    const value = shortcuts[command.id]?.trim();
-    if (!value) {
-      throw new Error(`Shortcut for ${command.label} is required.`);
-    }
-    normalized[command.id] = value;
-  }
-
-  return normalized;
-}
-
-function requirePromptPlaceholders(
-  prompt: string,
-  requiredPlaceholders: string[],
-  label: string,
-): void {
-  if (prompt.length === 0) {
-    throw new Error(`${label} is required.`);
-  }
-
-  for (const placeholder of requiredPlaceholders) {
-    if (!prompt.includes(placeholder)) {
-      throw new Error(`${label} must include ${placeholder}.`);
-    }
-  }
-}
-
-function requirePositiveInteger(value: number, label: string): number {
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`${label} must be a positive integer.`);
-  }
-
-  return value;
-}
-
-function requireRatio(value: number, label: string): number {
-  if (!Number.isFinite(value) || value < 0 || value > 1) {
-    throw new Error(`${label} must be between 0 and 1.`);
-  }
-
-  return value;
-}
-
-
-
-
-
-
-function getSystemTimezone(): string {
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return timezone && timezone.length > 0 && isSupportedTimezone(timezone) ? timezone : "UTC";
-}
-
 
 function createLogger(logsDir: string, secrets: string[]): AppLogger {
   const write = async (
@@ -1735,27 +1251,6 @@ async function pruneOldLogs(logsDir: string): Promise<void> {
   );
 }
 
-function getSecretsForRedaction(settings: MumblerSettings): string[] {
-  const decodedKey = decodeGeminiApiKey(settings.geminiApiKeyObfuscated);
-  return decodedKey.length > 0 ? [decodedKey] : [];
-}
-
-function encodeGeminiApiKey(value: string): string {
-  return Buffer.from(value.split("").reverse().join(""), "utf8").toString("base64");
-}
-
-function decodeGeminiApiKey(obfuscated: string): string {
-  if (obfuscated.length === 0) {
-    return "";
-  }
-
-  try {
-    return Buffer.from(obfuscated, "base64").toString("utf8").split("").reverse().join("");
-  } catch {
-    return "";
-  }
-}
-
 function serializeError(error: unknown): unknown {
   if (error instanceof Error) {
     return {
@@ -1782,34 +1277,6 @@ function formatUtcDate(date: Date): string {
   const month = `${date.getUTCMonth() + 1}`.padStart(2, "0");
   const day = `${date.getUTCDate()}`.padStart(2, "0");
   return `${year}${month}${day}`;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function asNullableString(value: unknown): string | null {
-  return value === null ? null : asString(value);
-}
-
-function asStringArray(value: unknown): string[] | null {
-  return Array.isArray(value) && value.every((item) => typeof item === "string")
-    ? [...value]
-    : null;
-}
-
-function asPositiveInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
-}
-
-function asRatio(value: unknown): number | null {
-  return typeof value === "number" && value >= 0 && value <= 1 ? value : null;
 }
 
 
