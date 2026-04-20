@@ -1,16 +1,17 @@
 import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { createRequire } from "node:module";
+import { arch, platform } from "node:os";
+import { dirname, extname, join } from "node:path";
 import { promisify } from "node:util";
 
-import ffmpegPath from "ffmpeg-static";
-import ffprobeStatic from "ffprobe-static";
 import { nanoid } from "nanoid";
 
 import type { AudioProfile, CardTrim, TrimDecision } from "@shared/app-shell";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TRIM_TOLERANCE_SEC = 3;
+const require = createRequire(import.meta.url);
 
 interface PacketBoundary {
   startSec: number;
@@ -246,19 +247,29 @@ export function inferAudioMimeType(filePath: string): string {
 }
 
 function resolveFfprobePath(): string {
-  if (!ffprobeStatic?.path) {
-    throw new Error("ffprobe-static did not provide a binary path.");
+  const required = require("ffprobe-static") as { path?: string };
+  if (required?.path) {
+    return required.path;
   }
 
-  return ffprobeStatic.path;
+  const packagePath = require.resolve("ffprobe-static/package.json");
+  const binaryPath = join(
+    dirname(packagePath),
+    "bin",
+    platform(),
+    arch(),
+    platform() === "win32" ? "ffprobe.exe" : "ffprobe",
+  );
+  return binaryPath;
 }
 
 function resolveFfmpegPath(): string {
-  if (!ffmpegPath) {
+  const required = require("ffmpeg-static") as string | null;
+  if (!required) {
     throw new Error("ffmpeg-static did not provide a binary path.");
   }
 
-  return ffmpegPath;
+  return required;
 }
 
 async function runFfmpegTrim(params: {

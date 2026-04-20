@@ -33,7 +33,6 @@ The current implementation provides:
 
 ## Verification Gaps
 
-- Destructive import and trash behavior still need an interactive desktop run
-- Trim-boundary decisions still need verification against real audio files
-- Gemini API integration still needs a real API key and real requests
-- Final save collision handling and output transaction behavior still need an interactive run
+- Full end-to-end operation still needs an interactive desktop UI run
+- Trim behavior still needs verification against more real files and codecs
+- External-drive import fallback and trash-staging behavior still need a live test
