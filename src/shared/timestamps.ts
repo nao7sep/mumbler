@@ -120,7 +120,7 @@ export function formatLocalTimestamp(parts: TimestampParts): string {
     .padStart(2, "0")}`;
 }
 
-function formatUtcMarker(date: Date): string {
+export function formatUtcMarker(date: Date): string {
   return `${date.getUTCFullYear().toString().padStart(4, "0")}${(date.getUTCMonth() + 1)
     .toString()
     .padStart(2, "0")}${date.getUTCDate().toString().padStart(2, "0")}-${date
@@ -130,6 +130,10 @@ function formatUtcMarker(date: Date): string {
     .getUTCSeconds()
     .toString()
     .padStart(2, "0")}-utc`;
+}
+
+export function nowUtcMarker(): string {
+  return formatUtcMarker(new Date());
 }
 
 function parseLocalTimestamp(value: string): TimestampParts | null {

@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { nanoid } from "nanoid";
 
 import type { AudioProfile, CardTrim, TrimDecision } from "@shared/app-shell";
+import { nowUtcMarker } from "@shared/timestamps";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TRIM_TOLERANCE_SEC = 3;
@@ -103,7 +104,7 @@ export async function analyzeTrimDecision(
       startDeltaSec: null,
       endDeltaSec: null,
       reason: "No trim markers set.",
-      analyzedAtUtc: new Date().toISOString(),
+      analyzedAtUtc: nowUtcMarker(),
     };
   }
 
@@ -153,7 +154,7 @@ export async function analyzeTrimDecision(
     reason: canStreamCopy
       ? "All required boundaries were found within tolerance."
       : "At least one required boundary was not found within tolerance.",
-    analyzedAtUtc: new Date().toISOString(),
+    analyzedAtUtc: nowUtcMarker(),
   };
 }
 
