@@ -8,12 +8,14 @@ Desktop audio transcription app built with Electron, React, and TypeScript.
 - `npm run build` — build production bundles
 - `npm run typecheck` — run the TypeScript checker
 
-## Phase 1 Scope
+## Current Scope
 
 The current implementation provides:
 
 - Electron main, preload, and renderer process structure
-- Typed preload bridge for shell bootstrap data
-- A semantic two-pane UI shell matching the product spec
-- No import, trim, ffmpeg, persistence, or Gemini behavior yet
-
+- Typed preload bridge and IPC-backed app snapshot
+- `~/.mumbler` bootstrap for settings, state, logs, and working storage
+- Timestamp-reviewed import flow from file picker or drag-and-drop
+- Destructive source handling: copy into working storage, then move outside source to trash
+- Queue selection and persisted pending-review state
+- No trim, ffmpeg, audio playback, or Gemini behavior yet

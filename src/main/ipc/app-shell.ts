@@ -1,17 +1,31 @@
-import { app, ipcMain } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 
-import {
-  APP_SHELL_CHANNELS,
-  type AppBootstrap,
-} from "@shared/app-shell";
+import type { PendingImportReviewItem } from "@shared/app-shell";
 
-export function registerAppShellIpc(): void {
-  ipcMain.handle(APP_SHELL_CHANNELS.getBootstrap, (): AppBootstrap => ({
-    appName: app.getName(),
-    appVersion: app.getVersion(),
-    platform: process.platform,
-    isPackaged: app.isPackaged,
-    shellReadyAtUtc: new Date().toISOString(),
-  }));
+import type { ApplicationRuntime } from "../core/app-runtime";
+
+export function registerAppShellIpc(runtime: ApplicationRuntime): void {
+  ipcMain.handle("app-shell:get-snapshot", () => runtime.getSnapshot());
+
+  ipcMain.handle("app-shell:open-import-dialog", (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window === null) {
+      throw new Error("Import dialog requires an active window.");
+    }
+
+    return runtime.openImportDialog(window);
+  });
+
+  ipcMain.handle("app-shell:import-dropped-paths", (_event, paths: string[]) =>
+    runtime.importDroppedPaths(paths),
+  );
+
+  ipcMain.handle(
+    "app-shell:confirm-pending-imports",
+    (_event, items: PendingImportReviewItem[]) => runtime.confirmPendingImports(items),
+  );
+
+  ipcMain.handle("app-shell:select-card", (_event, cardId: string | null) =>
+    runtime.selectCard(cardId),
+  );
 }
-

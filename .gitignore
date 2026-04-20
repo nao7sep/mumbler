@@ -1,6 +1,10 @@
+# Dependencies
 node_modules
+
+# Build output
 dist
 dist-electron
 out
-.DS_Store
 
+# OS files
+.DS_Store
