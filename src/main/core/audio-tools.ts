@@ -1,8 +1,11 @@
 import { execFile } from "node:child_process";
+import { mkdir } from "node:fs/promises";
+import { extname, join } from "node:path";
 import { promisify } from "node:util";
 
 import ffmpegPath from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
+import { nanoid } from "nanoid";
 
 import type { AudioProfile, CardTrim, TrimDecision } from "@shared/app-shell";
 
@@ -33,6 +36,13 @@ interface FfprobeFormatResponse {
     duration?: string;
   }>;
   packets?: RawPacket[];
+}
+
+export interface PreparedAudioInput {
+  filePath: string;
+  mimeType: string;
+  wasDerived: boolean;
+  cleanup: () => Promise<void>;
 }
 
 export async function probeAudioProfile(
@@ -146,6 +156,95 @@ export async function analyzeTrimDecision(
   };
 }
 
+export async function prepareAudioForTranscription(params: {
+  sourceFilePath: string;
+  workingDir: string;
+  trim: CardTrim;
+  trimDecision: TrimDecision | null;
+  durationSec: number | null;
+  audioProfile: AudioProfile | null;
+}): Promise<PreparedAudioInput> {
+  const mimeType = inferAudioMimeType(params.sourceFilePath);
+
+  if (params.trim.frontMarkerSec === null && params.trim.backMarkerSec === null) {
+    return {
+      filePath: params.sourceFilePath,
+      mimeType,
+      wasDerived: false,
+      cleanup: async () => undefined,
+    };
+  }
+
+  const derivedDir = join(params.workingDir, "derived");
+  await mkdir(derivedDir, { recursive: true });
+
+  const extension = extname(params.sourceFilePath) || ".audio";
+  const outputPath = join(derivedDir, `${nanoid()}${extension}`);
+
+  if (params.trimDecision?.kind === "stream-copy") {
+    const startSec = params.trimDecision.chosenStartBoundarySec ?? 0;
+    const endSec = params.trimDecision.chosenEndBoundarySec;
+    await runFfmpegTrim({
+      sourceFilePath: params.sourceFilePath,
+      outputPath,
+      startSec,
+      endSec,
+      mode: "stream-copy",
+      audioProfile: params.audioProfile,
+    });
+
+    return {
+      filePath: outputPath,
+      mimeType,
+      wasDerived: true,
+      cleanup: async () => cleanupDerivedFile(outputPath),
+    };
+  }
+
+  const startSec = params.trim.frontMarkerSec ?? 0;
+  const endSec = params.trim.backMarkerSec;
+  await runFfmpegTrim({
+    sourceFilePath: params.sourceFilePath,
+    outputPath,
+    startSec,
+    endSec,
+    mode: "reencode",
+    audioProfile: params.audioProfile,
+  });
+
+  return {
+    filePath: outputPath,
+    mimeType,
+    wasDerived: true,
+    cleanup: async () => cleanupDerivedFile(outputPath),
+  };
+}
+
+export function inferAudioMimeType(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case ".mp3":
+      return "audio/mpeg";
+    case ".m4a":
+    case ".mp4":
+      return "audio/mp4";
+    case ".aac":
+      return "audio/aac";
+    case ".wav":
+      return "audio/wav";
+    case ".flac":
+      return "audio/flac";
+    case ".ogg":
+    case ".oga":
+    case ".opus":
+      return "audio/ogg";
+    case ".aif":
+    case ".aiff":
+      return "audio/aiff";
+    default:
+      return "application/octet-stream";
+  }
+}
+
 function resolveFfprobePath(): string {
   if (!ffprobeStatic?.path) {
     throw new Error("ffprobe-static did not provide a binary path.");
@@ -160,6 +259,87 @@ function resolveFfmpegPath(): string {
   }
 
   return ffmpegPath;
+}
+
+async function runFfmpegTrim(params: {
+  sourceFilePath: string;
+  outputPath: string;
+  startSec: number;
+  endSec: number | null;
+  mode: "stream-copy" | "reencode";
+  audioProfile: AudioProfile | null;
+}): Promise<void> {
+  const ffmpeg = resolveFfmpegPath();
+  const trimArgs = buildTrimTimingArgs(params.startSec, params.endSec);
+  const codecArgs =
+    params.mode === "stream-copy"
+      ? ["-c", "copy"]
+      : buildReencodeArgs(params.outputPath, params.audioProfile);
+
+  await execFileAsync(ffmpeg, [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    params.sourceFilePath,
+    ...trimArgs,
+    ...codecArgs,
+    params.outputPath,
+  ]);
+}
+
+function buildTrimTimingArgs(startSec: number, endSec: number | null): string[] {
+  const args: string[] = [];
+
+  if (startSec > 0) {
+    args.push("-ss", startSec.toFixed(3));
+  }
+
+  const durationSec = endSec === null ? null : Math.max(0, endSec - startSec);
+  if (durationSec !== null) {
+    args.push("-t", durationSec.toFixed(3));
+  }
+
+  return args;
+}
+
+function buildReencodeArgs(outputPath: string, audioProfile: AudioProfile | null): string[] {
+  const extension = extname(outputPath).toLowerCase();
+  const bitrateKbps = audioProfile?.bitRateKbps ?? 192;
+
+  switch (extension) {
+    case ".mp3":
+      return ["-c:a", "libmp3lame", "-b:a", `${bitrateKbps}k`];
+    case ".m4a":
+    case ".mp4":
+    case ".aac":
+      return ["-c:a", "aac", "-b:a", `${bitrateKbps}k`];
+    case ".flac":
+      return ["-c:a", "flac"];
+    case ".wav":
+      return ["-c:a", "pcm_s16le"];
+    case ".aif":
+    case ".aiff":
+      return ["-c:a", "pcm_s16be"];
+    case ".ogg":
+    case ".oga":
+    case ".opus":
+      return audioProfile?.codecName === "opus"
+        ? ["-c:a", "libopus", "-b:a", `${Math.max(24, bitrateKbps)}k`]
+        : ["-c:a", "libvorbis", "-b:a", `${bitrateKbps}k`];
+    default:
+      return ["-c:a", "copy"];
+  }
+}
+
+async function cleanupDerivedFile(filePath: string): Promise<void> {
+  try {
+    const { rm } = await import("node:fs/promises");
+    await rm(filePath, { force: true });
+  } catch {
+    return;
+  }
 }
 
 async function findStartBoundary(

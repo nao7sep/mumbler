@@ -83,6 +83,42 @@ function describeTrimDecision(decision: TrimDecision | null): string {
   return "One or more boundaries fell outside tolerance. Re-encode will be required.";
 }
 
+function describeCardStep(card: MumblerCard): string {
+  if (card.status === "Transcribing") {
+    return "Gemini transcription in progress.";
+  }
+
+  if (card.status === "Generating Metadata") {
+    if (card.activeStep === "title") {
+      return "Generating title.";
+    }
+    if (card.activeStep === "slug") {
+      return "Generating slug.";
+    }
+    return "Generating metadata.";
+  }
+
+  if (card.status === "Ready to Save") {
+    return "Transcript and metadata are ready.";
+  }
+
+  if (card.status === "Error") {
+    return card.lastError?.message ?? "Processing failed.";
+  }
+
+  return "Ready for transcription.";
+}
+
+function formatAiRun(
+  run: MumblerCard["ai"]["transcription"] | MumblerCard["ai"]["title"] | MumblerCard["ai"]["slug"],
+): string {
+  if (run === null) {
+    return "—";
+  }
+
+  return `${run.provider} · ${run.model}`;
+}
+
 function QueueList({
   cards,
   selectedCardId,
@@ -316,6 +352,7 @@ export function App(): ReactElement {
   const [isConfirmingReview, setIsConfirmingReview] = useState(false);
   const [pendingReviewDrafts, setPendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
   const [importFailures, setImportFailures] = useState<FailedImport[]>([]);
+  const [activePipelineCards, setActivePipelineCards] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -344,8 +381,34 @@ export function App(): ReactElement {
     setPendingReviewDrafts(snapshot?.state?.pendingImports ?? []);
   }, [snapshot?.state?.pendingImports]);
 
+  useEffect(() => {
+    if (activePipelineCards.length === 0) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void window.mumbler
+        .getSnapshot()
+        .then((nextSnapshot) => {
+          setSnapshot(nextSnapshot);
+        })
+        .catch((error: unknown) => {
+          setErrorMessage(error instanceof Error ? error.message : "Failed to refresh card state.");
+        });
+    }, 800);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activePipelineCards]);
+
   const selectedCard =
     snapshot?.state?.cards.find((card) => card.id === snapshot.state?.selectedCardId) ?? null;
+  const selectedCardIsBusy =
+    selectedCard !== null &&
+    (activePipelineCards.includes(selectedCard.id) ||
+      selectedCard.status === "Transcribing" ||
+      selectedCard.status === "Generating Metadata");
 
   async function handleImportClick(): Promise<void> {
     setIsImporting(true);
@@ -427,6 +490,48 @@ export function App(): ReactElement {
     }
   }
 
+  function beginCardOperation(cardId: string): void {
+    setActivePipelineCards((current) =>
+      current.includes(cardId) ? current : [...current, cardId],
+    );
+  }
+
+  function endCardOperation(cardId: string): void {
+    setActivePipelineCards((current) => current.filter((value) => value !== cardId));
+  }
+
+  function handleTranscribeCard(cardId: string): void {
+    beginCardOperation(cardId);
+    void window.mumbler
+      .transcribeCard(cardId)
+      .then((nextSnapshot) => {
+        setSnapshot(nextSnapshot);
+        setErrorMessage(null);
+      })
+      .catch((error: unknown) => {
+        setErrorMessage(error instanceof Error ? error.message : "Failed to transcribe card.");
+      })
+      .finally(() => {
+        endCardOperation(cardId);
+      });
+  }
+
+  function handleRetryCard(cardId: string): void {
+    beginCardOperation(cardId);
+    void window.mumbler
+      .retryCard(cardId)
+      .then((nextSnapshot) => {
+        setSnapshot(nextSnapshot);
+        setErrorMessage(null);
+      })
+      .catch((error: unknown) => {
+        setErrorMessage(error instanceof Error ? error.message : "Failed to retry card.");
+      })
+      .finally(() => {
+        endCardOperation(cardId);
+      });
+  }
+
   function onDragOver(event: DragEvent<HTMLElement>): void {
     event.preventDefault();
     setIsDragActive(true);
@@ -459,7 +564,7 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          <span className="pill">Phase 4 Trim Workflow</span>
+          <span className="pill">Phase 5 Gemini Pipeline</span>
           {snapshot ? (
             <span className="pill pill--quiet">
               {snapshot.appVersion} · {snapshot.platform}
@@ -579,8 +684,8 @@ export function App(): ReactElement {
               <h2>Selection Workspace</h2>
             </div>
             <p className="panel__note">
-              Phase 4 adds the waveform player, marker editing, duplicate-card flow,
-              front-trim timestamp shifting, and ffprobe-based trim decisions.
+              Phase 5 adds Gemini transcription, title generation, slug generation,
+              retries, and ready-to-save states on top of the trim workflow.
             </p>
           </div>
 
@@ -682,6 +787,7 @@ export function App(): ReactElement {
                 <WaveformEditor
                   card={selectedCard}
                   previewSnippetSeconds={snapshot?.settingsSummary?.previewSnippetSeconds ?? 10}
+                  disabled={selectedCardIsBusy}
                   onDuplicateCard={handleDuplicateCard}
                   onTrimCommit={handleTrimCommit}
                   onError={(message) => setErrorMessage(message)}
@@ -746,13 +852,114 @@ export function App(): ReactElement {
 
               <section className="detail-card detail-card--wide">
                 <div className="detail-card__header">
-                  <h3>Next Pipeline Steps</h3>
-                  <span className="muted-tag">Phase 5</span>
+                  <div>
+                    <h3>Actions and Status</h3>
+                    <p className="panel__note">{describeCardStep(selectedCard)}</p>
+                  </div>
+                  <span className="muted-tag">
+                    {snapshot?.settingsSummary?.hasGeminiApiKey
+                      ? "Gemini key configured"
+                      : "Gemini key missing"}
+                  </span>
                 </div>
-                <p className="panel__note">
-                  Gemini transcription, title generation, slug generation, retries, and status transitions come next.
-                  This phase is focused on listening, splitting, and validating trim decisions.
-                </p>
+                <div className="action-grid">
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    onClick={() => handleTranscribeCard(selectedCard.id)}
+                    disabled={!snapshot?.settingsSummary?.hasGeminiApiKey || selectedCardIsBusy}
+                  >
+                    {selectedCardIsBusy ? "Processing..." : "Transcribe"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={() => handleRetryCard(selectedCard.id)}
+                    disabled={selectedCard.status !== "Error" || selectedCardIsBusy}
+                  >
+                    Retry Failed Step
+                  </button>
+                  <button type="button" className="button button--ghost" disabled>
+                    Save
+                  </button>
+                  <button type="button" className="button button--ghost" disabled>
+                    Remove
+                  </button>
+                </div>
+                <dl className="meta-list compact-meta-list">
+                  <div>
+                    <dt>Transcription model</dt>
+                    <dd>{snapshot?.settingsSummary?.transcriptionModel ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Metadata model</dt>
+                    <dd>{snapshot?.settingsSummary?.metadataModel ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Last failed step</dt>
+                    <dd>{selectedCard.lastError?.failedStep ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Active step</dt>
+                    <dd>{selectedCard.activeStep ?? "—"}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="detail-card detail-card--wide">
+                <div className="detail-card__header">
+                  <h3>Results</h3>
+                  <span className="muted-tag">Read-only</span>
+                </div>
+                <div className="result-grid">
+                  <label className="field">
+                    <span>Transcript</span>
+                    <textarea
+                      readOnly
+                      className="result-output"
+                      value={selectedCard.transcription.text ?? ""}
+                      placeholder="Transcript will appear here."
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Title</span>
+                    <textarea
+                      readOnly
+                      className="result-output"
+                      value={selectedCard.metadata.title ?? ""}
+                      placeholder="Generated title will appear here."
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Slug</span>
+                    <textarea
+                      readOnly
+                      className="result-output"
+                      value={selectedCard.metadata.slug ?? ""}
+                      placeholder="Generated slug will appear here."
+                    />
+                  </label>
+                  <section className="detail-card detail-card--nested">
+                    <div className="detail-card__header">
+                      <h3>Provenance</h3>
+                      <span className="muted-tag">Per artifact</span>
+                    </div>
+                    <dl className="meta-list compact-meta-list">
+                      <div>
+                        <dt>Transcript</dt>
+                        <dd>{formatAiRun(selectedCard.ai.transcription)}</dd>
+                      </div>
+                      <div>
+                        <dt>Title</dt>
+                        <dd>{formatAiRun(selectedCard.ai.title)}</dd>
+                      </div>
+                      <div>
+                        <dt>Slug</dt>
+                        <dd>{formatAiRun(selectedCard.ai.slug)}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                </div>
               </section>
             </div>
           ) : snapshot?.state?.cards.length ? (

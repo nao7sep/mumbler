@@ -7,6 +7,8 @@ export const APP_SHELL_CHANNELS = {
   duplicateCard: "app-shell:duplicate-card",
   updateCardTrim: "app-shell:update-card-trim",
   getCardMediaSource: "app-shell:get-card-media-source",
+  transcribeCard: "app-shell:transcribe-card",
+  retryCard: "app-shell:retry-card",
 } as const;
 
 export type CardStatus =
@@ -250,4 +252,6 @@ export interface MumblerShellApi {
   duplicateCard(cardId: string): Promise<AppSnapshot>;
   updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot>;
   getCardMediaSource(cardId: string): Promise<string>;
+  transcribeCard(cardId: string): Promise<AppSnapshot>;
+  retryCard(cardId: string): Promise<AppSnapshot>;
 }

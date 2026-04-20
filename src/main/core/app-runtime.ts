@@ -11,6 +11,7 @@ import {
   type CardTrim,
   type AppPaths,
   type AppSnapshot,
+  type CardProcessingStep,
   type FailedImport,
   type ImportOperationResult,
   type ImportSource,
@@ -21,7 +22,19 @@ import {
   type SettingsSummary,
 } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS, buildDefaultShortcutMap } from "@shared/commands";
-import { analyzeTrimDecision, assertFfmpegToolingPresent, probeAudioProfile } from "./audio-tools";
+import {
+  analyzeTrimDecision,
+  assertFfmpegToolingPresent,
+  prepareAudioForTranscription,
+  probeAudioProfile,
+} from "./audio-tools";
+import {
+  generateTextWithGemini,
+  getInlineAudioSafetyLimitBytes,
+  getInlineRequestLimitBytes,
+  isRetryableGeminiError,
+  transcribeWithGemini,
+} from "./gemini-adapter";
 import {
   getSupportedTimezones,
   isSupportedTimezone,
@@ -54,6 +67,7 @@ interface AppRuntimeState {
 
 export class ApplicationRuntime {
   private readonly runtime: AppRuntimeState;
+  private readonly activeCardOperations = new Set<string>();
 
   private constructor(runtime: AppRuntimeState) {
     this.runtime = runtime;
@@ -291,6 +305,10 @@ export class ApplicationRuntime {
       throw new Error("Card to duplicate does not exist.");
     }
 
+    if (source.status === "Transcribing" || source.status === "Generating Metadata") {
+      throw new Error("Cannot duplicate a card while it is being processed.");
+    }
+
     const duplicate = createDuplicatedCard(source);
     state.cards = [...state.cards, duplicate].sort((left, right) =>
       left.timestamps.effectiveUtc.localeCompare(right.timestamps.effectiveUtc),
@@ -313,6 +331,10 @@ export class ApplicationRuntime {
 
     if (card === undefined) {
       throw new Error("Card to update does not exist.");
+    }
+
+    if (card.status === "Transcribing" || card.status === "Generating Metadata") {
+      throw new Error("Cannot change trim markers while this card is being processed.");
     }
 
     const normalizedTrim = normalizeTrim(trim, card.durationSec);
@@ -370,6 +392,14 @@ export class ApplicationRuntime {
     }
 
     return pathToFileURL(card.sourceFilePath).href;
+  }
+
+  async transcribeCard(cardId: string): Promise<AppSnapshot> {
+    return this.runCardPipeline(cardId, "transcribe");
+  }
+
+  async retryCard(cardId: string): Promise<AppSnapshot> {
+    return this.runCardPipeline(cardId, "retry");
   }
 
   private async importPaths(
@@ -474,6 +504,264 @@ export class ApplicationRuntime {
     }
   }
 
+  private async runCardPipeline(
+    cardId: string,
+    mode: "transcribe" | "retry",
+  ): Promise<AppSnapshot> {
+    this.ensureReady();
+
+    const state = this.runtime.state!;
+    const settings = this.runtime.settings!;
+    const logger = this.runtime.logger!;
+    const card = state.cards.find((entry) => entry.id === cardId);
+
+    if (card === undefined) {
+      throw new Error("Card to process does not exist.");
+    }
+
+    if (this.activeCardOperations.has(cardId)) {
+      throw new Error("This card is already being processed.");
+    }
+
+    if (this.activeCardOperations.size >= settings.concurrencyLimit) {
+      throw new Error(
+        `Concurrency limit reached (${settings.concurrencyLimit}). Wait for another card to finish first.`,
+      );
+    }
+
+    const apiKey = decodeGeminiApiKey(settings.geminiApiKeyObfuscated);
+    if (apiKey.length === 0) {
+      throw new Error("Gemini API key is not configured.");
+    }
+
+    const startStep = resolvePipelineStartStep(card, mode);
+    let activeStep: Exclude<CardProcessingStep, null> = startStep;
+
+    this.activeCardOperations.add(cardId);
+
+    try {
+      if (startStep === "transcription") {
+        clearCardResults(card);
+        await this.setCardStepState(card, "Transcribing", "transcription");
+
+        const trimDecision =
+          card.trimDecision ??
+          (await analyzeTrimDecision(card.sourceFilePath, card.trim, card.durationSec));
+        card.trimDecision = trimDecision;
+        card.updatedAtUtc = new Date().toISOString();
+        await this.persistState();
+
+        const preparedAudio = await prepareAudioForTranscription({
+          sourceFilePath: card.sourceFilePath,
+          workingDir: this.runtime.paths!.workingDir,
+          trim: card.trim,
+          trimDecision,
+          durationSec: card.durationSec,
+          audioProfile: card.audioProfile,
+        });
+
+        try {
+          await logger.info("pipeline.audio-input", "Prepared audio for Gemini transcription.", {
+            cardId,
+            transportCandidate:
+              (await stat(preparedAudio.filePath)).size <= getInlineAudioSafetyLimitBytes()
+                ? "inline"
+                : "files-api",
+            inlineSafetyLimitBytes: getInlineAudioSafetyLimitBytes(),
+            inlineRequestLimitBytes: getInlineRequestLimitBytes(),
+            sourceFilePath: card.sourceFilePath,
+            preparedFilePath: preparedAudio.filePath,
+            preparedMimeType: preparedAudio.mimeType,
+            wasDerived: preparedAudio.wasDerived,
+            trimDecision: trimDecision.kind,
+          });
+
+          const transcriptionResult = await this.executeWithRetry({
+            cardId,
+            step: "transcription",
+            op: "gemini.transcription",
+            execute: () =>
+              transcribeWithGemini({
+                apiKey,
+                filePath: preparedAudio.filePath,
+                mimeType: preparedAudio.mimeType,
+                model: settings.transcriptionModel,
+                language: card.language,
+                timeoutMs: settings.timeouts.transcriptionMs,
+              }),
+          });
+
+          card.transcription.text = transcriptionResult.text;
+          card.ai.transcription = {
+            provider: "gemini",
+            model: transcriptionResult.modelVersion ?? settings.transcriptionModel,
+            generatedAtUtc: new Date().toISOString(),
+          };
+          card.updatedAtUtc = new Date().toISOString();
+
+          await logger.info("pipeline.transcription-complete", "Completed Gemini transcription.", {
+            cardId,
+            modelVersion: transcriptionResult.modelVersion,
+            transport: transcriptionResult.transport,
+            usageMetadata: transcriptionResult.usageMetadata,
+          });
+        } finally {
+          await preparedAudio.cleanup();
+        }
+
+        activeStep = "title";
+      }
+
+      if (activeStep === "title") {
+        await this.setCardStepState(card, "Generating Metadata", "title");
+        const titlePrompt = renderPromptTemplate(settings.prompts.title, {
+          transcript: card.transcription.text ?? "",
+          title: "",
+          language: card.language,
+        });
+        const titleResult = await this.executeWithRetry({
+          cardId,
+          step: "title",
+          op: "gemini.title",
+          execute: () =>
+            generateTextWithGemini({
+              apiKey,
+              prompt: titlePrompt,
+              model: settings.metadataModel,
+              timeoutMs: settings.timeouts.titleMs,
+            }),
+        });
+
+        card.metadata.title = sanitizeTitle(titleResult.text);
+        card.ai.title = {
+          provider: "gemini",
+          model: titleResult.modelVersion ?? settings.metadataModel,
+          generatedAtUtc: new Date().toISOString(),
+        };
+        card.updatedAtUtc = new Date().toISOString();
+        await this.persistState();
+        await logger.info("pipeline.title-complete", "Generated title metadata.", {
+          cardId,
+          modelVersion: titleResult.modelVersion,
+          usageMetadata: titleResult.usageMetadata,
+        });
+
+        activeStep = "slug";
+      }
+
+      if (activeStep === "slug") {
+        await this.setCardStepState(card, "Generating Metadata", "slug");
+        const slugPrompt = renderPromptTemplate(settings.prompts.slug, {
+          transcript: card.transcription.text ?? "",
+          title: card.metadata.title ?? "",
+          language: card.language,
+        });
+        const slugResult = await this.executeWithRetry({
+          cardId,
+          step: "slug",
+          op: "gemini.slug",
+          execute: () =>
+            generateTextWithGemini({
+              apiKey,
+              prompt: slugPrompt,
+              model: settings.metadataModel,
+              timeoutMs: settings.timeouts.slugMs,
+            }),
+        });
+
+        card.metadata.slug = sanitizeSlug(slugResult.text);
+        if (card.metadata.slug.length === 0) {
+          throw new Error("Generated slug was empty after sanitization.");
+        }
+        card.ai.slug = {
+          provider: "gemini",
+          model: slugResult.modelVersion ?? settings.metadataModel,
+          generatedAtUtc: new Date().toISOString(),
+        };
+        card.status = "Ready to Save";
+        card.activeStep = null;
+        card.lastError = null;
+        card.updatedAtUtc = new Date().toISOString();
+
+        await this.persistState();
+        await logger.info("pipeline.slug-complete", "Generated slug metadata.", {
+          cardId,
+          modelVersion: slugResult.modelVersion,
+          usageMetadata: slugResult.usageMetadata,
+        });
+      }
+    } catch (error: unknown) {
+      card.status = "Error";
+      card.activeStep = null;
+      card.lastError = {
+        message: getCardErrorMessage(error),
+        occurredAtUtc: new Date().toISOString(),
+        failedStep: activeStep,
+      };
+      card.updatedAtUtc = new Date().toISOString();
+
+      await this.persistState();
+      await logger.error("pipeline.failed", "Card pipeline failed.", error, {
+        cardId,
+        failedStep: activeStep,
+        status: card.status,
+      });
+    } finally {
+      this.activeCardOperations.delete(cardId);
+    }
+
+    return this.getSnapshot();
+  }
+
+  private async setCardStepState(
+    card: MumblerCard,
+    status: Extract<MumblerCard["status"], "Transcribing" | "Generating Metadata">,
+    step: Exclude<CardProcessingStep, null>,
+  ): Promise<void> {
+    card.status = status;
+    card.activeStep = step;
+    card.lastError = null;
+    card.updatedAtUtc = new Date().toISOString();
+    await this.persistState();
+  }
+
+  private async executeWithRetry<T>(params: {
+    cardId: string;
+    step: Exclude<CardProcessingStep, null>;
+    op: string;
+    execute: () => Promise<T>;
+  }): Promise<T> {
+    const { retryPolicy } = this.runtime.settings!;
+    const logger = this.runtime.logger!;
+
+    let attempt = 1;
+    while (true) {
+      try {
+        return await params.execute();
+      } catch (error: unknown) {
+        const retryable = isRetryableGeminiError(error);
+        const exhausted = attempt >= retryPolicy.maxRetries;
+
+        await logger.warn(params.op, "Gemini step attempt failed.", {
+          cardId: params.cardId,
+          step: params.step,
+          attempt,
+          retryable,
+          exhausted,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        if (!retryable || exhausted) {
+          throw error;
+        }
+
+        const delayMs = computeRetryDelayMs(attempt, retryPolicy);
+        await sleep(delayMs);
+        attempt += 1;
+      }
+    }
+  }
+
   private async persistState(): Promise<void> {
     const state = this.runtime.state!;
     const normalized =
@@ -546,8 +834,8 @@ function createDefaultSettings(systemTimezone: string): MumblerSettings {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     geminiApiKeyObfuscated: "",
     outputDirectory: null,
-    transcriptionModel: "gemini-3.1-pro-preview",
-    metadataModel: "gemini-3.1-pro-preview",
+    transcriptionModel: "gemini-3-pro-preview",
+    metadataModel: "gemini-3-pro-preview",
     defaultLanguage: "English",
     languages: [
       "English",
@@ -896,6 +1184,26 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
+function computeRetryDelayMs(
+  attempt: number,
+  retryPolicy: MumblerSettings["retryPolicy"],
+): number {
+  const baseDelay = Math.min(
+    retryPolicy.maxDelayMs,
+    retryPolicy.initialDelayMs * 4 ** (attempt - 1),
+  );
+  const jitterWindow = Math.round(baseDelay * retryPolicy.jitterRatio);
+  const jitterOffset =
+    jitterWindow === 0 ? 0 : Math.round((Math.random() * jitterWindow * 2) - jitterWindow);
+  return Math.max(0, baseDelay + jitterOffset);
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
 async function uniquePathInDirectory(directory: string, filename: string): Promise<string> {
   const extension = extname(filename);
   const stem = filename.slice(0, filename.length - extension.length);
@@ -1046,6 +1354,78 @@ function createDuplicatedCard(source: MumblerCard): MumblerCard {
     createdAtUtc: new Date().toISOString(),
     updatedAtUtc: new Date().toISOString(),
   };
+}
+
+function clearCardResults(card: MumblerCard): void {
+  card.transcription = { text: null };
+  card.metadata = { title: null, slug: null };
+  card.ai = { transcription: null, title: null, slug: null };
+  card.status = "Imported";
+  card.activeStep = null;
+  card.lastError = null;
+  card.updatedAtUtc = new Date().toISOString();
+}
+
+function resolvePipelineStartStep(
+  card: MumblerCard,
+  mode: "transcribe" | "retry",
+): Exclude<CardProcessingStep, null> {
+  if (mode === "transcribe") {
+    return "transcription";
+  }
+
+  if (card.lastError?.failedStep === "title" && card.transcription.text !== null) {
+    return "title";
+  }
+
+  if (
+    card.lastError?.failedStep === "slug" &&
+    card.transcription.text !== null &&
+    card.metadata.title !== null
+  ) {
+    return "slug";
+  }
+
+  return "transcription";
+}
+
+function renderPromptTemplate(
+  template: string,
+  values: {
+    transcript: string;
+    title: string;
+    language: string;
+  },
+): string {
+  return template
+    .replaceAll("{transcript}", values.transcript)
+    .replaceAll("{title}", values.title)
+    .replaceAll("{language}", values.language);
+}
+
+function sanitizeTitle(value: string): string {
+  return value
+    .replace(/^\s*["'`]+|["'`]+\s*$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sanitizeSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .replaceAll(/[`"'“”‘’]/g, "")
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/-+/g, "-")
+    .replaceAll(/^-|-$/g, "")
+    .slice(0, 80);
+}
+
+function getCardErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Unknown processing failure.";
 }
 
 function normalizeTrim(trim: CardTrim, durationSec: number | null): CardTrim {

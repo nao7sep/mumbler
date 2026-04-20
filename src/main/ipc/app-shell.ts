@@ -45,4 +45,12 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
   ipcMain.handle(APP_SHELL_CHANNELS.getCardMediaSource, (_event, cardId: string) =>
     runtime.getCardMediaSource(cardId),
   );
+
+  ipcMain.handle(APP_SHELL_CHANNELS.transcribeCard, (_event, cardId: string) =>
+    runtime.transcribeCard(cardId),
+  );
+
+  ipcMain.handle(APP_SHELL_CHANNELS.retryCard, (_event, cardId: string) =>
+    runtime.retryCard(cardId),
+  );
 }

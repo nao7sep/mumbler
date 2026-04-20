@@ -347,6 +347,12 @@ textarea:disabled {
   padding: 18px;
 }
 
+.detail-card--nested {
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: none;
+}
+
 .detail-card--wide {
   grid-column: 1 / -1;
 }
@@ -395,6 +401,11 @@ textarea:disabled {
   padding: 0.84rem 0.92rem;
   background: rgba(255, 255, 255, 0.72);
   color: var(--text);
+}
+
+.result-output {
+  min-height: 128px;
+  resize: vertical;
 }
 
 .waveform-editor {

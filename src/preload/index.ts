@@ -31,6 +31,10 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.updateCardTrim, cardId, trim) as Promise<AppSnapshot>,
   getCardMediaSource: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getCardMediaSource, cardId) as Promise<string>,
+  transcribeCard: (cardId: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.transcribeCard, cardId) as Promise<AppSnapshot>,
+  retryCard: (cardId: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.retryCard, cardId) as Promise<AppSnapshot>,
 };
 
 contextBridge.exposeInMainWorld("mumbler", api);

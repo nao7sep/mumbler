@@ -18,6 +18,7 @@ const MARKER_EPSILON_SEC = 0.05;
 interface WaveformEditorProps {
   card: MumblerCard;
   previewSnippetSeconds: number;
+  disabled: boolean;
   onDuplicateCard: (cardId: string) => Promise<void>;
   onTrimCommit: (cardId: string, trim: CardTrim) => Promise<void>;
   onError: (message: string) => void;
@@ -26,6 +27,7 @@ interface WaveformEditorProps {
 export function WaveformEditor({
   card,
   previewSnippetSeconds,
+  disabled,
   onDuplicateCard,
   onTrimCommit,
   onError,
@@ -356,16 +358,36 @@ export function WaveformEditor({
         <button type="button" className="button button--ghost" onClick={() => void playPause()}>
           {isPlaying ? "Pause" : "Play"}
         </button>
-        <button type="button" className="button button--ghost" onClick={() => void setMarkerAtCursor("front")}>
+        <button
+          type="button"
+          className="button button--ghost"
+          onClick={() => void setMarkerAtCursor("front")}
+          disabled={disabled}
+        >
           Set Front at Cursor
         </button>
-        <button type="button" className="button button--ghost" onClick={() => void setMarkerAtCursor("back")}>
+        <button
+          type="button"
+          className="button button--ghost"
+          onClick={() => void setMarkerAtCursor("back")}
+          disabled={disabled}
+        >
           Set Back at Cursor
         </button>
-        <button type="button" className="button button--ghost" onClick={() => void clearMarkers()}>
+        <button
+          type="button"
+          className="button button--ghost"
+          onClick={() => void clearMarkers()}
+          disabled={disabled}
+        >
           Clear Markers
         </button>
-        <button type="button" className="button button--ghost" onClick={() => void duplicateCard()}>
+        <button
+          type="button"
+          className="button button--ghost"
+          onClick={() => void duplicateCard()}
+          disabled={disabled}
+        >
           Duplicate Card
         </button>
       </div>
@@ -393,19 +415,40 @@ export function WaveformEditor({
               onBlur={() => void handleMarkerInputCommit("front")}
               onKeyDown={(event) => onMarkerInputKeyDown("front", event)}
               placeholder="mm:ss.s"
+              disabled={disabled}
             />
           </label>
           <div className="nudge-grid">
-            <button type="button" className="button button--ghost" onClick={() => void nudgeMarker("front", -1)}>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => void nudgeMarker("front", -1)}
+              disabled={disabled}
+            >
               -1.0s
             </button>
-            <button type="button" className="button button--ghost" onClick={() => void nudgeMarker("front", -0.1)}>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => void nudgeMarker("front", -0.1)}
+              disabled={disabled}
+            >
               -0.1s
             </button>
-            <button type="button" className="button button--ghost" onClick={() => void nudgeMarker("front", 0.1)}>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => void nudgeMarker("front", 0.1)}
+              disabled={disabled}
+            >
               +0.1s
             </button>
-            <button type="button" className="button button--ghost" onClick={() => void nudgeMarker("front", 1)}>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => void nudgeMarker("front", 1)}
+              disabled={disabled}
+            >
               +1.0s
             </button>
           </div>
@@ -424,19 +467,40 @@ export function WaveformEditor({
               onBlur={() => void handleMarkerInputCommit("back")}
               onKeyDown={(event) => onMarkerInputKeyDown("back", event)}
               placeholder="mm:ss.s"
+              disabled={disabled}
             />
           </label>
           <div className="nudge-grid">
-            <button type="button" className="button button--ghost" onClick={() => void nudgeMarker("back", -1)}>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => void nudgeMarker("back", -1)}
+              disabled={disabled}
+            >
               -1.0s
             </button>
-            <button type="button" className="button button--ghost" onClick={() => void nudgeMarker("back", -0.1)}>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => void nudgeMarker("back", -0.1)}
+              disabled={disabled}
+            >
               -0.1s
             </button>
-            <button type="button" className="button button--ghost" onClick={() => void nudgeMarker("back", 0.1)}>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => void nudgeMarker("back", 0.1)}
+              disabled={disabled}
+            >
               +0.1s
             </button>
-            <button type="button" className="button button--ghost" onClick={() => void nudgeMarker("back", 1)}>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => void nudgeMarker("back", 1)}
+              disabled={disabled}
+            >
               +1.0s
             </button>
           </div>

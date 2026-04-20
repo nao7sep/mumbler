@@ -23,10 +23,14 @@ The current implementation provides:
 - Front/back trim markers with drag, nudge, text input, and preview playback
 - Duplicate-card flow for splitting one recording into multiple extracts
 - Front-trim timestamp shifting and ffprobe-based trim decision analysis
-- No Gemini transcription, metadata generation, or final save workflow yet
+- Gemini transcription pipeline via `@google/genai`
+- Automatic title and slug generation after successful transcription
+- Retry flow that resumes from the failed Gemini step when possible
+- Ready-to-save card states with per-artifact model provenance in app state
+- No final save workflow yet
 
 ## Verification Gaps
 
 - Destructive import and trash behavior still need an interactive desktop run
 - Trim-boundary decisions still need verification against real audio files
-- Gemini API integration still needs a real API key in a later phase
+- Gemini API integration still needs a real API key and real requests
