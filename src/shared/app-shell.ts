@@ -3,6 +3,7 @@ export const APP_SHELL_CHANNELS = {
   getSettingsDraft: "app-shell:get-settings-draft",
   openImportDialog: "app-shell:open-import-dialog",
   importDroppedPaths: "app-shell:import-dropped-paths",
+  updatePendingImportDrafts: "app-shell:update-pending-import-drafts",
   confirmPendingImports: "app-shell:confirm-pending-imports",
   selectCard: "app-shell:select-card",
   duplicateCard: "app-shell:duplicate-card",
@@ -319,6 +320,7 @@ export interface MumblerShellApi {
   getSettingsDraft(): Promise<SettingsDraft>;
   openImportDialog(): Promise<ImportOperationResult>;
   importDroppedPaths(paths: string[]): Promise<ImportOperationResult>;
+  updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot>;
   confirmPendingImports(items: PendingImportReviewItem[]): Promise<AppSnapshot>;
   selectCard(cardId: string | null): Promise<AppSnapshot>;
   duplicateCard(cardId: string): Promise<AppSnapshot>;

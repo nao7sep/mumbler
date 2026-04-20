@@ -29,6 +29,11 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
   );
 
   ipcMain.handle(
+    APP_SHELL_CHANNELS.updatePendingImportDrafts,
+    (_event, items: PendingImportReviewItem[]) => runtime.updatePendingImportDrafts(items),
+  );
+
+  ipcMain.handle(
     APP_SHELL_CHANNELS.confirmPendingImports,
     (_event, items: PendingImportReviewItem[]) => runtime.confirmPendingImports(items),
   );

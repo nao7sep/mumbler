@@ -163,6 +163,28 @@ function formatAiRun(
   return `${run.provider} · ${run.model}`;
 }
 
+async function copyTextToClipboard(value: string): Promise<void> {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+
+  const copied = document.execCommand("copy");
+  textarea.remove();
+
+  if (!copied) {
+    throw new Error("Clipboard is not available.");
+  }
+}
+
 function QueueList({
   cards,
   selectedCardId,
@@ -438,6 +460,38 @@ export function App(): ReactElement {
   useEffect(() => {
     setPendingReviewDrafts(snapshot?.state?.pendingImports ?? []);
   }, [snapshot?.state?.pendingImports]);
+
+  useEffect(() => {
+    const currentState = snapshot?.state;
+    if (pendingReviewDrafts.length === 0 || currentState == null) {
+      return;
+    }
+
+    const persistedJson = JSON.stringify(currentState.pendingImports);
+    const draftJson = JSON.stringify(pendingReviewDrafts);
+    if (persistedJson === draftJson) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void window.mumbler
+        .updatePendingImportDrafts(pendingReviewDrafts)
+        .then((nextSnapshot) => {
+          setSnapshot(nextSnapshot);
+        })
+        .catch((error: unknown) => {
+          setErrorMessage(
+            error instanceof Error
+              ? error.message
+              : "Failed to persist pending timestamp review edits.",
+          );
+        });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [pendingReviewDrafts, snapshot?.state]);
 
   useEffect(() => {
     if (activePipelineCards.length === 0) {
@@ -758,6 +812,20 @@ export function App(): ReactElement {
       setNoticeMessage(null);
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to update card language.");
+    }
+  }
+
+  async function handleCopyResult(label: string, value: string | null): Promise<void> {
+    if (value === null || value.trim().length === 0) {
+      return;
+    }
+
+    try {
+      await copyTextToClipboard(value);
+      setNoticeMessage(`${label} copied to clipboard.`);
+      setErrorMessage(null);
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : `Failed to copy ${label}.`);
     }
   }
 
@@ -1396,7 +1464,17 @@ export function App(): ReactElement {
                 </div>
                 <div className="result-grid">
                   <label className="field">
-                    <span>Transcript</span>
+                    <span className="field-label-with-action">
+                      <span>Transcript</span>
+                      <button
+                        type="button"
+                        className="button button--ghost button--compact"
+                        onClick={() => void handleCopyResult("Transcript", selectedCard.transcription.text)}
+                        disabled={(selectedCard.transcription.text ?? "").trim().length === 0}
+                      >
+                        Copy
+                      </button>
+                    </span>
                     <textarea
                       readOnly
                       className="result-output"
@@ -1405,7 +1483,17 @@ export function App(): ReactElement {
                     />
                   </label>
                   <label className="field">
-                    <span>Title</span>
+                    <span className="field-label-with-action">
+                      <span>Title</span>
+                      <button
+                        type="button"
+                        className="button button--ghost button--compact"
+                        onClick={() => void handleCopyResult("Title", selectedCard.metadata.title)}
+                        disabled={(selectedCard.metadata.title ?? "").trim().length === 0}
+                      >
+                        Copy
+                      </button>
+                    </span>
                     <textarea
                       readOnly
                       className="result-output"
@@ -1414,7 +1502,17 @@ export function App(): ReactElement {
                     />
                   </label>
                   <label className="field">
-                    <span>Slug</span>
+                    <span className="field-label-with-action">
+                      <span>Slug</span>
+                      <button
+                        type="button"
+                        className="button button--ghost button--compact"
+                        onClick={() => void handleCopyResult("Slug", selectedCard.metadata.slug)}
+                        disabled={(selectedCard.metadata.slug ?? "").trim().length === 0}
+                      >
+                        Copy
+                      </button>
+                    </span>
                     <textarea
                       readOnly
                       className="result-output"

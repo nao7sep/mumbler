@@ -257,6 +257,11 @@ textarea:disabled {
   color: var(--text);
 }
 
+.button--compact {
+  padding: 0.42rem 0.82rem;
+  font-size: 0.82rem;
+}
+
 .button--danger {
   background: rgba(166, 59, 43, 0.1);
   border-color: rgba(166, 59, 43, 0.16);
@@ -377,6 +382,13 @@ textarea:disabled {
   font-size: 0.85rem;
   font-weight: 700;
   color: var(--muted);
+}
+
+.field-label-with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .meta-list dd {

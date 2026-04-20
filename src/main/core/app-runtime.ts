@@ -276,6 +276,22 @@ export class ApplicationRuntime {
     return this.importPaths(paths, "drag-and-drop");
   }
 
+  async updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot> {
+    this.ensureReady();
+    const state = this.runtime.state!;
+
+    const currentIds = new Set(state.pendingImports.map((item) => item.id));
+    const nextIds = new Set(items.map((item) => item.id));
+
+    if (currentIds.size !== nextIds.size || [...currentIds].some((id) => !nextIds.has(id))) {
+      throw new Error("Pending import drafts are out of date. Reopen the timestamp review.");
+    }
+
+    state.pendingImports = items.map((item) => normalizePendingImport(item));
+    await this.persistState();
+    return this.getSnapshot();
+  }
+
   async confirmPendingImports(items: PendingImportReviewItem[]): Promise<AppSnapshot> {
     this.ensureReady();
     const state = this.runtime.state!;

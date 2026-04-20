@@ -25,6 +25,11 @@ const api: MumblerShellApi = {
       APP_SHELL_CHANNELS.importDroppedPaths,
       paths,
     ) as Promise<ImportOperationResult>,
+  updatePendingImportDrafts: (items: PendingImportReviewItem[]) =>
+    ipcRenderer.invoke(
+      APP_SHELL_CHANNELS.updatePendingImportDrafts,
+      items,
+    ) as Promise<AppSnapshot>,
   confirmPendingImports: (items: PendingImportReviewItem[]) =>
     ipcRenderer.invoke(
       APP_SHELL_CHANNELS.confirmPendingImports,

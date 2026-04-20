@@ -19,6 +19,7 @@ The current implementation provides:
 - Editable central shortcut registry with renderer-side keyboard handling
 - App-wide main/renderer error surfacing with a custom blocking modal
 - Timestamp-reviewed import flow from file picker or drag-and-drop
+- Pending timestamp-review edits persisted back to state before final confirmation
 - Destructive source handling: copy into working storage, then move outside source to trash
 - Queue selection and persisted pending-review state
 - Audio probing with `ffprobe-static` during queue entry
@@ -34,6 +35,7 @@ The current implementation provides:
 - Output-directory selection through the desktop shell
 - Atomic audio plus JSON finalization with filename collision handling
 - Remove workflow that trashes app-managed working audio after confirmation
+- Copy-to-clipboard actions for transcript, title, and slug results
 - Custom app-close confirmation instead of native browser or OS confirmation prompts
 - Startup diagnostic recovery with a reset-state action
 
