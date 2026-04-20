@@ -53,6 +53,7 @@ import {
 import {
   getSupportedTimezones,
   isSupportedTimezone,
+  normalizeUtcMarkerText,
   nowUtcMarker,
   parseTimestampFromFilename,
   recomputeLocalFromUtc,
@@ -99,7 +100,7 @@ export class ApplicationRuntime {
   }
 
   static async initialize(): Promise<ApplicationRuntime> {
-    const shellReadyAtUtc = new Date().toISOString();
+    const shellReadyAtUtc = nowUtcMarker();
     const supportedTimezones = getSupportedTimezones();
     const paths = getAppPaths();
 
@@ -374,8 +375,8 @@ export class ApplicationRuntime {
         status: "Imported",
         activeStep: null,
         lastError: null,
-        createdAtUtc: new Date().toISOString(),
-        updatedAtUtc: new Date().toISOString(),
+        createdAtUtc: nowUtcMarker(),
+        updatedAtUtc: nowUtcMarker(),
       });
     }
 
@@ -465,7 +466,7 @@ export class ApplicationRuntime {
     card.status = "Imported";
     card.activeStep = null;
     card.lastError = null;
-    card.updatedAtUtc = new Date().toISOString();
+    card.updatedAtUtc = nowUtcMarker();
 
     state.cards.sort((left, right) =>
       left.timestamps.effectiveUtc.localeCompare(right.timestamps.effectiveUtc),
@@ -674,7 +675,7 @@ export class ApplicationRuntime {
 
       const finalProfile = await probeAudioProfile(finalAudio.filePath);
       const finalDurationSec = computeFinalDuration(card, finalProfile.durationSec);
-      const finalizedAtUtc = new Date().toISOString();
+      const finalizedAtUtc = nowUtcMarker();
       const outputPayload = buildOutputPayload({
         card,
         finalProfile: finalProfile.audioProfile,
@@ -822,8 +823,8 @@ export class ApplicationRuntime {
       timezone: settings.defaultTimezone,
       utcTimestampText: utcResult.error === null ? utcResult.utcTimestampText : "",
       parseStatus: parsed.parseStatus,
-      createdAtUtc: new Date().toISOString(),
-      updatedAtUtc: new Date().toISOString(),
+      createdAtUtc: nowUtcMarker(),
+      updatedAtUtc: nowUtcMarker(),
     };
 
     this.runtime.state!.pendingImports.push(pendingImport);
@@ -879,7 +880,7 @@ export class ApplicationRuntime {
           card.trimDecision ??
           (await analyzeTrimDecision(card.sourceFilePath, card.trim, card.durationSec));
         card.trimDecision = trimDecision;
-        card.updatedAtUtc = new Date().toISOString();
+        card.updatedAtUtc = nowUtcMarker();
         await this.persistState();
 
         const preparedAudio = await prepareAudioForTranscription({
@@ -926,9 +927,9 @@ export class ApplicationRuntime {
           card.ai.transcription = {
             provider: "gemini",
             model: transcriptionResult.modelVersion ?? settings.transcriptionModel,
-            generatedAtUtc: new Date().toISOString(),
+            generatedAtUtc: nowUtcMarker(),
           };
-          card.updatedAtUtc = new Date().toISOString();
+          card.updatedAtUtc = nowUtcMarker();
 
           await logger.info("pipeline.transcription-complete", "Completed Gemini transcription.", {
             cardId,
@@ -967,9 +968,9 @@ export class ApplicationRuntime {
         card.ai.title = {
           provider: "gemini",
           model: titleResult.modelVersion ?? settings.metadataModel,
-          generatedAtUtc: new Date().toISOString(),
+          generatedAtUtc: nowUtcMarker(),
         };
-        card.updatedAtUtc = new Date().toISOString();
+        card.updatedAtUtc = nowUtcMarker();
         await this.persistState();
         await logger.info("pipeline.title-complete", "Generated title metadata.", {
           cardId,
@@ -1007,12 +1008,12 @@ export class ApplicationRuntime {
         card.ai.slug = {
           provider: "gemini",
           model: slugResult.modelVersion ?? settings.metadataModel,
-          generatedAtUtc: new Date().toISOString(),
+          generatedAtUtc: nowUtcMarker(),
         };
         card.status = "Ready to Save";
         card.activeStep = null;
         card.lastError = null;
-        card.updatedAtUtc = new Date().toISOString();
+        card.updatedAtUtc = nowUtcMarker();
 
         await this.persistState();
         await logger.info("pipeline.slug-complete", "Generated slug metadata.", {
@@ -1026,10 +1027,10 @@ export class ApplicationRuntime {
       card.activeStep = null;
       card.lastError = {
         message: getCardErrorMessage(error),
-        occurredAtUtc: new Date().toISOString(),
+        occurredAtUtc: nowUtcMarker(),
         failedStep: activeStep,
       };
-      card.updatedAtUtc = new Date().toISOString();
+      card.updatedAtUtc = nowUtcMarker();
 
       await this.persistState();
       await logger.error("pipeline.failed", "Card pipeline failed.", error, {
@@ -1052,7 +1053,7 @@ export class ApplicationRuntime {
     card.status = status;
     card.activeStep = step;
     card.lastError = null;
-    card.updatedAtUtc = new Date().toISOString();
+    card.updatedAtUtc = nowUtcMarker();
     await this.persistState();
   }
 
@@ -1101,7 +1102,7 @@ export class ApplicationRuntime {
         : {
             ...state,
             selectedCardId: selectExistingCardId(state),
-            updatedAtUtc: new Date().toISOString(),
+            updatedAtUtc: nowUtcMarker(),
           };
 
     this.runtime.state = normalized;
@@ -1256,7 +1257,7 @@ function createEmptyState(): MumblerState {
     pendingImports: [],
     cards: [],
     selectedCardId: null,
-    updatedAtUtc: new Date().toISOString(),
+    updatedAtUtc: nowUtcMarker(),
   };
 }
 
@@ -1310,17 +1311,80 @@ function normalizeState(raw: Record<string, unknown>, defaults: MumblerState): M
   return {
     schemaVersion: STATE_SCHEMA_VERSION,
     pendingImports: Array.isArray(raw.pendingImports)
-      ? (raw.pendingImports as PendingImportReviewItem[])
+      ? (raw.pendingImports as PendingImportReviewItem[]).map(normalizePendingImportRecord)
       : defaults.pendingImports,
     cards: Array.isArray(raw.cards)
-      ? (raw.cards as MumblerCard[]).map((card) => ({
-          ...card,
-          audioProfile: card.audioProfile ?? null,
-          trimDecision: card.trimDecision ?? null,
-        }))
+      ? (raw.cards as MumblerCard[]).map(normalizeCardRecord)
       : defaults.cards,
     selectedCardId: asNullableString(raw.selectedCardId),
-    updatedAtUtc: asString(raw.updatedAtUtc) ?? defaults.updatedAtUtc,
+    updatedAtUtc: normalizeUtcMarkerText(asString(raw.updatedAtUtc) ?? defaults.updatedAtUtc),
+  };
+}
+
+function normalizePendingImportRecord(item: PendingImportReviewItem): PendingImportReviewItem {
+  const createdAtUtc = normalizeUtcMarkerText(item.createdAtUtc);
+
+  return {
+    ...item,
+    createdAtUtc,
+    updatedAtUtc: normalizeUtcMarkerText(item.updatedAtUtc, createdAtUtc),
+  };
+}
+
+function normalizeCardRecord(card: MumblerCard): MumblerCard {
+  const createdAtUtc = normalizeUtcMarkerText(card.createdAtUtc);
+  const confirmedUtc = normalizeUtcMarkerText(card.timestamps.confirmedUtc);
+
+  return {
+    ...card,
+    audioProfile: card.audioProfile ?? null,
+    timestamps: {
+      ...card.timestamps,
+      confirmedUtc,
+      effectiveUtc: normalizeUtcMarkerText(card.timestamps.effectiveUtc, confirmedUtc),
+    },
+    trimDecision: normalizeTrimDecisionRecord(card.trimDecision),
+    ai: {
+      transcription: normalizeAiRunInfo(card.ai?.transcription),
+      title: normalizeAiRunInfo(card.ai?.title),
+      slug: normalizeAiRunInfo(card.ai?.slug),
+    },
+    lastError: normalizeCardError(card.lastError),
+    createdAtUtc,
+    updatedAtUtc: normalizeUtcMarkerText(card.updatedAtUtc, createdAtUtc),
+  };
+}
+
+function normalizeTrimDecisionRecord(cardTrimDecision: MumblerCard["trimDecision"]): MumblerCard["trimDecision"] {
+  if (cardTrimDecision === null) {
+    return null;
+  }
+
+  return {
+    ...cardTrimDecision,
+    analyzedAtUtc: normalizeUtcMarkerText(cardTrimDecision.analyzedAtUtc),
+  };
+}
+
+function normalizeAiRunInfo(run: MumblerCard["ai"]["transcription"]): MumblerCard["ai"]["transcription"] {
+  if (run === null) {
+    return null;
+  }
+
+  return {
+    ...run,
+    generatedAtUtc: normalizeUtcMarkerText(run.generatedAtUtc),
+  };
+}
+
+function normalizeCardError(error: MumblerCard["lastError"]): MumblerCard["lastError"] {
+  if (error === null) {
+    return null;
+  }
+
+  return {
+    ...error,
+    occurredAtUtc: normalizeUtcMarkerText(error.occurredAtUtc),
   };
 }
 
@@ -1361,10 +1425,10 @@ function recoverInterruptedCards(
       activeStep: null,
       lastError: {
         message: "Interrupted — retry to resume",
-        occurredAtUtc: new Date().toISOString(),
+        occurredAtUtc: nowUtcMarker(),
         failedStep: "startup-recovery" as const,
       },
-      updatedAtUtc: new Date().toISOString(),
+      updatedAtUtc: nowUtcMarker(),
     };
   });
 
@@ -1372,7 +1436,7 @@ function recoverInterruptedCards(
     state: {
       ...state,
       cards,
-      updatedAtUtc: new Date().toISOString(),
+      updatedAtUtc: nowUtcMarker(),
     },
     recoveredInterruptedCards,
   };
@@ -1448,7 +1512,7 @@ async function reconcileWorkingState(
             pendingImports: nextPendingImports,
             cards: nextCards,
           }),
-          updatedAtUtc: new Date().toISOString(),
+          updatedAtUtc: nowUtcMarker(),
         };
 
   return {
@@ -1868,7 +1932,7 @@ function createLogger(logsDir: string, secrets: string[]): AppLogger {
   ): Promise<void> => {
     const filePath = join(logsDir, `${formatUtcDate(new Date())}.log`);
     const payload = {
-      time: new Date().toISOString(),
+      time: nowUtcMarker(),
       level,
       op,
       message,
@@ -2198,7 +2262,8 @@ function normalizePendingImport(item: PendingImportReviewItem): PendingImportRev
     localTimestampText: item.localTimestampText.trim(),
     timezone: item.timezone.trim(),
     utcTimestampText: item.utcTimestampText.trim().toLowerCase(),
-    updatedAtUtc: new Date().toISOString(),
+    createdAtUtc: normalizeUtcMarkerText(item.createdAtUtc),
+    updatedAtUtc: nowUtcMarker(),
   };
 }
 
@@ -2235,8 +2300,8 @@ function createDuplicatedCard(source: MumblerCard): MumblerCard {
     status: "Imported",
     activeStep: null,
     lastError: null,
-    createdAtUtc: new Date().toISOString(),
-    updatedAtUtc: new Date().toISOString(),
+    createdAtUtc: nowUtcMarker(),
+    updatedAtUtc: nowUtcMarker(),
   };
 }
 
@@ -2247,10 +2312,10 @@ function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
     activeStep: null,
     lastError: {
       message: "Working audio is missing from working storage — remove this card or re-import the source audio.",
-      occurredAtUtc: new Date().toISOString(),
+      occurredAtUtc: nowUtcMarker(),
       failedStep: "startup-recovery",
     },
-    updatedAtUtc: new Date().toISOString(),
+    updatedAtUtc: nowUtcMarker(),
   };
 }
 
@@ -2261,7 +2326,7 @@ function clearCardResults(card: MumblerCard): void {
   card.status = "Imported";
   card.activeStep = null;
   card.lastError = null;
-  card.updatedAtUtc = new Date().toISOString();
+  card.updatedAtUtc = nowUtcMarker();
 }
 
 function resolvePipelineStartStep(

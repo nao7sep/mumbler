@@ -136,6 +136,20 @@ export function nowUtcMarker(): string {
   return formatUtcMarker(new Date());
 }
 
+export function normalizeUtcMarkerText(value: string, fallback: string = nowUtcMarker()): string {
+  const markerDate = parseUtcMarker(value.toLowerCase());
+  if (markerDate !== null) {
+    return formatUtcMarker(markerDate);
+  }
+
+  const parsedDate = new Date(value);
+  if (!Number.isNaN(parsedDate.getTime())) {
+    return formatUtcMarker(parsedDate);
+  }
+
+  return fallback;
+}
+
 function parseLocalTimestamp(value: string): TimestampParts | null {
   const match = LOCAL_TIMESTAMP_PATTERN.exec(value);
   if (!match?.groups) {
