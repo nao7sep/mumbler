@@ -55,6 +55,20 @@ textarea:disabled {
   cursor: not-allowed;
 }
 
+button:not(:disabled),
+.queue-row {
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.queue-row:focus-visible {
+  outline: 2px solid rgba(29, 97, 118, 0.48);
+  outline-offset: 3px;
+}
+
 .app-shell {
   min-height: 100vh;
   padding: 28px;
@@ -111,6 +125,21 @@ textarea:disabled {
 .pill {
   background: rgba(191, 79, 47, 0.12);
   color: var(--accent-deep);
+}
+
+.pill--processing {
+  background: rgba(29, 97, 118, 0.1);
+  color: var(--accent-cool);
+}
+
+.pill--success {
+  background: rgba(32, 104, 79, 0.12);
+  color: var(--success);
+}
+
+.pill--danger {
+  background: rgba(166, 59, 43, 0.12);
+  color: var(--danger);
 }
 
 .pill--quiet,
@@ -191,6 +220,16 @@ textarea:disabled {
   border-radius: var(--radius-md);
   background: rgba(255, 252, 246, 0.88);
   color: var(--text);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.queue-row:not(.queue-row--selected):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(43, 30, 18, 0.06);
 }
 
 .queue-row--imported {
@@ -302,6 +341,13 @@ textarea:disabled {
 .banner {
   display: grid;
   gap: 10px;
+}
+
+.banner__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .banner--error {
@@ -649,7 +695,7 @@ textarea:disabled {
 }
 
 .action-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .result-grid {
@@ -663,6 +709,22 @@ textarea:disabled {
 .compact-meta-list {
   margin-top: 14px;
   gap: 10px;
+}
+
+.action-hints {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.provenance-value {
+  display: grid;
+  gap: 2px;
+}
+
+.provenance-time {
+  font-size: 0.84rem;
+  color: var(--muted);
 }
 
 .shortcut-list {
@@ -815,6 +877,7 @@ textarea:disabled {
   .control-row,
   .inline-action-field,
   .nudge-grid,
+  .action-grid,
   .result-grid,
   .settings-grid,
   .settings-number-grid,

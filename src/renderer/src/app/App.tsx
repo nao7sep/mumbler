@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 
 import type {
   AppSnapshot,
@@ -91,6 +99,39 @@ function describeTrimDecision(decision: TrimDecision | null): string {
   return "One or more boundaries fell outside tolerance. Re-encode will be required.";
 }
 
+function BannerCard({
+  title,
+  body,
+  variant,
+  onDismiss,
+  children,
+}: {
+  title: string;
+  body?: string;
+  variant: "error" | "warning" | "notice";
+  onDismiss?: () => void;
+  children?: ReactNode;
+}): ReactElement {
+  return (
+    <section className={`panel panel--nested banner banner--${variant}`}>
+      <div className="banner__header">
+        <p className="empty-state__title">{title}</p>
+        {onDismiss ? (
+          <button
+            type="button"
+            className="button button--ghost button--compact"
+            onClick={onDismiss}
+          >
+            Dismiss
+          </button>
+        ) : null}
+      </div>
+      {body ? <p className="empty-state__body">{body}</p> : null}
+      {children}
+    </section>
+  );
+}
+
 function DecisionModal({
   title,
   body,
@@ -165,6 +206,50 @@ function formatAiRun(
   }
 
   return `${run.provider} · ${run.model}`;
+}
+
+function getTranscribeDisabledReason(params: {
+  selectedCard: MumblerCard | null;
+  hasGeminiKey: boolean;
+  selectedCardIsBusy: boolean;
+}): string | null {
+  if (params.selectedCard === null) {
+    return null;
+  }
+
+  if (!params.hasGeminiKey) {
+    return "Configure the Gemini API key in Settings before transcribing.";
+  }
+
+  if (params.selectedCardIsBusy) {
+    return "This card is already being processed.";
+  }
+
+  return null;
+}
+
+function getSaveDisabledReason(params: {
+  selectedCard: MumblerCard | null;
+  outputDirectory: string | null | undefined;
+  selectedCardIsBusy: boolean;
+}): string | null {
+  if (params.selectedCard === null) {
+    return null;
+  }
+
+  if (params.selectedCard.status !== "Ready to Save") {
+    return "Save unlocks after transcription, title, and slug are complete.";
+  }
+
+  if (params.selectedCardIsBusy) {
+    return "Wait until the current card operation finishes.";
+  }
+
+  if (params.outputDirectory == null || params.outputDirectory.trim().length === 0) {
+    return "Choose an output directory before saving.";
+  }
+
+  return null;
 }
 
 async function copyTextToClipboard(value: string): Promise<void> {
@@ -584,11 +669,38 @@ export function App(): ReactElement {
 
   const selectedCard =
     snapshot?.state?.cards.find((card) => card.id === snapshot.state?.selectedCardId) ?? null;
+  const queueCards = snapshot?.state?.cards ?? [];
+  const pendingImportCount = snapshot?.queueSummary?.pendingImportCount ?? snapshot?.state?.pendingImports.length ?? 0;
+  const readyToSaveCount = useMemo(
+    () => queueCards.filter((card) => card.status === "Ready to Save").length,
+    [queueCards],
+  );
+  const errorCount = useMemo(
+    () => queueCards.filter((card) => card.status === "Error").length,
+    [queueCards],
+  );
+  const processingCount = useMemo(
+    () =>
+      queueCards.filter(
+        (card) => card.status === "Transcribing" || card.status === "Generating Metadata",
+      ).length,
+    [queueCards],
+  );
   const selectedCardIsBusy =
     selectedCard !== null &&
     (activePipelineCards.includes(selectedCard.id) ||
       selectedCard.status === "Transcribing" ||
       selectedCard.status === "Generating Metadata");
+  const transcribeDisabledReason = getTranscribeDisabledReason({
+    selectedCard,
+    hasGeminiKey: snapshot?.settingsSummary?.hasGeminiApiKey ?? false,
+    selectedCardIsBusy,
+  });
+  const saveDisabledReason = getSaveDisabledReason({
+    selectedCard,
+    outputDirectory: snapshot?.settingsSummary?.outputDirectory,
+    selectedCardIsBusy,
+  });
   const modalIsOpen =
     settingsDraft !== null ||
     pendingReviewDrafts.length > 0 ||
@@ -1025,11 +1137,25 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          <span className="pill">Phase 13 Visual States</span>
           {snapshot ? (
-            <span className="pill pill--quiet">
-              {snapshot.appVersion} · {snapshot.platform}
-            </span>
+            <>
+              <span className="pill">{queueCards.length} in queue</span>
+              {pendingImportCount > 0 ? (
+                <span className="pill pill--quiet">{pendingImportCount} pending review</span>
+              ) : null}
+              {processingCount > 0 ? (
+                <span className="pill pill--processing">{processingCount} processing</span>
+              ) : null}
+              {readyToSaveCount > 0 ? (
+                <span className="pill pill--success">{readyToSaveCount} ready to save</span>
+              ) : null}
+              {errorCount > 0 ? (
+                <span className="pill pill--danger">{errorCount} errors</span>
+              ) : null}
+              <span className="pill pill--quiet">
+                {snapshot.appVersion} · {snapshot.platform}
+              </span>
+            </>
           ) : (
             <span className="pill pill--quiet">Bootstrapping UI</span>
           )}
@@ -1047,6 +1173,7 @@ export function App(): ReactElement {
             <div>
               <p className="section-kicker">Queue</p>
               <h2>Incoming Recordings</h2>
+              <p className="panel__note">Sorted by effective UTC after any front-trim offset.</p>
             </div>
             <div className="toolbar">
               <button
@@ -1069,22 +1196,29 @@ export function App(): ReactElement {
           </div>
 
           {errorMessage ? (
-            <section className="panel panel--nested banner banner--error">
-              <p className="empty-state__title">Error</p>
-              <p className="empty-state__body">{errorMessage}</p>
-            </section>
+            <BannerCard
+              title="Error"
+              body={errorMessage}
+              variant="error"
+              onDismiss={() => setErrorMessage(null)}
+            />
           ) : null}
 
           {noticeMessage ? (
-            <section className="panel panel--nested banner banner--notice">
-              <p className="empty-state__title">Notice</p>
-              <p className="empty-state__body">{noticeMessage}</p>
-            </section>
+            <BannerCard
+              title="Notice"
+              body={noticeMessage}
+              variant="notice"
+              onDismiss={() => setNoticeMessage(null)}
+            />
           ) : null}
 
           {importFailures.length > 0 ? (
-            <section className="panel panel--nested banner banner--warning">
-              <p className="empty-state__title">Some imports failed.</p>
+            <BannerCard
+              title="Some imports failed."
+              variant="warning"
+              onDismiss={() => setImportFailures([])}
+            >
               <div className="failure-list">
                 {importFailures.map((failure) => (
                   <p key={`${failure.sourcePath}:${failure.message}`}>
@@ -1093,7 +1227,7 @@ export function App(): ReactElement {
                   </p>
                 ))}
               </div>
-            </section>
+            </BannerCard>
           ) : null}
 
           {snapshot?.startupDiagnostic ? (
@@ -1134,7 +1268,7 @@ export function App(): ReactElement {
 
           <section className="panel panel--nested">
             <div className="detail-card__header">
-              <h3>Queue Snapshot</h3>
+              <h3>Workspace Snapshot</h3>
               {snapshot?.queueSummary ? (
                 <span className="muted-tag">
                   {snapshot.queueSummary.cardCount} cards · {snapshot.queueSummary.pendingImportCount} pending
@@ -1171,8 +1305,7 @@ export function App(): ReactElement {
               <h2>Selection Workspace</h2>
             </div>
             <p className="panel__note">
-              Phase 13 strengthens status-driven color cues in the queue and detail pane while
-              keeping the existing trim, Gemini, save, and remove workflow intact.
+              Work one recording at a time: verify trim, transcribe, review metadata, then save or remove.
             </p>
           </div>
 
@@ -1396,17 +1529,9 @@ export function App(): ReactElement {
                 <div className="action-grid">
                   <button
                     type="button"
-                    className="button button--ghost"
-                    onClick={() => void handleChooseOutputDirectory()}
-                    disabled={selectedCardIsBusy}
-                  >
-                    Choose Output Directory
-                  </button>
-                  <button
-                    type="button"
                     className="button button--primary"
                     onClick={() => handleTranscribeCard(selectedCard.id)}
-                    disabled={!snapshot?.settingsSummary?.hasGeminiApiKey || selectedCardIsBusy}
+                    disabled={transcribeDisabledReason !== null}
                   >
                     {selectedCardIsBusy ? "Processing..." : "Transcribe"}
                   </button>
@@ -1420,13 +1545,17 @@ export function App(): ReactElement {
                   </button>
                   <button
                     type="button"
+                    className="button button--ghost"
+                    onClick={() => void handleChooseOutputDirectory()}
+                    disabled={selectedCardIsBusy}
+                  >
+                    Choose Output Directory
+                  </button>
+                  <button
+                    type="button"
                     className="button button--primary"
                     onClick={() => void handleSaveCard(selectedCard.id)}
-                    disabled={
-                      selectedCard.status !== "Ready to Save" ||
-                      selectedCardIsBusy ||
-                      snapshot?.settingsSummary?.outputDirectory == null
-                    }
+                    disabled={saveDisabledReason !== null}
                   >
                     Save
                   </button>
@@ -1439,6 +1568,14 @@ export function App(): ReactElement {
                     Remove
                   </button>
                 </div>
+                {transcribeDisabledReason || saveDisabledReason ? (
+                  <div className="action-hints">
+                    {transcribeDisabledReason ? (
+                      <p className="panel__note">{transcribeDisabledReason}</p>
+                    ) : null}
+                    {saveDisabledReason ? <p className="panel__note">{saveDisabledReason}</p> : null}
+                  </div>
+                ) : null}
                 <dl className="meta-list compact-meta-list">
                   <div>
                     <dt>Output directory</dt>
@@ -1536,15 +1673,30 @@ export function App(): ReactElement {
                     <dl className="meta-list compact-meta-list">
                       <div>
                         <dt>Transcript</dt>
-                        <dd>{formatAiRun(selectedCard.ai.transcription)}</dd>
+                        <dd className="provenance-value">
+                          <span>{formatAiRun(selectedCard.ai.transcription)}</span>
+                          <span className="provenance-time">
+                            {selectedCard.ai.transcription?.generatedAtUtc ?? "—"}
+                          </span>
+                        </dd>
                       </div>
                       <div>
                         <dt>Title</dt>
-                        <dd>{formatAiRun(selectedCard.ai.title)}</dd>
+                        <dd className="provenance-value">
+                          <span>{formatAiRun(selectedCard.ai.title)}</span>
+                          <span className="provenance-time">
+                            {selectedCard.ai.title?.generatedAtUtc ?? "—"}
+                          </span>
+                        </dd>
                       </div>
                       <div>
                         <dt>Slug</dt>
-                        <dd>{formatAiRun(selectedCard.ai.slug)}</dd>
+                        <dd className="provenance-value">
+                          <span>{formatAiRun(selectedCard.ai.slug)}</span>
+                          <span className="provenance-time">
+                            {selectedCard.ai.slug?.generatedAtUtc ?? "—"}
+                          </span>
+                        </dd>
                       </div>
                     </dl>
                   </section>
