@@ -69,6 +69,14 @@ interface AppLogger {
   error(op: string, message: string, error: unknown, details?: unknown): Promise<void>;
 }
 
+interface WorkingReconciliationResult {
+  state: MumblerState;
+  droppedPendingImports: number;
+  missingWorkingCards: number;
+  trashedOrphanedFiles: number;
+  retainedOrphanedFiles: number;
+}
+
 interface AppRuntimeState {
   paths: AppPaths | null;
   settings: MumblerSettings | null;
@@ -103,10 +111,16 @@ export class ApplicationRuntime {
       await pruneOldLogs(paths.logsDir);
 
       const { state, recoveredInterruptedCards } = await loadState(paths);
+      const reconciliation = await reconcileWorkingState(paths, state, logger);
+      await writeJsonFile(paths.statePath, reconciliation.state);
       await logger.info("app.startup", "Application runtime initialized.", {
-        cardCount: state.cards.length,
-        pendingImportCount: state.pendingImports.length,
+        cardCount: reconciliation.state.cards.length,
+        pendingImportCount: reconciliation.state.pendingImports.length,
         recoveredInterruptedCards,
+        droppedPendingImports: reconciliation.droppedPendingImports,
+        missingWorkingCards: reconciliation.missingWorkingCards,
+        trashedOrphanedFiles: reconciliation.trashedOrphanedFiles,
+        retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
       });
 
       if (recoveredInterruptedCards > 0) {
@@ -120,7 +134,7 @@ export class ApplicationRuntime {
       return new ApplicationRuntime({
         paths,
         settings,
-        state,
+        state: reconciliation.state,
         logger,
         startupDiagnostic: null,
         appWideError: null,
@@ -208,13 +222,17 @@ export class ApplicationRuntime {
       await writeJsonFile(paths.statePath, state);
       const logger = createLogger(paths.logsDir, getSecretsForRedaction(settings));
       await pruneOldLogs(paths.logsDir);
+      const reconciliation = await reconcileWorkingState(paths, state, logger);
+      await writeJsonFile(paths.statePath, reconciliation.state);
       await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
         workingDir: paths.workingDir,
+        trashedOrphanedFiles: reconciliation.trashedOrphanedFiles,
+        retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
       });
 
       this.runtime.paths = paths;
       this.runtime.settings = settings;
-      this.runtime.state = state;
+      this.runtime.state = reconciliation.state;
       this.runtime.logger = logger;
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
@@ -1359,6 +1377,88 @@ function recoverInterruptedCards(
   };
 }
 
+async function reconcileWorkingState(
+  paths: AppPaths,
+  state: MumblerState,
+  logger: AppLogger,
+): Promise<WorkingReconciliationResult> {
+  const referencedPaths = new Set<string>();
+  const nextPendingImports: PendingImportReviewItem[] = [];
+  let droppedPendingImports = 0;
+
+  for (const pendingImport of state.pendingImports) {
+    if (await fileExists(pendingImport.workingFilePath)) {
+      nextPendingImports.push(pendingImport);
+      referencedPaths.add(pendingImport.workingFilePath);
+      continue;
+    }
+
+    droppedPendingImports += 1;
+    await logger.warn(
+      "startup.pending-missing",
+      "Dropped pending import because its working file is missing.",
+      {
+        pendingImportId: pendingImport.id,
+        originalFilename: pendingImport.originalFilename,
+        workingFilePath: pendingImport.workingFilePath,
+      },
+    );
+  }
+
+  let missingWorkingCards = 0;
+  const nextCards: MumblerCard[] = [];
+
+  for (const card of state.cards) {
+    if (await fileExists(card.sourceFilePath)) {
+      referencedPaths.add(card.sourceFilePath);
+      nextCards.push(card);
+      continue;
+    }
+
+    missingWorkingCards += 1;
+    nextCards.push(markCardWorkingFileMissing(card));
+    await logger.warn(
+      "startup.card-missing",
+      "Marked card as errored because its working file is missing.",
+      {
+        cardId: card.id,
+        originalFilename: card.originalFilename,
+        sourceFilePath: card.sourceFilePath,
+      },
+    );
+  }
+
+  const cleanupResult = await cleanupOrphanedWorkingFiles(paths, referencedPaths, logger);
+  const changed =
+    droppedPendingImports > 0 ||
+    missingWorkingCards > 0 ||
+    cleanupResult.trashedOrphanedFiles > 0 ||
+    cleanupResult.retainedOrphanedFiles > 0;
+
+  const nextState =
+    !changed
+      ? state
+      : {
+          ...state,
+          pendingImports: nextPendingImports,
+          cards: nextCards,
+          selectedCardId: selectExistingCardId({
+            ...state,
+            pendingImports: nextPendingImports,
+            cards: nextCards,
+          }),
+          updatedAtUtc: new Date().toISOString(),
+        };
+
+  return {
+    state: nextState,
+    droppedPendingImports,
+    missingWorkingCards,
+    trashedOrphanedFiles: cleanupResult.trashedOrphanedFiles,
+    retainedOrphanedFiles: cleanupResult.retainedOrphanedFiles,
+  };
+}
+
 function summarizeSettings(settings: MumblerSettings): SettingsSummary {
   return {
     hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
@@ -1991,6 +2091,65 @@ async function moveImportedSourceToTrash(sourcePath: string, workingDir: string)
   }
 }
 
+async function cleanupOrphanedWorkingFiles(
+  paths: AppPaths,
+  referencedPaths: Set<string>,
+  logger: AppLogger,
+): Promise<{ trashedOrphanedFiles: number; retainedOrphanedFiles: number }> {
+  let trashedOrphanedFiles = 0;
+  let retainedOrphanedFiles = 0;
+  const candidates = await listWorkingFiles(paths.workingDir);
+
+  for (const candidate of candidates) {
+    if (referencedPaths.has(candidate)) {
+      continue;
+    }
+
+    try {
+      await shell.trashItem(candidate);
+      trashedOrphanedFiles += 1;
+      await logger.info("working.cleanup", "Moved orphaned working file to trash.", {
+        filePath: candidate,
+      });
+    } catch (error: unknown) {
+      retainedOrphanedFiles += 1;
+      await logger.warn("working.cleanup-failed", "Failed to trash orphaned working file.", {
+        filePath: candidate,
+        error: formatError(error),
+      });
+    }
+  }
+
+  return {
+    trashedOrphanedFiles,
+    retainedOrphanedFiles,
+  };
+}
+
+async function listWorkingFiles(workingDir: string): Promise<string[]> {
+  const entries = await readdir(workingDir, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const entryPath = join(workingDir, entry.name);
+    if (entry.isFile()) {
+      files.push(entryPath);
+      continue;
+    }
+
+    if (entry.isDirectory() && entry.name === "trash-staging") {
+      const stagedEntries = await readdir(entryPath, { withFileTypes: true });
+      for (const stagedEntry of stagedEntries) {
+        if (stagedEntry.isFile()) {
+          files.push(join(entryPath, stagedEntry.name));
+        }
+      }
+    }
+  }
+
+  return files;
+}
+
 function buildConfirmedTimestamps(
   localTimestampText: string,
   timezone: string,
@@ -2076,6 +2235,20 @@ function createDuplicatedCard(source: MumblerCard): MumblerCard {
     activeStep: null,
     lastError: null,
     createdAtUtc: new Date().toISOString(),
+    updatedAtUtc: new Date().toISOString(),
+  };
+}
+
+function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
+  return {
+    ...card,
+    status: "Error",
+    activeStep: null,
+    lastError: {
+      message: "Working audio is missing from working storage — remove this card or re-import the source audio.",
+      occurredAtUtc: new Date().toISOString(),
+      failedStep: "startup-recovery",
+    },
     updatedAtUtc: new Date().toISOString(),
   };
 }

@@ -22,6 +22,7 @@ The current implementation provides:
 - Pending timestamp-review edits persisted back to state before final confirmation
 - Destructive source handling: copy into working storage, then move outside source to trash
 - Queue selection and persisted pending-review state
+- Startup reconciliation of `working/` files against `state.json`, including orphan cleanup and missing-file error recovery
 - Audio probing with `ffprobe-static` during queue entry
 - Waveform playback with `wavesurfer.js`
 - Front/back trim markers with drag, nudge, text input, and preview playback
