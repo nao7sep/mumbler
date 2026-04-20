@@ -9,6 +9,9 @@ export const APP_SHELL_CHANNELS = {
   getCardMediaSource: "app-shell:get-card-media-source",
   transcribeCard: "app-shell:transcribe-card",
   retryCard: "app-shell:retry-card",
+  chooseOutputDirectory: "app-shell:choose-output-directory",
+  saveCard: "app-shell:save-card",
+  removeCard: "app-shell:remove-card",
 } as const;
 
 export type CardStatus =
@@ -243,6 +246,26 @@ export interface ImportOperationResult {
   failedImports: FailedImport[];
 }
 
+export type SaveConflictResolution = "overwrite" | "suffix" | "cancel";
+
+export type SaveCardResult =
+  | {
+      kind: "saved";
+      snapshot: AppSnapshot;
+      audioPath: string;
+      jsonPath: string;
+    }
+  | {
+      kind: "conflict";
+      snapshot: AppSnapshot;
+      audioPath: string;
+      jsonPath: string;
+    }
+  | {
+      kind: "cancelled";
+      snapshot: AppSnapshot;
+    };
+
 export interface MumblerShellApi {
   getSnapshot(): Promise<AppSnapshot>;
   openImportDialog(): Promise<ImportOperationResult>;
@@ -254,4 +277,7 @@ export interface MumblerShellApi {
   getCardMediaSource(cardId: string): Promise<string>;
   transcribeCard(cardId: string): Promise<AppSnapshot>;
   retryCard(cardId: string): Promise<AppSnapshot>;
+  chooseOutputDirectory(): Promise<AppSnapshot>;
+  saveCard(cardId: string, resolution?: SaveConflictResolution): Promise<SaveCardResult>;
+  removeCard(cardId: string): Promise<AppSnapshot>;
 }

@@ -7,6 +7,8 @@ import {
   type ImportOperationResult,
   type MumblerShellApi,
   type PendingImportReviewItem,
+  type SaveCardResult,
+  type SaveConflictResolution,
 } from "@shared/app-shell";
 
 const api: MumblerShellApi = {
@@ -35,6 +37,12 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.transcribeCard, cardId) as Promise<AppSnapshot>,
   retryCard: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.retryCard, cardId) as Promise<AppSnapshot>,
+  chooseOutputDirectory: () =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.chooseOutputDirectory) as Promise<AppSnapshot>,
+  saveCard: (cardId: string, resolution?: SaveConflictResolution) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.saveCard, cardId, resolution) as Promise<SaveCardResult>,
+  removeCard: (cardId: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.removeCard, cardId) as Promise<AppSnapshot>,
 };
 
 contextBridge.exposeInMainWorld("mumbler", api);

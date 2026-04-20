@@ -4,6 +4,7 @@ import {
   APP_SHELL_CHANNELS,
   type CardTrim,
   type PendingImportReviewItem,
+  type SaveConflictResolution,
 } from "@shared/app-shell";
 
 import type { ApplicationRuntime } from "../core/app-runtime";
@@ -52,5 +53,24 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
 
   ipcMain.handle(APP_SHELL_CHANNELS.retryCard, (_event, cardId: string) =>
     runtime.retryCard(cardId),
+  );
+
+  ipcMain.handle(APP_SHELL_CHANNELS.chooseOutputDirectory, (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window === null) {
+      throw new Error("Choose output directory requires an active window.");
+    }
+
+    return runtime.chooseOutputDirectory(window);
+  });
+
+  ipcMain.handle(
+    APP_SHELL_CHANNELS.saveCard,
+    (_event, cardId: string, resolution?: SaveConflictResolution) =>
+      runtime.saveCard(cardId, resolution),
+  );
+
+  ipcMain.handle(APP_SHELL_CHANNELS.removeCard, (_event, cardId: string) =>
+    runtime.removeCard(cardId),
   );
 }

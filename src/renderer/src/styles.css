@@ -283,6 +283,10 @@ textarea:disabled {
   border-color: rgba(191, 79, 47, 0.2);
 }
 
+.banner--notice {
+  border-color: rgba(32, 104, 79, 0.2);
+}
+
 .failure-list {
   display: grid;
   gap: 8px;
@@ -595,6 +599,10 @@ textarea:disabled {
   background: rgba(255, 251, 245, 0.97);
   box-shadow: 0 24px 56px rgba(24, 18, 14, 0.2);
   padding: 22px;
+}
+
+.modal-card--narrow {
+  width: min(640px, calc(100vw - 48px));
 }
 
 .modal-card__header,

@@ -27,10 +27,13 @@ The current implementation provides:
 - Automatic title and slug generation after successful transcription
 - Retry flow that resumes from the failed Gemini step when possible
 - Ready-to-save card states with per-artifact model provenance in app state
-- No final save workflow yet
+- Output-directory selection through the desktop shell
+- Atomic audio plus JSON finalization with filename collision handling
+- Remove workflow that trashes app-managed working audio after confirmation
 
 ## Verification Gaps
 
 - Destructive import and trash behavior still need an interactive desktop run
 - Trim-boundary decisions still need verification against real audio files
 - Gemini API integration still needs a real API key and real requests
+- Final save collision handling and output transaction behavior still need an interactive run

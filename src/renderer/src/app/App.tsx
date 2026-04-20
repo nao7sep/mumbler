@@ -6,6 +6,7 @@ import type {
   FailedImport,
   MumblerCard,
   PendingImportReviewItem,
+  SaveCardResult,
   TrimDecision,
 } from "@shared/app-shell";
 import {
@@ -81,6 +82,46 @@ function describeTrimDecision(decision: TrimDecision | null): string {
   }
 
   return "One or more boundaries fell outside tolerance. Re-encode will be required.";
+}
+
+function DecisionModal({
+  title,
+  body,
+  actions,
+}: {
+  title: string;
+  body: string;
+  actions: Array<{
+    label: string;
+    onClick: () => void;
+    variant?: "primary" | "danger" | "ghost";
+  }>;
+}): ReactElement {
+  return (
+    <div className="modal-backdrop">
+      <section className="modal-card modal-card--narrow">
+        <div className="modal-card__header">
+          <div>
+            <p className="section-kicker">Confirm</p>
+            <h2>{title}</h2>
+          </div>
+        </div>
+        <p className="empty-state__body">{body}</p>
+        <div className="modal-actions">
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              className={`button button--${action.variant ?? "ghost"}`}
+              onClick={action.onClick}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function describeCardStep(card: MumblerCard): string {
@@ -347,12 +388,18 @@ function TimestampReviewModal({
 export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isConfirmingReview, setIsConfirmingReview] = useState(false);
   const [pendingReviewDrafts, setPendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
   const [importFailures, setImportFailures] = useState<FailedImport[]>([]);
   const [activePipelineCards, setActivePipelineCards] = useState<string[]>([]);
+  const [pendingSaveConflict, setPendingSaveConflict] = useState<{
+    cardId: string;
+    result: Extract<SaveCardResult, { kind: "conflict" }>;
+  } | null>(null);
+  const [pendingRemoveCardId, setPendingRemoveCardId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -473,6 +520,7 @@ export function App(): ReactElement {
       const nextSnapshot = await window.mumbler.duplicateCard(cardId);
       setSnapshot(nextSnapshot);
       setErrorMessage(null);
+      setNoticeMessage(null);
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to duplicate card.");
       throw error;
@@ -484,6 +532,7 @@ export function App(): ReactElement {
       const nextSnapshot = await window.mumbler.updateCardTrim(cardId, trim);
       setSnapshot(nextSnapshot);
       setErrorMessage(null);
+      setNoticeMessage(null);
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to update trim.");
       throw error;
@@ -507,6 +556,7 @@ export function App(): ReactElement {
       .then((nextSnapshot) => {
         setSnapshot(nextSnapshot);
         setErrorMessage(null);
+        setNoticeMessage(null);
       })
       .catch((error: unknown) => {
         setErrorMessage(error instanceof Error ? error.message : "Failed to transcribe card.");
@@ -523,6 +573,7 @@ export function App(): ReactElement {
       .then((nextSnapshot) => {
         setSnapshot(nextSnapshot);
         setErrorMessage(null);
+        setNoticeMessage(null);
       })
       .catch((error: unknown) => {
         setErrorMessage(error instanceof Error ? error.message : "Failed to retry card.");
@@ -530,6 +581,63 @@ export function App(): ReactElement {
       .finally(() => {
         endCardOperation(cardId);
       });
+  }
+
+  async function handleChooseOutputDirectory(): Promise<void> {
+    try {
+      const nextSnapshot = await window.mumbler.chooseOutputDirectory();
+      setSnapshot(nextSnapshot);
+      setErrorMessage(null);
+      setNoticeMessage(
+        nextSnapshot.settingsSummary?.outputDirectory
+          ? `Output directory set to ${nextSnapshot.settingsSummary.outputDirectory}`
+          : null,
+      );
+    } catch (error: unknown) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Failed to choose output directory.",
+      );
+    }
+  }
+
+  async function handleSaveCard(
+    cardId: string,
+    resolution?: "overwrite" | "suffix" | "cancel",
+  ): Promise<void> {
+    try {
+      const result = await window.mumbler.saveCard(cardId, resolution);
+      setSnapshot(result.snapshot);
+      setErrorMessage(null);
+
+      if (result.kind === "conflict") {
+        setPendingSaveConflict({ cardId, result });
+        setNoticeMessage(null);
+        return;
+      }
+
+      if (result.kind === "cancelled") {
+        setPendingSaveConflict(null);
+        return;
+      }
+
+      setPendingSaveConflict(null);
+      setNoticeMessage(`Saved audio and metadata to ${result.audioPath}`);
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to save card.");
+    }
+  }
+
+  async function confirmRemoveCard(cardId: string): Promise<void> {
+    try {
+      const nextSnapshot = await window.mumbler.removeCard(cardId);
+      setSnapshot(nextSnapshot);
+      setErrorMessage(null);
+      setNoticeMessage("Removed card and moved its working audio to trash.");
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to remove card.");
+    } finally {
+      setPendingRemoveCardId(null);
+    }
   }
 
   function onDragOver(event: DragEvent<HTMLElement>): void {
@@ -564,7 +672,7 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          <span className="pill">Phase 5 Gemini Pipeline</span>
+          <span className="pill">Phase 6 Finalization</span>
           {snapshot ? (
             <span className="pill pill--quiet">
               {snapshot.appVersion} · {snapshot.platform}
@@ -606,6 +714,13 @@ export function App(): ReactElement {
             <section className="panel panel--nested banner banner--error">
               <p className="empty-state__title">Error</p>
               <p className="empty-state__body">{errorMessage}</p>
+            </section>
+          ) : null}
+
+          {noticeMessage ? (
+            <section className="panel panel--nested banner banner--notice">
+              <p className="empty-state__title">Notice</p>
+              <p className="empty-state__body">{noticeMessage}</p>
             </section>
           ) : null}
 
@@ -673,6 +788,10 @@ export function App(): ReactElement {
                 <dt>Recovered interrupted cards</dt>
                 <dd>{snapshot?.queueSummary?.recoveredInterruptedCards ?? "—"}</dd>
               </div>
+              <div>
+                <dt>Output directory</dt>
+                <dd>{snapshot?.settingsSummary?.outputDirectory ?? "Not configured"}</dd>
+              </div>
             </dl>
           </section>
         </aside>
@@ -684,8 +803,8 @@ export function App(): ReactElement {
               <h2>Selection Workspace</h2>
             </div>
             <p className="panel__note">
-              Phase 5 adds Gemini transcription, title generation, slug generation,
-              retries, and ready-to-save states on top of the trim workflow.
+              Phase 6 adds output-directory selection, atomic audio plus JSON finalization,
+              collision handling, and remove-to-trash workflow.
             </p>
           </div>
 
@@ -865,6 +984,14 @@ export function App(): ReactElement {
                 <div className="action-grid">
                   <button
                     type="button"
+                    className="button button--ghost"
+                    onClick={() => void handleChooseOutputDirectory()}
+                    disabled={selectedCardIsBusy}
+                  >
+                    Choose Output Directory
+                  </button>
+                  <button
+                    type="button"
                     className="button button--primary"
                     onClick={() => handleTranscribeCard(selectedCard.id)}
                     disabled={!snapshot?.settingsSummary?.hasGeminiApiKey || selectedCardIsBusy}
@@ -879,10 +1006,24 @@ export function App(): ReactElement {
                   >
                     Retry Failed Step
                   </button>
-                  <button type="button" className="button button--ghost" disabled>
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    onClick={() => void handleSaveCard(selectedCard.id)}
+                    disabled={
+                      selectedCard.status !== "Ready to Save" ||
+                      selectedCardIsBusy ||
+                      snapshot?.settingsSummary?.outputDirectory == null
+                    }
+                  >
                     Save
                   </button>
-                  <button type="button" className="button button--ghost" disabled>
+                  <button
+                    type="button"
+                    className="button button--danger"
+                    onClick={() => setPendingRemoveCardId(selectedCard.id)}
+                    disabled={selectedCardIsBusy}
+                  >
                     Remove
                   </button>
                 </div>
@@ -894,6 +1035,10 @@ export function App(): ReactElement {
                   <div>
                     <dt>Metadata model</dt>
                     <dd>{snapshot?.settingsSummary?.metadataModel ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Output directory</dt>
+                    <dd>{snapshot?.settingsSummary?.outputDirectory ?? "Not configured"}</dd>
                   </div>
                   <div>
                     <dt>Last failed step</dt>
@@ -1021,6 +1166,57 @@ export function App(): ReactElement {
           }
           onConfirm={() => void handleConfirmPendingImports()}
           isSubmitting={isConfirmingReview}
+        />
+      ) : null}
+
+      {pendingSaveConflict ? (
+        <DecisionModal
+          title="File Name Collision"
+          body={`The destination already contains ${pendingSaveConflict.result.audioPath} or its matching JSON sidecar. You can add a nanoid suffix, overwrite the existing pair, or cancel.`}
+          actions={[
+            {
+              label: "Add Nanoid Suffix",
+              variant: "primary",
+              onClick: () => {
+                void handleSaveCard(pendingSaveConflict.cardId, "suffix");
+              },
+            },
+            {
+              label: "Overwrite Existing",
+              variant: "danger",
+              onClick: () => {
+                void handleSaveCard(pendingSaveConflict.cardId, "overwrite");
+              },
+            },
+            {
+              label: "Cancel",
+              onClick: () => {
+                setPendingSaveConflict(null);
+              },
+            },
+          ]}
+        />
+      ) : null}
+
+      {pendingRemoveCardId ? (
+        <DecisionModal
+          title="Remove Recording"
+          body="This removes the card from the queue and moves its app-managed working audio to trash. The finalized output, if any, is not touched."
+          actions={[
+            {
+              label: "Remove",
+              variant: "danger",
+              onClick: () => {
+                void confirmRemoveCard(pendingRemoveCardId);
+              },
+            },
+            {
+              label: "Cancel",
+              onClick: () => {
+                setPendingRemoveCardId(null);
+              },
+            },
+          ]}
         />
       ) : null}
     </div>

@@ -1,5 +1,16 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
-import { access, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  copyFile,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { homedir } from "node:os";
@@ -19,6 +30,8 @@ import {
   type MumblerSettings,
   type MumblerState,
   type PendingImportReviewItem,
+  type SaveCardResult,
+  type SaveConflictResolution,
   type SettingsSummary,
 } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS, buildDefaultShortcutMap } from "@shared/commands";
@@ -402,6 +415,154 @@ export class ApplicationRuntime {
     return this.runCardPipeline(cardId, "retry");
   }
 
+  async chooseOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
+    this.ensureReady();
+
+    const result = await dialog.showOpenDialog(window, {
+      title: "Choose Output Directory",
+      properties: ["openDirectory", "createDirectory"],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return this.getSnapshot();
+    }
+
+    this.runtime.settings!.outputDirectory = result.filePaths[0] ?? null;
+    await this.persistSettings();
+    await this.runtime.logger!.info("settings.output-directory", "Updated output directory.", {
+      outputDirectory: this.runtime.settings!.outputDirectory,
+    });
+    return this.getSnapshot();
+  }
+
+  async saveCard(
+    cardId: string,
+    resolution?: SaveConflictResolution,
+  ): Promise<SaveCardResult> {
+    this.ensureReady();
+
+    const settings = this.runtime.settings!;
+    const state = this.runtime.state!;
+    const logger = this.runtime.logger!;
+    const card = state.cards.find((entry) => entry.id === cardId);
+
+    if (card === undefined) {
+      throw new Error("Card to save does not exist.");
+    }
+
+    if (card.status !== "Ready to Save") {
+      throw new Error("Only cards in Ready to Save state can be finalized.");
+    }
+
+    if (this.activeCardOperations.has(cardId)) {
+      throw new Error("Cannot save a card while it is being processed.");
+    }
+
+    const outputDirectory = settings.outputDirectory;
+    if (outputDirectory === null || outputDirectory.trim().length === 0) {
+      throw new Error("Choose an output directory before saving.");
+    }
+
+    const finalAudio = await prepareAudioForTranscription({
+      sourceFilePath: card.sourceFilePath,
+      workingDir: this.runtime.paths!.workingDir,
+      trim: card.trim,
+      trimDecision: card.trimDecision,
+      durationSec: card.durationSec,
+      audioProfile: card.audioProfile,
+    });
+
+    try {
+      const extension = extname(finalAudio.filePath) || extname(card.sourceFilePath);
+      const baseName = `${card.timestamps.effectiveUtc}-${card.metadata.slug}`;
+      const initialTargets = {
+        audioPath: join(outputDirectory, `${baseName}${extension}`),
+        jsonPath: join(outputDirectory, `${baseName}.json`),
+      };
+
+      const conflictExists = await pathsConflict(initialTargets.audioPath, initialTargets.jsonPath);
+      if (conflictExists && resolution === undefined) {
+        return {
+          kind: "conflict",
+          snapshot: this.getSnapshot(),
+          audioPath: initialTargets.audioPath,
+          jsonPath: initialTargets.jsonPath,
+        };
+      }
+
+      if (resolution === "cancel") {
+        return {
+          kind: "cancelled",
+          snapshot: this.getSnapshot(),
+        };
+      }
+
+      const targetPaths =
+        resolution === "suffix"
+          ? await buildUniqueSuffixedTargets(outputDirectory, baseName, extension)
+          : initialTargets;
+
+      const finalProfile = await probeAudioProfile(finalAudio.filePath);
+      const finalDurationSec = computeFinalDuration(card, finalProfile.durationSec);
+      const finalizedAtUtc = new Date().toISOString();
+      const outputPayload = buildOutputPayload({
+        card,
+        finalProfile: finalProfile.audioProfile,
+        finalDurationSec,
+        finalizedAtUtc,
+      });
+
+      await finalizeOutputsAtomically({
+        sourceAudioPath: finalAudio.filePath,
+        audioTargetPath: targetPaths.audioPath,
+        jsonTargetPath: targetPaths.jsonPath,
+        overwrite: resolution === "overwrite",
+        jsonContent: `${JSON.stringify(outputPayload, null, 2)}\n`,
+      });
+
+      await logger.info("save.completed", "Saved finalized audio and metadata.", {
+        cardId,
+        audioTargetPath: targetPaths.audioPath,
+        jsonTargetPath: targetPaths.jsonPath,
+        overwrite: resolution === "overwrite",
+      });
+
+      await this.discardWorkingCard(card);
+      return {
+        kind: "saved",
+        snapshot: this.getSnapshot(),
+        audioPath: targetPaths.audioPath,
+        jsonPath: targetPaths.jsonPath,
+      };
+    } finally {
+      await finalAudio.cleanup();
+    }
+  }
+
+  async removeCard(cardId: string): Promise<AppSnapshot> {
+    this.ensureReady();
+    const state = this.runtime.state!;
+    const card = state.cards.find((entry) => entry.id === cardId);
+
+    if (card === undefined) {
+      throw new Error("Card to remove does not exist.");
+    }
+
+    if (this.activeCardOperations.has(cardId)) {
+      throw new Error("Cannot remove a card while it is being processed.");
+    }
+
+    await shell.trashItem(card.sourceFilePath);
+    await this.runtime.logger!.info("card.remove", "Moved card audio to trash and removed card.", {
+      cardId,
+      sourceFilePath: card.sourceFilePath,
+    });
+
+    state.cards = state.cards.filter((entry) => entry.id !== cardId);
+    await this.persistState();
+    return this.getSnapshot();
+  }
+
   private async importPaths(
     sourcePaths: string[],
     importSource: ImportSource,
@@ -776,6 +937,29 @@ export class ApplicationRuntime {
     this.runtime.state = normalized;
     await writeJsonFile(this.runtime.paths!.statePath, normalized);
   }
+
+  private async persistSettings(): Promise<void> {
+    await writeJsonFile(this.runtime.paths!.settingsPath, this.runtime.settings);
+  }
+
+  private async discardWorkingCard(card: MumblerCard): Promise<void> {
+    this.runtime.state!.cards = this.runtime.state!.cards.filter((entry) => entry.id !== card.id);
+    try {
+      await shell.trashItem(card.sourceFilePath);
+    } catch (error: unknown) {
+      await this.runtime.logger!.warn(
+        "card.cleanup",
+        "Saved card was removed from the queue, but working audio could not be trashed.",
+        {
+          cardId: card.id,
+          sourceFilePath: card.sourceFilePath,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+
+    await this.persistState();
+  }
 }
 
 async function loadSettings(paths: AppPaths): Promise<MumblerSettings> {
@@ -1024,6 +1208,162 @@ function summarizeSettings(settings: MumblerSettings): SettingsSummary {
   };
 }
 
+async function pathsConflict(audioPath: string, jsonPath: string): Promise<boolean> {
+  const [audioExists, jsonExists] = await Promise.all([fileExists(audioPath), fileExists(jsonPath)]);
+  return audioExists || jsonExists;
+}
+
+async function buildUniqueSuffixedTargets(
+  outputDirectory: string,
+  baseName: string,
+  extension: string,
+): Promise<{ audioPath: string; jsonPath: string }> {
+  while (true) {
+    const suffixedBase = `${baseName}-${nanoid(8)}`;
+    const audioPath = join(outputDirectory, `${suffixedBase}${extension}`);
+    const jsonPath = join(outputDirectory, `${suffixedBase}.json`);
+    if (!(await pathsConflict(audioPath, jsonPath))) {
+      return { audioPath, jsonPath };
+    }
+  }
+}
+
+async function finalizeOutputsAtomically(params: {
+  sourceAudioPath: string;
+  audioTargetPath: string;
+  jsonTargetPath: string;
+  overwrite: boolean;
+  jsonContent: string;
+}): Promise<void> {
+  await mkdir(dirname(params.audioTargetPath), { recursive: true });
+
+  const token = nanoid(8);
+  const audioTempPath = join(
+    dirname(params.audioTargetPath),
+    `.${basename(params.audioTargetPath)}.${token}.tmp`,
+  );
+  const jsonTempPath = join(
+    dirname(params.jsonTargetPath),
+    `.${basename(params.jsonTargetPath)}.${token}.tmp`,
+  );
+
+  await copyFile(params.sourceAudioPath, audioTempPath);
+  await syncFile(audioTempPath);
+  await writeFile(jsonTempPath, params.jsonContent, "utf8");
+  await syncFile(jsonTempPath);
+
+  const audioBackupPath = `${params.audioTargetPath}.${token}.bak`;
+  const jsonBackupPath = `${params.jsonTargetPath}.${token}.bak`;
+  const audioHadExisting = params.overwrite && (await fileExists(params.audioTargetPath));
+  const jsonHadExisting = params.overwrite && (await fileExists(params.jsonTargetPath));
+
+  let audioFinalized = false;
+  let jsonFinalized = false;
+
+  try {
+    if (audioHadExisting) {
+      await rename(params.audioTargetPath, audioBackupPath);
+    }
+    if (jsonHadExisting) {
+      await rename(params.jsonTargetPath, jsonBackupPath);
+    }
+
+    await rename(audioTempPath, params.audioTargetPath);
+    audioFinalized = true;
+    await rename(jsonTempPath, params.jsonTargetPath);
+    jsonFinalized = true;
+
+    if (audioHadExisting) {
+      await rm(audioBackupPath, { force: true });
+    }
+    if (jsonHadExisting) {
+      await rm(jsonBackupPath, { force: true });
+    }
+  } catch (error: unknown) {
+    if (jsonFinalized) {
+      await rm(params.jsonTargetPath, { force: true }).catch(() => undefined);
+    }
+    if (audioFinalized) {
+      await rm(params.audioTargetPath, { force: true }).catch(() => undefined);
+    }
+
+    if (audioHadExisting && (await fileExists(audioBackupPath))) {
+      await rename(audioBackupPath, params.audioTargetPath).catch(() => undefined);
+    }
+    if (jsonHadExisting && (await fileExists(jsonBackupPath))) {
+      await rename(jsonBackupPath, params.jsonTargetPath).catch(() => undefined);
+    }
+
+    await rm(audioTempPath, { force: true }).catch(() => undefined);
+    await rm(jsonTempPath, { force: true }).catch(() => undefined);
+
+    throw new Error(`Failed to finalize output files: ${formatError(error)}`);
+  }
+}
+
+function buildOutputPayload(params: {
+  card: MumblerCard;
+  finalProfile: MumblerCard["audioProfile"];
+  finalDurationSec: number | null;
+  finalizedAtUtc: string;
+}): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    originalFilename: params.card.originalFilename,
+    importSource: params.card.importSource,
+    timestamps: {
+      confirmedLocal: params.card.timestamps.confirmedLocal,
+      confirmedUtc: params.card.timestamps.confirmedUtc,
+      timezone: params.card.timestamps.timezone,
+      effectiveLocal: params.card.timestamps.effectiveLocal,
+      effectiveUtc: params.card.timestamps.effectiveUtc,
+      transcribedAtUtc: params.card.ai.transcription?.generatedAtUtc ?? null,
+      finalizedAtUtc: params.finalizedAtUtc,
+    },
+    language: params.card.language,
+    trim:
+      params.card.trim.frontMarkerSec === null && params.card.trim.backMarkerSec === null
+        ? null
+        : params.card.trim,
+    duration: {
+      originalSec: params.card.durationSec,
+      finalSec: params.finalDurationSec,
+    },
+    transcription: {
+      raw: params.card.transcription.text,
+      title: params.card.metadata.title,
+      slug: params.card.metadata.slug,
+    },
+    providers: {
+      transcription: params.card.ai.transcription,
+      title: params.card.ai.title,
+      slug: params.card.ai.slug,
+    },
+    audio: {
+      finalCodec: params.finalProfile?.codecName ?? null,
+      finalBitrateKbps: params.finalProfile?.bitRateKbps ?? null,
+      finalSampleRateHz: params.finalProfile?.sampleRateHz ?? null,
+      finalChannels: params.finalProfile?.channels ?? null,
+      trimDecision: params.card.trimDecision?.kind ?? "not-needed",
+    },
+    appVersion: app.getVersion(),
+  };
+}
+
+function computeFinalDuration(card: MumblerCard, probedDurationSec: number | null): number | null {
+  if (probedDurationSec !== null) {
+    return probedDurationSec;
+  }
+
+  if (card.durationSec === null) {
+    return null;
+  }
+
+  const startSec = card.trim.frontMarkerSec ?? 0;
+  const endSec = card.trim.backMarkerSec ?? card.durationSec;
+  return Math.max(0, Math.round((endSec - startSec) * 1000) / 1000);
+}
+
 function getSystemTimezone(): string {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return timezone && timezone.length > 0 && isSupportedTimezone(timezone) ? timezone : "UTC";
@@ -1222,6 +1562,15 @@ async function fileExists(filePath: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function syncFile(filePath: string): Promise<void> {
+  const handle = await open(filePath, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 
