@@ -2,13 +2,14 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { arch, platform } from "node:os";
-import { dirname, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { nanoid } from "nanoid";
 
 import type { AudioProfile, CardTrim, TrimDecision } from "@shared/app-shell";
 import { nowUtcMarker } from "@shared/timestamps";
+import { type AppLogger } from "./logger";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TRIM_TOLERANCE_SEC = 3;
@@ -165,6 +166,7 @@ export async function prepareAudioForTranscription(params: {
   trimDecision: TrimDecision | null;
   durationSec: number | null;
   audioProfile: AudioProfile | null;
+  logger?: AppLogger;
 }): Promise<PreparedAudioInput> {
   const mimeType = inferAudioMimeType(params.sourceFilePath);
 
@@ -193,6 +195,7 @@ export async function prepareAudioForTranscription(params: {
       endSec,
       mode: "stream-copy",
       audioProfile: params.audioProfile,
+      logger: params.logger,
     });
 
     return {
@@ -212,6 +215,7 @@ export async function prepareAudioForTranscription(params: {
     endSec,
     mode: "reencode",
     audioProfile: params.audioProfile,
+    logger: params.logger,
   });
 
   return {
@@ -280,6 +284,7 @@ async function runFfmpegTrim(params: {
   endSec: number | null;
   mode: "stream-copy" | "reencode";
   audioProfile: AudioProfile | null;
+  logger?: AppLogger;
 }): Promise<void> {
   const ffmpeg = resolveFfmpegPath();
   const trimArgs = buildTrimTimingArgs(params.startSec, params.endSec);
@@ -287,6 +292,16 @@ async function runFfmpegTrim(params: {
     params.mode === "stream-copy"
       ? ["-c", "copy"]
       : buildReencodeArgs(params.outputPath, params.audioProfile);
+
+  await params.logger?.debug("audio.ffmpeg-trim", "Running ffmpeg trim.", {
+    mode: params.mode,
+    startSec: params.startSec,
+    endSec: params.endSec,
+    inputFile: basename(params.sourceFilePath),
+    outputFile: basename(params.outputPath),
+    trimArgs,
+    codecArgs,
+  });
 
   await execFileAsync(ffmpeg, [
     "-hide_banner",

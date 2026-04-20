@@ -49,7 +49,9 @@ async function bootstrap(): Promise<void> {
   });
 }
 
-app.whenReady().then(bootstrap);
+app.whenReady().then(bootstrap).catch((error: unknown) => {
+  console.error("[mumbler] Bootstrap failed:", error instanceof Error ? error.stack : String(error));
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

@@ -8,12 +8,7 @@ import type { AppPaths, MumblerCard, MumblerState, PendingImportReviewItem } fro
 import { nowUtcMarker } from "@shared/timestamps";
 import { fileExists, formatError, uniquePathInDirectory } from "./file-io";
 
-interface AppLogger {
-  debug(op: string, message: string, details?: unknown): Promise<void>;
-  info(op: string, message: string, details?: unknown): Promise<void>;
-  warn(op: string, message: string, details?: unknown): Promise<void>;
-  error(op: string, message: string, error: unknown, details?: unknown): Promise<void>;
-}
+import { type AppLogger } from "./logger";
 
 export interface WorkingReconciliationResult {
   state: MumblerState;
@@ -23,11 +18,15 @@ export interface WorkingReconciliationResult {
   retainedOrphanedFiles: number;
 }
 
-export async function moveImportedSourceToTrash(sourcePath: string, workingDir: string): Promise<void> {
+export async function moveImportedSourceToTrash(sourcePath: string, workingDir: string, logger?: AppLogger): Promise<void> {
   try {
     await shell.trashItem(sourcePath);
     return;
   } catch (directTrashError: unknown) {
+    await logger?.warn("trash.fallback", "Direct trash of imported source failed; falling back to staged copy.", {
+      sourcePath,
+      error: directTrashError instanceof Error ? directTrashError.message : String(directTrashError),
+    });
     const stagingDir = join(workingDir, "trash-staging");
     const stagedPath = await uniquePathInDirectory(stagingDir, basename(sourcePath));
 

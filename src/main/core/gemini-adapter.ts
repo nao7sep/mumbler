@@ -2,6 +2,8 @@ import { readFile, stat } from "node:fs/promises";
 
 import { ApiError, GoogleGenAI, type GenerateContentResponse } from "@google/genai";
 
+import { type AppLogger } from "./logger";
+
 const INLINE_REQUEST_LIMIT_BYTES = 20 * 1024 * 1024;
 const INLINE_AUDIO_SAFETY_LIMIT_BYTES = 18 * 1024 * 1024;
 
@@ -12,6 +14,7 @@ export interface GeminiAudioTranscriptionParams {
   model: string;
   language: string;
   timeoutMs: number;
+  logger?: AppLogger;
 }
 
 export interface GeminiTextGenerationParams {
@@ -74,6 +77,11 @@ export async function transcribeWithGemini(
         },
       });
       uploadedFileName = uploadedFile.name ?? null;
+      await params.logger?.debug("gemini.upload", "Uploaded audio via Files API.", {
+        uploadedFileName,
+        fileUri: uploadedFile.uri,
+        mimeType: uploadedFile.mimeType ?? params.mimeType,
+      });
 
       response = await ai.models.generateContent({
         model: params.model,
@@ -107,12 +115,19 @@ export async function transcribeWithGemini(
   } finally {
     clearTimeout(timeoutId);
     if (uploadedFileName !== null) {
-      try {
-        await ai.files.delete({ name: uploadedFileName });
-      } catch {
-        // Best effort cleanup only.
+        try {
+          await ai.files.delete({ name: uploadedFileName });
+        } catch (cleanupError: unknown) {
+          await params.logger?.warn(
+            "gemini.upload-cleanup",
+            "Failed to delete uploaded file from Files API.",
+            {
+              uploadedFileName,
+              error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+            },
+          );
+        }
       }
-    }
   }
 }
 

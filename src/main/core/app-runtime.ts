@@ -3,10 +3,8 @@ import {
   access,
   copyFile,
   mkdir,
-  readdir,
   rm,
   stat,
-  writeFile,
 } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { basename, extname, join } from "node:path";
@@ -66,15 +64,7 @@ import {
 } from "./file-output";
 
 import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, decodeGeminiApiKey, getSecretsForRedaction, getSystemTimezone, loadSettings, loadState, summarizeSettings } from "./settings-schema";
-
-const LOG_RETENTION_DAYS = 30;
-
-interface AppLogger {
-  debug(op: string, message: string, details?: unknown): Promise<void>;
-  info(op: string, message: string, details?: unknown): Promise<void>;
-  warn(op: string, message: string, details?: unknown): Promise<void>;
-  error(op: string, message: string, error: unknown, details?: unknown): Promise<void>;
-}
+import { type AppLogger, createLogger, pruneOldLogs, serializeError } from "./logger";
 
 
 interface AppRuntimeState {
@@ -213,7 +203,11 @@ export class ApplicationRuntime {
   }
 
   async dismissAppWideError(): Promise<AppSnapshot> {
+    const title = this.runtime.appWideError?.title ?? null;
     this.runtime.appWideError = null;
+    await this.runtime.logger?.info("app.error-dismissed", "App-wide error dismissed by user.", {
+      dismissedTitle: title,
+    });
     return this.getSnapshot();
   }
 
@@ -337,17 +331,25 @@ export class ApplicationRuntime {
         normalized.timezone,
         normalized.utcTimestampText,
       );
-      const probed = await probeAudioProfile(pendingImport.workingFilePath).catch(async (error) => {
+      let probed: Awaited<ReturnType<typeof probeAudioProfile>>;
+      try {
+        probed = await probeAudioProfile(pendingImport.workingFilePath);
+        await this.runtime.logger!.debug("audio.probe", "Probed audio profile for imported file.", {
+          filename: pendingImport.originalFilename,
+          durationSec: probed.durationSec,
+          formatName: probed.audioProfile?.formatName,
+          codecName: probed.audioProfile?.codecName,
+          bitRateKbps: probed.audioProfile?.bitRateKbps,
+          sampleRateHz: probed.audioProfile?.sampleRateHz,
+          channels: probed.audioProfile?.channels,
+        });
+      } catch (error: unknown) {
         await this.runtime.logger!.warn("audio.probe", "Failed to probe imported audio metadata.", {
           filePath: pendingImport.workingFilePath,
           error: error instanceof Error ? error.message : String(error),
         });
-
-        return {
-          durationSec: null,
-          audioProfile: null,
-        };
-      });
+        probed = { durationSec: null, audioProfile: null };
+      }
 
       cardsToAdd.push({
         id: nanoid(),
@@ -645,6 +647,7 @@ export class ApplicationRuntime {
       trimDecision: card.trimDecision,
       durationSec: card.durationSec,
       audioProfile: card.audioProfile,
+      logger,
     });
 
     try {
@@ -685,6 +688,15 @@ export class ApplicationRuntime {
 
       const finalProfile = await probeAudioProfile(finalAudio.filePath);
       const finalDurationSec = computeFinalDuration(card, finalProfile.durationSec);
+      await logger.debug("audio.probe-final", "Probed final audio profile before save.", {
+        cardId,
+        finalDurationSec,
+        formatName: finalProfile.audioProfile?.formatName,
+        codecName: finalProfile.audioProfile?.codecName,
+        bitRateKbps: finalProfile.audioProfile?.bitRateKbps,
+        sampleRateHz: finalProfile.audioProfile?.sampleRateHz,
+        channels: finalProfile.audioProfile?.channels,
+      });
       const finalizedAtUtc = nowUtcMarker();
       const outputPayload = buildOutputPayload({
         card,
@@ -810,7 +822,7 @@ export class ApplicationRuntime {
     }
 
     try {
-      await moveImportedSourceToTrash(sourcePath, paths.workingDir);
+      await moveImportedSourceToTrash(sourcePath, paths.workingDir, this.runtime.logger!);
     } catch (error: unknown) {
       await rm(workingFilePath, { force: true });
       throw error;
@@ -911,6 +923,7 @@ export class ApplicationRuntime {
           trimDecision,
           durationSec: card.durationSec,
           audioProfile: card.audioProfile,
+          logger,
         });
 
         try {
@@ -941,6 +954,7 @@ export class ApplicationRuntime {
                 model: settings.transcriptionModel,
                 language: card.language,
                 timeoutMs: settings.timeouts.transcriptionMs,
+                logger,
               }),
           });
 
@@ -1202,83 +1216,6 @@ async function ensureDirectories(paths: AppPaths): Promise<void> {
   await mkdir(paths.workingDir, { recursive: true });
   await mkdir(join(paths.workingDir, "trash-staging"), { recursive: true });
 }
-
-function createLogger(logsDir: string, secrets: string[]): AppLogger {
-  const write = async (
-    level: "debug" | "info" | "warn" | "error",
-    op: string,
-    message: string,
-    details?: unknown,
-    error?: unknown,
-  ): Promise<void> => {
-    const filePath = join(logsDir, `${formatUtcDate(new Date())}.log`);
-    const payload = {
-      time: nowUtcMarker(),
-      level,
-      op,
-      message,
-      ...(details === undefined ? {} : { details }),
-      ...(error === undefined ? {} : { error: serializeError(error) }),
-    };
-
-    const sanitized = redactSecrets(JSON.stringify(payload), secrets);
-    await writeFile(filePath, `${sanitized}\n`, { encoding: "utf8", flag: "a" });
-  };
-
-  return {
-    debug: (op, message, details) => write("debug", op, message, details),
-    info: (op, message, details) => write("info", op, message, details),
-    warn: (op, message, details) => write("warn", op, message, details),
-    error: (op, message, error, details) => write("error", op, message, details, error),
-  };
-}
-
-async function pruneOldLogs(logsDir: string): Promise<void> {
-  const entries = await readdir(logsDir, { withFileTypes: true });
-  const cutoff = new Date();
-  cutoff.setUTCDate(cutoff.getUTCDate() - LOG_RETENTION_DAYS);
-  const cutoffStamp = Number(formatUtcDate(cutoff));
-
-  await Promise.all(
-    entries
-      .filter((entry) => entry.isFile() && /^\d{8}\.log$/.test(entry.name))
-      .map(async (entry) => {
-        const stamp = Number(entry.name.slice(0, 8));
-        if (stamp < cutoffStamp) {
-          await rm(join(logsDir, entry.name), { force: true });
-        }
-      }),
-  );
-}
-
-function serializeError(error: unknown): unknown {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-    };
-  }
-
-  return error;
-}
-
-function redactSecrets(value: string, secrets: string[]): string {
-  return secrets.reduce((output, secret) => {
-    if (secret.length === 0) {
-      return output;
-    }
-    return output.split(secret).join("[REDACTED]");
-  }, value);
-}
-
-function formatUtcDate(date: Date): string {
-  const year = date.getUTCFullYear();
-  const month = `${date.getUTCMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getUTCDate()}`.padStart(2, "0");
-  return `${year}${month}${day}`;
-}
-
 
 // Uses 4^n (not 2^n) for aggressive backoff suited to Gemini API rate limits,
 // which penalize rapid retries more heavily than typical HTTP services.
