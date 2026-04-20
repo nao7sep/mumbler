@@ -1,18 +1,12 @@
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type DragEvent,
-  type ReactElement,
-} from "react";
+import { useEffect, useMemo, useState, type DragEvent, type ReactElement } from "react";
 
 import type {
   AppSnapshot,
   CardStatus,
-  CommandDefinition,
   FailedImport,
   MumblerCard,
   PendingImportReviewItem,
+  TrimDecision,
 } from "@shared/app-shell";
 import {
   getLocalTimestampError,
@@ -21,6 +15,7 @@ import {
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
+import { WaveformEditor } from "./WaveformEditor";
 
 interface StatusChipProps {
   label: CardStatus;
@@ -53,25 +48,39 @@ function formatBytes(value: number): string {
 
 function formatDuration(value: number | null): string {
   if (value === null) {
-    return "Unknown duration";
+    return "Unknown";
   }
 
-  const minutes = Math.floor(value / 60);
-  const seconds = Math.floor(value % 60);
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  const totalTenths = Math.round(value * 10);
+  const totalSeconds = Math.floor(totalTenths / 10);
+  const tenths = totalTenths % 10;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}.${tenths}`;
 }
 
-function ShortcutList({ commands }: { commands: CommandDefinition[] }): ReactElement {
-  return (
-    <div className="shortcut-list">
-      {commands.map((command) => (
-        <div key={command.id} className="shortcut-item">
-          <span>{command.label}</span>
-          <kbd>{command.defaultShortcut}</kbd>
-        </div>
-      ))}
-    </div>
-  );
+function formatOptionalSeconds(value: number | null): string {
+  if (value === null) {
+    return "—";
+  }
+
+  return `${value.toFixed(3)}s`;
+}
+
+function describeTrimDecision(decision: TrimDecision | null): string {
+  if (decision === null) {
+    return "Markers not analyzed yet.";
+  }
+
+  if (decision.kind === "not-needed") {
+    return "No trim markers set.";
+  }
+
+  if (decision.kind === "stream-copy") {
+    return "Boundaries found within tolerance. Stream copy is eligible.";
+  }
+
+  return "One or more boundaries fell outside tolerance. Re-encode will be required.";
 }
 
 function QueueList({
@@ -93,13 +102,22 @@ function QueueList({
           onClick={() => onSelect(card.id)}
         >
           <div className="queue-row__top">
-            <strong>{card.timestamps.effectiveUtc}</strong>
+            <strong>{card.timestamps.effectiveLocal}</strong>
             <StatusChip label={card.status} />
           </div>
           <div className="queue-row__name">{card.originalFilename}</div>
           <div className="queue-row__meta">
             <span>{formatDuration(card.durationSec)}</span>
             <span>{card.language}</span>
+            <span>{card.audioProfile?.codecName ?? "Unknown codec"}</span>
+          </div>
+          <div className="queue-row__meta">
+            <span>{card.timestamps.effectiveUtc}</span>
+            <span>
+              {card.timestamps.frontTrimOffsetSec > 0
+                ? `Front trim +${card.timestamps.frontTrimOffsetSec.toFixed(1)}s`
+                : "No front trim"}
+            </span>
             <span>{formatBytes(card.fileSizeBytes)}</span>
           </div>
           {card.lastError ? (
@@ -335,6 +353,7 @@ export function App(): ReactElement {
       const result = await window.mumbler.openImportDialog();
       setSnapshot(result.snapshot);
       setImportFailures(result.failedImports);
+      setErrorMessage(null);
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : "Import failed.");
     } finally {
@@ -346,6 +365,7 @@ export function App(): ReactElement {
     try {
       const nextSnapshot = await window.mumbler.selectCard(cardId);
       setSnapshot(nextSnapshot);
+      setErrorMessage(null);
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to select card.");
     }
@@ -357,6 +377,7 @@ export function App(): ReactElement {
       const nextSnapshot = await window.mumbler.confirmPendingImports(pendingReviewDrafts);
       setSnapshot(nextSnapshot);
       setImportFailures([]);
+      setErrorMessage(null);
     } catch (error: unknown) {
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to confirm imported timestamps.",
@@ -376,10 +397,33 @@ export function App(): ReactElement {
       const result = await window.mumbler.importDroppedPaths(paths);
       setSnapshot(result.snapshot);
       setImportFailures(result.failedImports);
+      setErrorMessage(null);
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : "Dropped import failed.");
     } finally {
       setIsImporting(false);
+    }
+  }
+
+  async function handleDuplicateCard(cardId: string): Promise<void> {
+    try {
+      const nextSnapshot = await window.mumbler.duplicateCard(cardId);
+      setSnapshot(nextSnapshot);
+      setErrorMessage(null);
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to duplicate card.");
+      throw error;
+    }
+  }
+
+  async function handleTrimCommit(cardId: string, trim: MumblerCard["trim"]): Promise<void> {
+    try {
+      const nextSnapshot = await window.mumbler.updateCardTrim(cardId, trim);
+      setSnapshot(nextSnapshot);
+      setErrorMessage(null);
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to update trim.");
+      throw error;
     }
   }
 
@@ -415,7 +459,7 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          <span className="pill">Phase 3 Import Flow</span>
+          <span className="pill">Phase 4 Trim Workflow</span>
           {snapshot ? (
             <span className="pill pill--quiet">
               {snapshot.appVersion} · {snapshot.platform}
@@ -502,7 +546,7 @@ export function App(): ReactElement {
 
           <section className="panel panel--nested">
             <div className="detail-card__header">
-              <h3>Startup Snapshot</h3>
+              <h3>Queue Snapshot</h3>
               {snapshot?.queueSummary ? (
                 <span className="muted-tag">
                   {snapshot.queueSummary.cardCount} cards · {snapshot.queueSummary.pendingImportCount} pending
@@ -513,20 +557,16 @@ export function App(): ReactElement {
             </div>
             <dl className="meta-list compact-meta-list">
               <div>
-                <dt>Recovered interrupted cards</dt>
-                <dd>{snapshot?.queueSummary?.recoveredInterruptedCards ?? "—"}</dd>
+                <dt>Working directory</dt>
+                <dd>{snapshot?.paths?.workingDir ?? "—"}</dd>
               </div>
               <div>
                 <dt>Default timezone</dt>
                 <dd>{snapshot?.settingsSummary?.defaultTimezone ?? "—"}</dd>
               </div>
               <div>
-                <dt>Gemini API key</dt>
-                <dd>
-                  {snapshot?.settingsSummary?.hasGeminiApiKey
-                    ? "Configured"
-                    : "Not configured"}
-                </dd>
+                <dt>Recovered interrupted cards</dt>
+                <dd>{snapshot?.queueSummary?.recoveredInterruptedCards ?? "—"}</dd>
               </div>
             </dl>
           </section>
@@ -539,9 +579,8 @@ export function App(): ReactElement {
               <h2>Selection Workspace</h2>
             </div>
             <p className="panel__note">
-              Phase 3 now handles destructive import, pending timestamp review, queue
-              selection, and persisted queue state. Trim, ffmpeg, and Gemini still come
-              later.
+              Phase 4 adds the waveform player, marker editing, duplicate-card flow,
+              front-trim timestamp shifting, and ffprobe-based trim decisions.
             </p>
           </div>
 
@@ -558,7 +597,7 @@ export function App(): ReactElement {
                     <dd>{selectedCard.originalFilename}</dd>
                   </div>
                   <div>
-                    <dt>Effective timestamp</dt>
+                    <dt>Effective local</dt>
                     <dd>{selectedCard.timestamps.effectiveLocal}</dd>
                   </div>
                   <div>
@@ -570,8 +609,57 @@ export function App(): ReactElement {
                     <dd>{selectedCard.timestamps.confirmedLocal}</dd>
                   </div>
                   <div>
-                    <dt>Confirmed UTC</dt>
-                    <dd>{selectedCard.timestamps.confirmedUtc}</dd>
+                    <dt>Timezone</dt>
+                    <dd>{selectedCard.timestamps.timezone}</dd>
+                  </div>
+                  <div>
+                    <dt>Import source</dt>
+                    <dd>{selectedCard.importSource}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="detail-card">
+                <div className="detail-card__header">
+                  <h3>Audio Profile</h3>
+                  <span className="muted-tag">Working source</span>
+                </div>
+                <dl className="meta-list">
+                  <div>
+                    <dt>Duration</dt>
+                    <dd>{formatDuration(selectedCard.durationSec)}</dd>
+                  </div>
+                  <div>
+                    <dt>Codec</dt>
+                    <dd>{selectedCard.audioProfile?.codecName ?? "Unknown"}</dd>
+                  </div>
+                  <div>
+                    <dt>Container</dt>
+                    <dd>{selectedCard.audioProfile?.formatName ?? "Unknown"}</dd>
+                  </div>
+                  <div>
+                    <dt>Bitrate</dt>
+                    <dd>
+                      {selectedCard.audioProfile?.bitRateKbps == null
+                        ? "Unknown"
+                        : `${selectedCard.audioProfile.bitRateKbps} kbps`}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Sample rate</dt>
+                    <dd>
+                      {selectedCard.audioProfile?.sampleRateHz == null
+                        ? "Unknown"
+                        : `${selectedCard.audioProfile.sampleRateHz} Hz`}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Channels</dt>
+                    <dd>{selectedCard.audioProfile?.channels ?? "Unknown"}</dd>
+                  </div>
+                  <div>
+                    <dt>Front trim offset</dt>
+                    <dd>{selectedCard.timestamps.frontTrimOffsetSec.toFixed(1)}s</dd>
                   </div>
                   <div>
                     <dt>File size</dt>
@@ -580,166 +668,108 @@ export function App(): ReactElement {
                 </dl>
               </section>
 
-              <section className="detail-card">
-                <div className="detail-card__header">
-                  <h3>Language</h3>
-                  <span className="muted-tag">Per-card override arrives next</span>
-                </div>
-                <div className="field-stack">
-                  <label className="field">
-                    <span>Language</span>
-                    <select disabled value={selectedCard.language} onChange={() => undefined}>
-                      <option value={selectedCard.language}>{selectedCard.language}</option>
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Timezone</span>
-                    <input disabled readOnly value={selectedCard.timestamps.timezone} />
-                  </label>
-                </div>
-              </section>
-
               <section className="detail-card detail-card--wide">
                 <div className="detail-card__header">
-                  <h3>Mini Player and Trim</h3>
-                  <span className="muted-tag">Phase 4</span>
-                </div>
-                <div className="waveform-placeholder">
-                  <div className="waveform-placeholder__mesh" />
-                  <div className="waveform-placeholder__markers">
-                    <span>Front marker</span>
-                    <span>Back marker</span>
+                  <div>
+                    <h3>Mini Player and Trim</h3>
+                    <p className="panel__note">
+                      Set markers only after listening. Front trim never moves forward past the requested cut;
+                      back trim never moves backward before it.
+                    </p>
                   </div>
+                  <span className="muted-tag">Trim first, then transcribe</span>
                 </div>
-                <div className="control-row">
-                  <button type="button" className="button button--ghost" disabled>
-                    Play / Pause
-                  </button>
-                  <button type="button" className="button button--ghost" disabled>
-                    Set Front Marker
-                  </button>
-                  <button type="button" className="button button--ghost" disabled>
-                    Set Back Marker
-                  </button>
-                  <button type="button" className="button button--ghost" disabled>
-                    Clear Markers
-                  </button>
-                </div>
-              </section>
-
-              <section className="detail-card">
-                <div className="detail-card__header">
-                  <h3>Actions</h3>
-                  <span className="muted-tag">Transcription comes later</span>
-                </div>
-                <div className="action-grid">
-                  <button type="button" className="button button--primary" disabled>
-                    Transcribe
-                  </button>
-                  <button type="button" className="button button--ghost" disabled>
-                    Save
-                  </button>
-                  <button type="button" className="button button--ghost" disabled>
-                    Regenerate Title
-                  </button>
-                  <button type="button" className="button button--ghost" disabled>
-                    Regenerate Slug
-                  </button>
-                  <button type="button" className="button button--ghost" disabled>
-                    Duplicate
-                  </button>
-                  <button type="button" className="button button--danger" disabled>
-                    Remove
-                  </button>
-                </div>
+                <WaveformEditor
+                  card={selectedCard}
+                  previewSnippetSeconds={snapshot?.settingsSummary?.previewSnippetSeconds ?? 10}
+                  onDuplicateCard={handleDuplicateCard}
+                  onTrimCommit={handleTrimCommit}
+                  onError={(message) => setErrorMessage(message)}
+                />
               </section>
 
               <section className="detail-card detail-card--wide">
                 <div className="detail-card__header">
-                  <h3>Storage and Defaults</h3>
-                  <span className="muted-tag">Paths are now real</span>
+                  <h3>Trim Analysis</h3>
+                  <span className="muted-tag">
+                    {selectedCard.trimDecision?.kind ?? "not-analyzed"}
+                  </span>
                 </div>
-                <div className="storage-grid">
-                  <label className="field">
-                    <span>Settings file</span>
-                    <input
-                      disabled
-                      readOnly
-                      value={snapshot?.paths?.settingsPath ?? "Unavailable"}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>State file</span>
-                    <input
-                      disabled
-                      readOnly
-                      value={snapshot?.paths?.statePath ?? "Unavailable"}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Logs directory</span>
-                    <input
-                      disabled
-                      readOnly
-                      value={snapshot?.paths?.logsDir ?? "Unavailable"}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Working directory</span>
-                    <input
-                      disabled
-                      readOnly
-                      value={snapshot?.paths?.workingDir ?? "Unavailable"}
-                    />
-                  </label>
-                </div>
-              </section>
-
-              <section className="detail-card detail-card--wide">
-                <div className="detail-card__header">
-                  <h3>Results</h3>
-                  <span className="muted-tag">Transcript, title, slug</span>
-                </div>
-                <div className="result-stack">
-                  <label className="field">
-                    <span>Transcript</span>
-                    <textarea rows={5} disabled readOnly value="Transcription not wired yet." />
-                  </label>
-                  <div className="result-grid">
-                    <label className="field">
-                      <span>Title</span>
-                      <input disabled readOnly value="Pending Gemini pipeline" />
-                    </label>
-                    <label className="field">
-                      <span>Slug</span>
-                      <input disabled readOnly value="pending-gemini-pipeline" />
-                    </label>
+                <p className="panel__note">{describeTrimDecision(selectedCard.trimDecision)}</p>
+                <dl className="meta-list">
+                  <div>
+                    <dt>Requested start</dt>
+                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedStartSec ?? null)}</dd>
                   </div>
+                  <div>
+                    <dt>Requested end</dt>
+                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedEndSec ?? null)}</dd>
+                  </div>
+                  <div>
+                    <dt>Start search window</dt>
+                    <dd>
+                      {selectedCard.trimDecision?.searchStartFromSec === null
+                        ? "—"
+                        : `${formatOptionalSeconds(selectedCard.trimDecision?.searchStartFromSec ?? null)} to ${formatOptionalSeconds(selectedCard.trimDecision?.searchStartToSec ?? null)}`}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>End search window</dt>
+                    <dd>
+                      {selectedCard.trimDecision?.searchEndFromSec === null
+                        ? "—"
+                        : `${formatOptionalSeconds(selectedCard.trimDecision?.searchEndFromSec ?? null)} to ${formatOptionalSeconds(selectedCard.trimDecision?.searchEndToSec ?? null)}`}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Chosen start boundary</dt>
+                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenStartBoundarySec ?? null)}</dd>
+                  </div>
+                  <div>
+                    <dt>Chosen end boundary</dt>
+                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenEndBoundarySec ?? null)}</dd>
+                  </div>
+                  <div>
+                    <dt>Start delta</dt>
+                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.startDeltaSec ?? null)}</dd>
+                  </div>
+                  <div>
+                    <dt>End delta</dt>
+                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.endDeltaSec ?? null)}</dd>
+                  </div>
+                  <div>
+                    <dt>Reason</dt>
+                    <dd>{selectedCard.trimDecision?.reason ?? "No markers set yet."}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="detail-card detail-card--wide">
+                <div className="detail-card__header">
+                  <h3>Next Pipeline Steps</h3>
+                  <span className="muted-tag">Phase 5</span>
                 </div>
+                <p className="panel__note">
+                  Gemini transcription, title generation, slug generation, retries, and status transitions come next.
+                  This phase is focused on listening, splitting, and validating trim decisions.
+                </p>
               </section>
             </div>
+          ) : snapshot?.state?.cards.length ? (
+            <section className="panel panel--nested queue-empty">
+              <p className="empty-state__title">Select a recording.</p>
+              <p className="empty-state__body">
+                Pick a queue item to inspect its waveform, adjust trim markers, or duplicate it for a second extract.
+              </p>
+            </section>
           ) : (
             <section className="panel panel--nested queue-empty">
-              <p className="empty-state__title">
-                {snapshot?.state?.cards.length
-                  ? "Select a recording from the list to view details."
-                  : "No card selected."}
-              </p>
+              <p className="empty-state__title">No queue item selected.</p>
               <p className="empty-state__body">
-                {snapshot?.state?.cards.length
-                  ? "The queue is now live. Timestamp-confirmed cards appear on the left."
-                  : "Imported files enter the queue after timestamp confirmation."}
+                Import recordings first. After timestamp review they will appear here for playback and trimming.
               </p>
             </section>
           )}
-
-          <section className="detail-card detail-card--wide">
-            <div className="detail-card__header">
-              <h3>Command Registry</h3>
-              <span className="muted-tag">Central default shortcuts</span>
-            </div>
-            <ShortcutList commands={snapshot?.commands ?? []} />
-          </section>
         </section>
       </main>
 
@@ -747,38 +777,38 @@ export function App(): ReactElement {
         <TimestampReviewModal
           items={pendingReviewDrafts}
           timezones={snapshot?.supportedTimezones ?? []}
-          onChange={(item) =>
+          onChange={(updatedItem) =>
             setPendingReviewDrafts((current) =>
-              current.map((entry) => (entry.id === item.id ? item : entry)),
+              current.map((item) => (item.id === updatedItem.id ? updatedItem : item)),
             )
           }
           onApplyTimezoneToAll={(timezone) =>
             setPendingReviewDrafts((current) =>
-              current.map((entry) => {
-                if (getLocalTimestampError(entry.localTimestampText) === null) {
-                  const utcResult = recomputeUtcFromLocal(entry.localTimestampText, timezone);
+              current.map((item) => {
+                const localError = getLocalTimestampError(item.localTimestampText);
+                const utcError = getUtcTimestampError(item.utcTimestampText);
+
+                if (localError === null) {
+                  const utcResult = recomputeUtcFromLocal(item.localTimestampText, timezone);
                   return {
-                    ...entry,
+                    ...item,
                     timezone,
                     utcTimestampText:
-                      utcResult.error === null ? utcResult.utcTimestampText : entry.utcTimestampText,
+                      utcResult.error === null ? utcResult.utcTimestampText : item.utcTimestampText,
                   };
                 }
 
-                if (getUtcTimestampError(entry.utcTimestampText) === null) {
-                  const localResult = recomputeLocalFromUtc(entry.utcTimestampText, timezone);
+                if (utcError === null) {
+                  const localResult = recomputeLocalFromUtc(item.utcTimestampText, timezone);
                   return {
-                    ...entry,
+                    ...item,
                     timezone,
                     localTimestampText:
-                      localResult.error === null ? localResult.localTimestampText : entry.localTimestampText,
+                      localResult.error === null ? localResult.localTimestampText : item.localTimestampText,
                   };
                 }
 
-                return {
-                  ...entry,
-                  timezone,
-                };
+                return { ...item, timezone };
               }),
             )
           }

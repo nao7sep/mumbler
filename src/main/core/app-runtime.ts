@@ -3,10 +3,12 @@ import { access, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 import { nanoid } from "nanoid";
 
 import {
+  type CardTrim,
   type AppPaths,
   type AppSnapshot,
   type FailedImport,
@@ -19,6 +21,7 @@ import {
   type SettingsSummary,
 } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS, buildDefaultShortcutMap } from "@shared/commands";
+import { analyzeTrimDecision, assertFfmpegToolingPresent, probeAudioProfile } from "./audio-tools";
 import {
   getSupportedTimezones,
   isSupportedTimezone,
@@ -63,6 +66,7 @@ export class ApplicationRuntime {
     try {
       const paths = getAppPaths();
       await ensureDirectories(paths);
+      assertFfmpegToolingPresent();
 
       const settings = await loadSettings(paths);
       const logger = createLogger(paths.logsDir, getSecretsForRedaction(settings));
@@ -202,13 +206,25 @@ export class ApplicationRuntime {
         normalized.timezone,
         normalized.utcTimestampText,
       );
+      const probed = await probeAudioProfile(pendingImport.workingFilePath).catch(async (error) => {
+        await this.runtime.logger!.warn("audio.probe", "Failed to probe imported audio metadata.", {
+          filePath: pendingImport.workingFilePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        return {
+          durationSec: null,
+          audioProfile: null,
+        };
+      });
 
       cardsToAdd.push({
         id: nanoid(),
         originalFilename: pendingImport.originalFilename,
         importSource: pendingImport.importSource,
         sourceFilePath: pendingImport.workingFilePath,
-        durationSec: null,
+        audioProfile: probed.audioProfile,
+        durationSec: probed.durationSec,
         fileSizeBytes: pendingImport.fileSizeBytes,
         language: settings.defaultLanguage,
         timestamps,
@@ -216,6 +232,7 @@ export class ApplicationRuntime {
           frontMarkerSec: null,
           backMarkerSec: null,
         },
+        trimDecision: null,
         transcription: {
           text: null,
         },
@@ -263,6 +280,96 @@ export class ApplicationRuntime {
     state.selectedCardId = cardId;
     await this.persistState();
     return this.getSnapshot();
+  }
+
+  async duplicateCard(cardId: string): Promise<AppSnapshot> {
+    this.ensureReady();
+    const state = this.runtime.state!;
+    const source = state.cards.find((card) => card.id === cardId);
+
+    if (source === undefined) {
+      throw new Error("Card to duplicate does not exist.");
+    }
+
+    const duplicate = createDuplicatedCard(source);
+    state.cards = [...state.cards, duplicate].sort((left, right) =>
+      left.timestamps.effectiveUtc.localeCompare(right.timestamps.effectiveUtc),
+    );
+    state.selectedCardId = duplicate.id;
+
+    await this.persistState();
+    await this.runtime.logger!.info("card.duplicate", "Duplicated card for independent trimming.", {
+      sourceCardId: source.id,
+      duplicateCardId: duplicate.id,
+    });
+
+    return this.getSnapshot();
+  }
+
+  async updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot> {
+    this.ensureReady();
+    const state = this.runtime.state!;
+    const card = state.cards.find((entry) => entry.id === cardId);
+
+    if (card === undefined) {
+      throw new Error("Card to update does not exist.");
+    }
+
+    const normalizedTrim = normalizeTrim(trim, card.durationSec);
+    const trimDecision = await analyzeTrimDecision(
+      card.sourceFilePath,
+      normalizedTrim,
+      card.durationSec,
+    );
+
+    card.trim = normalizedTrim;
+    card.trimDecision = trimDecision;
+    card.timestamps = applyFrontTrimOffset(card.timestamps, normalizedTrim.frontMarkerSec ?? 0);
+    card.transcription = { text: null };
+    card.metadata = { title: null, slug: null };
+    card.ai = { transcription: null, title: null, slug: null };
+    card.status = "Imported";
+    card.activeStep = null;
+    card.lastError = null;
+    card.updatedAtUtc = new Date().toISOString();
+
+    state.cards.sort((left, right) =>
+      left.timestamps.effectiveUtc.localeCompare(right.timestamps.effectiveUtc),
+    );
+
+    await this.persistState();
+    await this.runtime.logger!.info("trim.analyze", "Analyzed trim decision.", {
+      cardId,
+      sourceFilePath: card.sourceFilePath,
+      codec: card.audioProfile?.codecName,
+      container: card.audioProfile?.formatName,
+      durationSec: card.durationSec,
+      requestedStartSec: trimDecision.requestedStartSec,
+      requestedEndSec: trimDecision.requestedEndSec,
+      searchStartFromSec: trimDecision.searchStartFromSec,
+      searchStartToSec: trimDecision.searchStartToSec,
+      searchEndFromSec: trimDecision.searchEndFromSec,
+      searchEndToSec: trimDecision.searchEndToSec,
+      chosenStartBoundarySec: trimDecision.chosenStartBoundarySec,
+      chosenEndBoundarySec: trimDecision.chosenEndBoundarySec,
+      startDeltaSec: trimDecision.startDeltaSec,
+      endDeltaSec: trimDecision.endDeltaSec,
+      decision: trimDecision.kind,
+      reason: trimDecision.reason,
+    });
+
+    return this.getSnapshot();
+  }
+
+  async getCardMediaSource(cardId: string): Promise<string> {
+    this.ensureReady();
+    const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
+
+    if (card === undefined) {
+      throw new Error("Card media source no longer exists.");
+    }
+
+    return pathToFileURL(card.sourceFilePath).href;
   }
 
   private async importPaths(
@@ -548,7 +655,13 @@ function normalizeState(raw: Record<string, unknown>, defaults: MumblerState): M
     pendingImports: Array.isArray(raw.pendingImports)
       ? (raw.pendingImports as PendingImportReviewItem[])
       : defaults.pendingImports,
-    cards: Array.isArray(raw.cards) ? (raw.cards as MumblerCard[]) : defaults.cards,
+    cards: Array.isArray(raw.cards)
+      ? (raw.cards as MumblerCard[]).map((card) => ({
+          ...card,
+          audioProfile: card.audioProfile ?? null,
+          trimDecision: card.trimDecision ?? null,
+        }))
+      : defaults.cards,
     selectedCardId: asNullableString(raw.selectedCardId),
     updatedAtUtc: asString(raw.updatedAtUtc) ?? defaults.updatedAtUtc,
   };
@@ -903,4 +1016,123 @@ function selectExistingCardId(state: MumblerState): string | null {
   }
 
   return state.cards[0]?.id ?? null;
+}
+
+function createDuplicatedCard(source: MumblerCard): MumblerCard {
+  return {
+    ...source,
+    id: nanoid(),
+    trim: {
+      frontMarkerSec: null,
+      backMarkerSec: null,
+    },
+    trimDecision: null,
+    timestamps: applyFrontTrimOffset(source.timestamps, 0),
+    transcription: {
+      text: null,
+    },
+    metadata: {
+      title: null,
+      slug: null,
+    },
+    ai: {
+      transcription: null,
+      title: null,
+      slug: null,
+    },
+    status: "Imported",
+    activeStep: null,
+    lastError: null,
+    createdAtUtc: new Date().toISOString(),
+    updatedAtUtc: new Date().toISOString(),
+  };
+}
+
+function normalizeTrim(trim: CardTrim, durationSec: number | null): CardTrim {
+  const frontMarkerSec = normalizeMarker(trim.frontMarkerSec);
+  const backMarkerSec = normalizeMarker(trim.backMarkerSec);
+
+  if (
+    frontMarkerSec !== null &&
+    backMarkerSec !== null &&
+    frontMarkerSec >= backMarkerSec
+  ) {
+    throw new Error("Front trim must be earlier than back trim.");
+  }
+
+  if (durationSec !== null && frontMarkerSec !== null && frontMarkerSec > durationSec) {
+    throw new Error("Front trim cannot exceed audio duration.");
+  }
+
+  if (durationSec !== null && backMarkerSec !== null && backMarkerSec > durationSec) {
+    throw new Error("Back trim cannot exceed audio duration.");
+  }
+
+  return {
+    frontMarkerSec,
+    backMarkerSec,
+  };
+}
+
+function normalizeMarker(value: number | null): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error("Trim markers must be positive numbers.");
+  }
+
+  return Math.round(value * 10) / 10;
+}
+
+function applyFrontTrimOffset(
+  timestamps: MumblerCard["timestamps"],
+  frontTrimOffsetSec: number,
+): MumblerCard["timestamps"] {
+  const confirmedDate = parseConfirmedLocalTimestamp(timestamps.confirmedLocal);
+  if (confirmedDate === null) {
+    return timestamps;
+  }
+
+  const effectiveDate = new Date(confirmedDate.getTime() + frontTrimOffsetSec * 1000);
+  const effectiveBaseText = formatLocalDateTime(effectiveDate);
+  const effectiveUtcResult = recomputeUtcFromLocal(effectiveBaseText, timestamps.timezone);
+
+  return {
+    ...timestamps,
+    frontTrimOffsetSec,
+    effectiveLocal:
+      frontTrimOffsetSec % 1 === 0
+        ? effectiveBaseText
+        : `${effectiveBaseText}.${Math.round((frontTrimOffsetSec % 1) * 10)}`,
+    effectiveUtc:
+      effectiveUtcResult.error === null ? effectiveUtcResult.utcTimestampText : timestamps.confirmedUtc,
+  };
+}
+
+function parseConfirmedLocalTimestamp(value: string): Date | null {
+  const match =
+    /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2}) (?<hour>\d{2}):(?<minute>\d{2}):(?<second>\d{2})$/.exec(
+      value,
+    );
+
+  if (!match?.groups) {
+    return null;
+  }
+
+  return new Date(
+    Date.UTC(
+      Number(match.groups.year),
+      Number(match.groups.month) - 1,
+      Number(match.groups.day),
+      Number(match.groups.hour),
+      Number(match.groups.minute),
+      Number(match.groups.second),
+    ),
+  );
+}
+
+function formatLocalDateTime(value: Date): string {
+  return `${value.getUTCFullYear().toString().padStart(4, "0")}-${`${value.getUTCMonth() + 1}`.padStart(2, "0")}-${`${value.getUTCDate()}`.padStart(2, "0")} ${`${value.getUTCHours()}`.padStart(2, "0")}:${`${value.getUTCMinutes()}`.padStart(2, "0")}:${`${value.getUTCSeconds()}`.padStart(2, "0")}`;
 }

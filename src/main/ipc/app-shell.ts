@@ -1,13 +1,17 @@
 import { BrowserWindow, ipcMain } from "electron";
 
-import type { PendingImportReviewItem } from "@shared/app-shell";
+import {
+  APP_SHELL_CHANNELS,
+  type CardTrim,
+  type PendingImportReviewItem,
+} from "@shared/app-shell";
 
 import type { ApplicationRuntime } from "../core/app-runtime";
 
 export function registerAppShellIpc(runtime: ApplicationRuntime): void {
-  ipcMain.handle("app-shell:get-snapshot", () => runtime.getSnapshot());
+  ipcMain.handle(APP_SHELL_CHANNELS.getSnapshot, () => runtime.getSnapshot());
 
-  ipcMain.handle("app-shell:open-import-dialog", (event) => {
+  ipcMain.handle(APP_SHELL_CHANNELS.openImportDialog, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window === null) {
       throw new Error("Import dialog requires an active window.");
@@ -16,16 +20,29 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     return runtime.openImportDialog(window);
   });
 
-  ipcMain.handle("app-shell:import-dropped-paths", (_event, paths: string[]) =>
+  ipcMain.handle(APP_SHELL_CHANNELS.importDroppedPaths, (_event, paths: string[]) =>
     runtime.importDroppedPaths(paths),
   );
 
   ipcMain.handle(
-    "app-shell:confirm-pending-imports",
+    APP_SHELL_CHANNELS.confirmPendingImports,
     (_event, items: PendingImportReviewItem[]) => runtime.confirmPendingImports(items),
   );
 
-  ipcMain.handle("app-shell:select-card", (_event, cardId: string | null) =>
+  ipcMain.handle(APP_SHELL_CHANNELS.selectCard, (_event, cardId: string | null) =>
     runtime.selectCard(cardId),
+  );
+
+  ipcMain.handle(APP_SHELL_CHANNELS.duplicateCard, (_event, cardId: string) =>
+    runtime.duplicateCard(cardId),
+  );
+
+  ipcMain.handle(
+    APP_SHELL_CHANNELS.updateCardTrim,
+    (_event, cardId: string, trim: CardTrim) => runtime.updateCardTrim(cardId, trim),
+  );
+
+  ipcMain.handle(APP_SHELL_CHANNELS.getCardMediaSource, (_event, cardId: string) =>
+    runtime.getCardMediaSource(cardId),
   );
 }

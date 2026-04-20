@@ -397,6 +397,59 @@ textarea:disabled {
   color: var(--text);
 }
 
+.waveform-editor {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.waveform-editor__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.waveform-canvas {
+  overflow: hidden;
+  min-height: 184px;
+  border: 1px solid rgba(53, 43, 31, 0.12);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(180deg, rgba(29, 97, 118, 0.05), rgba(191, 79, 47, 0.03)),
+    rgba(255, 255, 255, 0.84);
+}
+
+.waveform-canvas wave {
+  border-radius: var(--radius-md);
+}
+
+.trim-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.trim-editor-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(53, 43, 31, 0.1);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 16px;
+}
+
+.trim-editor-card h4 {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: 1.1rem;
+}
+
+.nudge-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .waveform-placeholder {
   position: relative;
   overflow: hidden;
@@ -458,6 +511,14 @@ textarea:disabled {
 
 .control-row {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.control-row--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.control-row--five {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .action-grid {
@@ -582,8 +643,10 @@ textarea:disabled {
 
   .detail-grid,
   .control-row,
+  .nudge-grid,
   .result-grid,
   .storage-grid,
+  .trim-editor-grid,
   .review-row__fields {
     grid-template-columns: 1fr;
   }

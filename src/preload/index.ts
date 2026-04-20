@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   APP_SHELL_CHANNELS,
   type AppSnapshot,
+  type CardTrim,
   type ImportOperationResult,
   type MumblerShellApi,
   type PendingImportReviewItem,
@@ -24,6 +25,12 @@ const api: MumblerShellApi = {
     ) as Promise<AppSnapshot>,
   selectCard: (cardId: string | null) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.selectCard, cardId) as Promise<AppSnapshot>,
+  duplicateCard: (cardId: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.duplicateCard, cardId) as Promise<AppSnapshot>,
+  updateCardTrim: (cardId: string, trim: CardTrim) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.updateCardTrim, cardId, trim) as Promise<AppSnapshot>,
+  getCardMediaSource: (cardId: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.getCardMediaSource, cardId) as Promise<string>,
 };
 
 contextBridge.exposeInMainWorld("mumbler", api);

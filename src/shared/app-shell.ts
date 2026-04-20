@@ -4,6 +4,9 @@ export const APP_SHELL_CHANNELS = {
   importDroppedPaths: "app-shell:import-dropped-paths",
   confirmPendingImports: "app-shell:confirm-pending-imports",
   selectCard: "app-shell:select-card",
+  duplicateCard: "app-shell:duplicate-card",
+  updateCardTrim: "app-shell:update-card-trim",
+  getCardMediaSource: "app-shell:get-card-media-source",
 } as const;
 
 export type CardStatus =
@@ -93,6 +96,33 @@ export interface CardTrim {
   backMarkerSec: number | null;
 }
 
+export interface AudioProfile {
+  formatName: string | null;
+  codecName: string | null;
+  bitRateKbps: number | null;
+  sampleRateHz: number | null;
+  channels: number | null;
+}
+
+export type TrimDecisionKind = "not-needed" | "stream-copy" | "reencode";
+
+export interface TrimDecision {
+  kind: TrimDecisionKind;
+  toleranceSec: number;
+  requestedStartSec: number | null;
+  requestedEndSec: number | null;
+  searchStartFromSec: number | null;
+  searchStartToSec: number | null;
+  searchEndFromSec: number | null;
+  searchEndToSec: number | null;
+  chosenStartBoundarySec: number | null;
+  chosenEndBoundarySec: number | null;
+  startDeltaSec: number | null;
+  endDeltaSec: number | null;
+  reason: string;
+  analyzedAtUtc: string;
+}
+
 export interface AiRunInfo {
   provider: "gemini";
   model: string;
@@ -118,11 +148,13 @@ export interface MumblerCard {
   originalFilename: string;
   importSource: ImportSource;
   sourceFilePath: string;
+  audioProfile: AudioProfile | null;
   durationSec: number | null;
   fileSizeBytes: number;
   language: string;
   timestamps: CardTimestamps;
   trim: CardTrim;
+  trimDecision: TrimDecision | null;
   transcription: {
     text: string | null;
   };
@@ -215,4 +247,7 @@ export interface MumblerShellApi {
   importDroppedPaths(paths: string[]): Promise<ImportOperationResult>;
   confirmPendingImports(items: PendingImportReviewItem[]): Promise<AppSnapshot>;
   selectCard(cardId: string | null): Promise<AppSnapshot>;
+  duplicateCard(cardId: string): Promise<AppSnapshot>;
+  updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot>;
+  getCardMediaSource(cardId: string): Promise<string>;
 }
