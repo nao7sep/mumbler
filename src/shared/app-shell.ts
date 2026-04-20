@@ -26,6 +26,7 @@ export const APP_SHELL_CHANNELS = {
 export const APP_SHELL_EVENTS = {
   windowCloseRequested: "app-shell:event-window-close-requested",
   appWideErrorUpdated: "app-shell:event-app-wide-error-updated",
+  pipelineProgressUpdated: "app-shell:event-pipeline-progress-updated",
 } as const;
 
 export type CardStatus =
@@ -340,4 +341,5 @@ export interface MumblerShellApi {
   respondToWindowClose(shouldClose: boolean): Promise<void>;
   onWindowCloseRequested(listener: () => void): () => void;
   onAppWideErrorChanged(listener: () => void): () => void;
+  onPipelineProgressUpdated(listener: () => void): () => void;
 }

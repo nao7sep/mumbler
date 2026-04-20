@@ -84,6 +84,15 @@ const api: MumblerShellApi = {
       ipcRenderer.removeListener(APP_SHELL_EVENTS.appWideErrorUpdated, wrapped);
     };
   },
+  onPipelineProgressUpdated: (listener: () => void) => {
+    const wrapped = () => {
+      listener();
+    };
+    ipcRenderer.on(APP_SHELL_EVENTS.pipelineProgressUpdated, wrapped);
+    return () => {
+      ipcRenderer.removeListener(APP_SHELL_EVENTS.pipelineProgressUpdated, wrapped);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld("mumbler", api);

@@ -47,6 +47,11 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const regionRef = useRef<Region | null>(null);
   const isSyncingRegionRef = useRef(false);
+  const cardIdRef = useRef(card.id);
+  const onTrimCommitRef = useRef(onTrimCommit);
+
+  cardIdRef.current = card.id;
+  onTrimCommitRef.current = onTrimCommit;
 
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
@@ -220,7 +225,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       setFrontInput(formatMarkerInput(normalizedTrim.frontMarkerSec));
       setBackInput(formatMarkerInput(normalizedTrim.backMarkerSec));
       setPlayerError(null);
-      await onTrimCommit(card.id, normalizedTrim);
+      await onTrimCommitRef.current(cardIdRef.current, normalizedTrim);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to update trim markers.";
       setPlayerError(message);

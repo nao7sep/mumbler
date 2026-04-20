@@ -1,0 +1,191 @@
+import { useMemo, useState, type ReactElement } from "react";
+
+import type { PendingImportReviewItem } from "@shared/app-shell";
+import {
+  getLocalTimestampError,
+  getUtcTimestampError,
+  isSupportedTimezone,
+  recomputeLocalFromUtc,
+  recomputeUtcFromLocal,
+} from "@shared/timestamps";
+
+export interface TimestampReviewModalProps {
+  items: PendingImportReviewItem[];
+  timezones: string[];
+  onChange: (item: PendingImportReviewItem) => void;
+  onApplyTimezoneToAll: (timezone: string) => void;
+  onConfirm: () => void;
+  isSubmitting: boolean;
+}
+
+export function TimestampReviewModal({
+  items,
+  timezones,
+  onChange,
+  onApplyTimezoneToAll,
+  onConfirm,
+  isSubmitting,
+}: TimestampReviewModalProps): ReactElement {
+  const [bulkTimezone, setBulkTimezone] = useState("");
+
+  const validationErrors = useMemo(
+    () =>
+      items.map((item) => {
+        const timezoneError = isSupportedTimezone(item.timezone)
+          ? null
+          : "Enter a valid IANA timezone.";
+        return (
+          timezoneError ??
+          getLocalTimestampError(item.localTimestampText) ??
+          getUtcTimestampError(item.utcTimestampText)
+        );
+      }),
+    [items],
+  );
+
+  const isConfirmDisabled = validationErrors.some((error) => error !== null);
+
+  return (
+    <div className="modal-backdrop">
+      <section className="modal-card">
+        <div className="modal-card__header">
+          <div>
+            <p className="section-kicker">Timestamp Review</p>
+            <h2>Confirm Imported Timestamps</h2>
+          </div>
+          <span className="muted-tag">{items.length} pending</span>
+        </div>
+
+        <div className="modal-toolbar">
+          <label className="field">
+            <span>Set all timezones to</span>
+            <input
+              list="timezone-options"
+              value={bulkTimezone}
+              onChange={(event) => setBulkTimezone(event.target.value)}
+              placeholder="Asia/Tokyo"
+            />
+          </label>
+          <button
+            type="button"
+            className="button button--ghost"
+            onClick={() => onApplyTimezoneToAll(bulkTimezone)}
+            disabled={bulkTimezone.trim().length === 0}
+          >
+            Apply to All
+          </button>
+        </div>
+
+        <div className="review-table">
+          {items.map((item, index) => {
+            const timezoneError = isSupportedTimezone(item.timezone)
+              ? null
+              : "Enter a valid IANA timezone.";
+            const localError = getLocalTimestampError(item.localTimestampText);
+            const utcError = getUtcTimestampError(item.utcTimestampText);
+            const rowError = timezoneError ?? localError ?? utcError;
+
+            return (
+              <div key={item.id} className="review-row">
+                <div className="review-row__title">
+                  <strong>{item.originalFilename}</strong>
+                  <span className="muted-tag">
+                    {item.parseStatus === "parsed" ? "Parsed" : "Manual"}
+                  </span>
+                </div>
+                <div className="review-row__fields">
+                  <label className="field">
+                    <span>Local timestamp</span>
+                    <input
+                      value={item.localTimestampText}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        const utcResult = recomputeUtcFromLocal(nextValue, item.timezone);
+                        onChange({
+                          ...item,
+                          localTimestampText: nextValue,
+                          utcTimestampText:
+                            utcResult.error === null ? utcResult.utcTimestampText : item.utcTimestampText,
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Timezone</span>
+                    <input
+                      list="timezone-options"
+                      value={item.timezone}
+                      onChange={(event) => {
+                        const timezone = event.target.value;
+                        if (getLocalTimestampError(item.localTimestampText) === null) {
+                          const utcResult = recomputeUtcFromLocal(item.localTimestampText, timezone);
+                          onChange({
+                            ...item,
+                            timezone,
+                            utcTimestampText:
+                              utcResult.error === null ? utcResult.utcTimestampText : item.utcTimestampText,
+                          });
+                          return;
+                        }
+
+                        if (getUtcTimestampError(item.utcTimestampText) === null) {
+                          const localResult = recomputeLocalFromUtc(item.utcTimestampText, timezone);
+                          onChange({
+                            ...item,
+                            timezone,
+                            localTimestampText:
+                              localResult.error === null ? localResult.localTimestampText : item.localTimestampText,
+                          });
+                          return;
+                        }
+
+                        onChange({ ...item, timezone });
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>UTC timestamp</span>
+                    <input
+                      value={item.utcTimestampText}
+                      onChange={(event) => {
+                        const nextValue = event.target.value.toLowerCase();
+                        const localResult = recomputeLocalFromUtc(nextValue, item.timezone);
+                        onChange({
+                          ...item,
+                          utcTimestampText: nextValue,
+                          localTimestampText:
+                            localResult.error === null ? localResult.localTimestampText : item.localTimestampText,
+                        });
+                      }}
+                    />
+                  </label>
+                </div>
+                <div className="review-row__footer">
+                  <span className="review-row__index">#{index + 1}</span>
+                  {rowError ? <span className="row-error">{rowError}</span> : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={onConfirm}
+            disabled={isConfirmDisabled || isSubmitting}
+          >
+            {isSubmitting ? "Confirming..." : "Confirm and Add to Queue"}
+          </button>
+        </div>
+
+        <datalist id="timezone-options">
+          {timezones.map((timezone) => (
+            <option key={timezone} value={timezone} />
+          ))}
+        </datalist>
+      </section>
+    </div>
+  );
+}

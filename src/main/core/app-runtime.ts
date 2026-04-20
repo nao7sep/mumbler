@@ -3,16 +3,13 @@ import {
   access,
   copyFile,
   mkdir,
-  open,
   readdir,
-  readFile,
-  rename,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 
@@ -59,6 +56,15 @@ import {
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
+import { formatError, readJsonFile, uniquePathInDirectory, writeJsonFile } from "./file-io";
+import { moveImportedSourceToTrash, reconcileWorkingState } from "./working-files";
+import {
+  buildOutputPayload,
+  buildUniqueSuffixedTargets,
+  computeFinalDuration,
+  finalizeOutputsAtomically,
+  pathsConflict,
+} from "./file-output";
 
 const SETTINGS_SCHEMA_VERSION = 1;
 const STATE_SCHEMA_VERSION = 1;
@@ -71,13 +77,6 @@ interface AppLogger {
   error(op: string, message: string, error: unknown, details?: unknown): Promise<void>;
 }
 
-interface WorkingReconciliationResult {
-  state: MumblerState;
-  droppedPendingImports: number;
-  missingWorkingCards: number;
-  trashedOrphanedFiles: number;
-  retainedOrphanedFiles: number;
-}
 
 interface AppRuntimeState {
   paths: AppPaths | null;
@@ -94,6 +93,8 @@ interface AppRuntimeState {
 export class ApplicationRuntime {
   private readonly runtime: AppRuntimeState;
   private readonly activeCardOperations = new Set<string>();
+  private persistQueue: Promise<void> = Promise.resolve();
+  private onPipelineProgressCallback: (() => void) | null = null;
 
   private constructor(runtime: AppRuntimeState) {
     this.runtime = runtime;
@@ -163,6 +164,10 @@ export class ApplicationRuntime {
         supportedTimezones,
       });
     }
+  }
+
+  onPipelineProgress(callback: () => void): void {
+    this.onPipelineProgressCallback = callback;
   }
 
   getSnapshot(): AppSnapshot {
@@ -1095,18 +1100,27 @@ export class ApplicationRuntime {
   }
 
   private async persistState(): Promise<void> {
-    const state = this.runtime.state!;
-    const normalized =
-      state.cards.length === 0 && state.pendingImports.length === 0
-        ? createEmptyState()
-        : {
-            ...state,
-            selectedCardId: selectExistingCardId(state),
-            updatedAtUtc: nowUtcMarker(),
-          };
+    const work = async (): Promise<void> => {
+      const state = this.runtime.state!;
+      const normalized =
+        state.cards.length === 0 && state.pendingImports.length === 0
+          ? createEmptyState()
+          : {
+              ...state,
+              selectedCardId: selectExistingCardId(state),
+              updatedAtUtc: nowUtcMarker(),
+            };
 
-    this.runtime.state = normalized;
-    await writeJsonFile(this.runtime.paths!.statePath, normalized);
+      this.runtime.state = normalized;
+      await writeJsonFile(this.runtime.paths!.statePath, normalized);
+
+      if (this.activeCardOperations.size > 0 && this.onPipelineProgressCallback !== null) {
+        this.onPipelineProgressCallback();
+      }
+    };
+
+    this.persistQueue = this.persistQueue.then(work, work);
+    return this.persistQueue;
   }
 
   private async persistSettings(): Promise<void> {
@@ -1442,88 +1456,6 @@ function recoverInterruptedCards(
   };
 }
 
-async function reconcileWorkingState(
-  paths: AppPaths,
-  state: MumblerState,
-  logger: AppLogger,
-): Promise<WorkingReconciliationResult> {
-  const referencedPaths = new Set<string>();
-  const nextPendingImports: PendingImportReviewItem[] = [];
-  let droppedPendingImports = 0;
-
-  for (const pendingImport of state.pendingImports) {
-    if (await fileExists(pendingImport.workingFilePath)) {
-      nextPendingImports.push(pendingImport);
-      referencedPaths.add(pendingImport.workingFilePath);
-      continue;
-    }
-
-    droppedPendingImports += 1;
-    await logger.warn(
-      "startup.pending-missing",
-      "Dropped pending import because its working file is missing.",
-      {
-        pendingImportId: pendingImport.id,
-        originalFilename: pendingImport.originalFilename,
-        workingFilePath: pendingImport.workingFilePath,
-      },
-    );
-  }
-
-  let missingWorkingCards = 0;
-  const nextCards: MumblerCard[] = [];
-
-  for (const card of state.cards) {
-    if (await fileExists(card.sourceFilePath)) {
-      referencedPaths.add(card.sourceFilePath);
-      nextCards.push(card);
-      continue;
-    }
-
-    missingWorkingCards += 1;
-    nextCards.push(markCardWorkingFileMissing(card));
-    await logger.warn(
-      "startup.card-missing",
-      "Marked card as errored because its working file is missing.",
-      {
-        cardId: card.id,
-        originalFilename: card.originalFilename,
-        sourceFilePath: card.sourceFilePath,
-      },
-    );
-  }
-
-  const cleanupResult = await cleanupOrphanedWorkingFiles(paths, referencedPaths, logger);
-  const changed =
-    droppedPendingImports > 0 ||
-    missingWorkingCards > 0 ||
-    cleanupResult.trashedOrphanedFiles > 0 ||
-    cleanupResult.retainedOrphanedFiles > 0;
-
-  const nextState =
-    !changed
-      ? state
-      : {
-          ...state,
-          pendingImports: nextPendingImports,
-          cards: nextCards,
-          selectedCardId: selectExistingCardId({
-            ...state,
-            pendingImports: nextPendingImports,
-            cards: nextCards,
-          }),
-          updatedAtUtc: nowUtcMarker(),
-        };
-
-  return {
-    state: nextState,
-    droppedPendingImports,
-    missingWorkingCards,
-    trashedOrphanedFiles: cleanupResult.trashedOrphanedFiles,
-    retainedOrphanedFiles: cleanupResult.retainedOrphanedFiles,
-  };
-}
-
 function summarizeSettings(settings: MumblerSettings): SettingsSummary {
   return {
     hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
@@ -1744,183 +1676,16 @@ function requireRatio(value: number, label: string): number {
   return value;
 }
 
-async function pathsConflict(audioPath: string, jsonPath: string): Promise<boolean> {
-  const [audioExists, jsonExists] = await Promise.all([fileExists(audioPath), fileExists(jsonPath)]);
-  return audioExists || jsonExists;
-}
 
-async function buildUniqueSuffixedTargets(
-  outputDirectory: string,
-  baseName: string,
-  extension: string,
-): Promise<{ audioPath: string; jsonPath: string }> {
-  while (true) {
-    const suffixedBase = `${baseName}-${nanoid(8)}`;
-    const audioPath = join(outputDirectory, `${suffixedBase}${extension}`);
-    const jsonPath = join(outputDirectory, `${suffixedBase}.json`);
-    if (!(await pathsConflict(audioPath, jsonPath))) {
-      return { audioPath, jsonPath };
-    }
-  }
-}
 
-async function finalizeOutputsAtomically(params: {
-  sourceAudioPath: string;
-  audioTargetPath: string;
-  jsonTargetPath: string;
-  overwrite: boolean;
-  jsonContent: string;
-}): Promise<void> {
-  await mkdir(dirname(params.audioTargetPath), { recursive: true });
 
-  const token = nanoid(8);
-  const audioTempPath = join(
-    dirname(params.audioTargetPath),
-    `.${basename(params.audioTargetPath)}.${token}.tmp`,
-  );
-  const jsonTempPath = join(
-    dirname(params.jsonTargetPath),
-    `.${basename(params.jsonTargetPath)}.${token}.tmp`,
-  );
 
-  await copyFile(params.sourceAudioPath, audioTempPath);
-  await syncFile(audioTempPath);
-  await writeFile(jsonTempPath, params.jsonContent, "utf8");
-  await syncFile(jsonTempPath);
-
-  const audioBackupPath = `${params.audioTargetPath}.${token}.bak`;
-  const jsonBackupPath = `${params.jsonTargetPath}.${token}.bak`;
-  const audioHadExisting = params.overwrite && (await fileExists(params.audioTargetPath));
-  const jsonHadExisting = params.overwrite && (await fileExists(params.jsonTargetPath));
-
-  let audioFinalized = false;
-  let jsonFinalized = false;
-
-  try {
-    if (audioHadExisting) {
-      await rename(params.audioTargetPath, audioBackupPath);
-    }
-    if (jsonHadExisting) {
-      await rename(params.jsonTargetPath, jsonBackupPath);
-    }
-
-    await rename(audioTempPath, params.audioTargetPath);
-    audioFinalized = true;
-    await rename(jsonTempPath, params.jsonTargetPath);
-    jsonFinalized = true;
-
-    if (audioHadExisting) {
-      await rm(audioBackupPath, { force: true });
-    }
-    if (jsonHadExisting) {
-      await rm(jsonBackupPath, { force: true });
-    }
-  } catch (error: unknown) {
-    if (jsonFinalized) {
-      await rm(params.jsonTargetPath, { force: true }).catch(() => undefined);
-    }
-    if (audioFinalized) {
-      await rm(params.audioTargetPath, { force: true }).catch(() => undefined);
-    }
-
-    if (audioHadExisting && (await fileExists(audioBackupPath))) {
-      await rename(audioBackupPath, params.audioTargetPath).catch(() => undefined);
-    }
-    if (jsonHadExisting && (await fileExists(jsonBackupPath))) {
-      await rename(jsonBackupPath, params.jsonTargetPath).catch(() => undefined);
-    }
-
-    await rm(audioTempPath, { force: true }).catch(() => undefined);
-    await rm(jsonTempPath, { force: true }).catch(() => undefined);
-
-    throw new Error(`Failed to finalize output files: ${formatError(error)}`);
-  }
-}
-
-function buildOutputPayload(params: {
-  card: MumblerCard;
-  finalProfile: MumblerCard["audioProfile"];
-  finalDurationSec: number | null;
-  finalizedAtUtc: string;
-}): Record<string, unknown> {
-  return {
-    schemaVersion: 1,
-    originalFilename: params.card.originalFilename,
-    importSource: params.card.importSource,
-    timestamps: {
-      confirmedLocal: params.card.timestamps.confirmedLocal,
-      confirmedUtc: params.card.timestamps.confirmedUtc,
-      timezone: params.card.timestamps.timezone,
-      effectiveLocal: params.card.timestamps.effectiveLocal,
-      effectiveUtc: params.card.timestamps.effectiveUtc,
-      transcribedAtUtc: params.card.ai.transcription?.generatedAtUtc ?? null,
-      finalizedAtUtc: params.finalizedAtUtc,
-    },
-    language: params.card.language,
-    trim:
-      params.card.trim.frontMarkerSec === null && params.card.trim.backMarkerSec === null
-        ? null
-        : params.card.trim,
-    duration: {
-      originalSec: params.card.durationSec,
-      finalSec: params.finalDurationSec,
-    },
-    transcription: {
-      raw: params.card.transcription.text,
-      title: params.card.metadata.title,
-      slug: params.card.metadata.slug,
-    },
-    providers: {
-      transcription: params.card.ai.transcription,
-      title: params.card.ai.title,
-      slug: params.card.ai.slug,
-    },
-    audio: {
-      finalCodec: params.finalProfile?.codecName ?? null,
-      finalBitrateKbps: params.finalProfile?.bitRateKbps ?? null,
-      finalSampleRateHz: params.finalProfile?.sampleRateHz ?? null,
-      finalChannels: params.finalProfile?.channels ?? null,
-      trimDecision: params.card.trimDecision?.kind ?? "not-needed",
-    },
-    appVersion: app.getVersion(),
-  };
-}
-
-function computeFinalDuration(card: MumblerCard, probedDurationSec: number | null): number | null {
-  if (probedDurationSec !== null) {
-    return probedDurationSec;
-  }
-
-  if (card.durationSec === null) {
-    return null;
-  }
-
-  const startSec = card.trim.frontMarkerSec ?? 0;
-  const endSec = card.trim.backMarkerSec ?? card.durationSec;
-  return Math.max(0, Math.round((endSec - startSec) * 1000) / 1000);
-}
 
 function getSystemTimezone(): string {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return timezone && timezone.length > 0 && isSupportedTimezone(timezone) ? timezone : "UTC";
 }
 
-async function readJsonFile<T>(filePath: string): Promise<T | null> {
-  try {
-    const content = await readFile(filePath, "utf8");
-    return JSON.parse(content) as T;
-  } catch (error: unknown) {
-    if (isMissingFileError(error)) {
-      return null;
-    }
-    throw new Error(`Failed to read JSON file at ${filePath}: ${formatError(error)}`);
-  }
-}
-
-async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
 
 function createLogger(logsDir: string, secrets: string[]): AppLogger {
   const write = async (
@@ -2047,23 +1812,9 @@ function asRatio(value: unknown): number | null {
   return typeof value === "number" && value >= 0 && value <= 1 ? value : null;
 }
 
-function isMissingFileError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}
 
-function formatError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}
-
+// Uses 4^n (not 2^n) for aggressive backoff suited to Gemini API rate limits,
+// which penalize rapid retries more heavily than typical HTTP services.
 function computeRetryDelayMs(
   attempt: number,
   retryPolicy: MumblerSettings["retryPolicy"],
@@ -2084,136 +1835,10 @@ function sleep(delayMs: number): Promise<void> {
   });
 }
 
-async function uniquePathInDirectory(directory: string, filename: string): Promise<string> {
-  const extension = extname(filename);
-  const stem = filename.slice(0, filename.length - extension.length);
-  let candidate = join(directory, filename);
 
-  while (await fileExists(candidate)) {
-    candidate = join(directory, `${stem}-${nanoid(8)}${extension}`);
-  }
 
-  return candidate;
-}
 
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await access(filePath, fsConstants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
-async function syncFile(filePath: string): Promise<void> {
-  const handle = await open(filePath, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
-
-async function moveImportedSourceToTrash(sourcePath: string, workingDir: string): Promise<void> {
-  try {
-    await shell.trashItem(sourcePath);
-    return;
-  } catch (directTrashError: unknown) {
-    const stagingDir = join(workingDir, "trash-staging");
-    const stagedPath = await uniquePathInDirectory(stagingDir, basename(sourcePath));
-
-    try {
-      await copyFile(sourcePath, stagedPath);
-      await access(stagedPath, fsConstants.R_OK);
-      await rm(sourcePath);
-    } catch (stageError: unknown) {
-      await rm(stagedPath, { force: true });
-      throw new Error(
-        `Failed to stage imported source for trash after direct trash failed: ${formatError(stageError)}`,
-      );
-    }
-
-    try {
-      await shell.trashItem(stagedPath);
-    } catch (trashError: unknown) {
-      try {
-        await copyFile(stagedPath, sourcePath);
-        await rm(stagedPath, { force: true });
-      } catch (restoreError: unknown) {
-        throw new Error(
-          `Failed to trash staged source and failed to restore it. Staged copy remains at ${stagedPath}. Trash error: ${formatError(trashError)}. Restore error: ${formatError(restoreError)}`,
-        );
-      }
-
-      throw new Error(
-        `Failed to move source to trash after local staging: ${formatError(trashError)}`,
-      );
-    }
-
-    if (directTrashError instanceof Error) {
-      return;
-    }
-  }
-}
-
-async function cleanupOrphanedWorkingFiles(
-  paths: AppPaths,
-  referencedPaths: Set<string>,
-  logger: AppLogger,
-): Promise<{ trashedOrphanedFiles: number; retainedOrphanedFiles: number }> {
-  let trashedOrphanedFiles = 0;
-  let retainedOrphanedFiles = 0;
-  const candidates = await listWorkingFiles(paths.workingDir);
-
-  for (const candidate of candidates) {
-    if (referencedPaths.has(candidate)) {
-      continue;
-    }
-
-    try {
-      await shell.trashItem(candidate);
-      trashedOrphanedFiles += 1;
-      await logger.info("working.cleanup", "Moved orphaned working file to trash.", {
-        filePath: candidate,
-      });
-    } catch (error: unknown) {
-      retainedOrphanedFiles += 1;
-      await logger.warn("working.cleanup-failed", "Failed to trash orphaned working file.", {
-        filePath: candidate,
-        error: formatError(error),
-      });
-    }
-  }
-
-  return {
-    trashedOrphanedFiles,
-    retainedOrphanedFiles,
-  };
-}
-
-async function listWorkingFiles(workingDir: string): Promise<string[]> {
-  const entries = await readdir(workingDir, { withFileTypes: true });
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const entryPath = join(workingDir, entry.name);
-    if (entry.isFile()) {
-      files.push(entryPath);
-      continue;
-    }
-
-    if (entry.isDirectory() && entry.name === "trash-staging") {
-      const stagedEntries = await readdir(entryPath, { withFileTypes: true });
-      for (const stagedEntry of stagedEntries) {
-        if (stagedEntry.isFile()) {
-          files.push(join(entryPath, stagedEntry.name));
-        }
-      }
-    }
-  }
-
-  return files;
-}
 
 function buildConfirmedTimestamps(
   localTimestampText: string,
@@ -2301,20 +1926,6 @@ function createDuplicatedCard(source: MumblerCard): MumblerCard {
     activeStep: null,
     lastError: null,
     createdAtUtc: nowUtcMarker(),
-    updatedAtUtc: nowUtcMarker(),
-  };
-}
-
-function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
-  return {
-    ...card,
-    status: "Error",
-    activeStep: null,
-    lastError: {
-      message: "Working audio is missing from working storage — remove this card or re-import the source audio.",
-      occurredAtUtc: nowUtcMarker(),
-      failedStep: "startup-recovery",
-    },
     updatedAtUtc: nowUtcMarker(),
   };
 }

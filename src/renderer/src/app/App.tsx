@@ -5,12 +5,10 @@ import {
   useState,
   type DragEvent,
   type ReactElement,
-  type ReactNode,
 } from "react";
 
 import type {
   AppSnapshot,
-  CardStatus,
   FailedImport,
   MumblerCard,
   PendingImportReviewItem,
@@ -21,59 +19,15 @@ import type {
 import {
   getLocalTimestampError,
   getUtcTimestampError,
-  isSupportedTimezone,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
 import { SettingsModal } from "./SettingsModal";
 import { findMatchingCommand, isTypingTarget } from "./shortcut-utils";
-
-interface StatusChipProps {
-  label: CardStatus;
-}
-
-function StatusChip({ label }: StatusChipProps): ReactElement {
-  return <span className={`status-chip status-chip--${slugify(label)}`}>{label}</span>;
-}
-
-function slugify(value: string): string {
-  return value.toLowerCase().replaceAll(" ", "-");
-}
-
-function statusModifier(status: CardStatus): string {
-  return slugify(status);
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-
-  const units = ["KB", "MB", "GB"];
-  let size = value / 1024;
-  let unitIndex = 0;
-
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-
-  return `${size.toFixed(size >= 100 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
-function formatDuration(value: number | null): string {
-  if (value === null) {
-    return "Unknown";
-  }
-
-  const totalTenths = Math.round(value * 10);
-  const totalSeconds = Math.floor(totalTenths / 10);
-  const tenths = totalTenths % 10;
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}.${tenths}`;
-}
+import { TimestampReviewModal } from "./TimestampReviewModal";
+import { QueueList, StatusChip, formatBytes, formatDuration, statusModifier } from "./QueueList";
+import { BannerCard, DecisionModal } from "./DecisionModal";
 
 function formatOptionalSeconds(value: number | null): string {
   if (value === null) {
@@ -97,79 +51,6 @@ function describeTrimDecision(decision: TrimDecision | null): string {
   }
 
   return "One or more boundaries fell outside tolerance. Re-encode will be required.";
-}
-
-function BannerCard({
-  title,
-  body,
-  variant,
-  onDismiss,
-  children,
-}: {
-  title: string;
-  body?: string;
-  variant: "error" | "warning" | "notice";
-  onDismiss?: () => void;
-  children?: ReactNode;
-}): ReactElement {
-  return (
-    <section className={`panel panel--nested banner banner--${variant}`}>
-      <div className="banner__header">
-        <p className="empty-state__title">{title}</p>
-        {onDismiss ? (
-          <button
-            type="button"
-            className="button button--ghost button--compact"
-            onClick={onDismiss}
-          >
-            Dismiss
-          </button>
-        ) : null}
-      </div>
-      {body ? <p className="empty-state__body">{body}</p> : null}
-      {children}
-    </section>
-  );
-}
-
-function DecisionModal({
-  title,
-  body,
-  actions,
-}: {
-  title: string;
-  body: string;
-  actions: Array<{
-    label: string;
-    onClick: () => void;
-    variant?: "primary" | "danger" | "ghost";
-  }>;
-}): ReactElement {
-  return (
-    <div className="modal-backdrop">
-      <section className="modal-card modal-card--narrow">
-        <div className="modal-card__header">
-          <div>
-            <p className="section-kicker">Confirm</p>
-            <h2>{title}</h2>
-          </div>
-        </div>
-        <p className="empty-state__body">{body}</p>
-        <div className="modal-actions">
-          {actions.map((action) => (
-            <button
-              key={action.label}
-              type="button"
-              className={`button button--${action.variant ?? "ghost"}`}
-              onClick={action.onClick}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
 }
 
 function describeCardStep(card: MumblerCard): string {
@@ -274,231 +155,6 @@ async function copyTextToClipboard(value: string): Promise<void> {
   }
 }
 
-function QueueList({
-  cards,
-  selectedCardId,
-  onSelect,
-}: {
-  cards: MumblerCard[];
-  selectedCardId: string | null;
-  onSelect: (cardId: string) => void;
-}): ReactElement {
-  return (
-    <div className="queue-list">
-      {cards.map((card) => (
-        <button
-          key={card.id}
-          type="button"
-          className={`queue-row queue-row--${statusModifier(card.status)}${card.id === selectedCardId ? " queue-row--selected" : ""}`}
-          onClick={() => onSelect(card.id)}
-        >
-          <div className="queue-row__top">
-            <strong>{card.timestamps.effectiveLocal}</strong>
-            <StatusChip label={card.status} />
-          </div>
-          <div className="queue-row__name">{card.originalFilename}</div>
-          <div className="queue-row__meta">
-            <span>{formatDuration(card.durationSec)}</span>
-            <span>{card.language}</span>
-            <span>{card.audioProfile?.codecName ?? "Unknown codec"}</span>
-          </div>
-          <div className="queue-row__meta">
-            <span>{card.timestamps.effectiveUtc}</span>
-            <span>
-              {card.timestamps.frontTrimOffsetSec > 0
-                ? `Front trim +${card.timestamps.frontTrimOffsetSec.toFixed(1)}s`
-                : "No front trim"}
-            </span>
-            <span>{formatBytes(card.fileSizeBytes)}</span>
-          </div>
-          {card.lastError ? (
-            <div className="queue-row__error">{card.lastError.message}</div>
-          ) : null}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function TimestampReviewModal({
-  items,
-  timezones,
-  onChange,
-  onApplyTimezoneToAll,
-  onConfirm,
-  isSubmitting,
-}: {
-  items: PendingImportReviewItem[];
-  timezones: string[];
-  onChange: (item: PendingImportReviewItem) => void;
-  onApplyTimezoneToAll: (timezone: string) => void;
-  onConfirm: () => void;
-  isSubmitting: boolean;
-}): ReactElement {
-  const [bulkTimezone, setBulkTimezone] = useState("");
-
-  const validationErrors = useMemo(
-    () =>
-      items.map((item) => {
-        const timezoneError = isSupportedTimezone(item.timezone)
-          ? null
-          : "Enter a valid IANA timezone.";
-        return (
-          timezoneError ??
-          getLocalTimestampError(item.localTimestampText) ??
-          getUtcTimestampError(item.utcTimestampText)
-        );
-      }),
-    [items],
-  );
-
-  const isConfirmDisabled = validationErrors.some((error) => error !== null);
-
-  return (
-    <div className="modal-backdrop">
-      <section className="modal-card">
-        <div className="modal-card__header">
-          <div>
-            <p className="section-kicker">Timestamp Review</p>
-            <h2>Confirm Imported Timestamps</h2>
-          </div>
-          <span className="muted-tag">{items.length} pending</span>
-        </div>
-
-        <div className="modal-toolbar">
-          <label className="field">
-            <span>Set all timezones to</span>
-            <input
-              list="timezone-options"
-              value={bulkTimezone}
-              onChange={(event) => setBulkTimezone(event.target.value)}
-              placeholder="Asia/Tokyo"
-            />
-          </label>
-          <button
-            type="button"
-            className="button button--ghost"
-            onClick={() => onApplyTimezoneToAll(bulkTimezone)}
-            disabled={bulkTimezone.trim().length === 0}
-          >
-            Apply to All
-          </button>
-        </div>
-
-        <div className="review-table">
-          {items.map((item, index) => {
-            const timezoneError = isSupportedTimezone(item.timezone)
-              ? null
-              : "Enter a valid IANA timezone.";
-            const localError = getLocalTimestampError(item.localTimestampText);
-            const utcError = getUtcTimestampError(item.utcTimestampText);
-            const rowError = timezoneError ?? localError ?? utcError;
-
-            return (
-              <div key={item.id} className="review-row">
-                <div className="review-row__title">
-                  <strong>{item.originalFilename}</strong>
-                  <span className="muted-tag">
-                    {item.parseStatus === "parsed" ? "Parsed" : "Manual"}
-                  </span>
-                </div>
-                <div className="review-row__fields">
-                  <label className="field">
-                    <span>Local timestamp</span>
-                    <input
-                      value={item.localTimestampText}
-                      onChange={(event) => {
-                        const nextValue = event.target.value;
-                        const utcResult = recomputeUtcFromLocal(nextValue, item.timezone);
-                        onChange({
-                          ...item,
-                          localTimestampText: nextValue,
-                          utcTimestampText:
-                            utcResult.error === null ? utcResult.utcTimestampText : item.utcTimestampText,
-                        });
-                      }}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Timezone</span>
-                    <input
-                      list="timezone-options"
-                      value={item.timezone}
-                      onChange={(event) => {
-                        const timezone = event.target.value;
-                        if (getLocalTimestampError(item.localTimestampText) === null) {
-                          const utcResult = recomputeUtcFromLocal(item.localTimestampText, timezone);
-                          onChange({
-                            ...item,
-                            timezone,
-                            utcTimestampText:
-                              utcResult.error === null ? utcResult.utcTimestampText : item.utcTimestampText,
-                          });
-                          return;
-                        }
-
-                        if (getUtcTimestampError(item.utcTimestampText) === null) {
-                          const localResult = recomputeLocalFromUtc(item.utcTimestampText, timezone);
-                          onChange({
-                            ...item,
-                            timezone,
-                            localTimestampText:
-                              localResult.error === null ? localResult.localTimestampText : item.localTimestampText,
-                          });
-                          return;
-                        }
-
-                        onChange({ ...item, timezone });
-                      }}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>UTC timestamp</span>
-                    <input
-                      value={item.utcTimestampText}
-                      onChange={(event) => {
-                        const nextValue = event.target.value.toLowerCase();
-                        const localResult = recomputeLocalFromUtc(nextValue, item.timezone);
-                        onChange({
-                          ...item,
-                          utcTimestampText: nextValue,
-                          localTimestampText:
-                            localResult.error === null ? localResult.localTimestampText : item.localTimestampText,
-                        });
-                      }}
-                    />
-                  </label>
-                </div>
-                <div className="review-row__footer">
-                  <span className="review-row__index">#{index + 1}</span>
-                  {rowError ? <span className="row-error">{rowError}</span> : null}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="button button--primary"
-            onClick={onConfirm}
-            disabled={isConfirmDisabled || isSubmitting}
-          >
-            {isSubmitting ? "Confirming..." : "Confirm and Add to Queue"}
-          </button>
-        </div>
-
-        <datalist id="timezone-options">
-          {timezones.map((timezone) => (
-            <option key={timezone} value={timezone} />
-          ))}
-        </datalist>
-      </section>
-    </div>
-  );
-}
-
 export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -583,11 +239,7 @@ export function App(): ReactElement {
   }, [pendingReviewDrafts, snapshot?.state]);
 
   useEffect(() => {
-    if (activePipelineCards.length === 0) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
+    return window.mumbler.onPipelineProgressUpdated(() => {
       void window.mumbler
         .getSnapshot()
         .then((nextSnapshot) => {
@@ -596,12 +248,8 @@ export function App(): ReactElement {
         .catch((error: unknown) => {
           setErrorMessage(error instanceof Error ? error.message : "Failed to refresh card state.");
         });
-    }, 800);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [activePipelineCards]);
+    });
+  }, []);
 
   useEffect(() => {
     return window.mumbler.onWindowCloseRequested(() => {
