@@ -8,6 +8,7 @@ import {
   type ImportOperationResult,
   type MumblerShellApi,
   type PendingImportReviewItem,
+  type RendererErrorReport,
   type SaveCardResult,
   type SaveConflictResolution,
   type SettingsDraft,
@@ -53,6 +54,11 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.saveCard, cardId, resolution) as Promise<SaveCardResult>,
   removeCard: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.removeCard, cardId) as Promise<AppSnapshot>,
+  reportRendererError: (report: RendererErrorReport) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.reportRendererError, report) as Promise<AppSnapshot>,
+  dismissAppWideError: () =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.dismissAppWideError) as Promise<AppSnapshot>,
+  resetState: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.resetState) as Promise<AppSnapshot>,
   respondToWindowClose: (shouldClose: boolean) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.respondToWindowClose, shouldClose) as Promise<void>,
   onWindowCloseRequested: (listener: () => void) => {
@@ -62,6 +68,15 @@ const api: MumblerShellApi = {
     ipcRenderer.on(APP_SHELL_EVENTS.windowCloseRequested, wrapped);
     return () => {
       ipcRenderer.removeListener(APP_SHELL_EVENTS.windowCloseRequested, wrapped);
+    };
+  },
+  onAppWideErrorChanged: (listener: () => void) => {
+    const wrapped = () => {
+      listener();
+    };
+    ipcRenderer.on(APP_SHELL_EVENTS.appWideErrorUpdated, wrapped);
+    return () => {
+      ipcRenderer.removeListener(APP_SHELL_EVENTS.appWideErrorUpdated, wrapped);
     };
   },
 };

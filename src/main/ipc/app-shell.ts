@@ -4,6 +4,7 @@ import {
   APP_SHELL_CHANNELS,
   type CardTrim,
   type PendingImportReviewItem,
+  type RendererErrorReport,
   type SaveConflictResolution,
   type SettingsDraft,
 } from "@shared/app-shell";
@@ -92,4 +93,11 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
   ipcMain.handle(APP_SHELL_CHANNELS.removeCard, (_event, cardId: string) =>
     runtime.removeCard(cardId),
   );
+
+  ipcMain.handle(APP_SHELL_CHANNELS.reportRendererError, (_event, report: RendererErrorReport) =>
+    runtime.reportRendererError(report),
+  );
+
+  ipcMain.handle(APP_SHELL_CHANNELS.dismissAppWideError, () => runtime.dismissAppWideError());
+  ipcMain.handle(APP_SHELL_CHANNELS.resetState, () => runtime.resetState());
 }

@@ -17,6 +17,7 @@ The current implementation provides:
 - `~/.mumbler` bootstrap for settings, state, logs, and working storage
 - In-app settings modal for Gemini key, models, languages, timezone, prompts, retries, and timeouts
 - Editable central shortcut registry with renderer-side keyboard handling
+- App-wide main/renderer error surfacing with a custom blocking modal
 - Timestamp-reviewed import flow from file picker or drag-and-drop
 - Destructive source handling: copy into working storage, then move outside source to trash
 - Queue selection and persisted pending-review state
@@ -34,6 +35,7 @@ The current implementation provides:
 - Atomic audio plus JSON finalization with filename collision handling
 - Remove workflow that trashes app-managed working audio after confirmation
 - Custom app-close confirmation instead of native browser or OS confirmation prompts
+- Startup diagnostic recovery with a reset-state action
 
 ## Verification Gaps
 

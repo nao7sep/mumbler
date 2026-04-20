@@ -16,11 +16,15 @@ export const APP_SHELL_CHANNELS = {
   chooseOutputDirectory: "app-shell:choose-output-directory",
   saveCard: "app-shell:save-card",
   removeCard: "app-shell:remove-card",
+  reportRendererError: "app-shell:report-renderer-error",
+  dismissAppWideError: "app-shell:dismiss-app-wide-error",
+  resetState: "app-shell:reset-state",
   respondToWindowClose: "app-shell:respond-to-window-close",
 } as const;
 
 export const APP_SHELL_EVENTS = {
   windowCloseRequested: "app-shell:event-window-close-requested",
+  appWideErrorUpdated: "app-shell:event-app-wide-error-updated",
 } as const;
 
 export type CardStatus =
@@ -257,6 +261,12 @@ export interface StartupDiagnostic {
   message: string;
 }
 
+export interface RendererErrorReport {
+  message: string;
+  source: string;
+  stack?: string;
+}
+
 export interface AppSnapshot {
   appName: string;
   appVersion: string;
@@ -268,6 +278,7 @@ export interface AppSnapshot {
   queueSummary: QueueSummary | null;
   commands: CommandDefinition[];
   startupDiagnostic: StartupDiagnostic | null;
+  appWideError: StartupDiagnostic | null;
   state: MumblerState | null;
   supportedTimezones: string[];
 }
@@ -321,6 +332,10 @@ export interface MumblerShellApi {
   chooseOutputDirectory(): Promise<AppSnapshot>;
   saveCard(cardId: string, resolution?: SaveConflictResolution): Promise<SaveCardResult>;
   removeCard(cardId: string): Promise<AppSnapshot>;
+  reportRendererError(report: RendererErrorReport): Promise<AppSnapshot>;
+  dismissAppWideError(): Promise<AppSnapshot>;
+  resetState(): Promise<AppSnapshot>;
   respondToWindowClose(shouldClose: boolean): Promise<void>;
   onWindowCloseRequested(listener: () => void): () => void;
+  onAppWideErrorChanged(listener: () => void): () => void;
 }

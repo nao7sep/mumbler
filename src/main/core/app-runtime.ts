@@ -30,6 +30,7 @@ import {
   type MumblerSettings,
   type MumblerState,
   type PendingImportReviewItem,
+  type RendererErrorReport,
   type SaveCardResult,
   type SaveConflictResolution,
   type SettingsDraft,
@@ -74,6 +75,7 @@ interface AppRuntimeState {
   state: MumblerState | null;
   logger: AppLogger | null;
   startupDiagnostic: AppSnapshot["startupDiagnostic"];
+  appWideError: AppSnapshot["appWideError"];
   recoveredInterruptedCards: number;
   shellReadyAtUtc: string;
   supportedTimezones: string[];
@@ -90,9 +92,9 @@ export class ApplicationRuntime {
   static async initialize(): Promise<ApplicationRuntime> {
     const shellReadyAtUtc = new Date().toISOString();
     const supportedTimezones = getSupportedTimezones();
+    const paths = getAppPaths();
 
     try {
-      const paths = getAppPaths();
       await ensureDirectories(paths);
       assertFfmpegToolingPresent();
 
@@ -121,13 +123,14 @@ export class ApplicationRuntime {
         state,
         logger,
         startupDiagnostic: null,
+        appWideError: null,
         recoveredInterruptedCards,
         shellReadyAtUtc,
         supportedTimezones,
       });
     } catch (error: unknown) {
       return new ApplicationRuntime({
-        paths: null,
+        paths,
         settings: null,
         state: null,
         logger: null,
@@ -138,6 +141,7 @@ export class ApplicationRuntime {
               ? error.message
               : "Unknown startup failure while preparing app storage.",
         },
+        appWideError: null,
         recoveredInterruptedCards: 0,
         shellReadyAtUtc,
         supportedTimezones,
@@ -167,9 +171,63 @@ export class ApplicationRuntime {
             },
       commands: COMMAND_DEFINITIONS,
       startupDiagnostic: this.runtime.startupDiagnostic,
+      appWideError: this.runtime.appWideError,
       state,
       supportedTimezones: this.runtime.supportedTimezones,
     };
+  }
+
+  async reportRendererError(report: RendererErrorReport): Promise<AppSnapshot> {
+    await this.setAppWideError("Unexpected Renderer Error", report.message, {
+      source: report.source,
+      stack: report.stack,
+    });
+    return this.getSnapshot();
+  }
+
+  async reportMainProcessError(origin: "uncaughtException" | "unhandledRejection", error: unknown): Promise<void> {
+    await this.setAppWideError("Unexpected Main Process Error", formatError(error), {
+      origin,
+      error: serializeError(error),
+    });
+  }
+
+  async dismissAppWideError(): Promise<AppSnapshot> {
+    this.runtime.appWideError = null;
+    return this.getSnapshot();
+  }
+
+  async resetState(): Promise<AppSnapshot> {
+    const paths = this.runtime.paths ?? getAppPaths();
+    const settings = createDefaultSettings(getSystemTimezone());
+    const state = createEmptyState();
+
+    try {
+      await ensureDirectories(paths);
+      await writeJsonFile(paths.settingsPath, settings);
+      await writeJsonFile(paths.statePath, state);
+      const logger = createLogger(paths.logsDir, getSecretsForRedaction(settings));
+      await pruneOldLogs(paths.logsDir);
+      await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
+        workingDir: paths.workingDir,
+      });
+
+      this.runtime.paths = paths;
+      this.runtime.settings = settings;
+      this.runtime.state = state;
+      this.runtime.logger = logger;
+      this.runtime.startupDiagnostic = null;
+      this.runtime.appWideError = null;
+      this.runtime.recoveredInterruptedCards = 0;
+
+      return this.getSnapshot();
+    } catch (error: unknown) {
+      this.runtime.startupDiagnostic = {
+        title: "Reset Failed",
+        message: formatError(error),
+      };
+      throw error;
+    }
   }
 
   getSettingsDraft(): SettingsDraft {
@@ -1017,6 +1075,21 @@ export class ApplicationRuntime {
 
   private async persistSettings(): Promise<void> {
     await writeJsonFile(this.runtime.paths!.settingsPath, this.runtime.settings);
+  }
+
+  private async setAppWideError(
+    title: string,
+    message: string,
+    details?: unknown,
+  ): Promise<void> {
+    this.runtime.appWideError = {
+      title,
+      message,
+    };
+
+    if (this.runtime.logger !== null) {
+      await this.runtime.logger.error("app.unhandled", title, new Error(message), details);
+    }
   }
 
   private async discardWorkingCard(card: MumblerCard): Promise<void> {

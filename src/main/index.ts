@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from "electron";
 
+import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { ApplicationRuntime } from "./core/app-runtime";
 import { registerAppShellIpc } from "./ipc/app-shell";
 import { createMainWindow } from "./window";
@@ -12,6 +13,26 @@ async function bootstrap(): Promise<void> {
   registerAppShellIpc(runtime);
   registerWindowCloseIpc();
   attachWindowCloseHandling(createMainWindow());
+
+  const broadcastAppWideError = (): void => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(APP_SHELL_EVENTS.appWideErrorUpdated);
+      }
+    }
+  };
+
+  process.on("uncaughtException", (error) => {
+    void runtime.reportMainProcessError("uncaughtException", error).then(() => {
+      broadcastAppWideError();
+    });
+  });
+
+  process.on("unhandledRejection", (error) => {
+    void runtime.reportMainProcessError("unhandledRejection", error).then(() => {
+      broadcastAppWideError();
+    });
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

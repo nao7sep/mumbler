@@ -408,6 +408,7 @@ export function App(): ReactElement {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isPickingSettingsOutputDirectory, setIsPickingSettingsOutputDirectory] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
+  const [isResettingState, setIsResettingState] = useState(false);
   const [pendingCloseConfirmation, setPendingCloseConfirmation] = useState(false);
   const waveformEditorRef = useRef<WaveformEditorHandle | null>(null);
 
@@ -465,6 +466,64 @@ export function App(): ReactElement {
     });
   }, []);
 
+  useEffect(() => {
+    return window.mumbler.onAppWideErrorChanged(() => {
+      void window.mumbler
+        .getSnapshot()
+        .then((nextSnapshot) => {
+          setSnapshot(nextSnapshot);
+        })
+        .catch((error: unknown) => {
+          setErrorMessage(
+            error instanceof Error ? error.message : "Failed to refresh app-wide error state.",
+          );
+        });
+    });
+  }, []);
+
+  useEffect(() => {
+    function reportRendererFault(message: string, source: string, stack?: string): void {
+      void window.mumbler
+        .reportRendererError({ message, source, stack })
+        .then((nextSnapshot) => {
+          setSnapshot(nextSnapshot);
+        })
+        .catch((error: unknown) => {
+          setErrorMessage(
+            error instanceof Error ? error.message : "Failed to report renderer error.",
+          );
+        });
+    }
+
+    function onWindowError(event: ErrorEvent): void {
+      event.preventDefault();
+      reportRendererFault(
+        event.message || "Unknown renderer error.",
+        event.filename || "window.onerror",
+        event.error instanceof Error ? event.error.stack : undefined,
+      );
+    }
+
+    function onUnhandledRejection(event: PromiseRejectionEvent): void {
+      event.preventDefault();
+      const reason =
+        event.reason instanceof Error ? event.reason.message : String(event.reason ?? "Unknown promise rejection.");
+      reportRendererFault(
+        reason,
+        "window.unhandledrejection",
+        event.reason instanceof Error ? event.reason.stack : undefined,
+      );
+    }
+
+    window.addEventListener("error", onWindowError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+
+    return () => {
+      window.removeEventListener("error", onWindowError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+  }, []);
+
   const selectedCard =
     snapshot?.state?.cards.find((card) => card.id === snapshot.state?.selectedCardId) ?? null;
   const selectedCardIsBusy =
@@ -477,7 +536,9 @@ export function App(): ReactElement {
     pendingReviewDrafts.length > 0 ||
     pendingSaveConflict !== null ||
     pendingRemoveCardId !== null ||
-    pendingCloseConfirmation;
+    pendingCloseConfirmation ||
+    snapshot?.startupDiagnostic != null ||
+    snapshot?.appWideError != null;
   const languageOptions = useMemo(() => {
     const configuredLanguages = snapshot?.settingsSummary?.languages ?? [];
     if (selectedCard === null) {
@@ -700,6 +761,32 @@ export function App(): ReactElement {
     }
   }
 
+  async function handleDismissAppWideError(): Promise<void> {
+    try {
+      const nextSnapshot = await window.mumbler.dismissAppWideError();
+      setSnapshot(nextSnapshot);
+      setErrorMessage(null);
+    } catch (error: unknown) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Failed to dismiss app-wide error.",
+      );
+    }
+  }
+
+  async function handleResetState(): Promise<void> {
+    setIsResettingState(true);
+    try {
+      const nextSnapshot = await window.mumbler.resetState();
+      setSnapshot(nextSnapshot);
+      setErrorMessage(null);
+      setNoticeMessage("State and settings were reset to defaults.");
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to reset state.");
+    } finally {
+      setIsResettingState(false);
+    }
+  }
+
   async function handleShortcutCommand(commandId: string): Promise<void> {
     if (selectedCard === null) {
       if (commandId === "select-previous" || commandId === "select-next") {
@@ -866,7 +953,7 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          <span className="pill">Phase 9 Commands</span>
+          <span className="pill">Phase 10 Reliability</span>
           {snapshot ? (
             <span className="pill pill--quiet">
               {snapshot.appVersion} · {snapshot.platform}
@@ -941,6 +1028,16 @@ export function App(): ReactElement {
             <section className="panel panel--nested queue-empty">
               <p className="empty-state__title">{snapshot.startupDiagnostic.title}</p>
               <p className="empty-state__body">{snapshot.startupDiagnostic.message}</p>
+              <div className="toolbar">
+                <button
+                  type="button"
+                  className="button button--danger"
+                  onClick={() => void handleResetState()}
+                  disabled={isResettingState}
+                >
+                  {isResettingState ? "Resetting..." : "Reset State"}
+                </button>
+              </div>
             </section>
           ) : snapshot?.state?.cards.length ? (
             <QueueList
@@ -1002,8 +1099,8 @@ export function App(): ReactElement {
               <h2>Selection Workspace</h2>
             </div>
             <p className="panel__note">
-              Phase 9 activates the shortcut registry and custom close confirmation while keeping
-              the existing trim, Gemini, save, and remove workflow intact.
+              Phase 10 adds app-wide error surfacing and startup recovery while keeping the
+              existing trim, Gemini, save, and remove workflow intact.
             </p>
           </div>
 
@@ -1451,6 +1548,22 @@ export function App(): ReactElement {
               label: "Cancel",
               onClick: () => {
                 setPendingSaveConflict(null);
+              },
+            },
+          ]}
+        />
+      ) : null}
+
+      {snapshot?.appWideError ? (
+        <DecisionModal
+          title={snapshot.appWideError.title}
+          body={snapshot.appWideError.message}
+          actions={[
+            {
+              label: "Dismiss",
+              variant: "primary",
+              onClick: () => {
+                void handleDismissAppWideError();
               },
             },
           ]}
