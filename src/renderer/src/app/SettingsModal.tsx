@@ -106,11 +106,9 @@ export function SettingsModal({
       <section className="modal-card modal-card--settings">
         <div className="modal-card__header">
           <h2>Configuration</h2>
-          <span className="muted-tag">
-            {draft.hasGeminiApiKey && !draft.clearGeminiApiKey
-              ? "Gemini key saved"
-              : "Gemini key missing"}
-          </span>
+          <button type="button" className="button button--ghost button--compact modal-close" onClick={onClose} disabled={isSaving}>
+            ✕
+          </button>
         </div>
 
         {errorMessage ? <p className="inline-error">{errorMessage}</p> : null}

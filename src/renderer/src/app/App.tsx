@@ -39,44 +39,44 @@ function formatOptionalSeconds(value: number | null): string {
 
 function describeTrimDecision(decision: TrimDecision | null): string {
   if (decision === null) {
-    return "Markers not analyzed yet.";
+    return "Not analyzed.";
   }
 
   if (decision.kind === "not-needed") {
-    return "No trim markers set.";
+    return "No markers set.";
   }
 
   if (decision.kind === "stream-copy") {
-    return "Boundaries found within tolerance. Stream copy is eligible.";
+    return "Stream copy eligible.";
   }
 
-  return "One or more boundaries fell outside tolerance. Re-encode will be required.";
+  return "Re-encode required.";
 }
 
 function describeCardStep(card: MumblerCard): string {
   if (card.status === "Transcribing") {
-    return "Gemini transcription in progress.";
+    return "Transcribing...";
   }
 
   if (card.status === "Generating Metadata") {
     if (card.activeStep === "title") {
-      return "Generating title.";
+      return "Generating title...";
     }
     if (card.activeStep === "slug") {
-      return "Generating slug.";
+      return "Generating slug...";
     }
-    return "Generating metadata.";
+    return "Generating metadata...";
   }
 
   if (card.status === "Ready to Save") {
-    return "Transcript and metadata are ready.";
+    return "Ready to save.";
   }
 
   if (card.status === "Error") {
-    return card.lastError?.message ?? "Processing failed.";
+    return card.lastError?.message ?? "Failed.";
   }
 
-  return "Ready for transcription.";
+  return "Imported.";
 }
 
 function formatAiRun(
@@ -99,11 +99,11 @@ function getTranscribeDisabledReason(params: {
   }
 
   if (!params.hasGeminiKey) {
-    return "Configure the Gemini API key in Settings before transcribing.";
+    return "Gemini API key not configured.";
   }
 
   if (params.selectedCardIsBusy) {
-    return "This card is already being processed.";
+    return "Processing.";
   }
 
   return null;
@@ -119,15 +119,15 @@ function getSaveDisabledReason(params: {
   }
 
   if (params.selectedCard.status !== "Ready to Save") {
-    return "Save unlocks after transcription, title, and slug are complete.";
+    return "Not ready to save.";
   }
 
   if (params.selectedCardIsBusy) {
-    return "Wait until the current card operation finishes.";
+    return "Processing.";
   }
 
   if (params.outputDirectory == null || params.outputDirectory.trim().length === 0) {
-    return "Choose an output directory before saving.";
+    return "No output directory.";
   }
 
   return null;
@@ -906,13 +906,13 @@ export function App(): ReactElement {
             <section className="panel panel--nested queue-empty">
               <p className="empty-state__title">
                 {snapshot?.state?.pendingImports.length
-                  ? "Pending timestamp review."
-                  : "No recordings yet."}
+                  ? "Pending review"
+                  : "No recordings"}
               </p>
               <p className="empty-state__body">
                 {snapshot?.state?.pendingImports.length
-                  ? "Imported files are waiting for timestamp confirmation before they enter the queue."
-                  : "Click Import or drop audio files here. Imported files are copied into working storage, then the outside originals are moved to trash."}
+                  ? "Confirm timestamps to add files to the queue."
+                  : "Import or drop audio files here."}
               </p>
             </section>
           )}
@@ -1221,7 +1221,7 @@ export function App(): ReactElement {
                       readOnly
                       className="result-output"
                       value={selectedCard.transcription.text ?? ""}
-                      placeholder="Transcript will appear here."
+                      placeholder=""
                     />
                   </label>
                   <label className="field">
@@ -1240,7 +1240,7 @@ export function App(): ReactElement {
                       readOnly
                       className="result-output"
                       value={selectedCard.metadata.title ?? ""}
-                      placeholder="Generated title will appear here."
+                      placeholder=""
                     />
                   </label>
                   <label className="field">
@@ -1259,7 +1259,7 @@ export function App(): ReactElement {
                       readOnly
                       className="result-output"
                       value={selectedCard.metadata.slug ?? ""}
-                      placeholder="Generated slug will appear here."
+                      placeholder=""
                     />
                   </label>
                   <section className="detail-card detail-card--nested">
@@ -1301,17 +1301,12 @@ export function App(): ReactElement {
             </div>
           ) : snapshot?.state?.cards.length ? (
             <section className="panel panel--nested queue-empty">
-              <p className="empty-state__title">Select a recording.</p>
-              <p className="empty-state__body">
-                Pick a queue item to inspect its waveform, adjust trim markers, or duplicate it for a second extract.
-              </p>
+              <p className="empty-state__title">Select a recording</p>
             </section>
           ) : (
             <section className="panel panel--nested queue-empty">
-              <p className="empty-state__title">No queue item selected.</p>
-              <p className="empty-state__body">
-                Import recordings first. After timestamp review they will appear here for playback and trimming.
-              </p>
+              <p className="empty-state__title">No selection</p>
+              <p className="empty-state__body">Import recordings to get started.</p>
             </section>
           )}
         </section>
@@ -1381,27 +1376,27 @@ export function App(): ReactElement {
 
       {pendingSaveConflict ? (
         <DecisionModal
-          title="File Name Collision"
-          body={`The destination already contains ${pendingSaveConflict.result.audioPath} or its matching JSON sidecar. You can add a nanoid suffix, overwrite the existing pair, or cancel.`}
+          title="File Exists"
+          body={`${pendingSaveConflict.result.audioPath} already exists.`}
           actions={[
             {
-              label: "Add Nanoid Suffix",
-              variant: "primary",
+              label: "Cancel",
               onClick: () => {
-                void handleSaveCard(pendingSaveConflict.cardId, "suffix");
+                setPendingSaveConflict(null);
               },
             },
             {
-              label: "Overwrite Existing",
+              label: "Overwrite",
               variant: "danger",
               onClick: () => {
                 void handleSaveCard(pendingSaveConflict.cardId, "overwrite");
               },
             },
             {
-              label: "Cancel",
+              label: "Add Suffix",
+              variant: "primary",
               onClick: () => {
-                setPendingSaveConflict(null);
+                void handleSaveCard(pendingSaveConflict.cardId, "suffix");
               },
             },
           ]}
@@ -1426,22 +1421,22 @@ export function App(): ReactElement {
 
       {pendingCloseConfirmation ? (
         <DecisionModal
-          title="Close Mumbler"
-          body="Close the app window now? In-progress work will be restored as interrupted errors on next launch."
+          title="Close Mumbler?"
+          body="In-progress items will resume as errors on next launch."
           actions={[
-            {
-              label: "Close App",
-              variant: "danger",
-              onClick: () => {
-                setPendingCloseConfirmation(false);
-                void window.mumbler.respondToWindowClose(true);
-              },
-            },
             {
               label: "Cancel",
               onClick: () => {
                 setPendingCloseConfirmation(false);
                 void window.mumbler.respondToWindowClose(false);
+              },
+            },
+            {
+              label: "Close",
+              variant: "danger",
+              onClick: () => {
+                setPendingCloseConfirmation(false);
+                void window.mumbler.respondToWindowClose(true);
               },
             },
           ]}
@@ -1450,20 +1445,20 @@ export function App(): ReactElement {
 
       {pendingRemoveCardId ? (
         <DecisionModal
-          title="Remove Recording"
-          body="This removes the card from the queue and moves its app-managed working audio to trash. The finalized output, if any, is not touched."
+          title="Remove Recording?"
+          body="Working audio will be moved to trash. Saved output is not affected."
           actions={[
+            {
+              label: "Cancel",
+              onClick: () => {
+                setPendingRemoveCardId(null);
+              },
+            },
             {
               label: "Remove",
               variant: "danger",
               onClick: () => {
                 void confirmRemoveCard(pendingRemoveCardId);
-              },
-            },
-            {
-              label: "Cancel",
-              onClick: () => {
-                setPendingRemoveCardId(null);
               },
             },
           ]}

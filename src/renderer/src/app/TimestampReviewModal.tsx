@@ -49,11 +49,8 @@ export function TimestampReviewModal({
     <div className="modal-backdrop">
       <section className="modal-card">
         <div className="modal-card__header">
-          <div>
-            <p className="section-kicker">Timestamp Review</p>
-            <h2>Confirm Imported Timestamps</h2>
-          </div>
-          <span className="muted-tag">{items.length} pending</span>
+          <h2>Timestamp Review</h2>
+          <span className="muted-tag">{items.length} files</span>
         </div>
 
         <div className="modal-toolbar">
@@ -176,7 +173,7 @@ export function TimestampReviewModal({
             onClick={onConfirm}
             disabled={isConfirmDisabled || isSubmitting}
           >
-            {isSubmitting ? "Confirming..." : "Confirm and Add to Queue"}
+            {isSubmitting ? "Confirming..." : "Confirm"}
           </button>
         </div>
 

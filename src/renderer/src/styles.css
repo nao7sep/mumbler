@@ -105,7 +105,7 @@ textarea:focus-visible,
 }
 
 .topbar h1 {
-  font-size: 1.25rem;
+  font-size: 1.5rem;
 }
 
 .eyebrow,
@@ -199,10 +199,11 @@ textarea:focus-visible,
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  margin-bottom: 16px;
 }
 
 .panel__header h2 {
-  font-size: 0.875rem;
+  font-size: 1.125rem;
 }
 
 .detail-card__header h3 {
