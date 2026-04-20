@@ -50,10 +50,7 @@ export function DecisionModal({ title, body, actions }: DecisionModalProps): Rea
     <div className="modal-backdrop">
       <section className="modal-card modal-card--narrow">
         <div className="modal-card__header">
-          <div>
-            <p className="section-kicker">Confirm</p>
-            <h2>{title}</h2>
-          </div>
+          <h2>{title}</h2>
         </div>
         <p className="empty-state__body">{body}</p>
         <div className="modal-actions">

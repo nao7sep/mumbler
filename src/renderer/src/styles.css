@@ -49,6 +49,7 @@ body,
 
 body {
   min-height: 100vh;
+  font-size: 0.875rem;
 }
 
 button,
@@ -110,7 +111,7 @@ textarea:focus-visible,
 .eyebrow,
 .section-kicker {
   margin: 0 0 2px;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -163,7 +164,7 @@ textarea:focus-visible,
 
 .workspace {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-columns: 400px minmax(0, 1fr);
   gap: 20px;
 }
 
@@ -427,7 +428,7 @@ textarea:focus-visible,
 
 .status-chip {
   border: 1px solid transparent;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
@@ -550,7 +551,7 @@ textarea:focus-visible,
 
 .meta-list dt,
 .field span {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--text-tertiary);
   text-transform: uppercase;
@@ -710,7 +711,7 @@ textarea:focus-visible,
   border-radius: var(--radius-sm);
   background: var(--surface);
   border: 1px solid var(--border);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
@@ -764,7 +765,7 @@ textarea:focus-visible,
 }
 
 .provenance-time {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   color: var(--text-tertiary);
 }
 
@@ -785,18 +786,9 @@ textarea:focus-visible,
   background: var(--bg);
 }
 
-.shortcut-item--editable {
-  align-items: center;
-}
-
-.shortcut-item--editable input {
-  width: min(160px, 100%);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.375rem 0.5rem;
-  background: var(--surface);
-  font-size: 0.75rem;
-  text-align: right;
+.shortcut-item span {
+  font-size: 0.8125rem;
+  color: var(--text);
 }
 
 .shortcut-item kbd {
@@ -804,7 +796,7 @@ textarea:focus-visible,
   padding: 0.15rem 0.4rem;
   background: var(--accent-subtle);
   color: var(--accent);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 500;
   font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
 }
@@ -889,19 +881,21 @@ textarea:focus-visible,
   font-weight: 500;
 }
 
-.settings-grid {
+.settings-sections {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 24px;
   margin-top: 16px;
 }
 
 .settings-section {
-  align-content: start;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 16px;
 }
 
-.settings-section--wide {
-  grid-column: 1 / -1;
+.settings-section h3 {
+  margin: 0 0 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .settings-number-grid {
@@ -909,6 +903,69 @@ textarea:focus-visible,
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
+}
+
+.field-hint {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-tertiary);
+}
+
+.field-hint a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.field-hint a:hover {
+  text-decoration: underline;
+}
+
+.editable-list {
+  display: grid;
+  gap: 6px;
+}
+
+.editable-list__items {
+  display: grid;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.editable-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 0.8125rem;
+}
+
+.editable-list__item span {
+  word-break: break-all;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+
+.editable-list__add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.editable-list__add input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
+  background: var(--surface);
+  color: var(--text);
 }
 
 @media (max-width: 1100px) {
@@ -922,7 +979,6 @@ textarea:focus-visible,
   .nudge-grid,
   .action-grid,
   .result-grid,
-  .settings-grid,
   .settings-number-grid,
   .storage-grid,
   .trim-editor-grid,

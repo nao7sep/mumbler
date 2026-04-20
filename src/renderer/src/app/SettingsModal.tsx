@@ -1,9 +1,78 @@
-import { useMemo, type ReactElement } from "react";
+import { useMemo, useState, type ReactElement } from "react";
 
-import type { CommandDefinition, CommandId, SettingsDraft } from "@shared/app-shell";
+import type { CommandDefinition, SettingsDraft } from "@shared/app-shell";
 
 function parseEntries(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
+}
+
+function entriesToText(entries: string[]): string {
+  return entries.join("\n");
+}
+
+function EditableList({
+  entries,
+  onChange,
+  placeholder,
+}: {
+  entries: string[];
+  onChange: (entries: string[]) => void;
+  placeholder: string;
+}): ReactElement {
+  const [newValue, setNewValue] = useState("");
+
+  function handleAdd(): void {
+    const trimmed = newValue.trim();
+    if (trimmed.length === 0 || entries.includes(trimmed)) {
+      return;
+    }
+    onChange([...entries, trimmed]);
+    setNewValue("");
+  }
+
+  function handleRemove(index: number): void {
+    onChange(entries.filter((_, i) => i !== index));
+  }
+
+  return (
+    <div className="editable-list">
+      <div className="editable-list__items">
+        {entries.map((entry, index) => (
+          <div key={`${entry}-${index}`} className="editable-list__item">
+            <span>{entry}</span>
+            <button
+              type="button"
+              className="button button--ghost button--compact"
+              onClick={() => handleRemove(index)}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="editable-list__add">
+        <input
+          value={newValue}
+          placeholder={placeholder}
+          onChange={(event) => setNewValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              handleAdd();
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="button button--ghost button--compact"
+          onClick={handleAdd}
+          disabled={newValue.trim().length === 0}
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function SettingsModal({
@@ -29,16 +98,14 @@ export function SettingsModal({
   onPickOutputDirectory: () => void;
   onSave: () => void;
 }): ReactElement {
-  const languageOptions = useMemo(() => parseEntries(draft.languagesText), [draft.languagesText]);
+  const languageEntries = useMemo(() => parseEntries(draft.languagesText), [draft.languagesText]);
+  const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
 
   return (
     <div className="modal-backdrop">
       <section className="modal-card modal-card--settings">
         <div className="modal-card__header">
-          <div>
-            <p className="section-kicker">Settings</p>
-            <h2>Mumbler Configuration</h2>
-          </div>
+          <h2>Configuration</h2>
           <span className="muted-tag">
             {draft.hasGeminiApiKey && !draft.clearGeminiApiKey
               ? "Gemini key saved"
@@ -48,11 +115,9 @@ export function SettingsModal({
 
         {errorMessage ? <p className="inline-error">{errorMessage}</p> : null}
 
-        <div className="settings-grid">
-          <section className="detail-card detail-card--nested settings-section">
-            <div className="detail-card__header">
-              <h3>Credentials</h3>
-            </div>
+        <div className="settings-sections">
+          <section className="settings-section">
+            <h3>Credentials</h3>
             <div className="field-stack">
               <label className="field">
                 <span>Gemini API Key</span>
@@ -61,14 +126,11 @@ export function SettingsModal({
                   value={draft.geminiApiKeyInput}
                   placeholder={
                     draft.hasGeminiApiKey
-                      ? "Leave blank to keep the saved key"
+                      ? "Leave blank to keep saved key"
                       : "Enter Gemini API key"
                   }
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      geminiApiKeyInput: event.target.value,
-                    })
+                    onChange({ ...draft, geminiApiKeyInput: event.target.value })
                   }
                 />
               </label>
@@ -77,33 +139,25 @@ export function SettingsModal({
                   type="checkbox"
                   checked={draft.clearGeminiApiKey}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      clearGeminiApiKey: event.target.checked,
-                    })
+                    onChange({ ...draft, clearGeminiApiKey: event.target.checked })
                   }
                 />
-                <span>Clear saved Gemini API key</span>
+                <span>Clear saved key</span>
               </label>
             </div>
           </section>
 
-          <section className="detail-card detail-card--nested settings-section">
-            <div className="detail-card__header">
-              <h3>Output and Models</h3>
-            </div>
+          <section className="settings-section">
+            <h3>Output</h3>
             <div className="field-stack">
               <label className="field">
                 <span>Output Directory</span>
                 <div className="inline-action-field">
                   <input
                     value={draft.outputDirectory}
-                    placeholder="/Users/nao7sep/output"
+                    placeholder="/path/to/output"
                     onChange={(event) =>
-                      onChange({
-                        ...draft,
-                        outputDirectory: event.target.value,
-                      })
+                      onChange({ ...draft, outputDirectory: event.target.value })
                     }
                   />
                   <button
@@ -112,19 +166,22 @@ export function SettingsModal({
                     onClick={onPickOutputDirectory}
                     disabled={isPickingOutputDirectory}
                   >
-                    {isPickingOutputDirectory ? "Choosing..." : "Browse"}
+                    Browse
                   </button>
                 </div>
               </label>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <h3>Models</h3>
+            <div className="field-stack">
               <label className="field">
                 <span>Transcription Model</span>
                 <input
                   value={draft.transcriptionModel}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      transcriptionModel: event.target.value,
-                    })
+                    onChange({ ...draft, transcriptionModel: event.target.value })
                   }
                 />
               </label>
@@ -133,20 +190,15 @@ export function SettingsModal({
                 <input
                   value={draft.metadataModel}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      metadataModel: event.target.value,
-                    })
+                    onChange({ ...draft, metadataModel: event.target.value })
                   }
                 />
               </label>
             </div>
           </section>
 
-          <section className="detail-card detail-card--nested settings-section">
-            <div className="detail-card__header">
-              <h3>Languages and Timezone</h3>
-            </div>
+          <section className="settings-section">
+            <h3>Languages</h3>
             <div className="field-stack">
               <label className="field">
                 <span>Default Language</span>
@@ -154,179 +206,146 @@ export function SettingsModal({
                   list="settings-language-options"
                   value={draft.defaultLanguage}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      defaultLanguage: event.target.value,
-                    })
+                    onChange({ ...draft, defaultLanguage: event.target.value })
                   }
                 />
               </label>
-              <label className="field">
-                <span>Languages List</span>
-                <textarea
-                  rows={8}
-                  value={draft.languagesText}
-                  onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      languagesText: event.target.value,
-                    })
-                  }
+              <div className="field">
+                <span>Available Languages</span>
+                <EditableList
+                  entries={languageEntries}
+                  onChange={(entries) => onChange({ ...draft, languagesText: entriesToText(entries) })}
+                  placeholder="Add language..."
                 />
-              </label>
+              </div>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <h3>Timezone</h3>
+            <div className="field-stack">
               <label className="field">
                 <span>Default Timezone</span>
                 <input
                   list="settings-timezone-options"
                   value={draft.defaultTimezone}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      defaultTimezone: event.target.value,
-                    })
+                    onChange({ ...draft, defaultTimezone: event.target.value })
                   }
                 />
               </label>
+              <p className="field-hint">
+                Use IANA timezone names (e.g. America/New_York, Asia/Tokyo).
+                See <a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" rel="noopener noreferrer">full list on Wikipedia</a>.
+              </p>
             </div>
           </section>
 
-          <section className="detail-card detail-card--nested settings-section">
-            <div className="detail-card__header">
-              <h3>Timestamp Parsing</h3>
-            </div>
+          <section className="settings-section">
+            <h3>Timestamp Patterns</h3>
             <div className="field-stack">
-              <label className="field">
-                <span>Timestamp Regex Patterns</span>
-                <textarea
-                  rows={8}
-                  value={draft.timestampPatternsText}
-                  onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      timestampPatternsText: event.target.value,
-                    })
-                  }
+              <div className="field">
+                <span>Regex patterns for parsing timestamps from filenames</span>
+                <EditableList
+                  entries={patternEntries}
+                  onChange={(entries) => onChange({ ...draft, timestampPatternsText: entriesToText(entries) })}
+                  placeholder="Add regex pattern..."
                 />
-              </label>
+              </div>
             </div>
           </section>
 
-          <section className="detail-card detail-card--nested settings-section settings-section--wide">
-            <div className="detail-card__header">
-              <h3>Metadata Prompts</h3>
-            </div>
+          <section className="settings-section">
+            <h3>Prompts</h3>
             <div className="field-stack">
               <label className="field">
                 <span>Title Prompt</span>
                 <textarea
-                  rows={6}
+                  rows={4}
                   value={draft.titlePrompt}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      titlePrompt: event.target.value,
-                    })
+                    onChange({ ...draft, titlePrompt: event.target.value })
                   }
                 />
               </label>
               <label className="field">
                 <span>Slug Prompt</span>
                 <textarea
-                  rows={5}
+                  rows={3}
                   value={draft.slugPrompt}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      slugPrompt: event.target.value,
-                    })
+                    onChange({ ...draft, slugPrompt: event.target.value })
                   }
                 />
               </label>
             </div>
           </section>
 
-          <section className="detail-card detail-card--nested settings-section settings-section--wide">
-            <div className="detail-card__header">
-              <h3>Playback and Pipeline</h3>
-            </div>
+          <section className="settings-section">
+            <h3>Pipeline</h3>
             <div className="settings-number-grid">
               <label className="field">
-                <span>Preview Snippet Seconds</span>
+                <span>Preview Seconds</span>
                 <input
                   type="number"
                   min={1}
                   step={1}
                   value={draft.previewSnippetSeconds}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      previewSnippetSeconds: Number.parseInt(event.target.value, 10),
-                    })
+                    onChange({ ...draft, previewSnippetSeconds: Number.parseInt(event.target.value, 10) })
                   }
                 />
               </label>
               <label className="field">
-                <span>Concurrency Limit</span>
+                <span>Concurrency</span>
                 <input
                   type="number"
                   min={1}
                   step={1}
                   value={draft.concurrencyLimit}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      concurrencyLimit: Number.parseInt(event.target.value, 10),
-                    })
+                    onChange({ ...draft, concurrencyLimit: Number.parseInt(event.target.value, 10) })
                   }
                 />
               </label>
               <label className="field">
-                <span>Retry Max Retries</span>
+                <span>Max Retries</span>
                 <input
                   type="number"
                   min={1}
                   step={1}
                   value={draft.retryMaxRetries}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      retryMaxRetries: Number.parseInt(event.target.value, 10),
-                    })
+                    onChange({ ...draft, retryMaxRetries: Number.parseInt(event.target.value, 10) })
                   }
                 />
               </label>
               <label className="field">
-                <span>Retry Initial Delay Ms</span>
+                <span>Initial Delay (ms)</span>
                 <input
                   type="number"
                   min={1}
                   step={1}
                   value={draft.retryInitialDelayMs}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      retryInitialDelayMs: Number.parseInt(event.target.value, 10),
-                    })
+                    onChange({ ...draft, retryInitialDelayMs: Number.parseInt(event.target.value, 10) })
                   }
                 />
               </label>
               <label className="field">
-                <span>Retry Max Delay Ms</span>
+                <span>Max Delay (ms)</span>
                 <input
                   type="number"
                   min={1}
                   step={1}
                   value={draft.retryMaxDelayMs}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      retryMaxDelayMs: Number.parseInt(event.target.value, 10),
-                    })
+                    onChange({ ...draft, retryMaxDelayMs: Number.parseInt(event.target.value, 10) })
                   }
                 />
               </label>
               <label className="field">
-                <span>Retry Jitter Ratio</span>
+                <span>Jitter Ratio</span>
                 <input
                   type="number"
                   min={0}
@@ -334,82 +353,57 @@ export function SettingsModal({
                   step={0.05}
                   value={draft.retryJitterRatio}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      retryJitterRatio: Number.parseFloat(event.target.value),
-                    })
+                    onChange({ ...draft, retryJitterRatio: Number.parseFloat(event.target.value) })
                   }
                 />
               </label>
               <label className="field">
-                <span>Transcription Timeout Ms</span>
+                <span>Transcription Timeout (ms)</span>
                 <input
                   type="number"
                   min={1}
                   step={1000}
                   value={draft.transcriptionTimeoutMs}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      transcriptionTimeoutMs: Number.parseInt(event.target.value, 10),
-                    })
+                    onChange({ ...draft, transcriptionTimeoutMs: Number.parseInt(event.target.value, 10) })
                   }
                 />
               </label>
               <label className="field">
-                <span>Title Timeout Ms</span>
+                <span>Title Timeout (ms)</span>
                 <input
                   type="number"
                   min={1}
                   step={1000}
                   value={draft.titleTimeoutMs}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      titleTimeoutMs: Number.parseInt(event.target.value, 10),
-                    })
+                    onChange({ ...draft, titleTimeoutMs: Number.parseInt(event.target.value, 10) })
                   }
                 />
               </label>
               <label className="field">
-                <span>Slug Timeout Ms</span>
+                <span>Slug Timeout (ms)</span>
                 <input
                   type="number"
                   min={1}
                   step={1000}
                   value={draft.slugTimeoutMs}
                   onChange={(event) =>
-                    onChange({
-                      ...draft,
-                      slugTimeoutMs: Number.parseInt(event.target.value, 10),
-                    })
+                    onChange({ ...draft, slugTimeoutMs: Number.parseInt(event.target.value, 10) })
                   }
                 />
               </label>
             </div>
           </section>
 
-          <section className="detail-card detail-card--nested settings-section settings-section--wide">
-            <div className="detail-card__header">
-              <h3>Keyboard Shortcuts</h3>
-            </div>
+          <section className="settings-section">
+            <h3>Keyboard Shortcuts</h3>
             <div className="shortcut-list">
               {commands.map((command) => (
-                <label key={command.id} className="shortcut-item shortcut-item--editable">
+                <div key={command.id} className="shortcut-item">
                   <span>{command.label}</span>
-                  <input
-                    value={draft.shortcuts[command.id]}
-                    onChange={(event) =>
-                      onChange({
-                        ...draft,
-                        shortcuts: {
-                          ...draft.shortcuts,
-                          [command.id as CommandId]: event.target.value,
-                        },
-                      })
-                    }
-                  />
-                </label>
+                  <kbd>{draft.shortcuts[command.id]}</kbd>
+                </div>
               ))}
             </div>
           </section>
@@ -420,7 +414,7 @@ export function SettingsModal({
             Cancel
           </button>
           <button type="button" className="button button--primary" onClick={onSave} disabled={isSaving}>
-            {isSaving ? "Saving..." : "Save Settings"}
+            {isSaving ? "Saving..." : "Save"}
           </button>
         </div>
 
@@ -431,7 +425,7 @@ export function SettingsModal({
         </datalist>
 
         <datalist id="settings-language-options">
-          {languageOptions.map((language) => (
+          {languageEntries.map((language) => (
             <option key={language} value={language} />
           ))}
         </datalist>

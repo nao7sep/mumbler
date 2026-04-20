@@ -693,6 +693,18 @@ export function App(): ReactElement {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        if (pendingRemoveCardId !== null) {
+          setPendingRemoveCardId(null);
+        } else if (pendingSaveConflict !== null) {
+          setPendingSaveConflict(null);
+        } else if (settingsDraft !== null && !isSavingSettings) {
+          setSettingsDraft(null);
+          setSettingsErrorMessage(null);
+        }
+        return;
+      }
+
       const settingsSummary = snapshot?.settingsSummary;
       if (modalIsOpen || isTypingTarget(event.target) || settingsSummary == null) {
         return;
@@ -711,7 +723,7 @@ export function App(): ReactElement {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [modalIsOpen, selectedCard, selectedCardIsBusy, snapshot]);
+  }, [modalIsOpen, selectedCard, selectedCardIsBusy, snapshot, settingsDraft, isSavingSettings, pendingRemoveCardId, pendingSaveConflict]);
 
   async function handleSaveCard(
     cardId: string,
@@ -786,26 +798,22 @@ export function App(): ReactElement {
         <div className="topbar__meta">
           {snapshot ? (
             <>
-              <span className="pill">{queueCards.length} in queue</span>
+              <span className="pill">{queueCards.length}</span>
               {pendingImportCount > 0 ? (
-                <span className="pill pill--quiet">{pendingImportCount} pending review</span>
+                <span className="pill pill--quiet">{pendingImportCount} pending</span>
               ) : null}
               {processingCount > 0 ? (
-                <span className="pill pill--processing">{processingCount} processing</span>
+                <span className="pill pill--processing">{processingCount} active</span>
               ) : null}
               {readyToSaveCount > 0 ? (
-                <span className="pill pill--success">{readyToSaveCount} ready to save</span>
+                <span className="pill pill--success">{readyToSaveCount} ready</span>
               ) : null}
               {errorCount > 0 ? (
-                <span className="pill pill--danger">{errorCount} errors</span>
+                <span className="pill pill--danger">{errorCount} error</span>
               ) : null}
-              <span className="pill pill--quiet">
-                {snapshot.appVersion} · {snapshot.platform}
-              </span>
+              <span className="pill pill--quiet">v{snapshot.appVersion}</span>
             </>
-          ) : (
-            <span className="pill pill--quiet">Bootstrapping UI</span>
-          )}
+          ) : null}
         </div>
       </header>
 
@@ -817,11 +825,7 @@ export function App(): ReactElement {
       >
         <aside className="queue-pane panel">
           <div className="panel__header">
-            <div>
-              <p className="section-kicker">Queue</p>
-              <h2>Incoming Recordings</h2>
-              <p className="panel__note">Sorted by effective UTC after any front-trim offset.</p>
-            </div>
+            <h2>Queue</h2>
             <div className="toolbar">
               <button
                 type="button"
@@ -837,7 +841,7 @@ export function App(): ReactElement {
                 onClick={() => void handleOpenSettings()}
                 disabled={isImporting || isLoadingSettings}
               >
-                {isLoadingSettings ? "Loading..." : "Settings"}
+                Settings
               </button>
             </div>
           </div>
@@ -912,48 +916,11 @@ export function App(): ReactElement {
               </p>
             </section>
           )}
-
-          <section className="panel panel--nested">
-            <div className="detail-card__header">
-              <h3>Workspace Snapshot</h3>
-              {snapshot?.queueSummary ? (
-                <span className="muted-tag">
-                  {snapshot.queueSummary.cardCount} cards · {snapshot.queueSummary.pendingImportCount} pending
-                </span>
-              ) : (
-                <span className="muted-tag">Unavailable</span>
-              )}
-            </div>
-            <dl className="meta-list compact-meta-list">
-              <div>
-                <dt>Working directory</dt>
-                <dd>{snapshot?.paths?.workingDir ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>Default timezone</dt>
-                <dd>{snapshot?.settingsSummary?.defaultTimezone ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>Recovered interrupted cards</dt>
-                <dd>{snapshot?.queueSummary?.recoveredInterruptedCards ?? "—"}</dd>
-              </div>
-              <div>
-                <dt>Output directory</dt>
-                <dd>{snapshot?.settingsSummary?.outputDirectory ?? "Not configured"}</dd>
-              </div>
-            </dl>
-          </section>
         </aside>
 
         <section className="detail-pane panel">
           <div className="panel__header">
-            <div>
-              <p className="section-kicker">Detail</p>
-              <h2>Selection Workspace</h2>
-            </div>
-            <p className="panel__note">
-              Work one recording at a time: verify trim, transcribe, review metadata, then save or remove.
-            </p>
+            <h2>Detail</h2>
           </div>
 
           {selectedCard ? (
@@ -997,8 +964,7 @@ export function App(): ReactElement {
 
               <section className="detail-card">
                 <div className="detail-card__header">
-                  <h3>Language and Models</h3>
-                  <span className="muted-tag">Per card language</span>
+                  <h3>Language</h3>
                 </div>
                 <div className="field-stack">
                   <label className="field">
@@ -1036,8 +1002,7 @@ export function App(): ReactElement {
 
               <section className="detail-card">
                 <div className="detail-card__header">
-                  <h3>Audio Profile</h3>
-                  <span className="muted-tag">Working source</span>
+                  <h3>Audio</h3>
                 </div>
                 <dl className="meta-list">
                   <div>
@@ -1085,14 +1050,7 @@ export function App(): ReactElement {
 
               <section className="detail-card detail-card--wide">
                 <div className="detail-card__header">
-                  <div>
-                    <h3>Mini Player and Trim</h3>
-                    <p className="panel__note">
-                      Set markers only after listening. Front trim never moves forward past the requested cut;
-                      back trim never moves backward before it.
-                    </p>
-                  </div>
-                  <span className="muted-tag">Trim first, then transcribe</span>
+                  <h3>Player and Trim</h3>
                 </div>
                 <WaveformEditor
                   ref={waveformEditorRef}
@@ -1163,15 +1121,8 @@ export function App(): ReactElement {
 
               <section className={`detail-card detail-card--wide detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
                 <div className="detail-card__header">
-                  <div>
-                    <h3>Actions and Status</h3>
-                    <p className="panel__note">{describeCardStep(selectedCard)}</p>
-                  </div>
-                  <span className="muted-tag">
-                    {snapshot?.settingsSummary?.hasGeminiApiKey
-                      ? "Gemini key configured"
-                      : "Gemini key missing"}
-                  </span>
+                  <h3>Actions</h3>
+                  <StatusChip label={selectedCard.status} />
                 </div>
                 <div className="action-grid">
                   <button
@@ -1252,7 +1203,6 @@ export function App(): ReactElement {
               <section className="detail-card detail-card--wide">
                 <div className="detail-card__header">
                   <h3>Results</h3>
-                  <span className="muted-tag">Read-only</span>
                 </div>
                 <div className="result-grid">
                   <label className="field">
@@ -1315,7 +1265,6 @@ export function App(): ReactElement {
                   <section className="detail-card detail-card--nested">
                     <div className="detail-card__header">
                       <h3>Provenance</h3>
-                      <span className="muted-tag">Per artifact</span>
                     </div>
                     <dl className="meta-list compact-meta-list">
                       <div>
