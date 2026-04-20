@@ -396,6 +396,18 @@ textarea:disabled {
   gap: 8px;
 }
 
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.checkbox-field span {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .field input,
 .field select,
 .field textarea {
@@ -405,6 +417,12 @@ textarea:disabled {
   padding: 0.84rem 0.92rem;
   background: rgba(255, 255, 255, 0.72);
   color: var(--text);
+}
+
+.inline-action-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
 }
 
 .result-output {
@@ -605,6 +623,10 @@ textarea:disabled {
   width: min(640px, calc(100vw - 48px));
 }
 
+.modal-card--settings {
+  width: min(1340px, calc(100vw - 48px));
+}
+
 .modal-card__header,
 .modal-toolbar,
 .modal-actions {
@@ -655,6 +677,28 @@ textarea:disabled {
   font-weight: 700;
 }
 
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.settings-section {
+  align-content: start;
+}
+
+.settings-section--wide {
+  grid-column: 1 / -1;
+}
+
+.settings-number-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
 @media (max-width: 1100px) {
   .workspace {
     grid-template-columns: 1fr;
@@ -662,8 +706,11 @@ textarea:disabled {
 
   .detail-grid,
   .control-row,
+  .inline-action-field,
   .nudge-grid,
   .result-grid,
+  .settings-grid,
+  .settings-number-grid,
   .storage-grid,
   .trim-editor-grid,
   .review-row__fields {

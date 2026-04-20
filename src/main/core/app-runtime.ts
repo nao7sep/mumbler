@@ -32,6 +32,7 @@ import {
   type PendingImportReviewItem,
   type SaveCardResult,
   type SaveConflictResolution,
+  type SettingsDraft,
   type SettingsSummary,
 } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS, buildDefaultShortcutMap } from "@shared/commands";
@@ -169,6 +170,11 @@ export class ApplicationRuntime {
       state,
       supportedTimezones: this.runtime.supportedTimezones,
     };
+  }
+
+  getSettingsDraft(): SettingsDraft {
+    this.ensureReady();
+    return buildSettingsDraft(this.runtime.settings!);
   }
 
   async openImportDialog(window: BrowserWindow): Promise<ImportOperationResult> {
@@ -396,6 +402,44 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
+  async updateCardLanguage(cardId: string, language: string): Promise<AppSnapshot> {
+    this.ensureReady();
+    const state = this.runtime.state!;
+    const settings = this.runtime.settings!;
+    const card = state.cards.find((entry) => entry.id === cardId);
+
+    if (card === undefined) {
+      throw new Error("Card to update does not exist.");
+    }
+
+    if (card.status === "Transcribing" || card.status === "Generating Metadata") {
+      throw new Error("Cannot change language while this card is being processed.");
+    }
+
+    const normalizedLanguage = language.trim();
+    if (normalizedLanguage.length === 0) {
+      throw new Error("Language is required.");
+    }
+
+    if (!settings.languages.includes(normalizedLanguage)) {
+      throw new Error("Choose a language from the configured language list.");
+    }
+
+    if (card.language === normalizedLanguage) {
+      return this.getSnapshot();
+    }
+
+    card.language = normalizedLanguage;
+    clearCardResults(card);
+    await this.persistState();
+    await this.runtime.logger!.info("card.language", "Updated card language and cleared results.", {
+      cardId,
+      language: normalizedLanguage,
+    });
+
+    return this.getSnapshot();
+  }
+
   async getCardMediaSource(cardId: string): Promise<string> {
     this.ensureReady();
     const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
@@ -415,7 +459,7 @@ export class ApplicationRuntime {
     return this.runCardPipeline(cardId, "retry");
   }
 
-  async chooseOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
+  async pickOutputDirectory(window: BrowserWindow): Promise<string | null> {
     this.ensureReady();
 
     const result = await dialog.showOpenDialog(window, {
@@ -424,10 +468,43 @@ export class ApplicationRuntime {
     });
 
     if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return result.filePaths[0] ?? null;
+  }
+
+  async saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
+    this.ensureReady();
+
+    const nextSettings = applySettingsDraft(this.runtime.settings!, draft);
+    const logger = createLogger(this.runtime.paths!.logsDir, getSecretsForRedaction(nextSettings));
+    this.runtime.settings = nextSettings;
+    this.runtime.logger = logger;
+
+    await this.persistSettings();
+    await logger.info("settings.save", "Updated application settings.", {
+      outputDirectory: nextSettings.outputDirectory,
+      transcriptionModel: nextSettings.transcriptionModel,
+      metadataModel: nextSettings.metadataModel,
+      defaultLanguage: nextSettings.defaultLanguage,
+      defaultTimezone: nextSettings.defaultTimezone,
+      languageCount: nextSettings.languages.length,
+      timestampPatternCount: nextSettings.timestampPatterns.length,
+      previewSnippetSeconds: nextSettings.previewSnippetSeconds,
+      concurrencyLimit: nextSettings.concurrencyLimit,
+    });
+
+    return this.getSnapshot();
+  }
+
+  async chooseOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
+    const outputDirectory = await this.pickOutputDirectory(window);
+    if (outputDirectory === null) {
       return this.getSnapshot();
     }
 
-    this.runtime.settings!.outputDirectory = result.filePaths[0] ?? null;
+    this.runtime.settings!.outputDirectory = outputDirectory;
     await this.persistSettings();
     await this.runtime.logger!.info("settings.output-directory", "Updated output directory.", {
       outputDirectory: this.runtime.settings!.outputDirectory,
@@ -1200,12 +1277,196 @@ function summarizeSettings(settings: MumblerSettings): SettingsSummary {
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
     defaultLanguage: settings.defaultLanguage,
+    languages: [...settings.languages],
     defaultTimezone: settings.defaultTimezone,
     languageCount: settings.languages.length,
     timestampPatternCount: settings.timestampPatterns.length,
     previewSnippetSeconds: settings.previewSnippetSeconds,
     concurrencyLimit: settings.concurrencyLimit,
   };
+}
+
+function buildSettingsDraft(settings: MumblerSettings): SettingsDraft {
+  return {
+    schemaVersion: SETTINGS_SCHEMA_VERSION,
+    hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
+    geminiApiKeyInput: "",
+    clearGeminiApiKey: false,
+    outputDirectory: settings.outputDirectory ?? "",
+    transcriptionModel: settings.transcriptionModel,
+    metadataModel: settings.metadataModel,
+    defaultLanguage: settings.defaultLanguage,
+    languagesText: settings.languages.join("\n"),
+    defaultTimezone: settings.defaultTimezone,
+    timestampPatternsText: settings.timestampPatterns.join("\n"),
+    titlePrompt: settings.prompts.title,
+    slugPrompt: settings.prompts.slug,
+    previewSnippetSeconds: settings.previewSnippetSeconds,
+    concurrencyLimit: settings.concurrencyLimit,
+    retryMaxRetries: settings.retryPolicy.maxRetries,
+    retryInitialDelayMs: settings.retryPolicy.initialDelayMs,
+    retryMaxDelayMs: settings.retryPolicy.maxDelayMs,
+    retryJitterRatio: settings.retryPolicy.jitterRatio,
+    transcriptionTimeoutMs: settings.timeouts.transcriptionMs,
+    titleTimeoutMs: settings.timeouts.titleMs,
+    slugTimeoutMs: settings.timeouts.slugMs,
+  };
+}
+
+function applySettingsDraft(current: MumblerSettings, draft: SettingsDraft): MumblerSettings {
+  const transcriptionModel = draft.transcriptionModel.trim();
+  const metadataModel = draft.metadataModel.trim();
+  const defaultLanguage = draft.defaultLanguage.trim();
+  const defaultTimezone = draft.defaultTimezone.trim();
+  const titlePrompt = draft.titlePrompt.trim();
+  const slugPrompt = draft.slugPrompt.trim();
+  const outputDirectory = draft.outputDirectory.trim();
+  const languages = deduplicateStrings(parseSettingsEntries(draft.languagesText));
+  const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
+
+  if (transcriptionModel.length === 0) {
+    throw new Error("Transcription model is required.");
+  }
+
+  if (metadataModel.length === 0) {
+    throw new Error("Metadata model is required.");
+  }
+
+  if (defaultLanguage.length === 0) {
+    throw new Error("Default language is required.");
+  }
+
+  if (!isSupportedTimezone(defaultTimezone)) {
+    throw new Error("Default timezone must be a valid IANA timezone.");
+  }
+
+  if (languages.length === 0) {
+    throw new Error("Add at least one language.");
+  }
+
+  if (timestampPatterns.length === 0) {
+    throw new Error("Add at least one timestamp regex pattern.");
+  }
+
+  requirePromptPlaceholders(titlePrompt, ["{transcript}", "{language}"], "Title prompt");
+  requirePromptPlaceholders(slugPrompt, ["{title}"], "Slug prompt");
+
+  const previewSnippetSeconds = requirePositiveInteger(
+    draft.previewSnippetSeconds,
+    "Preview snippet seconds",
+  );
+  const concurrencyLimit = requirePositiveInteger(draft.concurrencyLimit, "Concurrency limit");
+  const retryMaxRetries = requirePositiveInteger(draft.retryMaxRetries, "Retry max retries");
+  const retryInitialDelayMs = requirePositiveInteger(
+    draft.retryInitialDelayMs,
+    "Retry initial delay",
+  );
+  const retryMaxDelayMs = requirePositiveInteger(draft.retryMaxDelayMs, "Retry max delay");
+  const retryJitterRatio = requireRatio(draft.retryJitterRatio, "Retry jitter ratio");
+  const transcriptionTimeoutMs = requirePositiveInteger(
+    draft.transcriptionTimeoutMs,
+    "Transcription timeout",
+  );
+  const titleTimeoutMs = requirePositiveInteger(draft.titleTimeoutMs, "Title timeout");
+  const slugTimeoutMs = requirePositiveInteger(draft.slugTimeoutMs, "Slug timeout");
+
+  if (retryMaxDelayMs < retryInitialDelayMs) {
+    throw new Error("Retry max delay must be greater than or equal to retry initial delay.");
+  }
+
+  const normalizedLanguages = languages.includes(defaultLanguage)
+    ? languages
+    : [defaultLanguage, ...languages];
+
+  return {
+    ...current,
+    geminiApiKeyObfuscated: resolveGeminiApiKeyObfuscated(current, draft),
+    outputDirectory: outputDirectory.length === 0 ? null : outputDirectory,
+    transcriptionModel,
+    metadataModel,
+    defaultLanguage,
+    languages: normalizedLanguages,
+    defaultTimezone,
+    timestampPatterns,
+    prompts: {
+      title: titlePrompt,
+      slug: slugPrompt,
+    },
+    previewSnippetSeconds,
+    concurrencyLimit,
+    retryPolicy: {
+      maxRetries: retryMaxRetries,
+      initialDelayMs: retryInitialDelayMs,
+      maxDelayMs: retryMaxDelayMs,
+      jitterRatio: retryJitterRatio,
+    },
+    timeouts: {
+      transcriptionMs: transcriptionTimeoutMs,
+      titleMs: titleTimeoutMs,
+      slugMs: slugTimeoutMs,
+    },
+  };
+}
+
+function resolveGeminiApiKeyObfuscated(current: MumblerSettings, draft: SettingsDraft): string {
+  const nextApiKey = draft.geminiApiKeyInput.trim();
+
+  if (draft.clearGeminiApiKey && nextApiKey.length > 0) {
+    throw new Error("Enter a new Gemini API key or clear the saved key, not both.");
+  }
+
+  if (draft.clearGeminiApiKey) {
+    return "";
+  }
+
+  if (nextApiKey.length === 0) {
+    return current.geminiApiKeyObfuscated;
+  }
+
+  return encodeGeminiApiKey(nextApiKey);
+}
+
+function parseSettingsEntries(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function deduplicateStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function requirePromptPlaceholders(
+  prompt: string,
+  requiredPlaceholders: string[],
+  label: string,
+): void {
+  if (prompt.length === 0) {
+    throw new Error(`${label} is required.`);
+  }
+
+  for (const placeholder of requiredPlaceholders) {
+    if (!prompt.includes(placeholder)) {
+      throw new Error(`${label} must include ${placeholder}.`);
+    }
+  }
+}
+
+function requirePositiveInteger(value: number, label: string): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+
+  return value;
+}
+
+function requireRatio(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${label} must be between 0 and 1.`);
+  }
+
+  return value;
 }
 
 async function pathsConflict(audioPath: string, jsonPath: string): Promise<boolean> {
@@ -1437,6 +1698,10 @@ async function pruneOldLogs(logsDir: string): Promise<void> {
 function getSecretsForRedaction(settings: MumblerSettings): string[] {
   const decodedKey = decodeGeminiApiKey(settings.geminiApiKeyObfuscated);
   return decodedKey.length > 0 ? [decodedKey] : [];
+}
+
+function encodeGeminiApiKey(value: string): string {
+  return Buffer.from(value.split("").reverse().join(""), "utf8").toString("base64");
 }
 
 function decodeGeminiApiKey(obfuscated: string): string {

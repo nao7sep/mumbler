@@ -9,10 +9,13 @@ import {
   type PendingImportReviewItem,
   type SaveCardResult,
   type SaveConflictResolution,
+  type SettingsDraft,
 } from "@shared/app-shell";
 
 const api: MumblerShellApi = {
   getSnapshot: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.getSnapshot) as Promise<AppSnapshot>,
+  getSettingsDraft: () =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.getSettingsDraft) as Promise<SettingsDraft>,
   openImportDialog: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.openImportDialog) as Promise<ImportOperationResult>,
   importDroppedPaths: (paths: string[]) =>
@@ -31,12 +34,18 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.duplicateCard, cardId) as Promise<AppSnapshot>,
   updateCardTrim: (cardId: string, trim: CardTrim) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.updateCardTrim, cardId, trim) as Promise<AppSnapshot>,
+  updateCardLanguage: (cardId: string, language: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.updateCardLanguage, cardId, language) as Promise<AppSnapshot>,
   getCardMediaSource: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getCardMediaSource, cardId) as Promise<string>,
   transcribeCard: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.transcribeCard, cardId) as Promise<AppSnapshot>,
   retryCard: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.retryCard, cardId) as Promise<AppSnapshot>,
+  pickOutputDirectory: () =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.pickOutputDirectory) as Promise<string | null>,
+  saveSettingsDraft: (draft: SettingsDraft) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.saveSettingsDraft, draft) as Promise<AppSnapshot>,
   chooseOutputDirectory: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.chooseOutputDirectory) as Promise<AppSnapshot>,
   saveCard: (cardId: string, resolution?: SaveConflictResolution) =>

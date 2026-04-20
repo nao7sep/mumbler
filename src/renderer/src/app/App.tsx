@@ -7,6 +7,7 @@ import type {
   MumblerCard,
   PendingImportReviewItem,
   SaveCardResult,
+  SettingsDraft,
   TrimDecision,
 } from "@shared/app-shell";
 import {
@@ -17,6 +18,7 @@ import {
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 import { WaveformEditor } from "./WaveformEditor";
+import { SettingsModal } from "./SettingsModal";
 
 interface StatusChipProps {
   label: CardStatus;
@@ -400,6 +402,11 @@ export function App(): ReactElement {
     result: Extract<SaveCardResult, { kind: "conflict" }>;
   } | null>(null);
   const [pendingRemoveCardId, setPendingRemoveCardId] = useState<string | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isPickingSettingsOutputDirectory, setIsPickingSettingsOutputDirectory] = useState(false);
+  const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -456,6 +463,16 @@ export function App(): ReactElement {
     (activePipelineCards.includes(selectedCard.id) ||
       selectedCard.status === "Transcribing" ||
       selectedCard.status === "Generating Metadata");
+  const languageOptions = useMemo(() => {
+    const configuredLanguages = snapshot?.settingsSummary?.languages ?? [];
+    if (selectedCard === null) {
+      return configuredLanguages;
+    }
+
+    return configuredLanguages.includes(selectedCard.language)
+      ? configuredLanguages
+      : [selectedCard.language, ...configuredLanguages];
+  }, [selectedCard, snapshot?.settingsSummary?.languages]);
 
   async function handleImportClick(): Promise<void> {
     setIsImporting(true);
@@ -600,6 +617,74 @@ export function App(): ReactElement {
     }
   }
 
+  async function handleOpenSettings(): Promise<void> {
+    setIsLoadingSettings(true);
+    try {
+      const draft = await window.mumbler.getSettingsDraft();
+      setSettingsDraft(draft);
+      setSettingsErrorMessage(null);
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to load settings.");
+    } finally {
+      setIsLoadingSettings(false);
+    }
+  }
+
+  async function handlePickSettingsOutputDirectory(): Promise<void> {
+    setIsPickingSettingsOutputDirectory(true);
+    try {
+      const nextPath = await window.mumbler.pickOutputDirectory();
+      if (nextPath !== null) {
+        setSettingsDraft((current) =>
+          current === null
+            ? current
+            : {
+                ...current,
+                outputDirectory: nextPath,
+              },
+        );
+      }
+      setSettingsErrorMessage(null);
+    } catch (error: unknown) {
+      setSettingsErrorMessage(
+        error instanceof Error ? error.message : "Failed to choose output directory.",
+      );
+    } finally {
+      setIsPickingSettingsOutputDirectory(false);
+    }
+  }
+
+  async function handleSaveSettings(): Promise<void> {
+    if (settingsDraft === null) {
+      return;
+    }
+
+    setIsSavingSettings(true);
+    try {
+      const nextSnapshot = await window.mumbler.saveSettingsDraft(settingsDraft);
+      setSnapshot(nextSnapshot);
+      setSettingsDraft(null);
+      setSettingsErrorMessage(null);
+      setNoticeMessage("Settings saved.");
+      setErrorMessage(null);
+    } catch (error: unknown) {
+      setSettingsErrorMessage(error instanceof Error ? error.message : "Failed to save settings.");
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
+  async function handleCardLanguageChange(cardId: string, language: string): Promise<void> {
+    try {
+      const nextSnapshot = await window.mumbler.updateCardLanguage(cardId, language);
+      setSnapshot(nextSnapshot);
+      setErrorMessage(null);
+      setNoticeMessage(null);
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to update card language.");
+    }
+  }
+
   async function handleSaveCard(
     cardId: string,
     resolution?: "overwrite" | "suffix" | "cancel",
@@ -672,7 +757,7 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          <span className="pill">Phase 6 Finalization</span>
+          <span className="pill">Phase 8 Settings</span>
           {snapshot ? (
             <span className="pill pill--quiet">
               {snapshot.appVersion} · {snapshot.platform}
@@ -704,8 +789,13 @@ export function App(): ReactElement {
               >
                 {isImporting ? "Importing..." : "Import"}
               </button>
-              <button type="button" className="button button--ghost" disabled>
-                Settings
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={() => void handleOpenSettings()}
+                disabled={isImporting || isLoadingSettings}
+              >
+                {isLoadingSettings ? "Loading..." : "Settings"}
               </button>
             </div>
           </div>
@@ -803,8 +893,8 @@ export function App(): ReactElement {
               <h2>Selection Workspace</h2>
             </div>
             <p className="panel__note">
-              Phase 6 adds output-directory selection, atomic audio plus JSON finalization,
-              collision handling, and remove-to-trash workflow.
+              Phase 8 adds editable settings, per-card language control, and keeps the existing
+              trim, Gemini, save, and remove workflow intact.
             </p>
           </div>
 
@@ -839,6 +929,45 @@ export function App(): ReactElement {
                   <div>
                     <dt>Import source</dt>
                     <dd>{selectedCard.importSource}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="detail-card">
+                <div className="detail-card__header">
+                  <h3>Language and Models</h3>
+                  <span className="muted-tag">Per card language</span>
+                </div>
+                <div className="field-stack">
+                  <label className="field">
+                    <span>Language</span>
+                    <select
+                      value={selectedCard.language}
+                      disabled={selectedCardIsBusy}
+                      onChange={(event) =>
+                        void handleCardLanguageChange(selectedCard.id, event.target.value)
+                      }
+                    >
+                      {languageOptions.map((language) => (
+                        <option key={language} value={language}>
+                          {language}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <dl className="meta-list compact-meta-list">
+                  <div>
+                    <dt>Transcription model</dt>
+                    <dd>{snapshot?.settingsSummary?.transcriptionModel ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Metadata model</dt>
+                    <dd>{snapshot?.settingsSummary?.metadataModel ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Configured languages</dt>
+                    <dd>{snapshot?.settingsSummary?.languageCount ?? "—"}</dd>
                   </div>
                 </dl>
               </section>
@@ -1029,16 +1158,14 @@ export function App(): ReactElement {
                 </div>
                 <dl className="meta-list compact-meta-list">
                   <div>
-                    <dt>Transcription model</dt>
-                    <dd>{snapshot?.settingsSummary?.transcriptionModel ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Metadata model</dt>
-                    <dd>{snapshot?.settingsSummary?.metadataModel ?? "—"}</dd>
-                  </div>
-                  <div>
                     <dt>Output directory</dt>
                     <dd>{snapshot?.settingsSummary?.outputDirectory ?? "Not configured"}</dd>
+                  </div>
+                  <div>
+                    <dt>Gemini API key</dt>
+                    <dd>
+                      {snapshot?.settingsSummary?.hasGeminiApiKey ? "Configured" : "Missing"}
+                    </dd>
                   </div>
                   <div>
                     <dt>Last failed step</dt>
@@ -1047,6 +1174,10 @@ export function App(): ReactElement {
                   <div>
                     <dt>Active step</dt>
                     <dd>{selectedCard.activeStep ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Language</dt>
+                    <dd>{selectedCard.language}</dd>
                   </div>
                 </dl>
               </section>
@@ -1124,6 +1255,23 @@ export function App(): ReactElement {
           )}
         </section>
       </main>
+
+      {settingsDraft ? (
+        <SettingsModal
+          draft={settingsDraft}
+          timezones={snapshot?.supportedTimezones ?? []}
+          isSaving={isSavingSettings}
+          isPickingOutputDirectory={isPickingSettingsOutputDirectory}
+          errorMessage={settingsErrorMessage}
+          onChange={setSettingsDraft}
+          onClose={() => {
+            setSettingsDraft(null);
+            setSettingsErrorMessage(null);
+          }}
+          onPickOutputDirectory={() => void handlePickSettingsOutputDirectory()}
+          onSave={() => void handleSaveSettings()}
+        />
+      ) : null}
 
       {pendingReviewDrafts.length > 0 ? (
         <TimestampReviewModal

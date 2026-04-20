@@ -5,12 +5,14 @@ import {
   type CardTrim,
   type PendingImportReviewItem,
   type SaveConflictResolution,
+  type SettingsDraft,
 } from "@shared/app-shell";
 
 import type { ApplicationRuntime } from "../core/app-runtime";
 
 export function registerAppShellIpc(runtime: ApplicationRuntime): void {
   ipcMain.handle(APP_SHELL_CHANNELS.getSnapshot, () => runtime.getSnapshot());
+  ipcMain.handle(APP_SHELL_CHANNELS.getSettingsDraft, () => runtime.getSettingsDraft());
 
   ipcMain.handle(APP_SHELL_CHANNELS.openImportDialog, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
@@ -43,6 +45,10 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     (_event, cardId: string, trim: CardTrim) => runtime.updateCardTrim(cardId, trim),
   );
 
+  ipcMain.handle(APP_SHELL_CHANNELS.updateCardLanguage, (_event, cardId: string, language: string) =>
+    runtime.updateCardLanguage(cardId, language),
+  );
+
   ipcMain.handle(APP_SHELL_CHANNELS.getCardMediaSource, (_event, cardId: string) =>
     runtime.getCardMediaSource(cardId),
   );
@@ -53,6 +59,19 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
 
   ipcMain.handle(APP_SHELL_CHANNELS.retryCard, (_event, cardId: string) =>
     runtime.retryCard(cardId),
+  );
+
+  ipcMain.handle(APP_SHELL_CHANNELS.pickOutputDirectory, (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window === null) {
+      throw new Error("Choose output directory requires an active window.");
+    }
+
+    return runtime.pickOutputDirectory(window);
+  });
+
+  ipcMain.handle(APP_SHELL_CHANNELS.saveSettingsDraft, (_event, draft: SettingsDraft) =>
+    runtime.saveSettingsDraft(draft),
   );
 
   ipcMain.handle(APP_SHELL_CHANNELS.chooseOutputDirectory, (event) => {

@@ -15,6 +15,7 @@ The current implementation provides:
 - Electron main, preload, and renderer process structure
 - Typed preload bridge and IPC-backed app snapshot
 - `~/.mumbler` bootstrap for settings, state, logs, and working storage
+- In-app settings modal for Gemini key, models, languages, timezone, prompts, retries, and timeouts
 - Timestamp-reviewed import flow from file picker or drag-and-drop
 - Destructive source handling: copy into working storage, then move outside source to trash
 - Queue selection and persisted pending-review state
@@ -26,6 +27,7 @@ The current implementation provides:
 - Gemini transcription pipeline via `@google/genai`
 - Automatic title and slug generation after successful transcription
 - Retry flow that resumes from the failed Gemini step when possible
+- Per-card language override that clears stale results before retranscription
 - Ready-to-save card states with per-artifact model provenance in app state
 - Output-directory selection through the desktop shell
 - Atomic audio plus JSON finalization with filename collision handling
