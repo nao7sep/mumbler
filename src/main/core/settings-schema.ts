@@ -1,4 +1,3 @@
-import { COMMAND_DEFINITIONS, buildDefaultShortcutMap } from "@shared/commands";
 import type {
   AppPaths,
   MumblerCard,
@@ -46,26 +45,6 @@ function asRatio(value: unknown): number | null {
   return typeof value === "number" && value >= 0 && value <= 1 ? value : null;
 }
 
-function normalizeShortcuts(
-  raw: Record<string, unknown> | null,
-  defaults: Record<string, string>,
-): Record<string, string> {
-  if (raw === null) {
-    return defaults;
-  }
-
-  const output: Record<string, string> = { ...defaults };
-
-  for (const command of COMMAND_DEFINITIONS) {
-    const candidate = raw[command.id];
-    if (typeof candidate === "string" && candidate.trim().length > 0) {
-      output[command.id] = candidate;
-    }
-  }
-
-  return output;
-}
-
 function normalizeSettings(
   raw: Record<string, unknown>,
   defaults: MumblerSettings,
@@ -73,7 +52,6 @@ function normalizeSettings(
   const prompts = asRecord(raw.prompts);
   const retryPolicy = asRecord(raw.retryPolicy);
   const timeouts = asRecord(raw.timeouts);
-  const shortcuts = asRecord(raw.shortcuts);
 
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
@@ -108,7 +86,6 @@ function normalizeSettings(
       titleMs: asPositiveInteger(timeouts?.titleMs) ?? defaults.timeouts.titleMs,
       slugMs: asPositiveInteger(timeouts?.slugMs) ?? defaults.timeouts.slugMs,
     },
-    shortcuts: normalizeShortcuts(shortcuts, defaults.shortcuts),
   };
 }
 
@@ -256,23 +233,6 @@ function deduplicateStrings(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-function normalizeDraftShortcuts(
-  shortcuts: Record<string, string>,
-  defaults: Record<string, string>,
-): Record<string, string> {
-  const normalized = { ...defaults };
-
-  for (const command of COMMAND_DEFINITIONS) {
-    const value = shortcuts[command.id]?.trim();
-    if (!value) {
-      throw new Error(`Shortcut for ${command.label} is required.`);
-    }
-    normalized[command.id] = value;
-  }
-
-  return normalized;
-}
-
 function requirePromptPlaceholders(
   prompt: string,
   requiredPlaceholders: string[],
@@ -362,7 +322,6 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
       titleMs: 2 * 60 * 1000,
       slugMs: 2 * 60 * 1000,
     },
-    shortcuts: buildDefaultShortcutMap(),
   };
 }
 
@@ -421,7 +380,6 @@ export function summarizeSettings(settings: MumblerSettings): SettingsSummary {
     timestampPatternCount: settings.timestampPatterns.length,
     previewSnippetSeconds: settings.previewSnippetSeconds,
     concurrencyLimit: settings.concurrencyLimit,
-    shortcuts: { ...settings.shortcuts },
   };
 }
 
@@ -449,7 +407,6 @@ export function buildSettingsDraft(settings: MumblerSettings): SettingsDraft {
     transcriptionTimeoutMs: settings.timeouts.transcriptionMs,
     titleTimeoutMs: settings.timeouts.titleMs,
     slugTimeoutMs: settings.timeouts.slugMs,
-    shortcuts: { ...settings.shortcuts },
   };
 }
 
@@ -509,7 +466,6 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
   );
   const titleTimeoutMs = requirePositiveInteger(draft.titleTimeoutMs, "Title timeout");
   const slugTimeoutMs = requirePositiveInteger(draft.slugTimeoutMs, "Slug timeout");
-  const shortcuts = normalizeDraftShortcuts(draft.shortcuts, current.shortcuts);
 
   if (retryMaxDelayMs < retryInitialDelayMs) {
     throw new Error("Retry max delay must be greater than or equal to retry initial delay.");
@@ -546,7 +502,6 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
       titleMs: titleTimeoutMs,
       slugMs: slugTimeoutMs,
     },
-    shortcuts,
   };
 }
 

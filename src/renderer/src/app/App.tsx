@@ -135,6 +135,26 @@ function getSaveDisabledReason(params: {
   return null;
 }
 
+function getRemoveConfirmBody(card: MumblerCard): string {
+  const hasAiWork =
+    (card.transcription.text ?? "").trim().length > 0 ||
+    (card.metadata.title ?? "").trim().length > 0 ||
+    (card.metadata.slug ?? "").trim().length > 0;
+
+  if (hasAiWork) {
+    return "This recording has been processed by AI. Removing it will permanently discard the transcript and generated metadata. Working audio will be moved to trash.";
+  }
+
+  const hasTrimWork =
+    card.trim.frontMarkerSec !== null || card.trim.backMarkerSec !== null;
+
+  if (hasTrimWork) {
+    return "You've set trim markers on this recording. Removing it will discard that work. Working audio will be moved to trash.";
+  }
+
+  return "Working audio will be moved to trash. Saved output is not affected.";
+}
+
 async function copyTextToClipboard(value: string): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -668,16 +688,6 @@ export function App(): ReactElement {
           await handleSaveCard(selectedCard.id);
         }
         return;
-      case "retry-selected":
-        if (selectedCard.status === "Error" && !selectedCardIsBusy) {
-          handleRetryCard(selectedCard.id);
-        }
-        return;
-      case "remove-selected":
-        if (!selectedCardIsBusy) {
-          setPendingRemoveCardId(selectedCard.id);
-        }
-        return;
       case "select-previous":
       case "select-next": {
         const cards = snapshot?.state?.cards ?? [];
@@ -723,7 +733,7 @@ export function App(): ReactElement {
         return;
       }
 
-      const commandId = findMatchingCommand(event, settingsSummary.shortcuts);
+      const commandId = findMatchingCommand(event);
       if (commandId === null) {
         return;
       }
@@ -950,12 +960,12 @@ export function App(): ReactElement {
               <p className="empty-state__title">
                 {snapshot?.state?.pendingImports.length
                   ? "Pending review"
-                  : "No recordings"}
+                  : "Empty queue"}
               </p>
               <p className="empty-state__body">
                 {snapshot?.state?.pendingImports.length
                   ? "Confirm timestamps to add files to the queue."
-                  : "Import or drop audio files here."}
+                  : "Import audio files or drop them into this window to get started."}
               </p>
             </section>
           )}
@@ -968,128 +978,133 @@ export function App(): ReactElement {
 
           {selectedCard ? (
             <div className="detail-grid">
-              <section className={`detail-card detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
-                <div className="detail-card__header">
-                  <h3>Identity</h3>
-                </div>
-                <div className={`status-summary status-summary--${statusModifier(selectedCard.status)}`}>
-                  <strong>{selectedCard.status}</strong>
-                  <span>{describeCardStep(selectedCard)}</span>
-                </div>
-                <dl className="meta-list">
-                  <div>
-                    <dt>Original filename</dt>
-                    <dd>{selectedCard.originalFilename}</dd>
-                  </div>
-                  <div>
-                    <dt>Effective local</dt>
-                    <dd>{selectedCard.timestamps.effectiveLocal}</dd>
-                  </div>
-                  <div>
-                    <dt>Effective UTC</dt>
-                    <dd>{selectedCard.timestamps.effectiveUtc}</dd>
-                  </div>
-                  <div>
-                    <dt>Confirmed local</dt>
-                    <dd>{selectedCard.timestamps.confirmedLocal}</dd>
-                  </div>
-                  <div>
-                    <dt>Timezone</dt>
-                    <dd>{selectedCard.timestamps.timezone}</dd>
-                  </div>
-                  <div>
-                    <dt>Import source</dt>
-                    <dd>{selectedCard.importSource}</dd>
-                  </div>
-                </dl>
-              </section>
 
-              <section className="detail-card">
-                <div className="detail-card__header">
-                  <h3>Language</h3>
-                </div>
-                <div className="field-stack">
-                  <label className="field">
-                    <span>Language</span>
-                    <select
-                      value={selectedCard.language}
-                      disabled={selectedCardIsBusy}
-                      onChange={(event) =>
-                        void handleCardLanguageChange(selectedCard.id, event.target.value)
-                      }
-                    >
-                      {languageOptions.map((language) => (
-                        <option key={language} value={language}>
-                          {language}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <dl className="meta-list compact-meta-list">
-                  <div>
-                    <dt>Transcription model</dt>
-                    <dd>{snapshot?.settingsSummary?.transcriptionModel ?? "—"}</dd>
+              {/* ── Group 1: Detail (3 columns) ─────────────────────── */}
+              <div className="detail-row">
+                <section className={`detail-card detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
+                  <div className="detail-card__header">
+                    <h3>Identity</h3>
                   </div>
-                  <div>
-                    <dt>Metadata model</dt>
-                    <dd>{snapshot?.settingsSummary?.metadataModel ?? "—"}</dd>
+                  <div className={`status-summary status-summary--${statusModifier(selectedCard.status)}`}>
+                    <strong>{selectedCard.status}</strong>
+                    <span>{describeCardStep(selectedCard)}</span>
                   </div>
-                  <div>
-                    <dt>Configured languages</dt>
-                    <dd>{snapshot?.settingsSummary?.languageCount ?? "—"}</dd>
-                  </div>
-                </dl>
-              </section>
+                  <dl className="meta-list">
+                    <div>
+                      <dt>Original filename</dt>
+                      <dd>{selectedCard.originalFilename}</dd>
+                    </div>
+                    <div>
+                      <dt>Effective local</dt>
+                      <dd>{selectedCard.timestamps.effectiveLocal}</dd>
+                    </div>
+                    <div>
+                      <dt>Effective UTC</dt>
+                      <dd>{selectedCard.timestamps.effectiveUtc}</dd>
+                    </div>
+                    <div>
+                      <dt>Confirmed local</dt>
+                      <dd>{selectedCard.timestamps.confirmedLocal}</dd>
+                    </div>
+                    <div>
+                      <dt>Timezone</dt>
+                      <dd>{selectedCard.timestamps.timezone}</dd>
+                    </div>
+                    <div>
+                      <dt>Import source</dt>
+                      <dd>{selectedCard.importSource}</dd>
+                    </div>
+                  </dl>
+                </section>
 
-              <section className="detail-card">
-                <div className="detail-card__header">
-                  <h3>Audio</h3>
-                </div>
-                <dl className="meta-list">
-                  <div>
-                    <dt>Duration</dt>
-                    <dd>{formatDuration(selectedCard.durationSec)}</dd>
+                <section className="detail-card">
+                  <div className="detail-card__header">
+                    <h3>Audio</h3>
                   </div>
-                  <div>
-                    <dt>Codec</dt>
-                    <dd>{selectedCard.audioProfile?.codecName ?? "Unknown"}</dd>
-                  </div>
-                  <div>
-                    <dt>Container</dt>
-                    <dd>{selectedCard.audioProfile?.formatName ?? "Unknown"}</dd>
-                  </div>
-                  <div>
-                    <dt>Bitrate</dt>
-                    <dd>
-                      {selectedCard.audioProfile?.bitRateKbps == null
-                        ? "Unknown"
-                        : `${selectedCard.audioProfile.bitRateKbps} kbps`}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Sample rate</dt>
-                    <dd>
-                      {selectedCard.audioProfile?.sampleRateHz == null
-                        ? "Unknown"
-                        : `${selectedCard.audioProfile.sampleRateHz} Hz`}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Channels</dt>
-                    <dd>{selectedCard.audioProfile?.channels ?? "Unknown"}</dd>
-                  </div>
-                  <div>
-                    <dt>Front trim offset</dt>
-                    <dd>{selectedCard.timestamps.frontTrimOffsetSec.toFixed(1)}s</dd>
-                  </div>
-                  <div>
-                    <dt>File size</dt>
-                    <dd>{formatBytes(selectedCard.fileSizeBytes)}</dd>
-                  </div>
-                </dl>
-              </section>
+                  <dl className="meta-list">
+                    <div>
+                      <dt>Duration</dt>
+                      <dd>{formatDuration(selectedCard.durationSec)}</dd>
+                    </div>
+                    <div>
+                      <dt>Codec</dt>
+                      <dd>{selectedCard.audioProfile?.codecName ?? "Unknown"}</dd>
+                    </div>
+                    <div>
+                      <dt>Container</dt>
+                      <dd>{selectedCard.audioProfile?.formatName ?? "Unknown"}</dd>
+                    </div>
+                    <div>
+                      <dt>Bitrate</dt>
+                      <dd>
+                        {selectedCard.audioProfile?.bitRateKbps == null
+                          ? "Unknown"
+                          : `${selectedCard.audioProfile.bitRateKbps} kbps`}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Sample rate</dt>
+                      <dd>
+                        {selectedCard.audioProfile?.sampleRateHz == null
+                          ? "Unknown"
+                          : `${selectedCard.audioProfile.sampleRateHz} Hz`}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Channels</dt>
+                      <dd>{selectedCard.audioProfile?.channels ?? "Unknown"}</dd>
+                    </div>
+                    <div>
+                      <dt>Front trim offset</dt>
+                      <dd>{selectedCard.timestamps.frontTrimOffsetSec.toFixed(1)}s</dd>
+                    </div>
+                    <div>
+                      <dt>File size</dt>
+                      <dd>{formatBytes(selectedCard.fileSizeBytes)}</dd>
+                    </div>
+                  </dl>
+                </section>
 
+                <section className="detail-card">
+                  <div className="detail-card__header">
+                    <h3>Language</h3>
+                  </div>
+                  <div className="field-stack">
+                    <label className="field">
+                      <span>Language</span>
+                      <select
+                        value={selectedCard.language}
+                        disabled={selectedCardIsBusy}
+                        onChange={(event) =>
+                          void handleCardLanguageChange(selectedCard.id, event.target.value)
+                        }
+                      >
+                        {languageOptions.map((language) => (
+                          <option key={language} value={language}>
+                            {language}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <dl className="meta-list compact-meta-list">
+                    <div>
+                      <dt>Transcription model</dt>
+                      <dd>{snapshot?.settingsSummary?.transcriptionModel ?? "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Metadata model</dt>
+                      <dd>{snapshot?.settingsSummary?.metadataModel ?? "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Configured languages</dt>
+                      <dd>{snapshot?.settingsSummary?.languageCount ?? "—"}</dd>
+                    </div>
+                  </dl>
+                </section>
+              </div>
+
+              {/* ── Group 2: Player and Trim ─────────────────────────── */}
               <section className="detail-card detail-card--wide">
                 <div className="detail-card__header">
                   <h3>Player and Trim</h3>
@@ -1103,69 +1118,69 @@ export function App(): ReactElement {
                   onTrimCommit={handleTrimCommit}
                   onError={(message) => setErrorMessage(message)}
                 />
-              </section>
-
-              <section className="detail-card detail-card--wide">
-                <div className="detail-card__header">
-                  <h3>Trim Analysis</h3>
-                  <span className="muted-tag">
-                    {selectedCard.trimDecision?.kind ?? "not-analyzed"}
-                  </span>
+                <div className="trim-analysis">
+                  <div className="trim-analysis__header">
+                    <span className="trim-analysis__label">Trim Analysis</span>
+                    <span className="muted-tag">
+                      {selectedCard.trimDecision?.kind ?? "not-analyzed"}
+                    </span>
+                  </div>
+                  <p className="panel__note">{describeTrimDecision(selectedCard.trimDecision)}</p>
+                  <dl className="trim-analysis-grid">
+                    <div>
+                      <dt>Requested start</dt>
+                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedStartSec ?? null)}</dd>
+                    </div>
+                    <div>
+                      <dt>Requested end</dt>
+                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedEndSec ?? null)}</dd>
+                    </div>
+                    <div>
+                      <dt>Start search window</dt>
+                      <dd>
+                        {selectedCard.trimDecision?.searchStartFromSec === null || selectedCard.trimDecision?.searchStartFromSec === undefined
+                          ? "—"
+                          : `${formatOptionalSeconds(selectedCard.trimDecision.searchStartFromSec)} – ${formatOptionalSeconds(selectedCard.trimDecision.searchStartToSec ?? null)}`}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>End search window</dt>
+                      <dd>
+                        {selectedCard.trimDecision?.searchEndFromSec === null || selectedCard.trimDecision?.searchEndFromSec === undefined
+                          ? "—"
+                          : `${formatOptionalSeconds(selectedCard.trimDecision.searchEndFromSec)} – ${formatOptionalSeconds(selectedCard.trimDecision.searchEndToSec ?? null)}`}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Chosen start boundary</dt>
+                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenStartBoundarySec ?? null)}</dd>
+                    </div>
+                    <div>
+                      <dt>Chosen end boundary</dt>
+                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenEndBoundarySec ?? null)}</dd>
+                    </div>
+                    <div>
+                      <dt>Start delta</dt>
+                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.startDeltaSec ?? null)}</dd>
+                    </div>
+                    <div>
+                      <dt>End delta</dt>
+                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.endDeltaSec ?? null)}</dd>
+                    </div>
+                    <div className="trim-analysis-grid__reason">
+                      <dt>Reason</dt>
+                      <dd>{selectedCard.trimDecision?.reason ?? "No markers set yet."}</dd>
+                    </div>
+                  </dl>
                 </div>
-                <p className="panel__note">{describeTrimDecision(selectedCard.trimDecision)}</p>
-                <dl className="meta-list">
-                  <div>
-                    <dt>Requested start</dt>
-                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedStartSec ?? null)}</dd>
-                  </div>
-                  <div>
-                    <dt>Requested end</dt>
-                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedEndSec ?? null)}</dd>
-                  </div>
-                  <div>
-                    <dt>Start search window</dt>
-                    <dd>
-                      {selectedCard.trimDecision?.searchStartFromSec === null
-                        ? "—"
-                        : `${formatOptionalSeconds(selectedCard.trimDecision?.searchStartFromSec ?? null)} to ${formatOptionalSeconds(selectedCard.trimDecision?.searchStartToSec ?? null)}`}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>End search window</dt>
-                    <dd>
-                      {selectedCard.trimDecision?.searchEndFromSec === null
-                        ? "—"
-                        : `${formatOptionalSeconds(selectedCard.trimDecision?.searchEndFromSec ?? null)} to ${formatOptionalSeconds(selectedCard.trimDecision?.searchEndToSec ?? null)}`}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Chosen start boundary</dt>
-                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenStartBoundarySec ?? null)}</dd>
-                  </div>
-                  <div>
-                    <dt>Chosen end boundary</dt>
-                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenEndBoundarySec ?? null)}</dd>
-                  </div>
-                  <div>
-                    <dt>Start delta</dt>
-                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.startDeltaSec ?? null)}</dd>
-                  </div>
-                  <div>
-                    <dt>End delta</dt>
-                    <dd>{formatOptionalSeconds(selectedCard.trimDecision?.endDeltaSec ?? null)}</dd>
-                  </div>
-                  <div>
-                    <dt>Reason</dt>
-                    <dd>{selectedCard.trimDecision?.reason ?? "No markers set yet."}</dd>
-                  </div>
-                </dl>
               </section>
 
+              {/* ── Group 3: Transcription and Metadata ──────────────── */}
               <section className={`detail-card detail-card--wide detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
                 <div className="detail-card__header">
-                  <h3>Actions</h3>
+                  <h3>Transcription and Metadata</h3>
                 </div>
-                <div className="action-grid">
+                <div className="action-toolbar">
                   <button
                     type="button"
                     className="button button--primary"
@@ -1182,13 +1197,144 @@ export function App(): ReactElement {
                   >
                     Retry Failed Step
                   </button>
+                </div>
+                {transcribeDisabledReason ? (
+                  <p className="panel__note">{transcribeDisabledReason}</p>
+                ) : null}
+                <div className="result-grid">
+                  <label className="field field--tall">
+                    <span className="field-label-with-action">
+                      <span>Transcript</span>
+                      <button
+                        type="button"
+                        className="button button--ghost button--compact"
+                        onClick={() => void handleCopyResult("Transcript", selectedCard.transcription.text)}
+                        disabled={(selectedCard.transcription.text ?? "").trim().length === 0}
+                      >
+                        Copy
+                      </button>
+                    </span>
+                    <textarea
+                      readOnly
+                      className="result-output result-output--tall"
+                      value={selectedCard.transcription.text ?? ""}
+                      placeholder=""
+                    />
+                  </label>
+                  <div className="result-secondary">
+                    <label className="field">
+                      <span className="field-label-with-action">
+                        <span>Title</span>
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact"
+                          onClick={() => void handleCopyResult("Title", selectedCard.metadata.title)}
+                          disabled={(selectedCard.metadata.title ?? "").trim().length === 0}
+                        >
+                          Copy
+                        </button>
+                      </span>
+                      <textarea
+                        readOnly
+                        className="result-output"
+                        value={selectedCard.metadata.title ?? ""}
+                        placeholder=""
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label-with-action">
+                        <span>Slug</span>
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact"
+                          onClick={() => void handleCopyResult("Slug", selectedCard.metadata.slug)}
+                          disabled={(selectedCard.metadata.slug ?? "").trim().length === 0}
+                        >
+                          Copy
+                        </button>
+                      </span>
+                      <textarea
+                        readOnly
+                        className="result-output"
+                        value={selectedCard.metadata.slug ?? ""}
+                        placeholder=""
+                      />
+                    </label>
+                    <section className="detail-card detail-card--nested">
+                      <div className="detail-card__header">
+                        <h3>Provenance</h3>
+                      </div>
+                      <dl className="meta-list compact-meta-list">
+                        <div>
+                          <dt>Transcript</dt>
+                          <dd className="provenance-value">
+                            <span>{formatAiRun(selectedCard.ai.transcription)}</span>
+                            <span className="provenance-time">
+                              {selectedCard.ai.transcription?.generatedAtUtc ?? "—"}
+                            </span>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Title</dt>
+                          <dd className="provenance-value">
+                            <span>{formatAiRun(selectedCard.ai.title)}</span>
+                            <span className="provenance-time">
+                              {selectedCard.ai.title?.generatedAtUtc ?? "—"}
+                            </span>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Slug</dt>
+                          <dd className="provenance-value">
+                            <span>{formatAiRun(selectedCard.ai.slug)}</span>
+                            <span className="provenance-time">
+                              {selectedCard.ai.slug?.generatedAtUtc ?? "—"}
+                            </span>
+                          </dd>
+                        </div>
+                      </dl>
+                    </section>
+                  </div>
+                </div>
+              </section>
+
+              {/* ── Group 4: Output and Save ──────────────────────────── */}
+              <section className="detail-card detail-card--wide">
+                <div className="detail-card__header">
+                  <h3>Output and Save</h3>
+                </div>
+                <dl className="meta-list compact-meta-list">
+                  <div>
+                    <dt>Output directory</dt>
+                    <dd>{snapshot?.settingsSummary?.outputDirectory ?? "Not configured"}</dd>
+                  </div>
+                  <div>
+                    <dt>Gemini API key</dt>
+                    <dd>
+                      {snapshot?.settingsSummary?.hasGeminiApiKey ? "Configured" : "Missing"}
+                    </dd>
+                  </div>
+                  {selectedCard.lastError ? (
+                    <div>
+                      <dt>Last failed step</dt>
+                      <dd>{selectedCard.lastError.failedStep}</dd>
+                    </div>
+                  ) : null}
+                  {selectedCard.activeStep ? (
+                    <div>
+                      <dt>Active step</dt>
+                      <dd>{selectedCard.activeStep}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+                <div className="action-toolbar">
                   <button
                     type="button"
                     className="button button--ghost"
                     onClick={() => void handleChooseOutputDirectory()}
                     disabled={selectedCardIsBusy}
                   >
-                    Choose Output Directory
+                    Change Output Directory
                   </button>
                   <button
                     type="button"
@@ -1207,138 +1353,11 @@ export function App(): ReactElement {
                     Remove
                   </button>
                 </div>
-                {transcribeDisabledReason || saveDisabledReason ? (
-                  <div className="action-hints">
-                    {transcribeDisabledReason ? (
-                      <p className="panel__note">{transcribeDisabledReason}</p>
-                    ) : null}
-                    {saveDisabledReason ? <p className="panel__note">{saveDisabledReason}</p> : null}
-                  </div>
+                {saveDisabledReason ? (
+                  <p className="panel__note">{saveDisabledReason}</p>
                 ) : null}
-                <dl className="meta-list compact-meta-list">
-                  <div>
-                    <dt>Output directory</dt>
-                    <dd>{snapshot?.settingsSummary?.outputDirectory ?? "Not configured"}</dd>
-                  </div>
-                  <div>
-                    <dt>Gemini API key</dt>
-                    <dd>
-                      {snapshot?.settingsSummary?.hasGeminiApiKey ? "Configured" : "Missing"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Last failed step</dt>
-                    <dd>{selectedCard.lastError?.failedStep ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Active step</dt>
-                    <dd>{selectedCard.activeStep ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Language</dt>
-                    <dd>{selectedCard.language}</dd>
-                  </div>
-                </dl>
               </section>
 
-              <section className="detail-card detail-card--wide">
-                <div className="detail-card__header">
-                  <h3>Results</h3>
-                </div>
-                <div className="result-grid">
-                  <label className="field">
-                    <span className="field-label-with-action">
-                      <span>Transcript</span>
-                      <button
-                        type="button"
-                        className="button button--ghost button--compact"
-                        onClick={() => void handleCopyResult("Transcript", selectedCard.transcription.text)}
-                        disabled={(selectedCard.transcription.text ?? "").trim().length === 0}
-                      >
-                        Copy
-                      </button>
-                    </span>
-                    <textarea
-                      readOnly
-                      className="result-output"
-                      value={selectedCard.transcription.text ?? ""}
-                      placeholder=""
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label-with-action">
-                      <span>Title</span>
-                      <button
-                        type="button"
-                        className="button button--ghost button--compact"
-                        onClick={() => void handleCopyResult("Title", selectedCard.metadata.title)}
-                        disabled={(selectedCard.metadata.title ?? "").trim().length === 0}
-                      >
-                        Copy
-                      </button>
-                    </span>
-                    <textarea
-                      readOnly
-                      className="result-output"
-                      value={selectedCard.metadata.title ?? ""}
-                      placeholder=""
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field-label-with-action">
-                      <span>Slug</span>
-                      <button
-                        type="button"
-                        className="button button--ghost button--compact"
-                        onClick={() => void handleCopyResult("Slug", selectedCard.metadata.slug)}
-                        disabled={(selectedCard.metadata.slug ?? "").trim().length === 0}
-                      >
-                        Copy
-                      </button>
-                    </span>
-                    <textarea
-                      readOnly
-                      className="result-output"
-                      value={selectedCard.metadata.slug ?? ""}
-                      placeholder=""
-                    />
-                  </label>
-                  <section className="detail-card detail-card--nested">
-                    <div className="detail-card__header">
-                      <h3>Provenance</h3>
-                    </div>
-                    <dl className="meta-list compact-meta-list">
-                      <div>
-                        <dt>Transcript</dt>
-                        <dd className="provenance-value">
-                          <span>{formatAiRun(selectedCard.ai.transcription)}</span>
-                          <span className="provenance-time">
-                            {selectedCard.ai.transcription?.generatedAtUtc ?? "—"}
-                          </span>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Title</dt>
-                        <dd className="provenance-value">
-                          <span>{formatAiRun(selectedCard.ai.title)}</span>
-                          <span className="provenance-time">
-                            {selectedCard.ai.title?.generatedAtUtc ?? "—"}
-                          </span>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Slug</dt>
-                        <dd className="provenance-value">
-                          <span>{formatAiRun(selectedCard.ai.slug)}</span>
-                          <span className="provenance-time">
-                            {selectedCard.ai.slug?.generatedAtUtc ?? "—"}
-                          </span>
-                        </dd>
-                      </div>
-                    </dl>
-                  </section>
-                </div>
-              </section>
             </div>
           ) : snapshot?.state?.cards.length ? (
             <section className="panel panel--nested queue-empty">
@@ -1357,7 +1376,6 @@ export function App(): ReactElement {
         <SettingsModal
           draft={settingsDraft}
           timezones={snapshot?.supportedTimezones ?? []}
-          commands={snapshot?.commands ?? []}
           isSaving={isSavingSettings}
           isPickingOutputDirectory={isPickingSettingsOutputDirectory}
           errorMessage={settingsErrorMessage}
@@ -1487,7 +1505,10 @@ export function App(): ReactElement {
       {pendingRemoveCardId ? (
         <DecisionModal
           title="Remove Recording?"
-          body="Working audio will be moved to trash. Saved output is not affected."
+          body={getRemoveConfirmBody(
+            snapshot?.state?.cards.find((c) => c.id === pendingRemoveCardId) ??
+              ({ trim: {}, transcription: {}, metadata: {} } as unknown as MumblerCard),
+          )}
           actions={[
             {
               label: "Cancel",
@@ -1510,12 +1531,8 @@ export function App(): ReactElement {
         <AboutModal version={snapshot.appVersion} onClose={() => setShowAbout(false)} />
       ) : null}
 
-      {showShortcutsHelp && snapshot?.settingsSummary ? (
-        <ShortcutsHelpModal
-          commands={snapshot.commands}
-          shortcuts={snapshot.settingsSummary.shortcuts}
-          onClose={() => setShowShortcutsHelp(false)}
-        />
+      {showShortcutsHelp ? (
+        <ShortcutsHelpModal onClose={() => setShowShortcutsHelp(false)} />
       ) : null}
     </div>
   );

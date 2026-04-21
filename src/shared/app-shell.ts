@@ -38,21 +38,20 @@ export type CardStatus =
   | "Error";
 
 export type CommandId =
+  | "select-previous"
+  | "select-next"
   | "play-pause"
-  | "set-front-marker"
-  | "set-back-marker"
   | "play-first-snippet"
   | "play-last-snippet"
+  | "set-front-marker"
+  | "set-back-marker"
   | "transcribe-selected"
-  | "save-selected"
-  | "retry-selected"
-  | "remove-selected"
-  | "select-previous"
-  | "select-next";
+  | "save-selected";
 
 export interface CommandDefinition {
   id: CommandId;
   label: string;
+  group: string;
   defaultShortcut: string;
 }
 
@@ -89,7 +88,6 @@ export interface MumblerSettings {
   concurrencyLimit: number;
   retryPolicy: RetryPolicy;
   timeouts: OperationTimeouts;
-  shortcuts: Record<CommandId, string>;
 }
 
 export type ImportSource = "file-picker" | "drag-and-drop";
@@ -222,7 +220,6 @@ export interface SettingsSummary {
   timestampPatternCount: number;
   previewSnippetSeconds: number;
   concurrencyLimit: number;
-  shortcuts: Record<CommandId, string>;
 }
 
 export interface SettingsDraft {
@@ -248,7 +245,6 @@ export interface SettingsDraft {
   transcriptionTimeoutMs: number;
   titleTimeoutMs: number;
   slugTimeoutMs: number;
-  shortcuts: Record<CommandId, string>;
 }
 
 export interface QueueSummary {

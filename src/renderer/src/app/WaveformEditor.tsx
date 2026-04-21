@@ -314,8 +314,14 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     }
 
     const span = Math.min(previewSnippetSeconds, durationSec);
-    const startSec = side === "first" ? 0 : Math.max(0, durationSec - span);
-    const endSec = Math.min(durationSec, startSec + span);
+    const preservedStart = draftTrim.frontMarkerSec ?? 0;
+    const preservedEnd = draftTrim.backMarkerSec ?? durationSec;
+    const startSec =
+      side === "first" ? preservedStart : Math.max(0, preservedEnd - span);
+    const endSec =
+      side === "first"
+        ? Math.min(durationSec, preservedStart + span)
+        : Math.min(durationSec, preservedEnd);
 
     await waveSurfer.play(startSec, endSec);
   }

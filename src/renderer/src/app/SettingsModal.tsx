@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactElement } from "react";
 
-import type { CommandDefinition, SettingsDraft } from "@shared/app-shell";
+import type { SettingsDraft } from "@shared/app-shell";
 
 function parseEntries(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
@@ -78,7 +78,6 @@ function EditableList({
 export function SettingsModal({
   draft,
   timezones,
-  commands,
   isSaving,
   isPickingOutputDirectory,
   errorMessage,
@@ -89,7 +88,6 @@ export function SettingsModal({
 }: {
   draft: SettingsDraft;
   timezones: string[];
-  commands: CommandDefinition[];
   isSaving: boolean;
   isPickingOutputDirectory: boolean;
   errorMessage: string | null;
@@ -396,14 +394,7 @@ export function SettingsModal({
 
           <section className="settings-section">
             <h3>Keyboard Shortcuts</h3>
-            <div className="shortcut-list">
-              {commands.map((command) => (
-                <div key={command.id} className="shortcut-item">
-                  <span>{command.label}</span>
-                  <kbd>{draft.shortcuts[command.id]}</kbd>
-                </div>
-              ))}
-            </div>
+            <p className="settings-note">To customize shortcuts, open the Keyboard Shortcuts menu from the hamburger menu.</p>
           </section>
         </div>
 

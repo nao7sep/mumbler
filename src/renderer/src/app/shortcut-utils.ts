@@ -1,4 +1,5 @@
 import type { CommandId } from "@shared/app-shell";
+import { COMMAND_DEFINITIONS } from "@shared/commands";
 
 const modifierAliases: Record<string, "ctrl" | "alt" | "shift" | "meta"> = {
   ctrl: "ctrl",
@@ -37,17 +38,14 @@ interface ParsedShortcut {
   meta: boolean;
 }
 
-export function findMatchingCommand(
-  event: KeyboardEvent,
-  shortcuts: Record<CommandId, string>,
-): CommandId | null {
+export function findMatchingCommand(event: KeyboardEvent): CommandId | null {
   const eventShortcut = normalizeKeyboardEvent(event);
   if (eventShortcut === null) {
     return null;
   }
 
-  for (const [commandId, shortcut] of Object.entries(shortcuts) as Array<[CommandId, string]>) {
-    const parsedShortcut = parseShortcut(shortcut);
+  for (const command of COMMAND_DEFINITIONS) {
+    const parsedShortcut = parseShortcut(command.defaultShortcut);
     if (parsedShortcut === null) {
       continue;
     }
@@ -59,7 +57,7 @@ export function findMatchingCommand(
       parsedShortcut.shift === eventShortcut.shift &&
       parsedShortcut.meta === eventShortcut.meta
     ) {
-      return commandId;
+      return command.id;
     }
   }
 
