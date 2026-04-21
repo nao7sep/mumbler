@@ -432,6 +432,7 @@ export function App(): ReactElement {
       const draft = await window.mumbler.getSettingsDraft();
       const nextSnapshot = await window.mumbler.saveSettingsDraft({ ...draft, [field]: value });
       setSnapshot(nextSnapshot);
+      addToast("Model updated.");
     } catch (error: unknown) {
       addPersistent(error instanceof Error ? error.message : "Failed to update model.", "error");
     }

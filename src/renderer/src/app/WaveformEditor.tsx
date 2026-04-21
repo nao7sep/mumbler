@@ -111,6 +111,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [activeSnippet, setActiveSnippet] = useState<"first" | "last" | null>(null);
   const [cursorSec, setCursorSec] = useState(0);
   const [resolvedDurationSec, setResolvedDurationSec] = useState<number | null>(card.durationSec);
   const [draftTrim, setDraftTrim] = useState<CardTrim>(card.trim);
@@ -187,6 +188,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     regionRef.current = null;
     setCursorSec(0);
     setIsPlaying(false);
+    setActiveSnippet(null);
 
     const subscriptions = [
       waveSurfer.on("ready", (duration) => {
@@ -200,9 +202,11 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       }),
       waveSurfer.on("pause", () => {
         setIsPlaying(false);
+        setActiveSnippet(null);
       }),
       waveSurfer.on("finish", () => {
         setIsPlaying(false);
+        setActiveSnippet(null);
       }),
       waveSurfer.on("timeupdate", (currentTime) => {
         setCursorSec(currentTime);
@@ -374,6 +378,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         ? Math.min(durationSec, preservedStart + span)
         : Math.min(durationSec, preservedEnd);
 
+    setActiveSnippet(side);
     await waveSurfer.play(startSec, endSec);
   }
 
@@ -383,6 +388,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       return;
     }
 
+    setActiveSnippet(null);
     await waveSurfer.playPause();
   }
 
@@ -462,7 +468,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           type="button"
           className="button button--ghost"
           onClick={() => void clearMarkers()}
-          disabled={disabled}
+          disabled={disabled || (draftTrim.frontMarkerSec === null && draftTrim.backMarkerSec === null)}
         >
           Clear Markers
         </button>
@@ -477,10 +483,18 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       </div>
 
       <div className="control-row control-row--two">
-        <button type="button" className="button button--ghost" onClick={() => void playSnippet("first")}>
+        <button
+          type="button"
+          className={`button ${activeSnippet === "first" && isPlaying ? "button--primary" : "button--ghost"}`}
+          onClick={() => void playSnippet("first")}
+        >
           Play First {previewSnippetSeconds}s
         </button>
-        <button type="button" className="button button--ghost" onClick={() => void playSnippet("last")}>
+        <button
+          type="button"
+          className={`button ${activeSnippet === "last" && isPlaying ? "button--primary" : "button--ghost"}`}
+          onClick={() => void playSnippet("last")}
+        >
           Play Last {previewSnippetSeconds}s
         </button>
       </div>

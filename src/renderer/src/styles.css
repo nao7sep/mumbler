@@ -342,6 +342,11 @@ textarea:focus-visible,
   opacity: 0.9;
 }
 
+.button:not(:disabled):active {
+  opacity: 0.75;
+  transform: scale(0.97);
+}
+
 .button--primary {
   background: var(--accent);
   color: #ffffff;
@@ -350,6 +355,12 @@ textarea:focus-visible,
 .button--primary:not(:disabled):hover {
   background: var(--accent-hover);
   opacity: 1;
+}
+
+.button--primary:not(:disabled):active {
+  background: var(--accent-hover);
+  opacity: 0.85;
+  transform: scale(0.97);
 }
 
 .button--ghost {
@@ -361,6 +372,12 @@ textarea:focus-visible,
 .button--ghost:not(:disabled):hover {
   background: #f1f3f5;
   opacity: 1;
+}
+
+.button--ghost:not(:disabled):active {
+  background: #e9ecef;
+  opacity: 1;
+  transform: scale(0.97);
 }
 
 .button--compact {
