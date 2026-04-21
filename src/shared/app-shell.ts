@@ -20,11 +20,9 @@ export const APP_SHELL_CHANNELS = {
   reportRendererError: "app-shell:report-renderer-error",
   dismissAppWideError: "app-shell:dismiss-app-wide-error",
   resetState: "app-shell:reset-state",
-  respondToWindowClose: "app-shell:respond-to-window-close",
 } as const;
 
 export const APP_SHELL_EVENTS = {
-  windowCloseRequested: "app-shell:event-window-close-requested",
   appWideErrorUpdated: "app-shell:event-app-wide-error-updated",
   pipelineProgressUpdated: "app-shell:event-pipeline-progress-updated",
 } as const;
@@ -334,8 +332,6 @@ export interface MumblerShellApi {
   reportRendererError(report: RendererErrorReport): Promise<AppSnapshot>;
   dismissAppWideError(): Promise<AppSnapshot>;
   resetState(): Promise<AppSnapshot>;
-  respondToWindowClose(shouldClose: boolean): Promise<void>;
-  onWindowCloseRequested(listener: () => void): () => void;
   onAppWideErrorChanged(listener: () => void): () => void;
   onPipelineProgressUpdated(listener: () => void): () => void;
 }

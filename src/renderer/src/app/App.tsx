@@ -198,7 +198,6 @@ export function App(): ReactElement {
   const [isPickingSettingsOutputDirectory, setIsPickingSettingsOutputDirectory] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
   const [isResettingState, setIsResettingState] = useState(false);
-  const [pendingCloseConfirmation, setPendingCloseConfirmation] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
@@ -273,12 +272,6 @@ export function App(): ReactElement {
         .catch((error: unknown) => {
           setErrorMessage(error instanceof Error ? error.message : "Failed to refresh card state.");
         });
-    });
-  }, []);
-
-  useEffect(() => {
-    return window.mumbler.onWindowCloseRequested(() => {
-      setPendingCloseConfirmation(true);
     });
   }, []);
 
@@ -379,7 +372,6 @@ export function App(): ReactElement {
     pendingReviewDrafts.length > 0 ||
     pendingSaveConflict !== null ||
     pendingRemoveCardId !== null ||
-    pendingCloseConfirmation ||
     showAbout ||
     showShortcutsHelp ||
     snapshot?.startupDiagnostic != null ||
@@ -1472,30 +1464,6 @@ export function App(): ReactElement {
               variant: "primary",
               onClick: () => {
                 void handleDismissAppWideError();
-              },
-            },
-          ]}
-        />
-      ) : null}
-
-      {pendingCloseConfirmation ? (
-        <DecisionModal
-          title="Close Mumbler?"
-          body="In-progress items will resume as errors on next launch."
-          actions={[
-            {
-              label: "Cancel",
-              onClick: () => {
-                setPendingCloseConfirmation(false);
-                void window.mumbler.respondToWindowClose(false);
-              },
-            },
-            {
-              label: "Close",
-              variant: "danger",
-              onClick: () => {
-                setPendingCloseConfirmation(false);
-                void window.mumbler.respondToWindowClose(true);
               },
             },
           ]}
