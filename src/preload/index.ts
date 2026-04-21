@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 import {
   APP_SHELL_CHANNELS,
@@ -66,6 +66,7 @@ const api: MumblerShellApi = {
   resetState: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.resetState) as Promise<AppSnapshot>,
   cancelPendingImports: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelPendingImports) as Promise<AppSnapshot>,
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   onAppWideErrorChanged: (listener: () => void) => {
     const wrapped = () => {
       listener();

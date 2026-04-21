@@ -279,7 +279,6 @@ export interface AppSnapshot {
   startupDiagnostic: StartupDiagnostic | null;
   appWideError: StartupDiagnostic | null;
   state: MumblerState | null;
-  supportedTimezones: string[];
 }
 
 export interface FailedImport {
@@ -336,6 +335,7 @@ export interface MumblerShellApi {
   dismissAppWideError(): Promise<AppSnapshot>;
   resetState(): Promise<AppSnapshot>;
   cancelPendingImports(): Promise<AppSnapshot>;
+  getPathForFile(file: File): string;
   onAppWideErrorChanged(listener: () => void): () => void;
   onPipelineProgressUpdated(listener: () => void): () => void;
 }

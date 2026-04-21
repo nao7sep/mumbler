@@ -1,6 +1,7 @@
-import { useMemo, useState, type ReactElement } from "react";
+import { useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { SettingsDraft } from "@shared/app-shell";
+import { isSupportedTimezone } from "@shared/timestamps";
 
 function parseEntries(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
@@ -14,12 +15,15 @@ function EditableList({
   entries,
   onChange,
   placeholder,
+  monospace = false,
 }: {
   entries: string[];
   onChange: (entries: string[]) => void;
   placeholder: string;
+  monospace?: boolean;
 }): ReactElement {
   const [newValue, setNewValue] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
 
   function handleAdd(): void {
     const trimmed = newValue.trim();
@@ -28,6 +32,10 @@ function EditableList({
     }
     onChange([...entries, trimmed]);
     setNewValue("");
+    // Scroll to bottom after React re-renders
+    setTimeout(() => {
+      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+    }, 0);
   }
 
   function handleRemove(index: number): void {
@@ -36,10 +44,10 @@ function EditableList({
 
   return (
     <div className="editable-list">
-      <div className="editable-list__items">
+      <div className="editable-list__items" ref={listRef}>
         {entries.map((entry, index) => (
           <div key={`${entry}-${index}`} className="editable-list__item">
-            <span>{entry}</span>
+            <span style={monospace ? { fontFamily: "monospace", fontSize: "0.85em" } : undefined}>{entry}</span>
             <button
               type="button"
               className="button button--ghost button--compact"
@@ -52,6 +60,7 @@ function EditableList({
       </div>
       <div className="editable-list__add">
         <input
+          style={monospace ? { fontFamily: "monospace", fontSize: "0.9em" } : undefined}
           value={newValue}
           placeholder={placeholder}
           onChange={(event) => setNewValue(event.target.value)}
@@ -77,7 +86,6 @@ function EditableList({
 
 export function SettingsModal({
   draft,
-  timezones,
   isSaving,
   isPickingOutputDirectory,
   errorMessage,
@@ -87,7 +95,6 @@ export function SettingsModal({
   onSave,
 }: {
   draft: SettingsDraft;
-  timezones: string[];
   isSaving: boolean;
   isPickingOutputDirectory: boolean;
   errorMessage: string | null;
@@ -101,6 +108,7 @@ export function SettingsModal({
     [draft.languagesText],
   );
   const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
+  const timezoneInvalid = draft.defaultTimezone.trim().length > 0 && !isSupportedTimezone(draft.defaultTimezone.trim());
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -117,7 +125,67 @@ export function SettingsModal({
         <div className="settings-sections">
 
           <section className="settings-section">
-            <h3>API Key</h3>
+            <h3>Timestamps</h3>
+            <div className="field-stack">
+              <label className="field">
+                <span>Default Timezone</span>
+                <input
+                  value={draft.defaultTimezone}
+                  placeholder="Asia/Tokyo"
+                  onChange={(event) => onChange({ ...draft, defaultTimezone: event.target.value })}
+                />
+              </label>
+              {timezoneInvalid && (
+                <p className="inline-error" style={{ marginTop: 0 }}>Not a valid IANA timezone name.</p>
+              )}
+              <p className="field-hint">
+                Use IANA timezone names (e.g. America/New_York, Asia/Tokyo).
+                See <a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" rel="noopener noreferrer">full list on Wikipedia</a>.
+              </p>
+              <div className="field">
+                <span>Timestamp Patterns</span>
+                <p className="field-hint">
+                  Regex patterns used to parse timestamps from filenames. Named groups: <code>year</code> or <code>year2</code> (2-digit), <code>month</code>, <code>day</code>, <code>hour</code>, <code>minute</code>, <code>second</code> (optional).<br />
+                  Examples matched: <code>20241215_143022.mp3</code> · <code>241215_143022.mp3</code> · <code>20241215_1430.mp3</code> · <code>260421_0944.mp3</code>
+                </p>
+                <EditableList
+                  monospace
+                  entries={patternEntries}
+                  onChange={(entries) => onChange({ ...draft, timestampPatternsText: entriesToText(entries) })}
+                  placeholder="Add regex pattern..."
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <h3>Language</h3>
+            <div className="field-stack">
+              <label className="field">
+                <span>Default Language</span>
+                <select
+                  value={draft.defaultLanguage}
+                  onChange={(event) => onChange({ ...draft, defaultLanguage: event.target.value })}
+                >
+                  <option value="">— none —</option>
+                  {languageEntries.map((lang) => (
+                    <option key={lang} value={lang}>{lang}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="field">
+                <span>Available Languages</span>
+                <EditableList
+                  entries={languageEntries}
+                  onChange={(entries) => onChange({ ...draft, languagesText: entriesToText(entries) })}
+                  placeholder="Add language..."
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <h3>AI</h3>
             <div className="field-stack">
               {draft.hasGeminiApiKey && !draft.clearGeminiApiKey ? (
                 <div className="api-key-status">
@@ -151,95 +219,6 @@ export function SettingsModal({
                   onChange={(event) => onChange({ ...draft, geminiApiKeyInput: event.target.value })}
                 />
               </label>
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <h3>Output</h3>
-            <div className="field-stack">
-              <label className="field">
-                <span>Output Directory</span>
-                <div className="inline-action-field">
-                  <input
-                    value={draft.outputDirectory}
-                    placeholder="/path/to/output"
-                    onChange={(event) => onChange({ ...draft, outputDirectory: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="button button--ghost"
-                    onClick={onPickOutputDirectory}
-                    disabled={isPickingOutputDirectory}
-                  >
-                    Browse
-                  </button>
-                </div>
-              </label>
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <h3>Language</h3>
-            <div className="field-stack">
-              <label className="field">
-                <span>Default Language</span>
-                <input
-                  list="settings-language-options"
-                  value={draft.defaultLanguage}
-                  onChange={(event) => onChange({ ...draft, defaultLanguage: event.target.value })}
-                />
-              </label>
-              <div className="field">
-                <span>Available Languages</span>
-                <EditableList
-                  entries={languageEntries}
-                  onChange={(entries) => onChange({ ...draft, languagesText: entriesToText(entries) })}
-                  placeholder="Add language..."
-                />
-              </div>
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <h3>Recording</h3>
-            <div className="field-stack">
-              <label className="field">
-                <span>Default Timezone</span>
-                <input
-                  list="settings-timezone-options"
-                  value={draft.defaultTimezone}
-                  onChange={(event) => onChange({ ...draft, defaultTimezone: event.target.value })}
-                />
-              </label>
-              <p className="field-hint">
-                Use IANA timezone names (e.g. America/New_York, Asia/Tokyo).
-                See <a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" rel="noopener noreferrer">full list on Wikipedia</a>.
-              </p>
-              <div className="field">
-                <span>Timestamp Patterns</span>
-                <p className="field-hint">Regex patterns used to parse timestamps from filenames. Named groups: <code>year</code>, <code>month</code>, <code>day</code>, <code>hour</code>, <code>minute</code>, <code>second</code> (optional).</p>
-                <EditableList
-                  entries={patternEntries}
-                  onChange={(entries) => onChange({ ...draft, timestampPatternsText: entriesToText(entries) })}
-                  placeholder="Add regex pattern..."
-                />
-              </div>
-              <label className="field">
-                <span>Preview Snippet (seconds)</span>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={draft.previewSnippetSeconds}
-                  onChange={(event) => onChange({ ...draft, previewSnippetSeconds: Number.parseInt(event.target.value, 10) })}
-                />
-              </label>
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <h3>AI</h3>
-            <div className="field-stack">
               <label className="field">
                 <span>Transcription Model</span>
                 <input
@@ -284,8 +263,44 @@ export function SettingsModal({
           </section>
 
           <section className="settings-section">
+            <h3>Output</h3>
+            <div className="field-stack">
+              <label className="field">
+                <span>Output Directory</span>
+                <div className="inline-action-field">
+                  <input
+                    value={draft.outputDirectory}
+                    placeholder="/path/to/output"
+                    onChange={(event) => onChange({ ...draft, outputDirectory: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={onPickOutputDirectory}
+                    disabled={isPickingOutputDirectory}
+                  >
+                    Browse
+                  </button>
+                </div>
+              </label>
+            </div>
+          </section>
+
+          <section className="settings-section">
             <h3>Advanced</h3>
-            <p className="field-hint">These settings control retry behavior and API timeouts. Change only if you experience reliability issues.</p>
+            <p className="field-hint">These settings control preview snippet duration, retry behavior, and API timeouts. Change only if you experience reliability issues.</p>
+            <div className="field-stack">
+              <label className="field">
+                <span>Preview Snippet (seconds)</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={draft.previewSnippetSeconds}
+                  onChange={(event) => onChange({ ...draft, previewSnippetSeconds: Number.parseInt(event.target.value, 10) })}
+                />
+              </label>
+            </div>
             <div className="settings-number-grid">
               <label className="field">
                 <span>Retry Attempts</span>
@@ -368,18 +383,6 @@ export function SettingsModal({
             {isSaving ? "Saving…" : "Save"}
           </button>
         </div>
-
-        <datalist id="settings-timezone-options">
-          {timezones.map((timezone) => (
-            <option key={timezone} value={timezone} />
-          ))}
-        </datalist>
-
-        <datalist id="settings-language-options">
-          {languageEntries.map((language) => (
-            <option key={language} value={language} />
-          ))}
-        </datalist>
       </section>
     </div>
   );

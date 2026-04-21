@@ -11,7 +11,6 @@ import {
 
 export interface TimestampReviewModalProps {
   items: PendingImportReviewItem[];
-  timezones: string[];
   onChange: (item: PendingImportReviewItem) => void;
   onApplyTimezoneToAll: (timezone: string) => void;
   onSetDeleteOriginalForAll: (value: boolean) => void;
@@ -22,7 +21,6 @@ export interface TimestampReviewModalProps {
 
 export function TimestampReviewModal({
   items,
-  timezones,
   onChange,
   onApplyTimezoneToAll,
   onSetDeleteOriginalForAll,
@@ -54,14 +52,12 @@ export function TimestampReviewModal({
       <section className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-card__header">
           <h2>Timestamp Review</h2>
-          <span className="muted-tag">{items.length} files</span>
         </div>
 
         <div className="modal-toolbar">
           <label className="field">
             <span>Set all timezones to</span>
             <input
-              list="timezone-options"
               value={bulkTimezone}
               onChange={(event) => setBulkTimezone(event.target.value)}
               placeholder="Asia/Tokyo"
@@ -90,9 +86,6 @@ export function TimestampReviewModal({
               <div key={item.id} className="review-row">
                 <div className="review-row__title">
                   <strong>{item.originalFilename}</strong>
-                  <span className="muted-tag">
-                    {item.parseStatus === "parsed" ? "Parsed" : "Manual"}
-                  </span>
                 </div>
                 <div className="review-row__fields">
                   <label className="field">
@@ -114,7 +107,6 @@ export function TimestampReviewModal({
                   <label className="field">
                     <span>Timezone</span>
                     <input
-                      list="timezone-options"
                       value={item.timezone}
                       onChange={(event) => {
                         const timezone = event.target.value;
@@ -170,8 +162,7 @@ export function TimestampReviewModal({
           })}
         </div>
 
-        <div className="modal-actions">
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: 'auto' }}>
+        <div className="modal-actions">          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: 'auto' }}>
             <input
               type="checkbox"
               checked={items.length > 0 && items.every((i) => i.deleteOriginalOnConfirm)}
@@ -197,11 +188,6 @@ export function TimestampReviewModal({
           </button>
         </div>
 
-        <datalist id="timezone-options">
-          {timezones.map((timezone) => (
-            <option key={timezone} value={timezone} />
-          ))}
-        </datalist>
       </section>
     </div>
   );

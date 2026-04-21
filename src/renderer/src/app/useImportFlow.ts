@@ -148,11 +148,11 @@ export function useImportFlow({
     setIsDragActive(false);
 
     const paths = Array.from(event.dataTransfer.files)
-      .map((file) => ((file as any).path as string | undefined) ?? "")
+      .map((file) => window.mumbler.getPathForFile(file))
       .filter((value) => value.length > 0);
 
     if (paths.length === 0) {
-      onError("Drop could not read file paths. Please use the Import button instead.");
+      onError("No valid file paths found in the dropped items.");
       return;
     }
 

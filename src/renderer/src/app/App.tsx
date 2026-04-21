@@ -1203,7 +1203,6 @@ export function App(): ReactElement {
       {settingsModal.settingsDraft ? (
         <SettingsModal
           draft={settingsModal.settingsDraft}
-          timezones={snapshot?.supportedTimezones ?? []}
           isSaving={settingsModal.isSavingSettings}
           isPickingOutputDirectory={settingsModal.isPickingSettingsOutputDirectory}
           errorMessage={settingsModal.settingsErrorMessage}
@@ -1220,7 +1219,6 @@ export function App(): ReactElement {
       {importFlow.pendingReviewDrafts.length > 0 ? (
         <TimestampReviewModal
           items={importFlow.pendingReviewDrafts}
-          timezones={snapshot?.supportedTimezones ?? []}
           onChange={(updatedItem) =>
             importFlow.setPendingReviewDrafts((current) =>
               current.map((item) => (item.id === updatedItem.id ? updatedItem : item)),
@@ -1339,8 +1337,8 @@ export function App(): ReactElement {
         />
       ) : null}
 
-      {showAbout && snapshot ? (
-        <AboutModal version={snapshot.appVersion} onClose={() => setShowAbout(false)} />
+      {showAbout ? (
+        <AboutModal onClose={() => setShowAbout(false)} />
       ) : null}
 
       {showShortcutsHelp ? (

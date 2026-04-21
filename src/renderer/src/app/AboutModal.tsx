@@ -1,6 +1,8 @@
 import type { ReactElement } from "react";
 
-export function AboutModal({ version, onClose }: { version: string; onClose: () => void }): ReactElement {
+const GITHUB_URL = "https://github.com/nao7sep/mumbler";
+
+export function AboutModal({ onClose }: { onClose: () => void }): ReactElement {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <section className="modal-card modal-card--narrow" onClick={(e) => e.stopPropagation()}>
@@ -11,9 +13,21 @@ export function AboutModal({ version, onClose }: { version: string; onClose: () 
           </button>
         </div>
         <div style={{ padding: "0 0 8px" }}>
-          <p style={{ margin: "0 0 6px", fontWeight: 600 }}>Mumbler</p>
-          <p className="empty-state__body" style={{ margin: "0 0 4px" }}>Version {version}</p>
-          <p className="empty-state__body" style={{ margin: 0 }}>Desktop audio transcription powered by Gemini AI.</p>
+          <p style={{ margin: "0 0 8px", fontWeight: 600 }}>Mumbler</p>
+          <p style={{ margin: "0 0 12px", fontSize: 13, color: "#555", lineHeight: 1.6 }}>
+            Desktop audio transcription powered by Gemini AI. Your audio stays on your machine.
+          </p>
+          <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
+            <a href={GITHUB_URL} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: "#0066cc", textDecoration: "none" }}>
+              GitHub ↗
+            </a>
+            <a href={`${GITHUB_URL}/issues`} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: "#0066cc", textDecoration: "none" }}>
+              Report Issue ↗
+            </a>
+          </div>
+          <p style={{ margin: 0, fontSize: 12, color: "#aaa" }}>
+            &copy; 2026 Yoshinao Inoguchi &mdash; MIT License
+          </p>
         </div>
       </section>
     </div>

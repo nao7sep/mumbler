@@ -36,7 +36,6 @@ import {
   probeAudioProfile,
 } from "./audio-tools";
 import {
-  getSupportedTimezones,
   isSupportedTimezone,
   normalizeUtcMarkerText,
   nowUtcMarker,
@@ -68,7 +67,6 @@ interface AppRuntimeState {
   appWideError: AppSnapshot["appWideError"];
   recoveredInterruptedCards: number;
   shellReadyAtUtc: string;
-  supportedTimezones: string[];
 }
 
 export class ApplicationRuntime {
@@ -83,7 +81,6 @@ export class ApplicationRuntime {
 
   static async initialize(): Promise<ApplicationRuntime> {
     const shellReadyAtUtc = nowUtcMarker();
-    const supportedTimezones = getSupportedTimezones();
     const paths = getAppPaths();
 
     try {
@@ -124,7 +121,6 @@ export class ApplicationRuntime {
         appWideError: null,
         recoveredInterruptedCards,
         shellReadyAtUtc,
-        supportedTimezones,
       });
     } catch (error: unknown) {
       return new ApplicationRuntime({
@@ -142,7 +138,6 @@ export class ApplicationRuntime {
         appWideError: null,
         recoveredInterruptedCards: 0,
         shellReadyAtUtc,
-        supportedTimezones,
       });
     }
   }
@@ -175,7 +170,6 @@ export class ApplicationRuntime {
       startupDiagnostic: this.runtime.startupDiagnostic,
       appWideError: this.runtime.appWideError,
       state,
-      supportedTimezones: this.runtime.supportedTimezones,
     };
   }
 
