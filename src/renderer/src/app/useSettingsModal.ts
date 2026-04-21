@@ -5,7 +5,6 @@ import type { AppSnapshot, SettingsDraft } from "@shared/app-shell";
 interface UseSettingsModalOptions {
   onSnapshotUpdate: (snapshot: AppSnapshot) => void;
   onError: (message: string | null) => void;
-  onNotice: (message: string | null) => void;
 }
 
 interface UseSettingsModalResult {
@@ -24,7 +23,6 @@ interface UseSettingsModalResult {
 export function useSettingsModal({
   onSnapshotUpdate,
   onError,
-  onNotice,
 }: UseSettingsModalOptions): UseSettingsModalResult {
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
@@ -80,7 +78,6 @@ export function useSettingsModal({
       onSnapshotUpdate(nextSnapshot);
       setSettingsDraft(null);
       setSettingsErrorMessage(null);
-      onNotice("Settings saved.");
       onError(null);
     } catch (error: unknown) {
       setSettingsErrorMessage(error instanceof Error ? error.message : "Failed to save settings.");

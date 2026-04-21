@@ -3,6 +3,12 @@ import { useMemo, useRef, useState, type ReactElement } from "react";
 import type { SettingsDraft } from "@shared/app-shell";
 import { getSupportedTimezones } from "@shared/timestamps";
 
+const GEMINI_MODELS = [
+  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+  { id: "gemini-3.1-flash-preview", label: "Gemini 3.1 Flash" },
+  { id: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash Lite" },
+];
+
 function parseEntries(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
 }
@@ -256,17 +262,31 @@ export function SettingsModal({
               </label>
               <label className="field">
                 <span>Transcription Model</span>
-                <input
+                <select
                   value={draft.transcriptionModel}
                   onChange={(event) => onChange({ ...draft, transcriptionModel: event.target.value })}
-                />
+                >
+                  {GEMINI_MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                  {!GEMINI_MODELS.some((m) => m.id === draft.transcriptionModel) && (
+                    <option value={draft.transcriptionModel}>{draft.transcriptionModel}</option>
+                  )}
+                </select>
               </label>
               <label className="field">
                 <span>Metadata Model</span>
-                <input
+                <select
                   value={draft.metadataModel}
                   onChange={(event) => onChange({ ...draft, metadataModel: event.target.value })}
-                />
+                >
+                  {GEMINI_MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                  {!GEMINI_MODELS.some((m) => m.id === draft.metadataModel) && (
+                    <option value={draft.metadataModel}>{draft.metadataModel}</option>
+                  )}
+                </select>
               </label>
               <label className="field">
                 <span>Title Prompt</span>

@@ -375,9 +375,9 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   return (
     <div className="waveform-editor">
       <div className="waveform-editor__info">
-        <span>Cursor: {formatMarkerInput(cursorSec)}</span>
-        <span>Duration: {durationLabel}</span>
-        <span>{trimSummary}</span>
+        <span className="waveform-editor__info-item">Cursor: {formatMarkerInput(cursorSec)}</span>
+        <span className="waveform-editor__info-item">Duration: {durationLabel}</span>
+        <span className="waveform-editor__info-item">{trimSummary}</span>
       </div>
 
       <div className="waveform-canvas" ref={containerRef} />

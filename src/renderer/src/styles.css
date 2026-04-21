@@ -467,6 +467,10 @@ textarea:focus-visible,
   background: var(--success-subtle);
 }
 
+.banner .empty-state__body {
+  max-width: none;
+}
+
 .failure-list {
   display: grid;
   gap: 6px;
@@ -697,7 +701,7 @@ textarea:focus-visible,
 }
 
 .result-output--tall {
-  min-height: 200px;
+  min-height: 360px;
 }
 
 .result-grid {
@@ -784,10 +788,20 @@ textarea:focus-visible,
 
 .waveform-editor__info {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.waveform-editor__info-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   font-size: 0.8rem;
-  color: var(--muted);
-  padding: 2px 0 4px;
+  color: var(--text-secondary);
+  background: var(--surface);
 }
 
 .waveform-canvas {

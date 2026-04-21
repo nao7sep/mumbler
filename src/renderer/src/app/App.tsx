@@ -14,11 +14,18 @@ import type {
   TrimDecision,
 } from "@shared/app-shell";
 import {
+  formatUtcForDisplay,
   getLocalTimestampError,
   getUtcTimestampError,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
+
+const GEMINI_MODELS = [
+  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+  { id: "gemini-3.1-flash-preview", label: "Gemini 3.1 Flash" },
+  { id: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash Lite" },
+];
 import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
 import { SettingsModal } from "./SettingsModal";
 import { findMatchingCommand, isTypingTarget } from "./shortcut-utils";
@@ -77,17 +84,7 @@ function describeCardStep(card: MumblerCard): string {
     return card.lastError?.message ?? "Failed.";
   }
 
-  return "Imported.";
-}
-
-function formatAiRun(
-  run: MumblerCard["ai"]["transcription"] | MumblerCard["ai"]["title"] | MumblerCard["ai"]["slug"],
-): string {
-  if (run === null) {
-    return "—";
-  }
-
-  return `${run.provider} · ${run.model}`;
+  return "";
 }
 
 function getTranscribeDisabledReason(params: {
@@ -211,7 +208,6 @@ export function App(): ReactElement {
   const settingsModal = useSettingsModal({
     onSnapshotUpdate: setSnapshot,
     onError: setErrorMessage,
-    onNotice: setNoticeMessage,
   });
 
   useEffect(() => {
@@ -450,6 +446,17 @@ export function App(): ReactElement {
     }
   }
 
+  async function handleDetailModelChange(field: "transcriptionModel" | "metadataModel", value: string): Promise<void> {
+    try {
+      const draft = await window.mumbler.getSettingsDraft();
+      const nextSnapshot = await window.mumbler.saveSettingsDraft({ ...draft, [field]: value });
+      setSnapshot(nextSnapshot);
+      setErrorMessage(null);
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to update model.");
+    }
+  }
+
   async function handleCopyResult(label: string, value: string | null): Promise<void> {
     if (value === null || value.trim().length === 0) {
       return;
@@ -616,6 +623,7 @@ export function App(): ReactElement {
 
       setPendingSaveConflict(null);
       setNoticeMessage(`Saved audio and metadata to ${result.audioPath}`);
+      window.scrollTo({ top: 0 });
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to save card.");
     }
@@ -626,7 +634,7 @@ export function App(): ReactElement {
       const nextSnapshot = await window.mumbler.removeCard(cardId);
       setSnapshot(nextSnapshot);
       setErrorMessage(null);
-      setNoticeMessage("Removed card and moved its working audio to trash.");
+      window.scrollTo({ top: 0 });
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to remove card.");
     } finally {
@@ -789,11 +797,11 @@ export function App(): ReactElement {
               <div className="detail-row">
                 <section className={`detail-card detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
                   <div className="detail-card__header">
-                    <h3>Identity</h3>
+                    <h3>Timestamps</h3>
                   </div>
                   <div className={`status-summary status-summary--${statusModifier(selectedCard.status)}`}>
                     <strong>{selectedCard.status}</strong>
-                    <span>{describeCardStep(selectedCard)}</span>
+                    {describeCardStep(selectedCard) ? <span>{describeCardStep(selectedCard)}</span> : null}
                   </div>
                   <dl className="meta-list">
                     <div>
@@ -805,20 +813,16 @@ export function App(): ReactElement {
                       <dd>{selectedCard.timestamps.effectiveLocal}</dd>
                     </div>
                     <div>
-                      <dt>Effective UTC</dt>
-                      <dd>{selectedCard.timestamps.effectiveUtc}</dd>
-                    </div>
-                    <div>
-                      <dt>Confirmed local</dt>
-                      <dd>{selectedCard.timestamps.confirmedLocal}</dd>
-                    </div>
-                    <div>
                       <dt>Timezone</dt>
                       <dd>{selectedCard.timestamps.timezone}</dd>
                     </div>
                     <div>
-                      <dt>Import source</dt>
-                      <dd>{selectedCard.importSource}</dd>
+                      <dt>Effective UTC</dt>
+                      <dd>{formatUtcForDisplay(selectedCard.timestamps.effectiveUtc)}</dd>
+                    </div>
+                    <div>
+                      <dt>Confirmed local</dt>
+                      <dd>{selectedCard.timestamps.confirmedLocal}</dd>
                     </div>
                   </dl>
                 </section>
@@ -833,12 +837,15 @@ export function App(): ReactElement {
                       <dd>{formatDuration(selectedCard.durationSec)}</dd>
                     </div>
                     <div>
-                      <dt>Codec</dt>
-                      <dd>{selectedCard.audioProfile?.codecName ?? "Unknown"}</dd>
-                    </div>
-                    <div>
-                      <dt>Container</dt>
-                      <dd>{selectedCard.audioProfile?.formatName ?? "Unknown"}</dd>
+                      <dt>Format</dt>
+                      <dd>{(() => {
+                        const codec = selectedCard.audioProfile?.codecName ?? null;
+                        const container = selectedCard.audioProfile?.formatName ?? null;
+                        if (!codec && !container) return "Unknown";
+                        if (codec === container || !container) return codec ?? "Unknown";
+                        if (!codec) return container ?? "Unknown";
+                        return `${codec} (${container})`;
+                      })()}</dd>
                     </div>
                     <div>
                       <dt>Bitrate</dt>
@@ -861,10 +868,6 @@ export function App(): ReactElement {
                       <dd>{selectedCard.audioProfile?.channels ?? "Unknown"}</dd>
                     </div>
                     <div>
-                      <dt>Front trim offset</dt>
-                      <dd>{selectedCard.timestamps.frontTrimOffsetSec.toFixed(1)}s</dd>
-                    </div>
-                    <div>
                       <dt>File size</dt>
                       <dd>{formatBytes(selectedCard.fileSizeBytes)}</dd>
                     </div>
@@ -873,7 +876,7 @@ export function App(): ReactElement {
 
                 <section className="detail-card">
                   <div className="detail-card__header">
-                    <h3>Language</h3>
+                    <h3>Options</h3>
                   </div>
                   <div className="field-stack">
                     <label className="field">
@@ -892,21 +895,44 @@ export function App(): ReactElement {
                         ))}
                       </select>
                     </label>
+                    <p className="field-hint">Set to match the recording's spoken language — determines the title language.</p>
+                    <label className="field">
+                      <span>Transcription Model</span>
+                      <select
+                        value={snapshot?.settingsSummary?.transcriptionModel ?? ""}
+                        disabled={selectedCardIsBusy}
+                        onChange={(event) => void handleDetailModelChange("transcriptionModel", event.target.value)}
+                      >
+                        {GEMINI_MODELS.map((m) => (
+                          <option key={m.id} value={m.id}>{m.label}</option>
+                        ))}
+                        {snapshot?.settingsSummary?.transcriptionModel &&
+                          !GEMINI_MODELS.some((m) => m.id === snapshot.settingsSummary?.transcriptionModel) && (
+                          <option value={snapshot.settingsSummary.transcriptionModel}>
+                            {snapshot.settingsSummary.transcriptionModel}
+                          </option>
+                        )}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Metadata Model</span>
+                      <select
+                        value={snapshot?.settingsSummary?.metadataModel ?? ""}
+                        disabled={selectedCardIsBusy}
+                        onChange={(event) => void handleDetailModelChange("metadataModel", event.target.value)}
+                      >
+                        {GEMINI_MODELS.map((m) => (
+                          <option key={m.id} value={m.id}>{m.label}</option>
+                        ))}
+                        {snapshot?.settingsSummary?.metadataModel &&
+                          !GEMINI_MODELS.some((m) => m.id === snapshot.settingsSummary?.metadataModel) && (
+                          <option value={snapshot.settingsSummary.metadataModel}>
+                            {snapshot.settingsSummary.metadataModel}
+                          </option>
+                        )}
+                      </select>
+                    </label>
                   </div>
-                  <dl className="meta-list compact-meta-list">
-                    <div>
-                      <dt>Transcription model</dt>
-                      <dd>{snapshot?.settingsSummary?.transcriptionModel ?? "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>Metadata model</dt>
-                      <dd>{snapshot?.settingsSummary?.metadataModel ?? "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>Configured languages</dt>
-                      <dd>{snapshot?.settingsSummary?.languageCount ?? "—"}</dd>
-                    </div>
-                  </dl>
                 </section>
               </div>
 
@@ -1001,7 +1027,7 @@ export function App(): ReactElement {
                     Retry Failed Step
                   </button>
                 </div>
-                {transcribeDisabledReason ? (
+                {transcribeDisabledReason && !selectedCardIsBusy ? (
                   <p className="panel__note">{transcribeDisabledReason}</p>
                 ) : null}
                 <div className="result-grid">
@@ -1063,40 +1089,6 @@ export function App(): ReactElement {
                         placeholder=""
                       />
                     </label>
-                    <section className="detail-card detail-card--nested">
-                      <div className="detail-card__header">
-                        <h3>Provenance</h3>
-                      </div>
-                      <dl className="meta-list compact-meta-list">
-                        <div>
-                          <dt>Transcript</dt>
-                          <dd className="provenance-value">
-                            <span>{formatAiRun(selectedCard.ai.transcription)}</span>
-                            <span className="provenance-time">
-                              {selectedCard.ai.transcription?.generatedAtUtc ?? "—"}
-                            </span>
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Title</dt>
-                          <dd className="provenance-value">
-                            <span>{formatAiRun(selectedCard.ai.title)}</span>
-                            <span className="provenance-time">
-                              {selectedCard.ai.title?.generatedAtUtc ?? "—"}
-                            </span>
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Slug</dt>
-                          <dd className="provenance-value">
-                            <span>{formatAiRun(selectedCard.ai.slug)}</span>
-                            <span className="provenance-time">
-                              {selectedCard.ai.slug?.generatedAtUtc ?? "—"}
-                            </span>
-                          </dd>
-                        </div>
-                      </dl>
-                    </section>
                   </div>
                 </div>
               </section>
@@ -1110,12 +1102,6 @@ export function App(): ReactElement {
                   <div>
                     <dt>Output directory</dt>
                     <dd>{snapshot?.settingsSummary?.outputDirectory ?? "Not configured"}</dd>
-                  </div>
-                  <div>
-                    <dt>Gemini API key</dt>
-                    <dd>
-                      {snapshot?.settingsSummary?.hasGeminiApiKey ? "Configured" : "Missing"}
-                    </dd>
                   </div>
                   {selectedCard.lastError ? (
                     <div>
@@ -1139,13 +1125,15 @@ export function App(): ReactElement {
                   >
                     Change Output Directory
                   </button>
+                </div>
+                <div className="action-toolbar">
                   <button
                     type="button"
                     className="button button--primary"
                     onClick={() => void handleSaveCard(selectedCard.id)}
                     disabled={saveDisabledReason !== null}
                   >
-                    Save
+                    Save and Remove
                   </button>
                   <button
                     type="button"
@@ -1156,7 +1144,8 @@ export function App(): ReactElement {
                     Remove
                   </button>
                 </div>
-                {saveDisabledReason ? (
+                <p className="field-hint">Saving exports audio and metadata, then removes this recording from the queue.</p>
+                {saveDisabledReason && !selectedCardIsBusy ? (
                   <p className="panel__note">{saveDisabledReason}</p>
                 ) : null}
               </section>
