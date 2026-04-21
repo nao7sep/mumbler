@@ -3,17 +3,13 @@ import {
   useMemo,
   useRef,
   useState,
-  type DragEvent,
   type ReactElement,
 } from "react";
 
 import type {
   AppSnapshot,
-  FailedImport,
   MumblerCard,
-  PendingImportReviewItem,
   SaveCardResult,
-  SettingsDraft,
   TrimDecision,
 } from "@shared/app-shell";
 import {
@@ -30,6 +26,8 @@ import { QueueList, formatBytes, formatDuration, statusModifier } from "./QueueL
 import { BannerCard, DecisionModal } from "./DecisionModal";
 import { AboutModal } from "./AboutModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
+import { useImportFlow } from "./useImportFlow";
+import { useSettingsModal } from "./useSettingsModal";
 
 function formatOptionalSeconds(value: number | null): string {
   if (value === null) {
@@ -181,27 +179,29 @@ export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
-  const [isDragActive, setIsDragActive] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-  const [isConfirmingReview, setIsConfirmingReview] = useState(false);
-  const [pendingReviewDrafts, setPendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
-  const [importFailures, setImportFailures] = useState<FailedImport[]>([]);
   const [activePipelineCards, setActivePipelineCards] = useState<string[]>([]);
   const [pendingSaveConflict, setPendingSaveConflict] = useState<{
     cardId: string;
     result: Extract<SaveCardResult, { kind: "conflict" }>;
   } | null>(null);
   const [pendingRemoveCardId, setPendingRemoveCardId] = useState<string | null>(null);
-  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
-  const [isLoadingSettings, setIsLoadingSettings] = useState(false);
-  const [isSavingSettings, setIsSavingSettings] = useState(false);
-  const [isPickingSettingsOutputDirectory, setIsPickingSettingsOutputDirectory] = useState(false);
-  const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
   const [isResettingState, setIsResettingState] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const waveformEditorRef = useRef<WaveformEditorHandle | null>(null);
+
+  const importFlow = useImportFlow({
+    snapshot,
+    onSnapshotUpdate: setSnapshot,
+    onError: setErrorMessage,
+  });
+
+  const settingsModal = useSettingsModal({
+    onSnapshotUpdate: setSnapshot,
+    onError: setErrorMessage,
+    onNotice: setNoticeMessage,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -225,42 +225,6 @@ export function App(): ReactElement {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    setPendingReviewDrafts(snapshot?.state?.pendingImports ?? []);
-  }, [snapshot?.state?.pendingImports]);
-
-  useEffect(() => {
-    const currentState = snapshot?.state;
-    if (pendingReviewDrafts.length === 0 || currentState == null) {
-      return;
-    }
-
-    const persistedJson = JSON.stringify(currentState.pendingImports);
-    const draftJson = JSON.stringify(pendingReviewDrafts);
-    if (persistedJson === draftJson) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      void window.mumbler
-        .updatePendingImportDrafts(pendingReviewDrafts)
-        .then((nextSnapshot) => {
-          setSnapshot(nextSnapshot);
-        })
-        .catch((error: unknown) => {
-          setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : "Failed to persist pending timestamp review edits.",
-          );
-        });
-    }, 250);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [pendingReviewDrafts, snapshot?.state]);
 
   useEffect(() => {
     return window.mumbler.onPipelineProgressUpdated(() => {
@@ -368,8 +332,8 @@ export function App(): ReactElement {
     selectedCardIsBusy,
   });
   const modalIsOpen =
-    settingsDraft !== null ||
-    pendingReviewDrafts.length > 0 ||
+    settingsModal.settingsDraft !== null ||
+    importFlow.pendingReviewDrafts.length > 0 ||
     pendingSaveConflict !== null ||
     pendingRemoveCardId !== null ||
     showAbout ||
@@ -386,20 +350,6 @@ export function App(): ReactElement {
     return [...merged].sort((a, b) => a.localeCompare(b));
   }, [selectedCard, snapshot?.settingsSummary?.languages]);
 
-  async function handleImportClick(): Promise<void> {
-    setIsImporting(true);
-    try {
-      const result = await window.mumbler.openImportDialog();
-      setSnapshot(result.snapshot);
-      setImportFailures(result.failedImports);
-      setErrorMessage(null);
-    } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Import failed.");
-    } finally {
-      setIsImporting(false);
-    }
-  }
-
   async function handleCardSelect(cardId: string): Promise<void> {
     try {
       const nextSnapshot = await window.mumbler.selectCard(cardId);
@@ -407,51 +357,6 @@ export function App(): ReactElement {
       setErrorMessage(null);
     } catch (error: unknown) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to select card.");
-    }
-  }
-
-  async function handleConfirmPendingImports(): Promise<void> {
-    setIsConfirmingReview(true);
-    try {
-      const nextSnapshot = await window.mumbler.confirmPendingImports(pendingReviewDrafts);
-      setSnapshot(nextSnapshot);
-      setImportFailures([]);
-      setErrorMessage(null);
-    } catch (error: unknown) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Failed to confirm imported timestamps.",
-      );
-    } finally {
-      setIsConfirmingReview(false);
-    }
-  }
-
-  async function handleCancelPendingImports(): Promise<void> {
-    try {
-      const nextSnapshot = await window.mumbler.cancelPendingImports();
-      setSnapshot(nextSnapshot);
-      setErrorMessage(null);
-    } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to cancel import.");
-    }
-    setPendingReviewDrafts([]);
-  }
-
-  async function handleDroppedPaths(paths: string[]): Promise<void> {
-    if (paths.length === 0) {
-      return;
-    }
-
-    setIsImporting(true);
-    try {
-      const result = await window.mumbler.importDroppedPaths(paths);
-      setSnapshot(result.snapshot);
-      setImportFailures(result.failedImports);
-      setErrorMessage(null);
-    } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Dropped import failed.");
-    } finally {
-      setIsImporting(false);
     }
   }
 
@@ -537,63 +442,6 @@ export function App(): ReactElement {
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to choose output directory.",
       );
-    }
-  }
-
-  async function handleOpenSettings(): Promise<void> {
-    setIsLoadingSettings(true);
-    try {
-      const draft = await window.mumbler.getSettingsDraft();
-      setSettingsDraft(draft);
-      setSettingsErrorMessage(null);
-    } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to load settings.");
-    } finally {
-      setIsLoadingSettings(false);
-    }
-  }
-
-  async function handlePickSettingsOutputDirectory(): Promise<void> {
-    setIsPickingSettingsOutputDirectory(true);
-    try {
-      const nextPath = await window.mumbler.pickOutputDirectory();
-      if (nextPath !== null) {
-        setSettingsDraft((current) =>
-          current === null
-            ? current
-            : {
-                ...current,
-                outputDirectory: nextPath,
-              },
-        );
-      }
-      setSettingsErrorMessage(null);
-    } catch (error: unknown) {
-      setSettingsErrorMessage(
-        error instanceof Error ? error.message : "Failed to choose output directory.",
-      );
-    } finally {
-      setIsPickingSettingsOutputDirectory(false);
-    }
-  }
-
-  async function handleSaveSettings(): Promise<void> {
-    if (settingsDraft === null) {
-      return;
-    }
-
-    setIsSavingSettings(true);
-    try {
-      const nextSnapshot = await window.mumbler.saveSettingsDraft(settingsDraft);
-      setSnapshot(nextSnapshot);
-      setSettingsDraft(null);
-      setSettingsErrorMessage(null);
-      setNoticeMessage("Settings saved.");
-      setErrorMessage(null);
-    } catch (error: unknown) {
-      setSettingsErrorMessage(error instanceof Error ? error.message : "Failed to save settings.");
-    } finally {
-      setIsSavingSettings(false);
     }
   }
 
@@ -723,11 +571,11 @@ export function App(): ReactElement {
           setPendingRemoveCardId(null);
         } else if (pendingSaveConflict !== null) {
           setPendingSaveConflict(null);
-        } else if (pendingReviewDrafts.length > 0) {
-          void handleCancelPendingImports();
-        } else if (settingsDraft !== null && !isSavingSettings) {
-          setSettingsDraft(null);
-          setSettingsErrorMessage(null);
+        } else if (importFlow.pendingReviewDrafts.length > 0) {
+          void importFlow.handleCancelPendingImports();
+        } else if (settingsModal.settingsDraft !== null && !settingsModal.isSavingSettings) {
+          settingsModal.setSettingsDraft(null);
+          settingsModal.setSettingsErrorMessage(null);
         }
         return;
       }
@@ -750,7 +598,7 @@ export function App(): ReactElement {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsDraft, isSavingSettings, pendingRemoveCardId, pendingSaveConflict, pendingReviewDrafts]);
+  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsModal.settingsDraft, settingsModal.isSavingSettings, settingsModal.setSettingsDraft, settingsModal.setSettingsErrorMessage, pendingRemoveCardId, pendingSaveConflict, importFlow.pendingReviewDrafts, importFlow.handleCancelPendingImports]);
 
   async function handleSaveCard(
     cardId: string,
@@ -792,35 +640,6 @@ export function App(): ReactElement {
     }
   }
 
-  function onDragOver(event: DragEvent<HTMLElement>): void {
-    event.preventDefault();
-    setIsDragActive(true);
-  }
-
-  function onDragLeave(event: DragEvent<HTMLElement>): void {
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      return;
-    }
-
-    setIsDragActive(false);
-  }
-
-  function onDrop(event: DragEvent<HTMLElement>): void {
-    event.preventDefault();
-    setIsDragActive(false);
-
-    const paths = Array.from(event.dataTransfer.files)
-      .map((file) => ((file as any).path as string | undefined) ?? "")
-      .filter((value) => value.length > 0);
-
-    if (paths.length === 0) {
-      setErrorMessage("Drop could not read file paths. Please use the Import button instead.");
-      return;
-    }
-
-    void handleDroppedPaths(paths);
-  }
-
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -860,8 +679,8 @@ export function App(): ReactElement {
                   <button
                     type="button"
                     className="app-menu-item"
-                    onClick={() => { setIsMenuOpen(false); void handleOpenSettings(); }}
-                    disabled={isImporting || isLoadingSettings}
+                    onClick={() => { setIsMenuOpen(false); void settingsModal.handleOpenSettings(); }}
+                    disabled={importFlow.isImporting || settingsModal.isLoadingSettings}
                   >
                     Settings
                   </button>
@@ -888,10 +707,10 @@ export function App(): ReactElement {
       </header>
 
       <main
-        className={`workspace${isDragActive ? " workspace--drag-active" : ""}`}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
+        className={`workspace${importFlow.isDragActive ? " workspace--drag-active" : ""}`}
+        onDragOver={importFlow.onDragOver}
+        onDragLeave={importFlow.onDragLeave}
+        onDrop={importFlow.onDrop}
       >
         <aside className="queue-pane panel">
           <div className="panel__header">
@@ -900,10 +719,10 @@ export function App(): ReactElement {
               <button
                 type="button"
                 className="button button--primary"
-                onClick={() => void handleImportClick()}
-                disabled={isImporting}
+                onClick={() => void importFlow.handleImportClick()}
+                disabled={importFlow.isImporting}
               >
-                {isImporting ? "Importing..." : "Import"}
+                {importFlow.isImporting ? "Importing..." : "Import"}
               </button>
             </div>
           </div>
@@ -926,14 +745,14 @@ export function App(): ReactElement {
             />
           ) : null}
 
-          {importFailures.length > 0 ? (
+          {importFlow.importFailures.length > 0 ? (
             <BannerCard
               title="Some imports failed."
               variant="warning"
-              onDismiss={() => setImportFailures([])}
+              onDismiss={() => importFlow.setImportFailures([])}
             >
               <div className="failure-list">
-                {importFailures.map((failure) => (
+                {importFlow.importFailures.map((failure) => (
                   <p key={`${failure.sourcePath}:${failure.message}`}>
                     <strong>{failure.sourcePath}</strong>
                     <span>{failure.message}</span>
@@ -1381,34 +1200,34 @@ export function App(): ReactElement {
         </section>
       </main>
 
-      {settingsDraft ? (
+      {settingsModal.settingsDraft ? (
         <SettingsModal
-          draft={settingsDraft}
+          draft={settingsModal.settingsDraft}
           timezones={snapshot?.supportedTimezones ?? []}
-          isSaving={isSavingSettings}
-          isPickingOutputDirectory={isPickingSettingsOutputDirectory}
-          errorMessage={settingsErrorMessage}
-          onChange={setSettingsDraft}
+          isSaving={settingsModal.isSavingSettings}
+          isPickingOutputDirectory={settingsModal.isPickingSettingsOutputDirectory}
+          errorMessage={settingsModal.settingsErrorMessage}
+          onChange={settingsModal.setSettingsDraft}
           onClose={() => {
-            setSettingsDraft(null);
-            setSettingsErrorMessage(null);
+            settingsModal.setSettingsDraft(null);
+            settingsModal.setSettingsErrorMessage(null);
           }}
-          onPickOutputDirectory={() => void handlePickSettingsOutputDirectory()}
-          onSave={() => void handleSaveSettings()}
+          onPickOutputDirectory={() => void settingsModal.handlePickSettingsOutputDirectory()}
+          onSave={() => void settingsModal.handleSaveSettings()}
         />
       ) : null}
 
-      {pendingReviewDrafts.length > 0 ? (
+      {importFlow.pendingReviewDrafts.length > 0 ? (
         <TimestampReviewModal
-          items={pendingReviewDrafts}
+          items={importFlow.pendingReviewDrafts}
           timezones={snapshot?.supportedTimezones ?? []}
           onChange={(updatedItem) =>
-            setPendingReviewDrafts((current) =>
+            importFlow.setPendingReviewDrafts((current) =>
               current.map((item) => (item.id === updatedItem.id ? updatedItem : item)),
             )
           }
           onApplyTimezoneToAll={(timezone) =>
-            setPendingReviewDrafts((current) =>
+            importFlow.setPendingReviewDrafts((current) =>
               current.map((item) => {
                 const localError = getLocalTimestampError(item.localTimestampText);
                 const utcError = getUtcTimestampError(item.utcTimestampText);
@@ -1437,14 +1256,14 @@ export function App(): ReactElement {
               }),
             )
           }
-          onConfirm={() => void handleConfirmPendingImports()}
-          onCancel={() => void handleCancelPendingImports()}
+          onConfirm={() => void importFlow.handleConfirmPendingImports()}
+          onCancel={() => void importFlow.handleCancelPendingImports()}
           onSetDeleteOriginalForAll={(value) =>
-            setPendingReviewDrafts((current) =>
+            importFlow.setPendingReviewDrafts((current) =>
               current.map((item) => ({ ...item, deleteOriginalOnConfirm: value }))
             )
           }
-          isSubmitting={isConfirmingReview}
+          isSubmitting={importFlow.isConfirmingReview}
         />
       ) : null}
 
