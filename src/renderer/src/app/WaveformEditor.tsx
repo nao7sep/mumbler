@@ -17,6 +17,60 @@ import type { CardTrim, MumblerCard } from "@shared/app-shell";
 const REGION_COLOR = "rgba(29, 97, 118, 0.22)";
 const MARKER_EPSILON_SEC = 0.05;
 
+// Renders a symmetric waveform by merging all channels and centering bars.
+// WaveSurfer's default renderer uses separate stereo channels for top/bottom halves,
+// which produces visually asymmetric results for mono-dominant recordings.
+function renderSymmetricWaveform(
+  channelData: Array<Float32Array | number[]>,
+  ctx: CanvasRenderingContext2D,
+): void {
+  const { width, height } = ctx.canvas;
+  const halfH = height / 2;
+  const pixelRatio = window.devicePixelRatio ?? 1;
+  const barWidth = 2 * pixelRatio;
+  const barStep = barWidth + 1.5 * pixelRatio;
+
+  const length = channelData[0]?.length ?? 0;
+  if (length === 0) return;
+
+  // Normalize against the global max across all channels.
+  let maxPeak = 0;
+  for (const ch of channelData) {
+    for (let i = 0; i < ch.length; i++) {
+      const abs = Math.abs(ch[i]);
+      if (abs > maxPeak) maxPeak = abs;
+    }
+  }
+  if (maxPeak === 0) return;
+
+  const numBars = Math.floor(width / barStep);
+  if (numBars === 0) return;
+  const samplesPerBar = length / numBars;
+
+  ctx.beginPath();
+  for (let b = 0; b < numBars; b++) {
+    const start = Math.round(b * samplesPerBar);
+    const end = Math.min(length, Math.round((b + 1) * samplesPerBar));
+    if (start >= end) continue;
+
+    let barPeak = 0;
+    for (let i = start; i < end; i++) {
+      for (const ch of channelData) {
+        const abs = Math.abs(ch[i] ?? 0);
+        if (abs > barPeak) barPeak = abs;
+      }
+    }
+
+    const amplitude = barPeak / maxPeak;
+    const barH = Math.max(pixelRatio, Math.round(amplitude * halfH * 2));
+    const x = b * barStep;
+    const y = halfH - barH / 2;
+    const radius = Math.min(pixelRatio, barH / 2);
+    ctx.roundRect(x, y, barWidth, barH, radius);
+  }
+  ctx.fill();
+}
+
 interface WaveformEditorProps {
   card: MumblerCard;
   previewSnippetSeconds: number;
@@ -120,10 +174,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       waveColor: "rgba(29, 97, 118, 0.2)",
       progressColor: "rgba(191, 79, 47, 0.84)",
       cursorColor: "#8f351b",
-      barWidth: 2,
-      barGap: 1.5,
-      barRadius: 999,
-      normalize: true,
+      renderFunction: renderSymmetricWaveform,
       dragToSeek: true,
       autoScroll: true,
       autoCenter: true,

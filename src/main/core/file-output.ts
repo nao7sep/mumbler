@@ -107,14 +107,15 @@ export function buildOutputPayload(params: {
 }): Record<string, unknown> {
   return {
     schemaVersion: 1,
+    appVersion: app.getVersion(),
     originalFilename: params.card.originalFilename,
     importSource: params.card.importSource,
     timestamps: {
       confirmedLocal: params.card.timestamps.confirmedLocal,
       confirmedUtc: params.card.timestamps.confirmedUtc,
-      timezone: params.card.timestamps.timezone,
       effectiveLocal: params.card.timestamps.effectiveLocal,
       effectiveUtc: params.card.timestamps.effectiveUtc,
+      timezone: params.card.timestamps.timezone,
       transcribedAtUtc: params.card.ai.transcription?.generatedAtUtc ?? null,
       finalizedAtUtc: params.finalizedAtUtc,
     },
@@ -143,7 +144,6 @@ export function buildOutputPayload(params: {
       finalChannels: params.finalProfile?.channels ?? null,
       trimDecision: params.card.trimDecision?.kind ?? "not-needed",
     },
-    appVersion: app.getVersion(),
   };
 }
 
