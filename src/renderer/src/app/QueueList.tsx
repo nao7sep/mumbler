@@ -61,23 +61,17 @@ export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): 
           onClick={() => onSelect(card.id)}
         >
           <div className="queue-row__top">
-            <strong>{card.timestamps.effectiveLocal}</strong>
+            <strong className="queue-row__filename">{card.originalFilename}</strong>
             <StatusChip label={card.status} />
           </div>
-          <div className="queue-row__name">{card.originalFilename}</div>
           <div className="queue-row__meta">
-            <span>{formatDuration(card.durationSec)}</span>
-            <span>{card.language}</span>
-            <span>{card.audioProfile?.codecName ?? "Unknown codec"}</span>
-          </div>
-          <div className="queue-row__meta">
-            <span>{card.timestamps.effectiveUtc}</span>
-            <span>
-              {card.timestamps.frontTrimOffsetSec > 0
-                ? `Front trim +${card.timestamps.frontTrimOffsetSec.toFixed(1)}s`
-                : "No front trim"}
-            </span>
-            <span>{formatBytes(card.fileSizeBytes)}</span>
+            <span>{card.timestamps.effectiveLocal}</span>
+            {card.durationSec !== null ? (
+              <>
+                <span className="queue-row__dot">·</span>
+                <span>{formatDuration(card.durationSec)}</span>
+              </>
+            ) : null}
           </div>
           {card.lastError ? (
             <div className="queue-row__error">{card.lastError.message}</div>

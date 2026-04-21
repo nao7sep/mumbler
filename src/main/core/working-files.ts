@@ -6,7 +6,7 @@ import { constants as fsConstants } from "node:fs";
 
 import type { AppPaths, MumblerCard, MumblerState, PendingImportReviewItem } from "@shared/app-shell";
 import { nowUtcMarker } from "@shared/timestamps";
-import { fileExists, formatError, uniquePathInDirectory } from "./file-io";
+import { fileExists, formatError } from "./file-io";
 
 import { type AppLogger } from "./logger";
 
@@ -28,7 +28,7 @@ export async function moveImportedSourceToTrash(sourcePath: string, workingDir: 
       error: directTrashError instanceof Error ? directTrashError.message : String(directTrashError),
     });
     const stagingDir = join(workingDir, "trash-staging");
-    const stagedPath = await uniquePathInDirectory(stagingDir, basename(sourcePath));
+    const stagedPath = join(stagingDir, basename(sourcePath));
 
     try {
       await copyFile(sourcePath, stagedPath);

@@ -890,7 +890,7 @@ export class ApplicationRuntime {
       timezone: settings.defaultTimezone,
       utcTimestampText: utcResult.error === null ? utcResult.utcTimestampText : "",
       parseStatus: parsed.parseStatus,
-      deleteOriginalOnConfirm: true,
+      deleteOriginalOnConfirm: false,
       createdAtUtc: nowUtcMarker(),
       updatedAtUtc: nowUtcMarker(),
     };

@@ -2,16 +2,19 @@ import { useMemo, useState, type ReactElement } from "react";
 
 import type { PendingImportReviewItem } from "@shared/app-shell";
 import {
+  formatUtcForDisplay,
   getLocalTimestampError,
   getSupportedTimezones,
   getUtcTimestampError,
   isSupportedTimezone,
+  parseUtcFromDisplay,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 
 export interface TimestampReviewModalProps {
   items: PendingImportReviewItem[];
+  defaultTimezone?: string;
   onChange: (item: PendingImportReviewItem) => void;
   onApplyTimezoneToAll: (timezone: string) => void;
   onSetDeleteOriginalForAll: (value: boolean) => void;
@@ -22,6 +25,7 @@ export interface TimestampReviewModalProps {
 
 export function TimestampReviewModal({
   items,
+  defaultTimezone,
   onChange,
   onApplyTimezoneToAll,
   onSetDeleteOriginalForAll,
@@ -29,7 +33,7 @@ export function TimestampReviewModal({
   onCancel,
   isSubmitting,
 }: TimestampReviewModalProps): ReactElement {
-  const [bulkTimezone, setBulkTimezone] = useState("");
+  const [bulkTimezone, setBulkTimezone] = useState(defaultTimezone ?? "");
 
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
 
@@ -150,13 +154,17 @@ export function TimestampReviewModal({
                   <label className="field">
                     <span>UTC timestamp</span>
                     <input
-                      value={item.utcTimestampText}
+                      value={formatUtcForDisplay(item.utcTimestampText)}
                       onChange={(event) => {
-                        const nextValue = event.target.value.toLowerCase();
-                        const localResult = recomputeLocalFromUtc(nextValue, item.timezone);
+                        const nextDisplay = event.target.value;
+                        const nextMarker = parseUtcFromDisplay(nextDisplay);
+                        const nextUtcTimestampText = nextMarker ?? nextDisplay;
+                        const localResult = nextMarker !== null
+                          ? recomputeLocalFromUtc(nextMarker, item.timezone)
+                          : { localTimestampText: item.localTimestampText, error: "invalid" };
                         onChange({
                           ...item,
-                          utcTimestampText: nextValue,
+                          utcTimestampText: nextUtcTimestampText,
                           localTimestampText:
                             localResult.error === null ? localResult.localTimestampText : item.localTimestampText,
                         });

@@ -106,8 +106,28 @@ export function getLocalTimestampError(localTimestampText: string): string | nul
 
 export function getUtcTimestampError(utcTimestampText: string): string | null {
   return parseUtcMarker(utcTimestampText) === null
-    ? "Enter UTC as yyyymmdd-hhmmss-utc."
+    ? "Enter UTC as YYYY-MM-DD HH:MM:SS."
     : null;
+}
+
+export function formatUtcForDisplay(utcMarker: string): string {
+  const date = parseUtcMarker(utcMarker);
+  if (date === null) return utcMarker;
+  return formatLocalTimestamp({
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+    hour: date.getUTCHours(),
+    minute: date.getUTCMinutes(),
+    second: date.getUTCSeconds(),
+  });
+}
+
+export function parseUtcFromDisplay(display: string): string | null {
+  const parts = parseLocalTimestamp(display);
+  if (parts === null) return null;
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second));
+  return Number.isNaN(date.getTime()) ? null : formatUtcMarker(date);
 }
 
 export function formatLocalTimestamp(parts: TimestampParts): string {

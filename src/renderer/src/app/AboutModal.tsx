@@ -15,7 +15,7 @@ export function AboutModal({ onClose }: { onClose: () => void }): ReactElement {
         <div style={{ padding: "0 0 8px" }}>
           <p style={{ margin: "0 0 8px", fontWeight: 600 }}>Mumbler</p>
           <p style={{ margin: "0 0 12px", fontSize: 13, color: "#555", lineHeight: 1.6 }}>
-            Turn voice memos into titled, searchable text files — in seconds.
+            Keep your voice recordings organized. Import, transcribe, and export — all in one place.
           </p>
           <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
             <a href={GITHUB_URL} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: "#0066cc", textDecoration: "none" }}>

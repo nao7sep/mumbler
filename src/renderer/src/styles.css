@@ -288,9 +288,19 @@ textarea:focus-visible,
 }
 
 .queue-row__top strong {
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.queue-row__dot {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
 }
 
 .queue-row__name {
@@ -1180,9 +1190,12 @@ textarea:focus-visible,
 
 .notification-strip {
   flex-shrink: 0;
-  padding: 0 16px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  background: var(--surface);
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.notification-strip:empty {
+  display: none;
 }

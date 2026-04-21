@@ -49,7 +49,7 @@ function EditableList({
       <div className="editable-list__items" ref={listRef}>
         {entries.map((entry, index) => (
           <div key={`${entry}-${index}`} className="editable-list__item">
-            <span style={monospace ? { fontFamily: "monospace", fontSize: "0.95em" } : undefined}>{entry}</span>
+            <span style={monospace ? { fontFamily: "monospace", fontSize: "1.05em" } : undefined}>{entry}</span>
             <button
               type="button"
               className="button button--ghost button--compact"
@@ -64,7 +64,7 @@ function EditableList({
       </div>
       <div className="editable-list__add">
         <input
-          style={monospace ? { fontFamily: "monospace", fontSize: "0.95em" } : undefined}
+          style={monospace ? { fontFamily: "monospace", fontSize: "1.05em" } : undefined}
           value={newValue}
           placeholder={placeholder}
           onChange={(event) => setNewValue(event.target.value)}
@@ -203,18 +203,20 @@ export function SettingsModal({
 
           <section className="settings-section">
             <h3>AI</h3>
-            <div className="field-stack">
-              <label className="field">
-                <span>Concurrent Jobs</span>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={draft.concurrencyLimit}
-                  onChange={(e) => onChange({ ...draft, concurrencyLimit: Number.parseInt(e.target.value, 10) })}
-                />
-              </label>
-              <p className="field-hint">Maximum number of cards processed simultaneously.</p>
+            <div className="settings-number-grid">
+              <div>
+                <label className="field">
+                  <span>Concurrent Jobs</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={draft.concurrencyLimit}
+                    onChange={(e) => onChange({ ...draft, concurrencyLimit: Number.parseInt(e.target.value, 10) })}
+                  />
+                </label>
+                <p className="field-hint">Maximum number of cards processed simultaneously.</p>
+              </div>
             </div>
 
             <h4 className="settings-subheading">Gemini</h4>
@@ -363,6 +365,7 @@ export function SettingsModal({
                     onChange={(event) => onChange({ ...draft, titleTimeoutMs: Number.parseInt(event.target.value, 10) })}
                   />
                 </label>
+                <p className="field-hint">Time allowed per title generation request.</p>
               </div>
               <div>
                 <label className="field">
@@ -375,6 +378,7 @@ export function SettingsModal({
                     onChange={(event) => onChange({ ...draft, slugTimeoutMs: Number.parseInt(event.target.value, 10) })}
                   />
                 </label>
+                <p className="field-hint">Time allowed per slug generation request.</p>
               </div>
             </div>
           </section>
@@ -383,7 +387,7 @@ export function SettingsModal({
             <h3>Output</h3>
             <div className="field-stack">
               <label className="field">
-                <span>Output Directory</span>
+                <span>Default Directory</span>
                 <div className="inline-action-field">
                   <input
                     value={draft.outputDirectory}
@@ -400,6 +404,7 @@ export function SettingsModal({
                   </button>
                 </div>
               </label>
+              <p className="field-hint">Where exported files are saved. Can be changed per recording.</p>
             </div>
           </section>
 

@@ -1171,6 +1171,7 @@ export function App(): ReactElement {
       {importFlow.pendingReviewDrafts.length > 0 ? (
         <TimestampReviewModal
           items={importFlow.pendingReviewDrafts}
+          defaultTimezone={snapshot?.settingsSummary?.defaultTimezone}
           onChange={(updatedItem) =>
             importFlow.setPendingReviewDrafts((current) =>
               current.map((item) => (item.id === updatedItem.id ? updatedItem : item)),
