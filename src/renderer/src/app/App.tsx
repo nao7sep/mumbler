@@ -30,7 +30,7 @@ import { SettingsModal } from "./SettingsModal";
 import { findMatchingCommand, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
 import { QueueList, formatBytes, formatDuration, statusModifier } from "./QueueList";
-import { BannerCard, DecisionModal } from "./DecisionModal";
+import { DecisionModal } from "./DecisionModal";
 import { AboutModal } from "./AboutModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
@@ -58,32 +58,6 @@ function describeTrimDecision(decision: TrimDecision | null): string {
   }
 
   return "Re-encode required.";
-}
-
-function describeCardStep(card: MumblerCard): string {
-  if (card.status === "Transcribing") {
-    return "Transcribing...";
-  }
-
-  if (card.status === "Generating Metadata") {
-    if (card.activeStep === "title") {
-      return "Generating title...";
-    }
-    if (card.activeStep === "slug") {
-      return "Generating slug...";
-    }
-    return "Generating metadata...";
-  }
-
-  if (card.status === "Ready to Save") {
-    return "Ready to save.";
-  }
-
-  if (card.status === "Error") {
-    return card.lastError?.message ?? "Failed.";
-  }
-
-  return "";
 }
 
 function getTranscribeDisabledReason(params: {
@@ -172,19 +146,33 @@ async function copyTextToClipboard(value: string): Promise<void> {
   }
 }
 
+interface AppNotification {
+  id: string;
+  message: string;
+  kind: "toast" | "persistent";
+  variant: "info" | "error";
+}
+
 export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
-  const [errorMessages, setErrorMessages] = useState<string[]>([]);
-  const [noticeMessages, setNoticeMessages] = useState<string[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const snapshotRef = useRef<AppSnapshot | null>(null);
 
-  const setErrorMessage = useCallback((msg: string | null) => {
-    if (msg === null) setErrorMessages([]);
-    else setErrorMessages((prev) => [...prev, msg]);
+  const addToast = useCallback((message: string, variant: AppNotification["variant"] = "info") => {
+    const id = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setNotifications(prev => [...prev, { id, message, kind: "toast", variant }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 4000);
   }, []);
 
-  const setNoticeMessage = useCallback((msg: string | null) => {
-    if (msg === null) setNoticeMessages([]);
-    else setNoticeMessages((prev) => [...prev, msg]);
+  const addPersistent = useCallback((message: string, variant: AppNotification["variant"] = "info") => {
+    const id = `p-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setNotifications(prev => [...prev, { id, message, kind: "persistent", variant }]);
+  }, []);
+
+  const dismissNotification = useCallback((id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
   const [activePipelineCards, setActivePipelineCards] = useState<string[]>([]);
   const [pendingSaveConflict, setPendingSaveConflict] = useState<{
@@ -201,12 +189,14 @@ export function App(): ReactElement {
   const importFlow = useImportFlow({
     snapshot,
     onSnapshotUpdate: setSnapshot,
-    onError: setErrorMessage,
+    onError: (msg) => { if (msg !== null) addPersistent(msg, "error"); },
+    onPersistentNotice: (msg) => addPersistent(msg, "error"),
   });
 
   const settingsModal = useSettingsModal({
     onSnapshotUpdate: setSnapshot,
-    onError: setErrorMessage,
+    onError: (msg) => { if (msg !== null) addPersistent(msg, "error"); },
+    onNotice: addToast,
   });
 
   useEffect(() => {
@@ -216,13 +206,19 @@ export function App(): ReactElement {
       .getSnapshot()
       .then((data) => {
         if (!cancelled) {
+          snapshotRef.current = data;
           setSnapshot(data);
+          const recovered = data.queueSummary?.recoveredInterruptedCards ?? 0;
+          if (recovered > 0) {
+            addPersistent(`${recovered} recording${recovered === 1 ? "" : "s"} recovered from an interrupted session — retry to resume.`);
+          }
         }
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setErrorMessage(
+          addPersistent(
             error instanceof Error ? error.message : "Failed to load app snapshot.",
+            "error",
           );
         }
       });
@@ -234,13 +230,26 @@ export function App(): ReactElement {
 
   useEffect(() => {
     return window.mumbler.onPipelineProgressUpdated(() => {
+      const prevSnapshot = snapshotRef.current;
       void window.mumbler
         .getSnapshot()
         .then((nextSnapshot) => {
+          if (prevSnapshot?.state?.cards) {
+            for (const card of nextSnapshot.state?.cards ?? []) {
+              const prevCard = prevSnapshot.state.cards.find((c) => c.id === card.id);
+              if (prevCard && prevCard.status !== card.status) {
+                if (card.status === "Ready to Save") {
+                  addToast(`Ready to save: ${card.originalFilename}`);
+                } else if (card.status === "Error") {
+                  addToast(`Failed: ${card.originalFilename} — ${card.lastError?.message ?? "Unknown error"}`, "error");
+                }
+              }
+            }
+          }
           setSnapshot(nextSnapshot);
         })
         .catch((error: unknown) => {
-          setErrorMessage(error instanceof Error ? error.message : "Failed to refresh card state.");
+          addPersistent(error instanceof Error ? error.message : "Failed to refresh card state.", "error");
         });
     });
   }, []);
@@ -253,12 +262,17 @@ export function App(): ReactElement {
           setSnapshot(nextSnapshot);
         })
         .catch((error: unknown) => {
-          setErrorMessage(
+          addPersistent(
             error instanceof Error ? error.message : "Failed to refresh app-wide error state.",
+            "error",
           );
         });
     });
   }, []);
+
+  useEffect(() => {
+    snapshotRef.current = snapshot;
+  }, [snapshot]);
 
   useEffect(() => {
     function reportRendererFault(message: string, source: string, stack?: string): void {
@@ -268,8 +282,9 @@ export function App(): ReactElement {
           setSnapshot(nextSnapshot);
         })
         .catch((error: unknown) => {
-          setErrorMessage(
+          addPersistent(
             error instanceof Error ? error.message : "Failed to report renderer error.",
+            "error",
           );
         });
     }
@@ -333,9 +348,8 @@ export function App(): ReactElement {
     try {
       const nextSnapshot = await window.mumbler.selectCard(cardId);
       setSnapshot(nextSnapshot);
-      setErrorMessage(null);
     } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to select card.");
+      addPersistent(error instanceof Error ? error.message : "Failed to select card.", "error");
     }
   }
 
@@ -343,10 +357,9 @@ export function App(): ReactElement {
     try {
       const nextSnapshot = await window.mumbler.duplicateCard(cardId);
       setSnapshot(nextSnapshot);
-      setErrorMessage(null);
-      setNoticeMessage(null);
+      addToast("Recording duplicated.");
     } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to duplicate card.");
+      addPersistent(error instanceof Error ? error.message : "Failed to duplicate card.", "error");
       throw error;
     }
   }
@@ -355,10 +368,8 @@ export function App(): ReactElement {
     try {
       const nextSnapshot = await window.mumbler.updateCardTrim(cardId, trim);
       setSnapshot(nextSnapshot);
-      setErrorMessage(null);
-      setNoticeMessage(null);
     } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to update trim.");
+      addPersistent(error instanceof Error ? error.message : "Failed to update trim.", "error");
       throw error;
     }
   }
@@ -379,11 +390,9 @@ export function App(): ReactElement {
       .transcribeCard(cardId)
       .then((nextSnapshot) => {
         setSnapshot(nextSnapshot);
-        setErrorMessage(null);
-        setNoticeMessage(null);
       })
       .catch((error: unknown) => {
-        setErrorMessage(error instanceof Error ? error.message : "Failed to transcribe card.");
+        addPersistent(error instanceof Error ? error.message : "Failed to transcribe card.", "error");
       })
       .finally(() => {
         endCardOperation(cardId);
@@ -396,11 +405,9 @@ export function App(): ReactElement {
       .retryCard(cardId)
       .then((nextSnapshot) => {
         setSnapshot(nextSnapshot);
-        setErrorMessage(null);
-        setNoticeMessage(null);
       })
       .catch((error: unknown) => {
-        setErrorMessage(error instanceof Error ? error.message : "Failed to retry card.");
+        addPersistent(error instanceof Error ? error.message : "Failed to retry card.", "error");
       })
       .finally(() => {
         endCardOperation(cardId);
@@ -411,15 +418,11 @@ export function App(): ReactElement {
     try {
       const nextSnapshot = await window.mumbler.chooseOutputDirectory();
       setSnapshot(nextSnapshot);
-      setErrorMessage(null);
-      setNoticeMessage(
-        nextSnapshot.settingsSummary?.outputDirectory
-          ? `Output directory set to ${nextSnapshot.settingsSummary.outputDirectory}`
-          : null,
-      );
+      addToast("Output directory set.");
     } catch (error: unknown) {
-      setErrorMessage(
+      addPersistent(
         error instanceof Error ? error.message : "Failed to choose output directory.",
+        "error",
       );
     }
   }
@@ -429,9 +432,8 @@ export function App(): ReactElement {
       const draft = await window.mumbler.getSettingsDraft();
       const nextSnapshot = await window.mumbler.saveSettingsDraft({ ...draft, [field]: value });
       setSnapshot(nextSnapshot);
-      setErrorMessage(null);
     } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to update model.");
+      addPersistent(error instanceof Error ? error.message : "Failed to update model.", "error");
     }
   }
 
@@ -442,10 +444,9 @@ export function App(): ReactElement {
 
     try {
       await copyTextToClipboard(value);
-      setNoticeMessage(`${label} copied to clipboard.`);
-      setErrorMessage(null);
+      addToast(`${label} copied.`);
     } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : `Failed to copy ${label}.`);
+      addPersistent(error instanceof Error ? error.message : `Failed to copy ${label}.`, "error");
     }
   }
 
@@ -453,10 +454,10 @@ export function App(): ReactElement {
     try {
       const nextSnapshot = await window.mumbler.dismissAppWideError();
       setSnapshot(nextSnapshot);
-      setErrorMessage(null);
     } catch (error: unknown) {
-      setErrorMessage(
+      addPersistent(
         error instanceof Error ? error.message : "Failed to dismiss app-wide error.",
+        "error",
       );
     }
   }
@@ -466,10 +467,9 @@ export function App(): ReactElement {
     try {
       const nextSnapshot = await window.mumbler.resetState();
       setSnapshot(nextSnapshot);
-      setErrorMessage(null);
-      setNoticeMessage("State and settings were reset to defaults.");
+      addToast("Reset to defaults.");
     } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to reset state.");
+      addPersistent(error instanceof Error ? error.message : "Failed to reset state.", "error");
     } finally {
       setIsResettingState(false);
     }
@@ -588,11 +588,9 @@ export function App(): ReactElement {
     try {
       const result = await window.mumbler.saveCard(cardId, resolution);
       setSnapshot(result.snapshot);
-      setErrorMessage(null);
 
       if (result.kind === "conflict") {
         setPendingSaveConflict({ cardId, result });
-        setNoticeMessage(null);
         return;
       }
 
@@ -602,10 +600,10 @@ export function App(): ReactElement {
       }
 
       setPendingSaveConflict(null);
-      setNoticeMessage(`Saved audio and metadata to ${result.audioPath}`);
+      addToast(`Saved to ${result.audioPath}`);
       window.scrollTo({ top: 0 });
     } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to save card.");
+      addPersistent(error instanceof Error ? error.message : "Failed to save card.", "error");
     }
   }
 
@@ -613,10 +611,10 @@ export function App(): ReactElement {
     try {
       const nextSnapshot = await window.mumbler.removeCard(cardId);
       setSnapshot(nextSnapshot);
-      setErrorMessage(null);
+      addToast("Recording moved to trash.");
       window.scrollTo({ top: 0 });
     } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to remove card.");
+      addPersistent(error instanceof Error ? error.message : "Failed to remove card.", "error");
     } finally {
       setPendingRemoveCardId(null);
     }
@@ -672,38 +670,18 @@ export function App(): ReactElement {
         </div>
       </header>
 
-      {(errorMessages.length > 0 || noticeMessages.length > 0 || importFlow.importFailures.length > 0) && (
-        <div className="notification-strip">
-          {errorMessages.map((msg, i) => (
-            <BannerCard
-              key={`error-${i}`}
-              title="Error"
-              body={msg}
-              variant="error"
-              onDismiss={() => setErrorMessages((prev) => prev.filter((_, j) => j !== i))}
-            />
+      {notifications.filter(n => n.kind === "persistent").length > 0 && (
+        <div className="persistent-strip">
+          {notifications.filter(n => n.kind === "persistent").map(n => (
+            <div key={n.id} className={`persistent-notice persistent-notice--${n.variant}`}>
+              <span className="persistent-notice__message">{n.message}</span>
+              <button
+                type="button"
+                className="button button--ghost button--compact"
+                onClick={() => dismissNotification(n.id)}
+              >✕</button>
+            </div>
           ))}
-          {noticeMessages.map((msg, i) => (
-            <BannerCard
-              key={`notice-${i}`}
-              title="Notice"
-              body={msg}
-              variant="notice"
-              onDismiss={() => setNoticeMessages((prev) => prev.filter((_, j) => j !== i))}
-            />
-          ))}
-          {importFlow.importFailures.length > 0 && (
-            <BannerCard title="Some imports failed." variant="warning" onDismiss={() => importFlow.setImportFailures([])}>
-              <div className="failure-list">
-                {importFlow.importFailures.map((failure) => (
-                  <p key={`${failure.sourcePath}:${failure.message}`}>
-                    <strong>{failure.sourcePath}</strong>
-                    <span>{failure.message}</span>
-                  </p>
-                ))}
-              </div>
-            </BannerCard>
-          )}
         </div>
       )}
 
@@ -779,21 +757,21 @@ export function App(): ReactElement {
                   <div className="detail-card__header">
                     <h3>Timestamps</h3>
                   </div>
-                  {selectedCard.status !== "Imported" && (
-                    <div className={`status-summary status-summary--${statusModifier(selectedCard.status)}`}>
-                      <strong>{selectedCard.status}</strong>
-                      {describeCardStep(selectedCard) ? <span>{describeCardStep(selectedCard)}</span> : null}
-                    </div>
-                  )}
                   <dl className="meta-list">
                     <div>
                       <dt>Original filename</dt>
                       <dd>{selectedCard.originalFilename}</dd>
                     </div>
                     <div>
-                      <dt>Effective local</dt>
-                      <dd>{selectedCard.timestamps.effectiveLocal}</dd>
+                      <dt>Confirmed local</dt>
+                      <dd>{selectedCard.timestamps.confirmedLocal}</dd>
                     </div>
+                    {selectedCard.timestamps.frontTrimOffsetSec > 0 && (
+                      <div>
+                        <dt>Effective local</dt>
+                        <dd>{selectedCard.timestamps.effectiveLocal}</dd>
+                      </div>
+                    )}
                     <div>
                       <dt>Timezone</dt>
                       <dd>{selectedCard.timestamps.timezone}</dd>
@@ -801,10 +779,6 @@ export function App(): ReactElement {
                     <div>
                       <dt>Effective UTC</dt>
                       <dd>{formatUtcForDisplay(selectedCard.timestamps.effectiveUtc)}</dd>
-                    </div>
-                    <div>
-                      <dt>Confirmed local</dt>
-                      <dd>{selectedCard.timestamps.confirmedLocal}</dd>
                     </div>
                   </dl>
                 </section>
@@ -913,7 +887,7 @@ export function App(): ReactElement {
                   disabled={selectedCardIsBusy}
                   onDuplicateCard={handleDuplicateCard}
                   onTrimCommit={handleTrimCommit}
-                  onError={(message) => setErrorMessage(message)}
+                  onError={(message) => addPersistent(message, "error")}
                 />
                 <div className="trim-analysis">
                   <div className="trim-analysis__header">
@@ -1072,12 +1046,6 @@ export function App(): ReactElement {
                     <div>
                       <dt>Last failed step</dt>
                       <dd>{selectedCard.lastError.failedStep}</dd>
-                    </div>
-                  ) : null}
-                  {selectedCard.activeStep ? (
-                    <div>
-                      <dt>Active step</dt>
-                      <dd>{selectedCard.activeStep}</dd>
                     </div>
                   ) : null}
                 </dl>
@@ -1275,6 +1243,20 @@ export function App(): ReactElement {
       {showShortcutsHelp ? (
         <ShortcutsHelpModal onClose={() => setShowShortcutsHelp(false)} />
       ) : null}
+
+      {notifications.filter(n => n.kind === "toast").length > 0 && (
+        <div className="toast-container">
+          {notifications.filter(n => n.kind === "toast").map(n => (
+            <div
+              key={n.id}
+              className={`toast toast--${n.variant}`}
+              onClick={() => dismissNotification(n.id)}
+            >
+              {n.message}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

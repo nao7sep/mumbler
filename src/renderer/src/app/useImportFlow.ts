@@ -1,21 +1,20 @@
 import { useEffect, useState, type Dispatch, type SetStateAction, type DragEvent } from "react";
 
-import type { AppSnapshot, FailedImport, PendingImportReviewItem } from "@shared/app-shell";
+import type { AppSnapshot, PendingImportReviewItem } from "@shared/app-shell";
 
 interface UseImportFlowOptions {
   snapshot: AppSnapshot | null;
   onSnapshotUpdate: (snapshot: AppSnapshot) => void;
   onError: (message: string | null) => void;
+  onPersistentNotice: (message: string) => void;
 }
 
 interface UseImportFlowResult {
   isImporting: boolean;
   isConfirmingReview: boolean;
   pendingReviewDrafts: PendingImportReviewItem[];
-  importFailures: FailedImport[];
   isDragActive: boolean;
   setPendingReviewDrafts: Dispatch<SetStateAction<PendingImportReviewItem[]>>;
-  setImportFailures: Dispatch<SetStateAction<FailedImport[]>>;
   handleImportClick: () => Promise<void>;
   handleConfirmPendingImports: () => Promise<void>;
   handleCancelPendingImports: () => Promise<void>;
@@ -28,11 +27,11 @@ export function useImportFlow({
   snapshot,
   onSnapshotUpdate,
   onError,
+  onPersistentNotice,
 }: UseImportFlowOptions): UseImportFlowResult {
   const [isImporting, setIsImporting] = useState(false);
   const [isConfirmingReview, setIsConfirmingReview] = useState(false);
   const [pendingReviewDrafts, setPendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
-  const [importFailures, setImportFailures] = useState<FailedImport[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
 
   useEffect(() => {
@@ -76,8 +75,9 @@ export function useImportFlow({
     try {
       const result = await window.mumbler.openImportDialog();
       onSnapshotUpdate(result.snapshot);
-      setImportFailures(result.failedImports);
-      onError(null);
+      for (const failure of result.failedImports) {
+        onPersistentNotice(`Import failed: ${failure.sourcePath} — ${failure.message}`);
+      }
     } catch (error: unknown) {
       onError(error instanceof Error ? error.message : "Import failed.");
     } finally {
@@ -90,8 +90,6 @@ export function useImportFlow({
     try {
       const nextSnapshot = await window.mumbler.confirmPendingImports(pendingReviewDrafts);
       onSnapshotUpdate(nextSnapshot);
-      setImportFailures([]);
-      onError(null);
     } catch (error: unknown) {
       onError(
         error instanceof Error ? error.message : "Failed to confirm imported timestamps.",
@@ -105,7 +103,6 @@ export function useImportFlow({
     try {
       const nextSnapshot = await window.mumbler.cancelPendingImports();
       onSnapshotUpdate(nextSnapshot);
-      onError(null);
     } catch (error: unknown) {
       onError(error instanceof Error ? error.message : "Failed to cancel import.");
     }
@@ -121,8 +118,9 @@ export function useImportFlow({
     try {
       const result = await window.mumbler.importDroppedPaths(paths);
       onSnapshotUpdate(result.snapshot);
-      setImportFailures(result.failedImports);
-      onError(null);
+      for (const failure of result.failedImports) {
+        onPersistentNotice(`Import failed: ${failure.sourcePath} — ${failure.message}`);
+      }
     } catch (error: unknown) {
       onError(error instanceof Error ? error.message : "Dropped import failed.");
     } finally {
@@ -163,10 +161,8 @@ export function useImportFlow({
     isImporting,
     isConfirmingReview,
     pendingReviewDrafts,
-    importFailures,
     isDragActive,
     setPendingReviewDrafts,
-    setImportFailures,
     handleImportClick,
     handleConfirmPendingImports,
     handleCancelPendingImports,
