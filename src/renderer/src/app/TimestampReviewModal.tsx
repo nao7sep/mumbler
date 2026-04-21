@@ -85,7 +85,7 @@ export function TimestampReviewModal({
         </div>
 
         <div className="review-table">
-          {items.map((item, index) => {
+          {items.map((item) => {
             const timezoneError = isSupportedTimezone(item.timezone)
               ? null
               : "Enter a valid IANA timezone.";
@@ -173,7 +173,6 @@ export function TimestampReviewModal({
                   </label>
                 </div>
                 <div className="review-row__footer">
-                  <span className="review-row__index">#{index + 1}</span>
                   {rowError ? <span className="row-error">{rowError}</span> : null}
                 </div>
               </div>
@@ -181,14 +180,21 @@ export function TimestampReviewModal({
           })}
         </div>
 
-        <div className="modal-actions">          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: 'auto' }}>
+        <div className="modal-footer-note">
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <input
               type="checkbox"
               checked={items.length > 0 && items.every((i) => i.deleteOriginalOnConfirm)}
               onChange={(e) => onSetDeleteOriginalForAll(e.target.checked)}
             />
-            Delete originals after import
+            Move originals to trash after import
           </label>
+          <p className="field-hint">
+            Working copies also move to trash when you remove cards — redundant copies are better than none.
+          </p>
+        </div>
+
+        <div className="modal-actions">
           <button
             type="button"
             className="button button--ghost"

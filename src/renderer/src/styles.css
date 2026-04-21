@@ -1000,6 +1000,14 @@ textarea:focus-visible,
   gap: 12px;
 }
 
+.modal-footer-note {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  display: grid;
+  gap: 4px;
+}
+
 .modal-actions {
   display: flex;
   align-items: center;

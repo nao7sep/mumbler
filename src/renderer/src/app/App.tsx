@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -177,8 +178,18 @@ async function copyTextToClipboard(value: string): Promise<void> {
 
 export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const [errorMessages, setErrorMessages] = useState<string[]>([]);
+  const [noticeMessages, setNoticeMessages] = useState<string[]>([]);
+
+  const setErrorMessage = useCallback((msg: string | null) => {
+    if (msg === null) setErrorMessages([]);
+    else setErrorMessages((prev) => [...prev, msg]);
+  }, []);
+
+  const setNoticeMessage = useCallback((msg: string | null) => {
+    if (msg === null) setNoticeMessages([]);
+    else setNoticeMessages((prev) => [...prev, msg]);
+  }, []);
   const [activePipelineCards, setActivePipelineCards] = useState<string[]>([]);
   const [pendingSaveConflict, setPendingSaveConflict] = useState<{
     cardId: string;
@@ -673,14 +684,26 @@ export function App(): ReactElement {
         </div>
       </header>
 
-      {(errorMessage || noticeMessage || importFlow.importFailures.length > 0) && (
+      {(errorMessages.length > 0 || noticeMessages.length > 0 || importFlow.importFailures.length > 0) && (
         <div className="notification-strip">
-          {errorMessage && (
-            <BannerCard title="Error" body={errorMessage} variant="error" onDismiss={() => setErrorMessage(null)} />
-          )}
-          {noticeMessage && (
-            <BannerCard title="Notice" body={noticeMessage} variant="notice" onDismiss={() => setNoticeMessage(null)} />
-          )}
+          {errorMessages.map((msg, i) => (
+            <BannerCard
+              key={`error-${i}`}
+              title="Error"
+              body={msg}
+              variant="error"
+              onDismiss={() => setErrorMessages((prev) => prev.filter((_, j) => j !== i))}
+            />
+          ))}
+          {noticeMessages.map((msg, i) => (
+            <BannerCard
+              key={`notice-${i}`}
+              title="Notice"
+              body={msg}
+              variant="notice"
+              onDismiss={() => setNoticeMessages((prev) => prev.filter((_, j) => j !== i))}
+            />
+          ))}
           {importFlow.importFailures.length > 0 && (
             <BannerCard title="Some imports failed." variant="warning" onDismiss={() => importFlow.setImportFailures([])}>
               <div className="failure-list">
