@@ -180,15 +180,15 @@ function groupsToTimestampParts(groups: Record<string, string>): TimestampParts 
   const day = Number(groups.day);
   const hour = Number(groups.hour);
   const minute = Number(groups.minute);
-  const second = Number(groups.second);
+  const secondRaw = groups.second !== undefined ? Number(groups.second) : 0;
+  const second = Number.isInteger(secondRaw) && !Number.isNaN(secondRaw) ? secondRaw : 0;
 
   if (
     !Number.isInteger(year) ||
     !Number.isInteger(month) ||
     !Number.isInteger(day) ||
     !Number.isInteger(hour) ||
-    !Number.isInteger(minute) ||
-    !Number.isInteger(second)
+    !Number.isInteger(minute)
   ) {
     return null;
   }

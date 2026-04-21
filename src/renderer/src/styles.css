@@ -360,8 +360,8 @@ textarea:focus-visible,
 }
 
 .button--icon {
-  padding: 0.3rem 0.55rem;
-  font-size: 1rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 1.15rem;
   line-height: 1;
 }
 
@@ -978,16 +978,22 @@ textarea:focus-visible,
 }
 
 .modal-card__header,
-.modal-toolbar,
-.modal-actions {
+.modal-toolbar {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.modal-toolbar,
 .modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.modal-toolbar {
   margin-top: 16px;
 }
 
@@ -1036,6 +1042,22 @@ textarea:focus-visible,
 .settings-section {
   border-top: 1px solid var(--border-subtle);
   padding-top: 16px;
+}
+
+.api-key-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 6px;
+}
+
+.api-key-status__label {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.api-key-status--removing .api-key-status__label {
+  color: var(--color-danger, #c0392b);
 }
 
 .settings-section h3 {

@@ -378,13 +378,12 @@ export function App(): ReactElement {
     snapshot?.appWideError != null;
   const languageOptions = useMemo(() => {
     const configuredLanguages = snapshot?.settingsSummary?.languages ?? [];
-    if (selectedCard === null) {
-      return configuredLanguages;
-    }
-
-    return configuredLanguages.includes(selectedCard.language)
+    const merged = configuredLanguages.includes(selectedCard?.language ?? "")
       ? configuredLanguages
-      : [selectedCard.language, ...configuredLanguages];
+      : selectedCard !== null
+        ? [selectedCard.language, ...configuredLanguages]
+        : configuredLanguages;
+    return [...merged].sort((a, b) => a.localeCompare(b));
   }, [selectedCard, snapshot?.settingsSummary?.languages]);
 
   async function handleImportClick(): Promise<void> {
@@ -713,6 +712,8 @@ export function App(): ReactElement {
           setPendingRemoveCardId(null);
         } else if (pendingSaveConflict !== null) {
           setPendingSaveConflict(null);
+        } else if (pendingReviewDrafts.length > 0) {
+          setPendingReviewDrafts([]);
         } else if (settingsDraft !== null && !isSavingSettings) {
           setSettingsDraft(null);
           setSettingsErrorMessage(null);
@@ -738,7 +739,7 @@ export function App(): ReactElement {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsDraft, isSavingSettings, pendingRemoveCardId, pendingSaveConflict]);
+  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsDraft, isSavingSettings, pendingRemoveCardId, pendingSaveConflict, pendingReviewDrafts]);
 
   async function handleSaveCard(
     cardId: string,
@@ -1421,6 +1422,7 @@ export function App(): ReactElement {
             )
           }
           onConfirm={() => void handleConfirmPendingImports()}
+          onCancel={() => setPendingReviewDrafts([])}
           isSubmitting={isConfirmingReview}
         />
       ) : null}
@@ -1451,6 +1453,7 @@ export function App(): ReactElement {
               },
             },
           ]}
+          onBackdropClick={() => setPendingSaveConflict(null)}
         />
       ) : null}
 
@@ -1492,6 +1495,7 @@ export function App(): ReactElement {
               },
             },
           ]}
+          onBackdropClick={() => setPendingRemoveCardId(null)}
         />
       ) : null}
 

@@ -43,12 +43,13 @@ export interface DecisionModalProps {
     onClick: () => void;
     variant?: "primary" | "danger" | "ghost";
   }>;
+  onBackdropClick?: () => void;
 }
 
-export function DecisionModal({ title, body, actions }: DecisionModalProps): ReactElement {
+export function DecisionModal({ title, body, actions, onBackdropClick }: DecisionModalProps): ReactElement {
   return (
-    <div className="modal-backdrop">
-      <section className="modal-card modal-card--narrow">
+    <div className="modal-backdrop" onClick={onBackdropClick}>
+      <section className="modal-card modal-card--narrow" onClick={(e) => e.stopPropagation()}>
         <div className="modal-card__header">
           <h2>{title}</h2>
         </div>

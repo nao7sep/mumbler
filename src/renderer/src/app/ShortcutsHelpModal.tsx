@@ -18,10 +18,13 @@ export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactE
   );
 
   return (
-    <div className="modal-backdrop">
-      <section className="modal-card modal-card--narrow">
+    <div className="modal-backdrop" onClick={onClose}>
+      <section className="modal-card modal-card--narrow" onClick={(e) => e.stopPropagation()}>
         <div className="modal-card__header">
           <h2>Keyboard Shortcuts</h2>
+          <button type="button" className="button button--ghost button--compact modal-close" onClick={onClose}>
+            ✕
+          </button>
         </div>
         <div className="shortcut-groups">
           {groups.map((group) => (
@@ -38,12 +41,8 @@ export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactE
             </div>
           ))}
         </div>
-        <div className="modal-actions">
-          <button type="button" className="button button--primary" onClick={onClose}>
-            Close
-          </button>
-        </div>
       </section>
     </div>
   );
 }
+

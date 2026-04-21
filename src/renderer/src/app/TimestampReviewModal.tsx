@@ -15,6 +15,7 @@ export interface TimestampReviewModalProps {
   onChange: (item: PendingImportReviewItem) => void;
   onApplyTimezoneToAll: (timezone: string) => void;
   onConfirm: () => void;
+  onCancel: () => void;
   isSubmitting: boolean;
 }
 
@@ -24,6 +25,7 @@ export function TimestampReviewModal({
   onChange,
   onApplyTimezoneToAll,
   onConfirm,
+  onCancel,
   isSubmitting,
 }: TimestampReviewModalProps): ReactElement {
   const [bulkTimezone, setBulkTimezone] = useState("");
@@ -46,8 +48,8 @@ export function TimestampReviewModal({
   const isConfirmDisabled = validationErrors.some((error) => error !== null);
 
   return (
-    <div className="modal-backdrop">
-      <section className="modal-card">
+    <div className="modal-backdrop" onClick={onCancel}>
+      <section className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-card__header">
           <h2>Timestamp Review</h2>
           <span className="muted-tag">{items.length} files</span>
@@ -169,11 +171,19 @@ export function TimestampReviewModal({
         <div className="modal-actions">
           <button
             type="button"
+            className="button button--ghost"
+            onClick={onCancel}
+            disabled={isSubmitting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
             className="button button--primary"
             onClick={onConfirm}
             disabled={isConfirmDisabled || isSubmitting}
           >
-            {isSubmitting ? "Confirming..." : "Confirm"}
+            {isSubmitting ? "Confirming…" : "Confirm"}
           </button>
         </div>
 
@@ -186,3 +196,4 @@ export function TimestampReviewModal({
     </div>
   );
 }
+
