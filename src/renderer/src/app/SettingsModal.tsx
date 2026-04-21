@@ -113,10 +113,6 @@ export function SettingsModal({
   onPickOutputDirectory: () => void;
   onSave: () => void;
 }): ReactElement {
-  const languageEntries = useMemo(
-    () => [...parseEntries(draft.languagesText)].sort((a, b) => a.localeCompare(b)),
-    [draft.languagesText],
-  );
   const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
 
@@ -159,32 +155,6 @@ export function SettingsModal({
                   entries={patternEntries}
                   onChange={(entries) => onChange({ ...draft, timestampPatternsText: entriesToText(entries) })}
                   placeholder="Add regex pattern..."
-                />
-              </div>
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <h3>Language</h3>
-            <div className="field-stack">
-              <label className="field">
-                <span>Default Language</span>
-                <select
-                  value={draft.defaultLanguage}
-                  onChange={(event) => onChange({ ...draft, defaultLanguage: event.target.value })}
-                >
-                  {languageEntries.map((lang) => (
-                    <option key={lang} value={lang}>{lang}</option>
-                  ))}
-                </select>
-              </label>
-              <div className="field">
-                <span>Available Languages</span>
-                <EditableList
-                  entries={languageEntries}
-                  onChange={(entries) => onChange({ ...draft, languagesText: entriesToText(entries) })}
-                  placeholder="Add language..."
-                  disabledEntries={[draft.defaultLanguage]}
                 />
               </div>
             </div>

@@ -8,7 +8,6 @@ export const APP_SHELL_CHANNELS = {
   selectCard: "app-shell:select-card",
   duplicateCard: "app-shell:duplicate-card",
   updateCardTrim: "app-shell:update-card-trim",
-  updateCardLanguage: "app-shell:update-card-language",
   getCardMediaSource: "app-shell:get-card-media-source",
   transcribeCard: "app-shell:transcribe-card",
   retryCard: "app-shell:retry-card",
@@ -78,8 +77,6 @@ export interface MumblerSettings {
   outputDirectory: string | null;
   transcriptionModel: string;
   metadataModel: string;
-  defaultLanguage: string;
-  languages: string[];
   defaultTimezone: string;
   timestampPatterns: string[];
   prompts: PromptTemplates;
@@ -170,7 +167,6 @@ export interface MumblerCard {
   audioProfile: AudioProfile | null;
   durationSec: number | null;
   fileSizeBytes: number;
-  language: string;
   timestamps: CardTimestamps;
   trim: CardTrim;
   trimDecision: TrimDecision | null;
@@ -214,10 +210,7 @@ export interface SettingsSummary {
   outputDirectory: string | null;
   transcriptionModel: string;
   metadataModel: string;
-  defaultLanguage: string;
-  languages: string[];
   defaultTimezone: string;
-  languageCount: number;
   timestampPatternCount: number;
   previewSnippetSeconds: number;
   concurrencyLimit: number;
@@ -231,8 +224,6 @@ export interface SettingsDraft {
   outputDirectory: string;
   transcriptionModel: string;
   metadataModel: string;
-  defaultLanguage: string;
-  languagesText: string;
   defaultTimezone: string;
   timestampPatternsText: string;
   titlePrompt: string;
@@ -322,7 +313,6 @@ export interface MumblerShellApi {
   selectCard(cardId: string | null): Promise<AppSnapshot>;
   duplicateCard(cardId: string): Promise<AppSnapshot>;
   updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot>;
-  updateCardLanguage(cardId: string, language: string): Promise<AppSnapshot>;
   getCardMediaSource(cardId: string): Promise<string>;
   transcribeCard(cardId: string): Promise<AppSnapshot>;
   retryCard(cardId: string): Promise<AppSnapshot>;

@@ -41,8 +41,6 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.duplicateCard, cardId) as Promise<AppSnapshot>,
   updateCardTrim: (cardId: string, trim: CardTrim) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.updateCardTrim, cardId, trim) as Promise<AppSnapshot>,
-  updateCardLanguage: (cardId: string, language: string) =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.updateCardLanguage, cardId, language) as Promise<AppSnapshot>,
   getCardMediaSource: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getCardMediaSource, cardId) as Promise<string>,
   transcribeCard: (cardId: string) =>

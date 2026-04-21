@@ -59,8 +59,6 @@ function normalizeSettings(
     outputDirectory: asNullableString(raw.outputDirectory),
     transcriptionModel: asString(raw.transcriptionModel) ?? defaults.transcriptionModel,
     metadataModel: asString(raw.metadataModel) ?? defaults.metadataModel,
-    defaultLanguage: asString(raw.defaultLanguage) ?? defaults.defaultLanguage,
-    languages: asStringArray(raw.languages) ?? defaults.languages,
     defaultTimezone:
       asString(raw.defaultTimezone) && isSupportedTimezone(asString(raw.defaultTimezone)!)
         ? (asString(raw.defaultTimezone) as string)
@@ -283,39 +281,13 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
     outputDirectory: null,
     transcriptionModel: "gemini-3.1-pro-preview",
     metadataModel: "gemini-3.1-pro-preview",
-    defaultLanguage: "English",
-    languages: [
-      "Arabic",
-      "Dutch",
-      "English",
-      "French",
-      "German",
-      "Greek",
-      "Hindi",
-      "Indonesian",
-      "Italian",
-      "Japanese",
-      "Korean",
-      "Malay",
-      "Mandarin Chinese",
-      "Norwegian",
-      "Polish",
-      "Portuguese",
-      "Russian",
-      "Spanish",
-      "Swedish",
-      "Thai",
-      "Turkish",
-      "Ukrainian",
-      "Vietnamese",
-    ],
     defaultTimezone: systemTimezone,
     timestampPatterns: [
       "(?<year>\\d{2}(?:\\d{2})?)(?<month>\\d{2})(?<day>\\d{2})[-_](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})?",
     ],
     prompts: {
       title:
-        "You are given a transcript in {language}. Write a single concise title in {language} that accurately summarizes the content. Output only the title text — no prefix such as \"Title:\", no quotes, no markdown formatting, no explanation, and no trailing period unless the title is a naturally complete sentence.\n\nTranscript:\n{transcript}",
+        "Write a single concise title in the same language as the transcript that accurately summarizes the content. Output only the title text — no prefix such as \"Title:\", no quotes, no markdown formatting, no explanation, and no trailing period unless the title is a naturally complete sentence.\n\nTranscript:\n{transcript}",
       slug:
         "Create a short English URL slug for the title below. Use only lowercase letters (a–z), digits (0–9), and hyphens (-). Do not start or end with a hyphen. Aim for 3–6 words. Output only the slug — no label, no quotes, no markdown, no explanation.\n\nTitle:\n{title}",
     },
@@ -383,10 +355,7 @@ export function summarizeSettings(settings: MumblerSettings): SettingsSummary {
     outputDirectory: settings.outputDirectory,
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
-    defaultLanguage: settings.defaultLanguage,
-    languages: [...settings.languages],
     defaultTimezone: settings.defaultTimezone,
-    languageCount: settings.languages.length,
     timestampPatternCount: settings.timestampPatterns.length,
     previewSnippetSeconds: settings.previewSnippetSeconds,
     concurrencyLimit: settings.concurrencyLimit,
@@ -402,8 +371,6 @@ export function buildSettingsDraft(settings: MumblerSettings): SettingsDraft {
     outputDirectory: settings.outputDirectory ?? "",
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
-    defaultLanguage: settings.defaultLanguage,
-    languagesText: settings.languages.join("\n"),
     defaultTimezone: settings.defaultTimezone,
     timestampPatternsText: settings.timestampPatterns.join("\n"),
     titlePrompt: settings.prompts.title,
@@ -423,12 +390,10 @@ export function buildSettingsDraft(settings: MumblerSettings): SettingsDraft {
 export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraft): MumblerSettings {
   const transcriptionModel = draft.transcriptionModel.trim();
   const metadataModel = draft.metadataModel.trim();
-  const defaultLanguage = draft.defaultLanguage.trim();
   const defaultTimezone = draft.defaultTimezone.trim();
   const titlePrompt = draft.titlePrompt.trim();
   const slugPrompt = draft.slugPrompt.trim();
   const outputDirectory = draft.outputDirectory.trim();
-  const languages = deduplicateStrings(parseSettingsEntries(draft.languagesText));
   const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
 
   if (transcriptionModel.length === 0) {
@@ -439,23 +404,15 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     throw new Error("Metadata model is required.");
   }
 
-  if (defaultLanguage.length === 0) {
-    throw new Error("Default language is required.");
-  }
-
   if (!isSupportedTimezone(defaultTimezone)) {
     throw new Error("Default timezone must be a valid IANA timezone.");
-  }
-
-  if (languages.length === 0) {
-    throw new Error("Add at least one language.");
   }
 
   if (timestampPatterns.length === 0) {
     throw new Error("Add at least one timestamp regex pattern.");
   }
 
-  requirePromptPlaceholders(titlePrompt, ["{transcript}", "{language}"], "Title prompt");
+  requirePromptPlaceholders(titlePrompt, ["{transcript}"], "Title prompt");
   requirePromptPlaceholders(slugPrompt, ["{title}"], "Slug prompt");
 
   const previewSnippetSeconds = requirePositiveInteger(
@@ -481,18 +438,12 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     throw new Error("Retry max delay must be greater than or equal to retry initial delay.");
   }
 
-  const normalizedLanguages = languages.includes(defaultLanguage)
-    ? languages
-    : [defaultLanguage, ...languages];
-
   return {
     ...current,
     geminiApiKeyObfuscated: resolveGeminiApiKeyObfuscated(current, draft),
     outputDirectory: outputDirectory.length === 0 ? null : outputDirectory,
     transcriptionModel,
     metadataModel,
-    defaultLanguage,
-    languages: normalizedLanguages,
     defaultTimezone,
     timestampPatterns,
     prompts: {

@@ -84,12 +84,6 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     },
   );
 
-  ipcMain.handle(APP_SHELL_CHANNELS.updateCardLanguage, (_event, cardId: string, language: string) => {
-    assertString(cardId, "cardId");
-    assertString(language, "language");
-    return runtime.updateCardLanguage(cardId, language);
-  });
-
   ipcMain.handle(APP_SHELL_CHANNELS.getCardMediaSource, (_event, cardId: string) => {
     assertString(cardId, "cardId");
     return runtime.getCardMediaSource(cardId);

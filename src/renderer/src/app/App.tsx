@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactElement,
@@ -330,16 +329,6 @@ export function App(): ReactElement {
     showShortcutsHelp ||
     snapshot?.startupDiagnostic != null ||
     snapshot?.appWideError != null;
-  const languageOptions = useMemo(() => {
-    const configuredLanguages = snapshot?.settingsSummary?.languages ?? [];
-    const merged = configuredLanguages.includes(selectedCard?.language ?? "")
-      ? configuredLanguages
-      : selectedCard !== null
-        ? [selectedCard.language, ...configuredLanguages]
-        : configuredLanguages;
-    return [...merged].sort((a, b) => a.localeCompare(b));
-  }, [selectedCard, snapshot?.settingsSummary?.languages]);
-
   async function handleCardSelect(cardId: string): Promise<void> {
     try {
       const nextSnapshot = await window.mumbler.selectCard(cardId);
@@ -432,17 +421,6 @@ export function App(): ReactElement {
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to choose output directory.",
       );
-    }
-  }
-
-  async function handleCardLanguageChange(cardId: string, language: string): Promise<void> {
-    try {
-      const nextSnapshot = await window.mumbler.updateCardLanguage(cardId, language);
-      setSnapshot(nextSnapshot);
-      setErrorMessage(null);
-      setNoticeMessage(null);
-    } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to update card language.");
     }
   }
 
@@ -562,7 +540,9 @@ export function App(): ReactElement {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
-        if (isMenuOpen) {
+        if (snapshot?.appWideError) {
+          void handleDismissAppWideError();
+        } else if (isMenuOpen) {
           setIsMenuOpen(false);
         } else if (showAbout) {
           setShowAbout(false);
@@ -799,10 +779,12 @@ export function App(): ReactElement {
                   <div className="detail-card__header">
                     <h3>Timestamps</h3>
                   </div>
-                  <div className={`status-summary status-summary--${statusModifier(selectedCard.status)}`}>
-                    <strong>{selectedCard.status}</strong>
-                    {describeCardStep(selectedCard) ? <span>{describeCardStep(selectedCard)}</span> : null}
-                  </div>
+                  {selectedCard.status !== "Imported" && (
+                    <div className={`status-summary status-summary--${statusModifier(selectedCard.status)}`}>
+                      <strong>{selectedCard.status}</strong>
+                      {describeCardStep(selectedCard) ? <span>{describeCardStep(selectedCard)}</span> : null}
+                    </div>
+                  )}
                   <dl className="meta-list">
                     <div>
                       <dt>Original filename</dt>
@@ -879,23 +861,6 @@ export function App(): ReactElement {
                     <h3>Options</h3>
                   </div>
                   <div className="field-stack">
-                    <label className="field">
-                      <span>Language</span>
-                      <select
-                        value={selectedCard.language}
-                        disabled={selectedCardIsBusy}
-                        onChange={(event) =>
-                          void handleCardLanguageChange(selectedCard.id, event.target.value)
-                        }
-                      >
-                        {languageOptions.map((language) => (
-                          <option key={language} value={language}>
-                            {language}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <p className="field-hint">Set to match the recording's spoken language — determines the title language.</p>
                     <label className="field">
                       <span>Transcription Model</span>
                       <select
@@ -1273,6 +1238,7 @@ export function App(): ReactElement {
               },
             },
           ]}
+          onBackdropClick={() => void handleDismissAppWideError()}
         />
       ) : null}
 

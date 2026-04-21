@@ -55,7 +55,7 @@ import {
 
 import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, getSecretsForRedaction, getSystemTimezone, loadSettings, loadState, summarizeSettings } from "./settings-schema";
 import { type AppLogger, createLogger, pruneOldLogs, serializeError } from "./logger";
-import { executeCardPipeline, clearCardResults } from "./card-pipeline";
+import { executeCardPipeline } from "./card-pipeline";
 
 
 interface AppRuntimeState {
@@ -299,7 +299,6 @@ export class ApplicationRuntime {
   async confirmPendingImports(items: PendingImportReviewItem[]): Promise<AppSnapshot> {
     this.ensureReady();
     const state = this.runtime.state!;
-    const settings = this.runtime.settings!;
     const paths = this.runtime.paths!;
 
     const byId = new Map(items.map((item) => [item.id, item]));
@@ -346,7 +345,6 @@ export class ApplicationRuntime {
         audioProfile: probed.audioProfile,
         durationSec: probed.durationSec,
         fileSizeBytes: pendingImport.fileSizeBytes,
-        language: settings.defaultLanguage,
         timestamps,
         trim: {
           frontMarkerSec: null,
@@ -529,44 +527,6 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  async updateCardLanguage(cardId: string, language: string): Promise<AppSnapshot> {
-    this.ensureReady();
-    const state = this.runtime.state!;
-    const settings = this.runtime.settings!;
-    const card = state.cards.find((entry) => entry.id === cardId);
-
-    if (card === undefined) {
-      throw new Error("Card to update does not exist.");
-    }
-
-    if (card.status === "Transcribing" || card.status === "Generating Metadata") {
-      throw new Error("Cannot change language while this card is being processed.");
-    }
-
-    const normalizedLanguage = language.trim();
-    if (normalizedLanguage.length === 0) {
-      throw new Error("Language is required.");
-    }
-
-    if (!settings.languages.includes(normalizedLanguage)) {
-      throw new Error("Choose a language from the configured language list.");
-    }
-
-    if (card.language === normalizedLanguage) {
-      return this.getSnapshot();
-    }
-
-    card.language = normalizedLanguage;
-    clearCardResults(card);
-    await this.persistState();
-    await this.runtime.logger!.info("card.language", "Updated card language and cleared results.", {
-      cardId,
-      language: normalizedLanguage,
-    });
-
-    return this.getSnapshot();
-  }
-
   async getCardMediaSource(cardId: string): Promise<string> {
     this.ensureReady();
     const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
@@ -632,9 +592,7 @@ export class ApplicationRuntime {
       outputDirectory: nextSettings.outputDirectory,
       transcriptionModel: nextSettings.transcriptionModel,
       metadataModel: nextSettings.metadataModel,
-      defaultLanguage: nextSettings.defaultLanguage,
       defaultTimezone: nextSettings.defaultTimezone,
-      languageCount: nextSettings.languages.length,
       timestampPatternCount: nextSettings.timestampPatterns.length,
       previewSnippetSeconds: nextSettings.previewSnippetSeconds,
       concurrencyLimit: nextSettings.concurrencyLimit,

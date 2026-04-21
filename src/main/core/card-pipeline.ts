@@ -119,7 +119,6 @@ export async function executeCardPipeline(
               filePath: preparedAudio.filePath,
               mimeType: preparedAudio.mimeType,
               model: settings.transcriptionModel,
-              language: card.language,
               timeoutMs: settings.timeouts.transcriptionMs,
               logger,
             }),
@@ -151,7 +150,6 @@ export async function executeCardPipeline(
       const titlePrompt = renderPromptTemplate(settings.prompts.title, {
         transcript: card.transcription.text ?? "",
         title: "",
-        language: card.language,
       });
       const titleResult = await executeWithRetry({
         cardId,
@@ -188,7 +186,6 @@ export async function executeCardPipeline(
       const slugPrompt = renderPromptTemplate(settings.prompts.slug, {
         transcript: card.transcription.text ?? "",
         title: card.metadata.title ?? "",
-        language: card.language,
       });
       const slugResult = await executeWithRetry({
         cardId,
@@ -339,13 +336,11 @@ function renderPromptTemplate(
   values: {
     transcript: string;
     title: string;
-    language: string;
   },
 ): string {
   return template
     .replaceAll("{transcript}", values.transcript)
-    .replaceAll("{title}", values.title)
-    .replaceAll("{language}", values.language);
+    .replaceAll("{title}", values.title);
 }
 
 function sanitizeTitle(value: string): string {

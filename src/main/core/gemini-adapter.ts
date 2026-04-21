@@ -12,7 +12,6 @@ export interface GeminiAudioTranscriptionParams {
   filePath: string;
   mimeType: string;
   model: string;
-  language: string;
   timeoutMs: number;
   logger?: AppLogger;
 }
@@ -42,7 +41,7 @@ export async function transcribeWithGemini(
 
   try {
     const fileStats = await stat(params.filePath);
-    const prompt = buildTranscriptionPrompt(params.language);
+    const prompt = buildTranscriptionPrompt();
 
     let response: GenerateContentResponse;
     if (fileStats.size <= INLINE_AUDIO_SAFETY_LIMIT_BYTES) {
@@ -185,12 +184,11 @@ export function getInlineRequestLimitBytes(): number {
   return INLINE_REQUEST_LIMIT_BYTES;
 }
 
-function buildTranscriptionPrompt(language: string): string {
+function buildTranscriptionPrompt(): string {
   return [
     "Generate a faithful transcript of the spoken audio.",
     "Return only the transcript text.",
     "Do not add summaries, timestamps, headings, speaker labels, markdown, or explanations.",
-    `Expected primary language hint: ${language}. If the audio clearly uses a different language, follow the audio instead of the hint.`,
   ].join(" ");
 }
 

@@ -118,7 +118,6 @@ export function buildOutputPayload(params: {
       transcribedAtUtc: params.card.ai.transcription?.generatedAtUtc ?? null,
       finalizedAtUtc: params.finalizedAtUtc,
     },
-    language: params.card.language,
     trim:
       params.card.trim.frontMarkerSec === null && params.card.trim.backMarkerSec === null
         ? null

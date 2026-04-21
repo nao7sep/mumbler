@@ -59,6 +59,14 @@ export function TimestampReviewModal({
       <section className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-card__header">
           <h2>Timestamp Review</h2>
+          <button
+            type="button"
+            className="button button--ghost button--compact modal-close"
+            onClick={onCancel}
+            disabled={isSubmitting}
+          >
+            ✕
+          </button>
         </div>
 
         <div className="modal-toolbar">
