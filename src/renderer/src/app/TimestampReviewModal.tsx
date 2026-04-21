@@ -3,6 +3,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import type { PendingImportReviewItem } from "@shared/app-shell";
 import {
   getLocalTimestampError,
+  getSupportedTimezones,
   getUtcTimestampError,
   isSupportedTimezone,
   recomputeLocalFromUtc,
@@ -29,6 +30,8 @@ export function TimestampReviewModal({
   isSubmitting,
 }: TimestampReviewModalProps): ReactElement {
   const [bulkTimezone, setBulkTimezone] = useState("");
+
+  const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
 
   const validationErrors = useMemo(
     () =>
@@ -57,11 +60,15 @@ export function TimestampReviewModal({
         <div className="modal-toolbar">
           <label className="field">
             <span>Set all timezones to</span>
-            <input
+            <select
               value={bulkTimezone}
               onChange={(event) => setBulkTimezone(event.target.value)}
-              placeholder="Asia/Tokyo"
-            />
+            >
+              <option value="">— select —</option>
+              {timezoneOptions.map((tz) => (
+                <option key={tz} value={tz}>{tz}</option>
+              ))}
+            </select>
           </label>
           <button
             type="button"
@@ -106,7 +113,7 @@ export function TimestampReviewModal({
                   </label>
                   <label className="field">
                     <span>Timezone</span>
-                    <input
+                    <select
                       value={item.timezone}
                       onChange={(event) => {
                         const timezone = event.target.value;
@@ -134,7 +141,11 @@ export function TimestampReviewModal({
 
                         onChange({ ...item, timezone });
                       }}
-                    />
+                    >
+                      {timezoneOptions.map((tz) => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                    </select>
                   </label>
                   <label className="field">
                     <span>UTC timestamp</span>

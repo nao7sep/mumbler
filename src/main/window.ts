@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, shell } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,6 +25,11 @@ export function createMainWindow(): BrowserWindow {
 
   window.once("ready-to-show", () => {
     window.show();
+  });
+
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url);
+    return { action: "deny" };
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {

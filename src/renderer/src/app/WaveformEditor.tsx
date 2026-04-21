@@ -374,10 +374,10 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
   return (
     <div className="waveform-editor">
-      <div className="waveform-editor__status">
-        <span className="muted-tag">Cursor {formatMarkerInput(cursorSec)}</span>
-        <span className="muted-tag">Duration {durationLabel}</span>
-        <span className="muted-tag">{trimSummary}</span>
+      <div className="waveform-editor__info">
+        <span>Cursor: {formatMarkerInput(cursorSec)}</span>
+        <span>Duration: {durationLabel}</span>
+        <span>{trimSummary}</span>
       </div>
 
       <div className="waveform-canvas" ref={containerRef} />
@@ -436,10 +436,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
       <div className="trim-editor-grid">
         <section className="trim-editor-card">
-          <div className="detail-card__header">
-            <h4>Front Marker</h4>
-            <span className="muted-tag">Shifts effective start</span>
-          </div>
+          <h4>Front Marker</h4>
           <label className="field">
             <span>Keep audio from</span>
             <input
@@ -488,10 +485,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         </section>
 
         <section className="trim-editor-card">
-          <div className="detail-card__header">
-            <h4>Back Marker</h4>
-            <span className="muted-tag">Keep audio until</span>
-          </div>
+          <h4>Back Marker</h4>
           <label className="field">
             <span>Discard audio after</span>
             <input

@@ -311,10 +311,7 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
     ],
     defaultTimezone: systemTimezone,
     timestampPatterns: [
-      "(?<year>\\d{4})(?<month>\\d{2})(?<day>\\d{2})[-_ ](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})",
-      "(?<year2>\\d{2})(?<month>\\d{2})(?<day>\\d{2})[-_ ](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})",
-      "(?<year>\\d{4})(?<month>\\d{2})(?<day>\\d{2})[-_ ](?<hour>\\d{2})(?<minute>\\d{2})",
-      "(?<year2>\\d{2})(?<month>\\d{2})(?<day>\\d{2})[-_ ](?<hour>\\d{2})(?<minute>\\d{2})",
+      "(?<year>\\d{2}(?:\\d{2})?)(?<month>\\d{2})(?<day>\\d{2})[-_](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})?",
     ],
     prompts: {
       title:

@@ -63,11 +63,9 @@ button:disabled,
 input:disabled,
 select:disabled,
 textarea:disabled {
-  cursor: not-allowed;
   opacity: 0.5;
 }
 
-button:not(:disabled),
 .queue-row {
   cursor: pointer;
 }
@@ -83,6 +81,8 @@ textarea:focus-visible,
 
 .app-shell {
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   padding: 20px 24px;
 }
 
@@ -93,7 +93,6 @@ textarea:focus-visible,
   gap: 16px;
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--border);
 }
 
 .topbar h1,
@@ -402,7 +401,6 @@ textarea:focus-visible,
   font: inherit;
   font-size: 0.8125rem;
   color: var(--text);
-  cursor: pointer;
 }
 
 .app-menu-item:hover:not(:disabled) {
@@ -411,7 +409,6 @@ textarea:focus-visible,
 
 .app-menu-item:disabled {
   opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .button--danger {
@@ -775,6 +772,14 @@ textarea:focus-visible,
   gap: 8px;
 }
 
+.waveform-editor__info {
+  display: flex;
+  gap: 16px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 2px 0 4px;
+}
+
 .waveform-canvas {
   overflow: hidden;
   min-height: 160px;
@@ -1044,6 +1049,15 @@ textarea:focus-visible,
   padding-top: 16px;
 }
 
+.settings-subheading {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 16px 0 6px;
+}
+
 .api-key-status {
   display: flex;
   align-items: center;
@@ -1162,4 +1176,13 @@ textarea:focus-visible,
   .modal-actions {
     flex-direction: column;
   }
+}
+
+.notification-strip {
+  flex-shrink: 0;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface);
 }

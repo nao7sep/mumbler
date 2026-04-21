@@ -176,12 +176,14 @@ function parseUtcMarker(value: string): Date | null {
 
 function groupsToTimestampParts(groups: Record<string, string>): TimestampParts | null {
   let year: number;
-  if (groups.year2 !== undefined) {
-    const y2 = Number(groups.year2);
-    if (!Number.isInteger(y2) || Number.isNaN(y2)) return null;
-    year = y2 < 70 ? 2000 + y2 : 1900 + y2;
+  const yearStr = groups.year;
+  if (yearStr === undefined) return null;
+  const yearNum = Number(yearStr);
+  if (!Number.isInteger(yearNum) || Number.isNaN(yearNum)) return null;
+  if (yearStr.length === 2) {
+    year = yearNum < 70 ? 2000 + yearNum : 1900 + yearNum;
   } else {
-    year = Number(groups.year);
+    year = yearNum;
   }
   const month = Number(groups.month);
   const day = Number(groups.day);

@@ -299,23 +299,6 @@ export function App(): ReactElement {
 
   const selectedCard =
     snapshot?.state?.cards.find((card) => card.id === snapshot.state?.selectedCardId) ?? null;
-  const queueCards = snapshot?.state?.cards ?? [];
-  const pendingImportCount = snapshot?.queueSummary?.pendingImportCount ?? snapshot?.state?.pendingImports.length ?? 0;
-  const readyToSaveCount = useMemo(
-    () => queueCards.filter((card) => card.status === "Ready to Save").length,
-    [queueCards],
-  );
-  const errorCount = useMemo(
-    () => queueCards.filter((card) => card.status === "Error").length,
-    [queueCards],
-  );
-  const processingCount = useMemo(
-    () =>
-      queueCards.filter(
-        (card) => card.status === "Transcribing" || card.status === "Generating Metadata",
-      ).length,
-    [queueCards],
-  );
   const selectedCardIsBusy =
     selectedCard !== null &&
     (activePipelineCards.includes(selectedCard.id) ||
@@ -647,22 +630,6 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          {snapshot ? (
-            <>
-              {pendingImportCount > 0 ? (
-                <span className="pill pill--quiet">{pendingImportCount} pending</span>
-              ) : null}
-              {processingCount > 0 ? (
-                <span className="pill pill--processing">{processingCount} active</span>
-              ) : null}
-              {readyToSaveCount > 0 ? (
-                <span className="pill pill--success">{readyToSaveCount} ready</span>
-              ) : null}
-              {errorCount > 0 ? (
-                <span className="pill pill--danger">{errorCount} error</span>
-              ) : null}
-            </>
-          ) : null}
           <div className="app-menu-anchor">
             <button
               type="button"
@@ -706,6 +673,29 @@ export function App(): ReactElement {
         </div>
       </header>
 
+      {(errorMessage || noticeMessage || importFlow.importFailures.length > 0) && (
+        <div className="notification-strip">
+          {errorMessage && (
+            <BannerCard title="Error" body={errorMessage} variant="error" onDismiss={() => setErrorMessage(null)} />
+          )}
+          {noticeMessage && (
+            <BannerCard title="Notice" body={noticeMessage} variant="notice" onDismiss={() => setNoticeMessage(null)} />
+          )}
+          {importFlow.importFailures.length > 0 && (
+            <BannerCard title="Some imports failed." variant="warning" onDismiss={() => importFlow.setImportFailures([])}>
+              <div className="failure-list">
+                {importFlow.importFailures.map((failure) => (
+                  <p key={`${failure.sourcePath}:${failure.message}`}>
+                    <strong>{failure.sourcePath}</strong>
+                    <span>{failure.message}</span>
+                  </p>
+                ))}
+              </div>
+            </BannerCard>
+          )}
+        </div>
+      )}
+
       <main
         className={`workspace${importFlow.isDragActive ? " workspace--drag-active" : ""}`}
         onDragOver={importFlow.onDragOver}
@@ -726,41 +716,6 @@ export function App(): ReactElement {
               </button>
             </div>
           </div>
-
-          {errorMessage ? (
-            <BannerCard
-              title="Error"
-              body={errorMessage}
-              variant="error"
-              onDismiss={() => setErrorMessage(null)}
-            />
-          ) : null}
-
-          {noticeMessage ? (
-            <BannerCard
-              title="Notice"
-              body={noticeMessage}
-              variant="notice"
-              onDismiss={() => setNoticeMessage(null)}
-            />
-          ) : null}
-
-          {importFlow.importFailures.length > 0 ? (
-            <BannerCard
-              title="Some imports failed."
-              variant="warning"
-              onDismiss={() => importFlow.setImportFailures([])}
-            >
-              <div className="failure-list">
-                {importFlow.importFailures.map((failure) => (
-                  <p key={`${failure.sourcePath}:${failure.message}`}>
-                    <strong>{failure.sourcePath}</strong>
-                    <span>{failure.message}</span>
-                  </p>
-                ))}
-              </div>
-            </BannerCard>
-          ) : null}
 
           {snapshot?.startupDiagnostic ? (
             <section className="panel panel--nested queue-empty">
@@ -949,9 +904,6 @@ export function App(): ReactElement {
                 <div className="trim-analysis">
                   <div className="trim-analysis__header">
                     <span className="trim-analysis__label">Trim Analysis</span>
-                    <span className="muted-tag">
-                      {selectedCard.trimDecision?.kind ?? "not-analyzed"}
-                    </span>
                   </div>
                   <p className="panel__note">{describeTrimDecision(selectedCard.trimDecision)}</p>
                   <dl className="trim-analysis-grid">
