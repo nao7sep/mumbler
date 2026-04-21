@@ -146,4 +146,5 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
 
   ipcMain.handle(APP_SHELL_CHANNELS.dismissAppWideError, () => runtime.dismissAppWideError());
   ipcMain.handle(APP_SHELL_CHANNELS.resetState, () => runtime.resetState());
+  ipcMain.handle(APP_SHELL_CHANNELS.cancelPendingImports, () => runtime.cancelPendingImports());
 }

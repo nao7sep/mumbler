@@ -64,6 +64,8 @@ const api: MumblerShellApi = {
   dismissAppWideError: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.dismissAppWideError) as Promise<AppSnapshot>,
   resetState: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.resetState) as Promise<AppSnapshot>,
+  cancelPendingImports: () =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelPendingImports) as Promise<AppSnapshot>,
   onAppWideErrorChanged: (listener: () => void) => {
     const wrapped = () => {
       listener();

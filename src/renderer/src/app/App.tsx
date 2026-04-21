@@ -426,6 +426,17 @@ export function App(): ReactElement {
     }
   }
 
+  async function handleCancelPendingImports(): Promise<void> {
+    try {
+      const nextSnapshot = await window.mumbler.cancelPendingImports();
+      setSnapshot(nextSnapshot);
+      setErrorMessage(null);
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to cancel import.");
+    }
+    setPendingReviewDrafts([]);
+  }
+
   async function handleDroppedPaths(paths: string[]): Promise<void> {
     if (paths.length === 0) {
       return;
@@ -713,7 +724,7 @@ export function App(): ReactElement {
         } else if (pendingSaveConflict !== null) {
           setPendingSaveConflict(null);
         } else if (pendingReviewDrafts.length > 0) {
-          setPendingReviewDrafts([]);
+          void handleCancelPendingImports();
         } else if (settingsDraft !== null && !isSavingSettings) {
           setSettingsDraft(null);
           setSettingsErrorMessage(null);
@@ -799,8 +810,13 @@ export function App(): ReactElement {
     setIsDragActive(false);
 
     const paths = Array.from(event.dataTransfer.files)
-      .map((file) => (file as File & { path?: string }).path ?? "")
+      .map((file) => ((file as any).path as string | undefined) ?? "")
       .filter((value) => value.length > 0);
+
+    if (paths.length === 0) {
+      setErrorMessage("Drop could not read file paths. Please use the Import button instead.");
+      return;
+    }
 
     void handleDroppedPaths(paths);
   }
@@ -1422,7 +1438,12 @@ export function App(): ReactElement {
             )
           }
           onConfirm={() => void handleConfirmPendingImports()}
-          onCancel={() => setPendingReviewDrafts([])}
+          onCancel={() => void handleCancelPendingImports()}
+          onSetDeleteOriginalForAll={(value) =>
+            setPendingReviewDrafts((current) =>
+              current.map((item) => ({ ...item, deleteOriginalOnConfirm: value }))
+            )
+          }
           isSubmitting={isConfirmingReview}
         />
       ) : null}

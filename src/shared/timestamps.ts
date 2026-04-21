@@ -175,7 +175,14 @@ function parseUtcMarker(value: string): Date | null {
 }
 
 function groupsToTimestampParts(groups: Record<string, string>): TimestampParts | null {
-  const year = Number(groups.year);
+  let year: number;
+  if (groups.year2 !== undefined) {
+    const y2 = Number(groups.year2);
+    if (!Number.isInteger(y2) || Number.isNaN(y2)) return null;
+    year = y2 < 70 ? 2000 + y2 : 1900 + y2;
+  } else {
+    year = Number(groups.year);
+  }
   const month = Number(groups.month);
   const day = Number(groups.day);
   const hour = Number(groups.hour);

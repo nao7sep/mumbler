@@ -313,6 +313,7 @@ export class ApplicationRuntime {
     this.ensureReady();
     const state = this.runtime.state!;
     const settings = this.runtime.settings!;
+    const paths = this.runtime.paths!;
 
     const byId = new Map(items.map((item) => [item.id, item]));
     const pendingImports = [...state.pendingImports];
@@ -383,6 +384,17 @@ export class ApplicationRuntime {
         createdAtUtc: nowUtcMarker(),
         updatedAtUtc: nowUtcMarker(),
       });
+
+      if (pendingImport.deleteOriginalOnConfirm) {
+        try {
+          await moveImportedSourceToTrash(pendingImport.originalSourcePath, paths.workingDir, this.runtime.logger!);
+        } catch (error: unknown) {
+          await this.runtime.logger!.warn("import.trash-original", "Failed to trash original after confirm.", {
+            originalSourcePath: pendingImport.originalSourcePath,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
 
     state.pendingImports = [];
@@ -397,6 +409,35 @@ export class ApplicationRuntime {
       "Confirmed pending imports into queue.",
       { addedCards: cardsToAdd.length },
     );
+
+    return this.getSnapshot();
+  }
+
+  async cancelPendingImports(): Promise<AppSnapshot> {
+    this.ensureReady();
+    const pendingImports = [...this.runtime.state!.pendingImports];
+
+    for (const pendingImport of pendingImports) {
+      try {
+        await shell.trashItem(pendingImport.workingFilePath);
+      } catch (error: unknown) {
+        await this.runtime.logger!.warn("import.cancel-cleanup", "Failed to trash working file on cancel.", {
+          workingFilePath: pendingImport.workingFilePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        try {
+          await rm(pendingImport.workingFilePath, { force: true });
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    this.runtime.state!.pendingImports = [];
+    await this.persistState();
+    await this.runtime.logger!.info("import.cancelled", "Cancelled pending imports.", {
+      cancelledCount: pendingImports.length,
+    });
 
     return this.getSnapshot();
   }
@@ -820,13 +861,6 @@ export class ApplicationRuntime {
       );
     }
 
-    try {
-      await moveImportedSourceToTrash(sourcePath, paths.workingDir, this.runtime.logger!);
-    } catch (error: unknown) {
-      await rm(workingFilePath, { force: true });
-      throw error;
-    }
-
     await this.runtime.logger!.debug("import.file", "Staged file to working storage.", {
       originalFilename,
       fileSizeBytes: sourceStats.size,
@@ -844,12 +878,14 @@ export class ApplicationRuntime {
       id: nanoid(),
       originalFilename,
       importSource,
+      originalSourcePath: sourcePath,
       workingFilePath,
       fileSizeBytes: sourceStats.size,
       localTimestampText: parsed.localTimestampText,
       timezone: settings.defaultTimezone,
       utcTimestampText: utcResult.error === null ? utcResult.utcTimestampText : "",
       parseStatus: parsed.parseStatus,
+      deleteOriginalOnConfirm: true,
       createdAtUtc: nowUtcMarker(),
       updatedAtUtc: nowUtcMarker(),
     };

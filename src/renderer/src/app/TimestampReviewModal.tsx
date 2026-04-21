@@ -14,6 +14,7 @@ export interface TimestampReviewModalProps {
   timezones: string[];
   onChange: (item: PendingImportReviewItem) => void;
   onApplyTimezoneToAll: (timezone: string) => void;
+  onSetDeleteOriginalForAll: (value: boolean) => void;
   onConfirm: () => void;
   onCancel: () => void;
   isSubmitting: boolean;
@@ -24,6 +25,7 @@ export function TimestampReviewModal({
   timezones,
   onChange,
   onApplyTimezoneToAll,
+  onSetDeleteOriginalForAll,
   onConfirm,
   onCancel,
   isSubmitting,
@@ -169,6 +171,14 @@ export function TimestampReviewModal({
         </div>
 
         <div className="modal-actions">
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: 'auto' }}>
+            <input
+              type="checkbox"
+              checked={items.length > 0 && items.every((i) => i.deleteOriginalOnConfirm)}
+              onChange={(e) => onSetDeleteOriginalForAll(e.target.checked)}
+            />
+            Delete originals after import
+          </label>
           <button
             type="button"
             className="button button--ghost"

@@ -20,6 +20,7 @@ export const APP_SHELL_CHANNELS = {
   reportRendererError: "app-shell:report-renderer-error",
   dismissAppWideError: "app-shell:dismiss-app-wide-error",
   resetState: "app-shell:reset-state",
+  cancelPendingImports: "app-shell:cancel-pending-imports",
 } as const;
 
 export const APP_SHELL_EVENTS = {
@@ -149,12 +150,14 @@ export interface PendingImportReviewItem {
   id: string;
   originalFilename: string;
   importSource: ImportSource;
+  originalSourcePath: string;
   workingFilePath: string;
   fileSizeBytes: number;
   localTimestampText: string;
   timezone: string;
   utcTimestampText: string;
   parseStatus: TimestampParseStatus;
+  deleteOriginalOnConfirm: boolean;
   createdAtUtc: string;
   updatedAtUtc: string;
 }
@@ -332,6 +335,7 @@ export interface MumblerShellApi {
   reportRendererError(report: RendererErrorReport): Promise<AppSnapshot>;
   dismissAppWideError(): Promise<AppSnapshot>;
   resetState(): Promise<AppSnapshot>;
+  cancelPendingImports(): Promise<AppSnapshot>;
   onAppWideErrorChanged(listener: () => void): () => void;
   onPipelineProgressUpdated(listener: () => void): () => void;
 }

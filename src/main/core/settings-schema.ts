@@ -94,6 +94,8 @@ function normalizePendingImportRecord(item: PendingImportReviewItem): PendingImp
 
   return {
     ...item,
+    originalSourcePath: typeof item.originalSourcePath === 'string' ? item.originalSourcePath : '',
+    deleteOriginalOnConfirm: typeof item.deleteOriginalOnConfirm === 'boolean' ? item.deleteOriginalOnConfirm : true,
     createdAtUtc,
     updatedAtUtc: normalizeUtcMarkerText(item.updatedAtUtc, createdAtUtc),
   };
@@ -317,6 +319,8 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
       "(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})[ T](?<hour>\\d{2})-(?<minute>\\d{2})",
       "(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})[ T](?<hour>\\d{2}):(?<minute>\\d{2}):(?<second>\\d{2})",
       "(?<year>\\d{4})-(?<month>\\d{2})-(?<day>\\d{2})[ T](?<hour>\\d{2}):(?<minute>\\d{2})",
+      "(?<year2>\\d{2})(?<month>\\d{2})(?<day>\\d{2})[-_ ](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})",
+      "(?<year2>\\d{2})(?<month>\\d{2})(?<day>\\d{2})[-_ ](?<hour>\\d{2})(?<minute>\\d{2})",
     ],
     prompts: {
       title:
