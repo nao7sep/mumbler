@@ -5,7 +5,6 @@ import { access } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 
 import type { AppPaths, MumblerCard, MumblerState, PendingImportReviewItem } from "@shared/app-shell";
-import { nowUtcMarker } from "@shared/timestamps";
 import { fileExists, formatError } from "./file-io";
 
 import { type AppLogger } from "./logger";
@@ -189,7 +188,7 @@ export async function reconcileWorkingState(
             pendingImports: nextPendingImports,
             cards: nextCards,
           }),
-          updatedAtUtc: nowUtcMarker(),
+          updatedAtUtc: Date.now(),
         };
 
   return {
@@ -208,10 +207,10 @@ function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
     activeStep: null,
     lastError: {
       message: "Working audio is missing from working storage — remove this card or re-import the source audio.",
-      occurredAtUtc: nowUtcMarker(),
+      occurredAtUtc: Date.now(),
       failedStep: "startup-recovery",
     },
-    updatedAtUtc: nowUtcMarker(),
+    updatedAtUtc: Date.now(),
   };
 }
 

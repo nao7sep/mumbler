@@ -1135,7 +1135,7 @@ export function App(): ReactElement {
                     ...item,
                     timezone,
                     utcTimestampText:
-                      utcResult.error === null ? utcResult.utcTimestampText : item.utcTimestampText,
+                      utcResult.error === null ? formatUtcForDisplay(utcResult.utcMs!) : item.utcTimestampText,
                   };
                 }
 

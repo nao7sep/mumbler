@@ -7,7 +7,6 @@ import type {
   MumblerSettings,
   MumblerState,
 } from "@shared/app-shell";
-import { nowUtcMarker } from "@shared/timestamps";
 
 import type { AppLogger } from "./logger";
 import {
@@ -80,7 +79,7 @@ export async function executeCardPipeline(
         card.trimDecision ??
         (await analyzeTrimDecision(card.sourceFilePath, card.trim, card.durationSec));
       card.trimDecision = trimDecision;
-      card.updatedAtUtc = nowUtcMarker();
+      card.updatedAtUtc = Date.now();
       await ctx.persistState();
 
       const preparedAudio = await prepareAudioForTranscription({
@@ -128,9 +127,9 @@ export async function executeCardPipeline(
         card.ai.transcription = {
           provider: "gemini",
           model: transcriptionResult.modelVersion ?? settings.transcriptionModel,
-          generatedAtUtc: nowUtcMarker(),
+          generatedAtUtc: Date.now(),
         };
-        card.updatedAtUtc = nowUtcMarker();
+        card.updatedAtUtc = Date.now();
 
         await logger.info("pipeline.transcription-complete", "Completed Gemini transcription.", {
           cardId,
@@ -168,9 +167,9 @@ export async function executeCardPipeline(
       card.ai.title = {
         provider: "gemini",
         model: titleResult.modelVersion ?? settings.metadataModel,
-        generatedAtUtc: nowUtcMarker(),
+        generatedAtUtc: Date.now(),
       };
-      card.updatedAtUtc = nowUtcMarker();
+      card.updatedAtUtc = Date.now();
       await ctx.persistState();
       await logger.info("pipeline.title-complete", "Generated title metadata.", {
         cardId,
@@ -207,12 +206,12 @@ export async function executeCardPipeline(
       card.ai.slug = {
         provider: "gemini",
         model: slugResult.modelVersion ?? settings.metadataModel,
-        generatedAtUtc: nowUtcMarker(),
+        generatedAtUtc: Date.now(),
       };
       card.status = "Ready to Save";
       card.activeStep = null;
       card.lastError = null;
-      card.updatedAtUtc = nowUtcMarker();
+      card.updatedAtUtc = Date.now();
 
       await ctx.persistState();
       await logger.info("pipeline.slug-complete", "Generated slug metadata.", {
@@ -226,10 +225,10 @@ export async function executeCardPipeline(
     card.activeStep = null;
     card.lastError = {
       message: getCardErrorMessage(error),
-      occurredAtUtc: nowUtcMarker(),
+      occurredAtUtc: Date.now(),
       failedStep: activeStep,
     };
-    card.updatedAtUtc = nowUtcMarker();
+    card.updatedAtUtc = Date.now();
 
     await ctx.persistState();
     await logger.error("pipeline.failed", "Card pipeline failed.", error, {
@@ -251,7 +250,7 @@ async function setCardStepState(
   card.status = status;
   card.activeStep = step;
   card.lastError = null;
-  card.updatedAtUtc = nowUtcMarker();
+  card.updatedAtUtc = Date.now();
   await ctx.persistState();
 }
 
@@ -305,7 +304,7 @@ export function clearCardResults(card: MumblerCard): void {
   card.status = "Imported";
   card.activeStep = null;
   card.lastError = null;
-  card.updatedAtUtc = nowUtcMarker();
+  card.updatedAtUtc = Date.now();
 }
 
 function resolvePipelineStartStep(

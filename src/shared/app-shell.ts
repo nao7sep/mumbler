@@ -92,17 +92,17 @@ export type TimestampParseStatus = "parsed" | "manual-required";
 
 export interface CardError {
   message: string;
-  occurredAtUtc: string;
+  occurredAtUtc: number;
   failedStep: Exclude<CardProcessingStep, null> | "startup-recovery";
 }
 
 export interface CardTimestamps {
   confirmedLocal: string;
-  confirmedUtc: string;
+  confirmedUtc: number;
   timezone: string;
   frontTrimOffsetSec: number;
   effectiveLocal: string;
-  effectiveUtc: string;
+  effectiveUtc: number;
 }
 
 export interface CardTrim {
@@ -134,13 +134,13 @@ export interface TrimDecision {
   startDeltaSec: number | null;
   endDeltaSec: number | null;
   reason: string;
-  analyzedAtUtc: string;
+  analyzedAtUtc: number;
 }
 
 export interface AiRunInfo {
   provider: "gemini";
   model: string;
-  generatedAtUtc: string;
+  generatedAtUtc: number;
 }
 
 export interface PendingImportReviewItem {
@@ -155,8 +155,8 @@ export interface PendingImportReviewItem {
   utcTimestampText: string;
   parseStatus: TimestampParseStatus;
   deleteOriginalOnConfirm: boolean;
-  createdAtUtc: string;
-  updatedAtUtc: string;
+  createdAtUtc: number;
+  updatedAtUtc: number;
 }
 
 export interface MumblerCard {
@@ -185,8 +185,8 @@ export interface MumblerCard {
   status: CardStatus;
   activeStep: CardProcessingStep;
   lastError: CardError | null;
-  createdAtUtc: string;
-  updatedAtUtc: string;
+  createdAtUtc: number;
+  updatedAtUtc: number;
 }
 
 export interface MumblerState {
@@ -194,7 +194,7 @@ export interface MumblerState {
   pendingImports: PendingImportReviewItem[];
   cards: MumblerCard[];
   selectedCardId: string | null;
-  updatedAtUtc: string;
+  updatedAtUtc: number;
 }
 
 export interface AppPaths {
@@ -262,7 +262,7 @@ export interface AppSnapshot {
   appVersion: string;
   platform: NodeJS.Platform;
   isPackaged: boolean;
-  shellReadyAtUtc: string;
+  shellReadyAtUtc: number;
   paths: AppPaths | null;
   settingsSummary: SettingsSummary | null;
   queueSummary: QueueSummary | null;

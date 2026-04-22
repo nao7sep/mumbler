@@ -1,8 +1,6 @@
 import { readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { nowUtcMarker } from "@shared/timestamps";
-
 const LOG_RETENTION_DAYS = 30;
 
 export interface AppLogger {
@@ -50,7 +48,7 @@ export function createLogger(logsDir: string, secrets: string[]): AppLogger {
   ): Promise<void> => {
     const filePath = join(logsDir, `${formatUtcDate(new Date())}.log`);
     const payload = {
-      time: nowUtcMarker(),
+      time: Date.now(),
       level,
       op,
       message,

@@ -103,7 +103,7 @@ export function buildOutputPayload(params: {
   card: MumblerCard;
   finalProfile: MumblerCard["audioProfile"];
   finalDurationSec: number | null;
-  finalizedAtUtc: string;
+  finalizedAtUtc: number;
 }): Record<string, unknown> {
   return {
     schemaVersion: 1,
@@ -112,12 +112,12 @@ export function buildOutputPayload(params: {
     importSource: params.card.importSource,
     timestamps: {
       confirmedLocal: params.card.timestamps.confirmedLocal,
-      confirmedUtc: params.card.timestamps.confirmedUtc,
+      confirmedUtc: new Date(params.card.timestamps.confirmedUtc).toISOString(),
       effectiveLocal: params.card.timestamps.effectiveLocal,
-      effectiveUtc: params.card.timestamps.effectiveUtc,
+      effectiveUtc: new Date(params.card.timestamps.effectiveUtc).toISOString(),
       timezone: params.card.timestamps.timezone,
-      transcribedAtUtc: params.card.ai.transcription?.generatedAtUtc ?? null,
-      finalizedAtUtc: params.finalizedAtUtc,
+      transcribedAtUtc: params.card.ai.transcription !== null ? new Date(params.card.ai.transcription.generatedAtUtc).toISOString() : null,
+      finalizedAtUtc: new Date(params.finalizedAtUtc).toISOString(),
     },
     trim:
       params.card.trim.frontMarkerSec === null && params.card.trim.backMarkerSec === null

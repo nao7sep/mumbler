@@ -9,8 +9,7 @@ import type {
 } from "@shared/app-shell";
 import {
   isSupportedTimezone,
-  normalizeUtcMarkerText,
-  nowUtcMarker,
+  normalizeUtcMs,
 } from "@shared/timestamps";
 import { readJsonFile, writeJsonFile } from "./file-io";
 
@@ -88,14 +87,14 @@ function normalizeSettings(
 }
 
 function normalizePendingImportRecord(item: PendingImportReviewItem): PendingImportReviewItem {
-  const createdAtUtc = normalizeUtcMarkerText(item.createdAtUtc);
+  const createdAtUtc = normalizeUtcMs(item.createdAtUtc);
 
   return {
     ...item,
     originalSourcePath: typeof item.originalSourcePath === 'string' ? item.originalSourcePath : '',
     deleteOriginalOnConfirm: typeof item.deleteOriginalOnConfirm === 'boolean' ? item.deleteOriginalOnConfirm : true,
     createdAtUtc,
-    updatedAtUtc: normalizeUtcMarkerText(item.updatedAtUtc, createdAtUtc),
+    updatedAtUtc: normalizeUtcMs(item.updatedAtUtc, createdAtUtc),
   };
 }
 
@@ -106,7 +105,7 @@ function normalizeTrimDecisionRecord(cardTrimDecision: MumblerCard["trimDecision
 
   return {
     ...cardTrimDecision,
-    analyzedAtUtc: normalizeUtcMarkerText(cardTrimDecision.analyzedAtUtc),
+    analyzedAtUtc: normalizeUtcMs(cardTrimDecision.analyzedAtUtc),
   };
 }
 
@@ -117,7 +116,7 @@ function normalizeAiRunInfo(run: MumblerCard["ai"]["transcription"]): MumblerCar
 
   return {
     ...run,
-    generatedAtUtc: normalizeUtcMarkerText(run.generatedAtUtc),
+    generatedAtUtc: normalizeUtcMs(run.generatedAtUtc),
   };
 }
 
@@ -128,13 +127,13 @@ function normalizeCardError(error: MumblerCard["lastError"]): MumblerCard["lastE
 
   return {
     ...error,
-    occurredAtUtc: normalizeUtcMarkerText(error.occurredAtUtc),
+    occurredAtUtc: normalizeUtcMs(error.occurredAtUtc),
   };
 }
 
 function normalizeCardRecord(card: MumblerCard): MumblerCard {
-  const createdAtUtc = normalizeUtcMarkerText(card.createdAtUtc);
-  const confirmedUtc = normalizeUtcMarkerText(card.timestamps.confirmedUtc);
+  const createdAtUtc = normalizeUtcMs(card.createdAtUtc);
+  const confirmedUtc = normalizeUtcMs(card.timestamps.confirmedUtc);
 
   return {
     ...card,
@@ -142,7 +141,7 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
     timestamps: {
       ...card.timestamps,
       confirmedUtc,
-      effectiveUtc: normalizeUtcMarkerText(card.timestamps.effectiveUtc, confirmedUtc),
+      effectiveUtc: normalizeUtcMs(card.timestamps.effectiveUtc, confirmedUtc),
     },
     trimDecision: normalizeTrimDecisionRecord(card.trimDecision),
     ai: {
@@ -152,7 +151,7 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
     },
     lastError: normalizeCardError(card.lastError),
     createdAtUtc,
-    updatedAtUtc: normalizeUtcMarkerText(card.updatedAtUtc, createdAtUtc),
+    updatedAtUtc: normalizeUtcMs(card.updatedAtUtc, createdAtUtc),
   };
 }
 
@@ -166,7 +165,7 @@ function normalizeState(raw: Record<string, unknown>, defaults: MumblerState): M
       ? (raw.cards as MumblerCard[]).map(normalizeCardRecord)
       : defaults.cards,
     selectedCardId: asNullableString(raw.selectedCardId),
-    updatedAtUtc: normalizeUtcMarkerText(asString(raw.updatedAtUtc) ?? defaults.updatedAtUtc),
+    updatedAtUtc: normalizeUtcMs(raw.updatedAtUtc, defaults.updatedAtUtc),
   };
 }
 
@@ -187,10 +186,10 @@ function recoverInterruptedCards(
       activeStep: null,
       lastError: {
         message: "Interrupted — retry to resume",
-        occurredAtUtc: nowUtcMarker(),
+        occurredAtUtc: Date.now(),
         failedStep: "startup-recovery" as const,
       },
-      updatedAtUtc: nowUtcMarker(),
+      updatedAtUtc: Date.now(),
     };
   });
 
@@ -198,7 +197,7 @@ function recoverInterruptedCards(
     state: {
       ...state,
       cards,
-      updatedAtUtc: nowUtcMarker(),
+      updatedAtUtc: Date.now(),
     },
     recoveredInterruptedCards,
   };
@@ -345,7 +344,7 @@ export function createEmptyState(): MumblerState {
     pendingImports: [],
     cards: [],
     selectedCardId: null,
-    updatedAtUtc: nowUtcMarker(),
+    updatedAtUtc: Date.now(),
   };
 }
 

@@ -61,31 +61,38 @@ export function parseTimestampFromFilename(
 export function recomputeUtcFromLocal(
   localTimestampText: string,
   timezone: string,
-): { utcTimestampText: string; error: string | null } {
+): { utcMs: number | null; error: string | null } {
   const localParts = parseLocalTimestamp(localTimestampText);
   if (localParts === null) {
-    return { utcTimestampText: "", error: "Enter local time as YYYY-MM-DD HH:MM:SS." };
+    return { utcMs: null, error: "Enter local time as YYYY-MM-DD HH:MM:SS." };
   }
 
   if (!isSupportedTimezone(timezone)) {
-    return { utcTimestampText: "", error: "Enter a valid IANA timezone." };
+    return { utcMs: null, error: "Enter a valid IANA timezone." };
   }
 
   const utcDate = zonedLocalToUtcDate(localParts, timezone);
   if (utcDate === null) {
-    return { utcTimestampText: "", error: "Could not convert local time to UTC." };
+    return { utcMs: null, error: "Could not convert local time to UTC." };
   }
 
-  return { utcTimestampText: formatUtcMarker(utcDate), error: null };
+  return { utcMs: utcDate.getTime(), error: null };
 }
 
 export function recomputeLocalFromUtc(
-  utcTimestampText: string,
+  utcInput: string | number,
   timezone: string,
 ): { localTimestampText: string; error: string | null } {
-  const utcDate = parseUtcMarker(utcTimestampText);
+  let utcDate: Date | null;
+  if (typeof utcInput === "number") {
+    utcDate = new Date(utcInput);
+  } else {
+    const ms = parseUtcFromDisplay(utcInput);
+    utcDate = ms !== null ? new Date(ms) : null;
+  }
+
   if (utcDate === null) {
-    return { localTimestampText: "", error: "Enter UTC as yyyymmdd-hhmmss-utc." };
+    return { localTimestampText: "", error: "Enter UTC as YYYY-MM-DD HH:MM:SS." };
   }
 
   if (!isSupportedTimezone(timezone)) {
@@ -105,14 +112,13 @@ export function getLocalTimestampError(localTimestampText: string): string | nul
 }
 
 export function getUtcTimestampError(utcTimestampText: string): string | null {
-  return parseUtcMarker(utcTimestampText) === null
+  return parseUtcFromDisplay(utcTimestampText) === null
     ? "Enter UTC as YYYY-MM-DD HH:MM:SS."
     : null;
 }
 
-export function formatUtcForDisplay(utcMarker: string): string {
-  const date = parseUtcMarker(utcMarker);
-  if (date === null) return utcMarker;
+export function formatUtcForDisplay(utcMs: number): string {
+  const date = new Date(utcMs);
   return formatLocalTimestamp({
     year: date.getUTCFullYear(),
     month: date.getUTCMonth() + 1,
@@ -123,11 +129,11 @@ export function formatUtcForDisplay(utcMarker: string): string {
   });
 }
 
-export function parseUtcFromDisplay(display: string): string | null {
+export function parseUtcFromDisplay(display: string): number | null {
   const parts = parseLocalTimestamp(display);
   if (parts === null) return null;
-  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second));
-  return Number.isNaN(date.getTime()) ? null : formatUtcMarker(date);
+  const ms = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return Number.isNaN(ms) ? null : ms;
 }
 
 export function formatLocalTimestamp(parts: TimestampParts): string {
@@ -152,21 +158,16 @@ export function formatUtcMarker(date: Date): string {
     .padStart(2, "0")}-utc`;
 }
 
-export function nowUtcMarker(): string {
-  return formatUtcMarker(new Date());
-}
-
-export function normalizeUtcMarkerText(value: string, fallback: string = nowUtcMarker()): string {
-  const markerDate = parseUtcMarker(value.toLowerCase());
-  if (markerDate !== null) {
-    return formatUtcMarker(markerDate);
+export function normalizeUtcMs(value: unknown, fallback: number = Date.now()): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const fromDisplay = parseUtcFromDisplay(value);
+    if (fromDisplay !== null) return fromDisplay;
+    const markerDate = parseUtcMarker(value.toLowerCase());
+    if (markerDate !== null) return markerDate.getTime();
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return d.getTime();
   }
-
-  const parsedDate = new Date(value);
-  if (!Number.isNaN(parsedDate.getTime())) {
-    return formatUtcMarker(parsedDate);
-  }
-
   return fallback;
 }
 

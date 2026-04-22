@@ -36,9 +36,10 @@ import {
   probeAudioProfile,
 } from "./audio-tools";
 import {
+  formatUtcForDisplay,
+  formatUtcMarker,
   isSupportedTimezone,
-  normalizeUtcMarkerText,
-  nowUtcMarker,
+  normalizeUtcMs,
   parseTimestampFromFilename,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
@@ -66,7 +67,7 @@ interface AppRuntimeState {
   startupDiagnostic: AppSnapshot["startupDiagnostic"];
   appWideError: AppSnapshot["appWideError"];
   recoveredInterruptedCards: number;
-  shellReadyAtUtc: string;
+  shellReadyAtUtc: number;
 }
 
 export class ApplicationRuntime {
@@ -80,7 +81,7 @@ export class ApplicationRuntime {
   }
 
   static async initialize(): Promise<ApplicationRuntime> {
-    const shellReadyAtUtc = nowUtcMarker();
+    const shellReadyAtUtc = Date.now();
     const paths = getAppPaths();
 
     try {
@@ -366,8 +367,8 @@ export class ApplicationRuntime {
         status: "Imported",
         activeStep: null,
         lastError: null,
-        createdAtUtc: nowUtcMarker(),
-        updatedAtUtc: nowUtcMarker(),
+        createdAtUtc: Date.now(),
+        updatedAtUtc: Date.now(),
       });
 
       if (pendingImport.deleteOriginalOnConfirm) {
@@ -384,7 +385,7 @@ export class ApplicationRuntime {
 
     state.pendingImports = [];
     state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
-      left.timestamps.effectiveUtc.localeCompare(right.timestamps.effectiveUtc),
+      left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
     );
     state.selectedCardId = cardsToAdd[0]?.id ?? state.selectedCardId;
 
@@ -455,7 +456,7 @@ export class ApplicationRuntime {
 
     const duplicate = createDuplicatedCard(source);
     state.cards = [...state.cards, duplicate].sort((left, right) =>
-      left.timestamps.effectiveUtc.localeCompare(right.timestamps.effectiveUtc),
+      left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
     );
     state.selectedCardId = duplicate.id;
 
@@ -497,10 +498,10 @@ export class ApplicationRuntime {
     card.status = "Imported";
     card.activeStep = null;
     card.lastError = null;
-    card.updatedAtUtc = nowUtcMarker();
+    card.updatedAtUtc = Date.now();
 
     state.cards.sort((left, right) =>
-      left.timestamps.effectiveUtc.localeCompare(right.timestamps.effectiveUtc),
+      left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
     );
 
     await this.persistState();
@@ -655,7 +656,7 @@ export class ApplicationRuntime {
 
     try {
       const extension = extname(finalAudio.filePath) || extname(card.sourceFilePath);
-      const baseName = `${card.timestamps.effectiveUtc}-${card.metadata.slug}`;
+      const baseName = `${formatUtcMarker(new Date(card.timestamps.effectiveUtc))}-${card.metadata.slug}`;
       const initialTargets = {
         audioPath: join(outputDirectory, `${baseName}${extension}`),
         jsonPath: join(outputDirectory, `${baseName}.json`),
@@ -700,7 +701,7 @@ export class ApplicationRuntime {
         sampleRateHz: finalProfile.audioProfile?.sampleRateHz,
         channels: finalProfile.audioProfile?.channels,
       });
-      const finalizedAtUtc = nowUtcMarker();
+      const finalizedAtUtc = Date.now();
       const outputPayload = buildOutputPayload({
         card,
         finalProfile: finalProfile.audioProfile,
@@ -835,7 +836,7 @@ export class ApplicationRuntime {
     const utcResult =
       parsed.localTimestampText.length > 0
         ? recomputeUtcFromLocal(parsed.localTimestampText, settings.defaultTimezone)
-        : { utcTimestampText: "", error: null };
+        : { utcMs: null, error: null };
 
     const pendingImport: PendingImportReviewItem = {
       id: nanoid(),
@@ -846,11 +847,11 @@ export class ApplicationRuntime {
       fileSizeBytes: sourceStats.size,
       localTimestampText: parsed.localTimestampText,
       timezone: settings.defaultTimezone,
-      utcTimestampText: utcResult.error === null ? utcResult.utcTimestampText : "",
+      utcTimestampText: utcResult.error === null && utcResult.utcMs !== null ? formatUtcForDisplay(utcResult.utcMs) : "",
       parseStatus: parsed.parseStatus,
       deleteOriginalOnConfirm: false,
-      createdAtUtc: nowUtcMarker(),
-      updatedAtUtc: nowUtcMarker(),
+      createdAtUtc: Date.now(),
+      updatedAtUtc: Date.now(),
     };
 
     this.runtime.state!.pendingImports.push(pendingImport);
@@ -871,7 +872,7 @@ export class ApplicationRuntime {
           : {
               ...state,
               selectedCardId: selectExistingCardId(state),
-              updatedAtUtc: nowUtcMarker(),
+              updatedAtUtc: Date.now(),
             };
 
       this.runtime.state = normalized;
@@ -957,11 +958,11 @@ function buildConfirmedTimestamps(
   if (localResult.error === null) {
     return {
       confirmedLocal: localTimestampText,
-      confirmedUtc: localResult.utcTimestampText,
+      confirmedUtc: localResult.utcMs!,
       timezone,
       frontTrimOffsetSec: 0,
       effectiveLocal: localTimestampText,
-      effectiveUtc: localResult.utcTimestampText,
+      effectiveUtc: localResult.utcMs!,
     };
   }
 
@@ -974,11 +975,11 @@ function buildConfirmedTimestamps(
 
     return {
       confirmedLocal: utcResult.localTimestampText,
-      confirmedUtc: normalizedUtc.utcTimestampText,
+      confirmedUtc: normalizedUtc.utcMs!,
       timezone,
       frontTrimOffsetSec: 0,
       effectiveLocal: utcResult.localTimestampText,
-      effectiveUtc: normalizedUtc.utcTimestampText,
+      effectiveUtc: normalizedUtc.utcMs!,
     };
   }
 
@@ -990,9 +991,9 @@ function normalizePendingImport(item: PendingImportReviewItem): PendingImportRev
     ...item,
     localTimestampText: item.localTimestampText.trim(),
     timezone: item.timezone.trim(),
-    utcTimestampText: item.utcTimestampText.trim().toLowerCase(),
-    createdAtUtc: normalizeUtcMarkerText(item.createdAtUtc),
-    updatedAtUtc: nowUtcMarker(),
+    utcTimestampText: item.utcTimestampText.trim(),
+    createdAtUtc: normalizeUtcMs(item.createdAtUtc),
+    updatedAtUtc: Date.now(),
   };
 }
 
@@ -1029,8 +1030,8 @@ function createDuplicatedCard(source: MumblerCard): MumblerCard {
     status: "Imported",
     activeStep: null,
     lastError: null,
-    createdAtUtc: nowUtcMarker(),
-    updatedAtUtc: nowUtcMarker(),
+    createdAtUtc: Date.now(),
+    updatedAtUtc: Date.now(),
   };
 }
 
@@ -1094,7 +1095,7 @@ function applyFrontTrimOffset(
         ? effectiveBaseText
         : `${effectiveBaseText}.${Math.round((frontTrimOffsetSec % 1) * 10)}`,
     effectiveUtc:
-      effectiveUtcResult.error === null ? effectiveUtcResult.utcTimestampText : timestamps.confirmedUtc,
+      effectiveUtcResult.utcMs ?? timestamps.confirmedUtc,
   };
 }
 

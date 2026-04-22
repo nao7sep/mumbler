@@ -118,7 +118,7 @@ export function TimestampReviewModal({
                           ...item,
                           localTimestampText: nextValue,
                           utcTimestampText:
-                            utcResult.error === null ? utcResult.utcTimestampText : item.utcTimestampText,
+                            utcResult.error === null ? formatUtcForDisplay(utcResult.utcMs!) : item.utcTimestampText,
                         });
                       }}
                     />
@@ -135,13 +135,14 @@ export function TimestampReviewModal({
                             ...item,
                             timezone,
                             utcTimestampText:
-                              utcResult.error === null ? utcResult.utcTimestampText : item.utcTimestampText,
+                              utcResult.error === null ? formatUtcForDisplay(utcResult.utcMs!) : item.utcTimestampText,
                           });
                           return;
                         }
 
                         if (getUtcTimestampError(item.utcTimestampText) === null) {
-                          const localResult = recomputeLocalFromUtc(item.utcTimestampText, timezone);
+                          const utcMs = parseUtcFromDisplay(item.utcTimestampText)!;
+                          const localResult = recomputeLocalFromUtc(utcMs, timezone);
                           onChange({
                             ...item,
                             timezone,
@@ -162,13 +163,13 @@ export function TimestampReviewModal({
                   <label className="field">
                     <span>UTC timestamp</span>
                     <input
-                      value={formatUtcForDisplay(item.utcTimestampText)}
+                      value={item.utcTimestampText}
                       onChange={(event) => {
                         const nextDisplay = event.target.value;
-                        const nextMarker = parseUtcFromDisplay(nextDisplay);
-                        const nextUtcTimestampText = nextMarker ?? nextDisplay;
-                        const localResult = nextMarker !== null
-                          ? recomputeLocalFromUtc(nextMarker, item.timezone)
+                        const nextMs = parseUtcFromDisplay(nextDisplay);
+                        const nextUtcTimestampText = nextMs !== null ? formatUtcForDisplay(nextMs) : nextDisplay;
+                        const localResult = nextMs !== null
+                          ? recomputeLocalFromUtc(nextMs, item.timezone)
                           : { localTimestampText: item.localTimestampText, error: "invalid" };
                         onChange({
                           ...item,
