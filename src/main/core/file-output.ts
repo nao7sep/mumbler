@@ -133,9 +133,18 @@ export function buildOutputPayload(params: {
       slug: params.card.metadata.slug,
     },
     providers: {
-      transcription: params.card.ai.transcription,
-      title: params.card.ai.title,
-      slug: params.card.ai.slug,
+      transcription: params.card.ai.transcription !== null ? {
+        ...params.card.ai.transcription,
+        generatedAtUtc: new Date(params.card.ai.transcription.generatedAtUtc).toISOString(),
+      } : null,
+      title: params.card.ai.title !== null ? {
+        ...params.card.ai.title,
+        generatedAtUtc: new Date(params.card.ai.title.generatedAtUtc).toISOString(),
+      } : null,
+      slug: params.card.ai.slug !== null ? {
+        ...params.card.ai.slug,
+        generatedAtUtc: new Date(params.card.ai.slug.generatedAtUtc).toISOString(),
+      } : null,
     },
     audio: {
       finalCodec: params.finalProfile?.codecName ?? null,
