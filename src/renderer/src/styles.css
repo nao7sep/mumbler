@@ -5,27 +5,27 @@
     Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  background: #f8f9fa;
+  background: #eef0ec;
   color: #1a1d21;
 
-  --bg: #f8f9fa;
-  --surface: #ffffff;
+  --bg: #eef0ec;
+  --surface: #f8faf6;
   --surface-raised: #ffffff;
-  --border: #e2e5e9;
-  --border-subtle: #eef0f2;
+  --border: #cdd4c8;
+  --border-subtle: #dde3d8;
   --text: #1a1d21;
-  --text-secondary: #5f6b7a;
-  --text-tertiary: #8b95a2;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-subtle: #eff6ff;
-  --danger: #dc2626;
-  --danger-subtle: #fef2f2;
-  --success: #16a34a;
+  --text-secondary: #4a5a68;
+  --text-tertiary: #7a8c9a;
+  --accent: #1d6176;
+  --accent-hover: #155463;
+  --accent-subtle: #e2f1f6;
+  --danger: #c2410c;
+  --danger-subtle: #fff3ee;
+  --success: #15803d;
   --success-subtle: #f0fdf4;
-  --warning: #d97706;
+  --warning: #b45309;
   --warning-subtle: #fffbeb;
-  --processing: #7c3aed;
+  --processing: #6d28d9;
   --processing-subtle: #f5f3ff;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -92,7 +92,30 @@ textarea:focus-visible,
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 20px;
-  padding-bottom: 16px;
+  padding: 14px 20px;
+  background: #1b2e3c;
+  border-radius: var(--radius-lg);
+}
+
+.topbar h1 {
+  color: #ddeaf4;
+}
+
+.topbar .button--ghost {
+  color: #8aafc8;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.topbar .button--ghost:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ddeaf4;
+  opacity: 1;
+}
+
+.topbar .button--ghost:not(:disabled):active {
+  background: rgba(255, 255, 255, 0.05);
+  opacity: 1;
+  transform: scale(0.97);
 }
 
 .topbar h1,
@@ -253,7 +276,7 @@ textarea:focus-visible,
 }
 
 .queue-row:not(.queue-row--selected):hover {
-  background: #f1f3f5;
+  background: #e5e9e2;
 }
 
 .queue-row--imported {
@@ -370,12 +393,12 @@ textarea:focus-visible,
 }
 
 .button--ghost:not(:disabled):hover {
-  background: #f1f3f5;
+  background: #e5e9e2;
   opacity: 1;
 }
 
 .button--ghost:not(:disabled):active {
-  background: #e9ecef;
+  background: #d8ddd4;
   opacity: 1;
   transform: scale(0.97);
 }
@@ -431,7 +454,7 @@ textarea:focus-visible,
 }
 
 .app-menu-item:hover:not(:disabled) {
-  background: #f1f3f5;
+  background: #e5e9e2;
 }
 
 .app-menu-item:disabled {

@@ -2,7 +2,7 @@ import { BrowserWindow, Menu, shell } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const WINDOW_BACKGROUND = "#f8f9fb";
+const WINDOW_BACKGROUND = "#eef0ec";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export function createMainWindow(): BrowserWindow {
