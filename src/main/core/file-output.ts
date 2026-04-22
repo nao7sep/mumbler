@@ -70,13 +70,6 @@ export async function finalizeOutputsAtomically(params: {
     audioFinalized = true;
     await rename(jsonTempPath, params.jsonTargetPath);
     jsonFinalized = true;
-
-    if (audioHadExisting) {
-      await rm(audioBackupPath, { force: true });
-    }
-    if (jsonHadExisting) {
-      await rm(jsonBackupPath, { force: true });
-    }
   } catch (error: unknown) {
     if (jsonFinalized) {
       await rm(params.jsonTargetPath, { force: true }).catch(() => undefined);
@@ -96,6 +89,15 @@ export async function finalizeOutputsAtomically(params: {
     await rm(jsonTempPath, { force: true }).catch(() => undefined);
 
     throw new Error(`Failed to finalize output files: ${formatError(error)}`);
+  }
+
+  // Backup cleanup is best-effort: failure here cannot undo the already-committed
+  // renames above, so errors are swallowed to avoid masking a successful save.
+  if (audioHadExisting) {
+    await rm(audioBackupPath, { force: true }).catch(() => undefined);
+  }
+  if (jsonHadExisting) {
+    await rm(jsonBackupPath, { force: true }).catch(() => undefined);
   }
 }
 
