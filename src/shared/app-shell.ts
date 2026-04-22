@@ -1,3 +1,9 @@
+export const GEMINI_MODELS = [
+  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
+  { id: "gemini-3.1-flash-preview", label: "Gemini 3.1 Flash" },
+  { id: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash Lite" },
+] as const;
+
 export const APP_SHELL_CHANNELS = {
   getSnapshot: "app-shell:get-snapshot",
   getSettingsDraft: "app-shell:get-settings-draft",

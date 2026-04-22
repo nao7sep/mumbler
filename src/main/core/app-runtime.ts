@@ -45,7 +45,7 @@ import {
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 import { formatError, uniquePathInDirectory, writeJsonFile } from "./file-io";
-import { moveImportedSourceToTrash, reconcileWorkingState } from "./working-files";
+import { moveImportedSourceToTrash, reconcileWorkingState, selectExistingCardId } from "./working-files";
 import {
   buildOutputPayload,
   buildUniqueSuffixedTargets,
@@ -414,7 +414,7 @@ export class ApplicationRuntime {
         try {
           await rm(pendingImport.workingFilePath, { force: true });
         } catch {
-          // ignore
+          // Best-effort cleanup; failure here is not actionable.
         }
       }
     }
@@ -608,8 +608,16 @@ export class ApplicationRuntime {
       return this.getSnapshot();
     }
 
+    const previousOutputDirectory = this.runtime.settings!.outputDirectory;
     this.runtime.settings!.outputDirectory = outputDirectory;
-    await this.persistSettings();
+
+    try {
+      await this.persistSettings();
+    } catch (error: unknown) {
+      this.runtime.settings!.outputDirectory = previousOutputDirectory;
+      throw error;
+    }
+
     await this.runtime.logger!.info("settings.output-directory", "Updated output directory.", {
       outputDirectory: this.runtime.settings!.outputDirectory,
     });
@@ -749,11 +757,23 @@ export class ApplicationRuntime {
       throw new Error("Cannot remove a card while it is being processed.");
     }
 
-    await shell.trashItem(card.sourceFilePath);
-    await this.runtime.logger!.info("card.remove", "Moved card audio to trash and removed card.", {
-      cardId,
-      sourceFilePath: card.sourceFilePath,
-    });
+    try {
+      await shell.trashItem(card.sourceFilePath);
+      await this.runtime.logger!.info("card.remove", "Moved card audio to trash and removed card.", {
+        cardId,
+        sourceFilePath: card.sourceFilePath,
+      });
+    } catch (error: unknown) {
+      await this.runtime.logger!.warn(
+        "card.remove",
+        "Working audio could not be trashed; removing card anyway.",
+        {
+          cardId,
+          sourceFilePath: card.sourceFilePath,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
 
     state.cards = state.cards.filter((entry) => entry.id !== cardId);
     await this.persistState();
@@ -995,14 +1015,6 @@ function normalizePendingImport(item: PendingImportReviewItem): PendingImportRev
     createdAtUtc: normalizeUtcMs(item.createdAtUtc),
     updatedAtUtc: Date.now(),
   };
-}
-
-function selectExistingCardId(state: MumblerState): string | null {
-  if (state.selectedCardId !== null && state.cards.some((card) => card.id === state.selectedCardId)) {
-    return state.selectedCardId;
-  }
-
-  return state.cards[0]?.id ?? null;
 }
 
 function createDuplicatedCard(source: MumblerCard): MumblerCard {

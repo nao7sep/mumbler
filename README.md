@@ -1,49 +1,105 @@
 # Mumbler
 
-Desktop audio transcription app built with Electron, React, and TypeScript.
+A desktop app for transcribing audio recordings using Google Gemini AI. Import recordings, trim them, transcribe, and save the audio alongside a JSON sidecar with the transcript, title, and metadata.
 
-## Scripts
+## Features
 
-- `npm run dev` — start the development app
-- `npm run build` — build production bundles
-- `npm run typecheck` — run the TypeScript checker
+- **Waveform editor** — visualize audio with WaveSurfer.js; set front/back trim markers to cut unwanted silence before transcription
+- **AI transcription** — sends audio to Google Gemini and generates a transcript, title, and URL slug
+- **Queue** — import multiple files and process them concurrently (configurable limit)
+- **Timestamp parsing** — extracts recording datetime from filenames using configurable regex patterns; falls back to file modification time
+- **Atomic save** — writes audio + JSON sidecar atomically (temp → rename) with rollback on failure
+- **Optional source deletion** — can trash the original source file after confirming an import
 
-## Current Scope
+## Requirements
 
-The current implementation provides:
+- Node.js 20+
+- A [Google Gemini API key](https://aistudio.google.com/app/apikey)
 
-- Electron main, preload, and renderer process structure
-- Typed preload bridge and IPC-backed app snapshot
-- `~/.mumbler` bootstrap for settings, state, logs, and working storage
-- In-app settings modal for Gemini key, models, languages, timezone, prompts, retries, and timeouts
-- Editable central shortcut registry with renderer-side keyboard handling
-- App-wide main/renderer error surfacing with a custom blocking modal
-- Timestamp-reviewed import flow from file picker or drag-and-drop
-- Pending timestamp-review edits persisted back to state before final confirmation
-- Destructive source handling: copy into working storage, then move outside source to trash
-- Queue selection and persisted pending-review state
-- Startup reconciliation of `working/` files against `state.json`, including orphan cleanup and missing-file error recovery
-- Audio probing with `ffprobe-static` during queue entry
-- Waveform playback with `wavesurfer.js`
-- Front/back trim markers with drag, nudge, text input, and preview playback
-- Duplicate-card flow for splitting one recording into multiple extracts
-- Front-trim timestamp shifting and ffprobe-based trim decision analysis
-- Gemini transcription pipeline via `@google/genai`
-- Automatic title and slug generation after successful transcription
-- Retry flow that resumes from the failed Gemini step when possible
-- Per-card language override that clears stale results before retranscription
-- Ready-to-save card states with per-artifact model provenance in app state
-- App-owned UTC timestamps normalized to `yyyymmdd-hhmmss-utc` across state, logs, and saved metadata
-- Status-driven color cues across queue rows and selected-card detail panels
-- Output-directory selection through the desktop shell
-- Atomic audio plus JSON finalization with filename collision handling
-- Remove workflow that trashes app-managed working audio after confirmation
-- Copy-to-clipboard actions for transcript, title, and slug results
-- Custom app-close confirmation instead of native browser or OS confirmation prompts
-- Startup diagnostic recovery with a reset-state action
+## Getting Started
 
-## Verification Gaps
+```bash
+git clone https://github.com/nao7sep/mumbler
+cd mumbler
+npm install
+npm run dev
+```
 
-- Full end-to-end operation still needs an interactive desktop UI run
-- Trim behavior still needs verification against more real files and codecs
-- External-drive import fallback and trash-staging behavior still need a live test
+On first launch, open Settings and enter your Gemini API key and choose an output directory.
+
+## Usage
+
+1. **Import** — drag audio files onto the window or use the import dialog
+2. **Review** — the import review screen shows filename-parsed timestamps; adjust if needed and confirm (optionally trash the original)
+3. **Trim** — drag the front/back markers on the waveform to cut unwanted sections
+4. **Transcribe** — click the transcribe button; the app sends the (trimmed) audio to Gemini and generates a transcript, title, and slug
+5. **Save** — save the card to the output directory; produces `<slug>.<ext>` and `<slug>.json`
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Select previous / next card |
+| `Space` | Play / pause |
+| `[` | Set front trim marker at cursor |
+| `]` | Set back trim marker at cursor |
+
+## Settings
+
+| Setting | Description |
+|---------|-------------|
+| Gemini API Key | API key for Google Gemini |
+| Output Directory | Where saved files are written |
+| Transcription Model | Gemini model used for transcription |
+| Metadata Model | Gemini model used for title and slug generation |
+| Default Timezone | Timezone for recording timestamps |
+| Timestamp Patterns | Regex patterns to parse datetime from filenames |
+| Title Prompt | Custom prompt for title generation |
+| Slug Prompt | Custom prompt for slug generation |
+| Preview Snippet | Seconds of audio sent for waveform preview |
+| Concurrency Limit | Max cards processed simultaneously |
+
+## Output Format
+
+Each saved card produces two files in the output directory:
+
+**`<slug>.<ext>`** — the audio file (original or trimmed; never re-encoded unless stream-copy trim is impossible)
+
+**`<slug>.json`** — metadata sidecar:
+
+```json
+{
+  "title": "...",
+  "slug": "...",
+  "transcript": "...",
+  "timestamps": {
+    "recordedLocal": "2026-04-22 09:44:00",
+    "recordedUtc": "...",
+    "confirmedUtc": "..."
+  }
+}
+```
+
+## Data Directory
+
+App data is stored in `~/.mumbler` by default. Override with the `MUMBLER_HOME` environment variable.
+
+```
+~/.mumbler/
+  settings.json     # app settings
+  state.json        # queue state
+  working/          # working copies of imported audio
+  logs/             # application logs
+```
+
+## Tech Stack
+
+- [Electron](https://www.electronjs.org/) + [electron-vite](https://electron-vite.org/)
+- [React](https://react.dev/) + TypeScript
+- [WaveSurfer.js](https://wavesurfer.xyz/) for waveform rendering
+- [FFmpeg](https://ffmpeg.org/) (via `ffmpeg-static` / `ffprobe-static`) for audio trimming and probing
+- [Google Gemini API](https://ai.google.dev/) (`@google/genai`) for transcription and metadata
+
+## License
+
+MIT

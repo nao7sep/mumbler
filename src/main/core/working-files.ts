@@ -214,7 +214,7 @@ function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
   };
 }
 
-function selectExistingCardId(state: MumblerState): string | null {
+export function selectExistingCardId(state: MumblerState): string | null {
   if (state.selectedCardId !== null && state.cards.some((card) => card.id === state.selectedCardId)) {
     return state.selectedCardId;
   }

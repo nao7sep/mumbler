@@ -12,6 +12,7 @@ import type {
   SaveCardResult,
   TrimDecision,
 } from "@shared/app-shell";
+import { GEMINI_MODELS } from "@shared/app-shell";
 import {
   formatUtcForDisplay,
   getLocalTimestampError,
@@ -20,11 +21,6 @@ import {
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 
-const GEMINI_MODELS = [
-  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
-  { id: "gemini-3.1-flash-preview", label: "Gemini 3.1 Flash" },
-  { id: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash Lite" },
-];
 import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
 import { SettingsModal } from "./SettingsModal";
 import { findMatchingCommand, isTypingTarget } from "./shortcut-utils";
@@ -478,9 +474,6 @@ export function App(): ReactElement {
 
   async function handleShortcutCommand(commandId: string): Promise<void> {
     if (selectedCard === null) {
-      if (commandId === "select-previous" || commandId === "select-next") {
-        return;
-      }
       return;
     }
 
