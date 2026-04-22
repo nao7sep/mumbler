@@ -286,11 +286,23 @@ async function runFfmpegTrim(params: {
   logger?: AppLogger;
 }): Promise<void> {
   const ffmpeg = resolveFfmpegPath();
-  const trimArgs = buildTrimTimingArgs(params.startSec, params.endSec);
+
+  // For stream-copy, -ss before -i (fast input-side seek) is safe because
+  // startSec is already an exact packet boundary found by findStartBoundary.
+  // For re-encode, -ss after -i (output-side seek) gives frame-accurate positioning.
+  const inputSeekArgs =
+    params.mode === "stream-copy" && params.startSec > 0
+      ? ["-ss", params.startSec.toFixed(3)]
+      : [];
+  const outputTimingArgs = buildOutputTimingArgs(
+    params.mode === "stream-copy" ? 0 : params.startSec,
+    params.endSec,
+    params.mode === "stream-copy" ? params.startSec : 0,
+  );
   const codecArgs =
     params.mode === "stream-copy"
-      ? ["-c", "copy"]
-      : buildReencodeArgs(params.outputPath, params.audioProfile);
+      ? ["-vn", "-c:a", "copy"]
+      : ["-vn", ...buildReencodeArgs(params.outputPath, params.audioProfile)];
 
   await params.logger?.debug("audio.ffmpeg-trim", "Running ffmpeg trim.", {
     mode: params.mode,
@@ -298,7 +310,8 @@ async function runFfmpegTrim(params: {
     endSec: params.endSec,
     inputFile: basename(params.sourceFilePath),
     outputFile: basename(params.outputPath),
-    trimArgs,
+    inputSeekArgs,
+    outputTimingArgs,
     codecArgs,
   });
 
@@ -307,22 +320,32 @@ async function runFfmpegTrim(params: {
     "-loglevel",
     "error",
     "-y",
+    ...inputSeekArgs,
     "-i",
     params.sourceFilePath,
-    ...trimArgs,
+    ...outputTimingArgs,
     ...codecArgs,
     params.outputPath,
   ]);
 }
 
-function buildTrimTimingArgs(startSec: number, endSec: number | null): string[] {
+// seekSec: value placed after -i as -ss (0 = omit). baseOffsetSec: amount
+// already consumed by an input-side seek (non-zero for stream-copy mode).
+// Duration = endSec - seekSec - baseOffsetSec, which collapses to endSec - startSec
+// in both stream-copy (seekSec=0, baseOffsetSec=startSec) and re-encode
+// (seekSec=startSec, baseOffsetSec=0) cases.
+function buildOutputTimingArgs(
+  seekSec: number,
+  endSec: number | null,
+  baseOffsetSec: number,
+): string[] {
   const args: string[] = [];
 
-  if (startSec > 0) {
-    args.push("-ss", startSec.toFixed(3));
+  if (seekSec > 0) {
+    args.push("-ss", seekSec.toFixed(3));
   }
 
-  const durationSec = endSec === null ? null : Math.max(0, endSec - startSec);
+  const durationSec = endSec === null ? null : Math.max(0, endSec - seekSec - baseOffsetSec);
   if (durationSec !== null) {
     args.push("-t", durationSec.toFixed(3));
   }

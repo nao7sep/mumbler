@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "description": "Desktop audio transcription app",
+  "author": {
+    "name": "Yoshinao Inoguchi",
+    "email": "nao7sep@gmail.com",
+    "url": "https://github.com/nao7sep"
+  },
+  "license": "MIT",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
