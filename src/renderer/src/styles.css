@@ -1105,6 +1105,7 @@ textarea:focus-visible,
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 16px;
   padding: 0 20px 20px;
@@ -1284,8 +1285,7 @@ textarea:focus-visible,
   }
 
   .modal-card__header,
-  .modal-toolbar,
-  .modal-actions {
+  .modal-toolbar {
     flex-direction: column;
   }
 }
