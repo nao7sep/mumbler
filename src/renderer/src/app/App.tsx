@@ -549,8 +549,7 @@ export function App(): ReactElement {
         } else if (importFlow.pendingReviewDrafts.length > 0) {
           void importFlow.handleCancelPendingImports();
         } else if (settingsModal.settingsDraft !== null && !settingsModal.isSavingSettings) {
-          settingsModal.setSettingsDraft(null);
-          settingsModal.setSettingsErrorMessage(null);
+          settingsModal.handleRequestCloseSettings();
         }
         return;
       }
@@ -1098,12 +1097,28 @@ export function App(): ReactElement {
           isPickingOutputDirectory={settingsModal.isPickingSettingsOutputDirectory}
           errorMessage={settingsModal.settingsErrorMessage}
           onChange={settingsModal.setSettingsDraft}
-          onClose={() => {
-            settingsModal.setSettingsDraft(null);
-            settingsModal.setSettingsErrorMessage(null);
-          }}
+          onClose={settingsModal.handleRequestCloseSettings}
           onPickOutputDirectory={() => void settingsModal.handlePickSettingsOutputDirectory()}
           onSave={() => void settingsModal.handleSaveSettings()}
+        />
+      ) : null}
+
+      {settingsModal.showDiscardConfirm ? (
+        <DecisionModal
+          title="Discard Changes?"
+          body="You have unsaved changes. Discard them and close settings?"
+          actions={[
+            {
+              label: "Keep Editing",
+              onClick: settingsModal.handleCancelDiscardSettings,
+            },
+            {
+              label: "Discard",
+              variant: "danger",
+              onClick: settingsModal.handleConfirmDiscardSettings,
+            },
+          ]}
+          onBackdropClick={settingsModal.handleCancelDiscardSettings}
         />
       ) : null}
 

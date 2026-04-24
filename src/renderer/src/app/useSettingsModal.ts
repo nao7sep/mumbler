@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 
 import type { AppSnapshot, SettingsDraft } from "@shared/app-shell";
 
@@ -14,11 +14,15 @@ interface UseSettingsModalResult {
   isSavingSettings: boolean;
   isPickingSettingsOutputDirectory: boolean;
   settingsErrorMessage: string | null;
+  showDiscardConfirm: boolean;
   setSettingsDraft: Dispatch<SetStateAction<SettingsDraft | null>>;
   setSettingsErrorMessage: Dispatch<SetStateAction<string | null>>;
   handleOpenSettings: () => Promise<void>;
   handlePickSettingsOutputDirectory: () => Promise<void>;
   handleSaveSettings: () => Promise<void>;
+  handleRequestCloseSettings: () => void;
+  handleConfirmDiscardSettings: () => void;
+  handleCancelDiscardSettings: () => void;
 }
 
 export function useSettingsModal({
@@ -31,12 +35,15 @@ export function useSettingsModal({
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isPickingSettingsOutputDirectory, setIsPickingSettingsOutputDirectory] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const initialDraftRef = useRef<SettingsDraft | null>(null);
 
   async function handleOpenSettings(): Promise<void> {
     setIsLoadingSettings(true);
     try {
       const draft = await window.mumbler.getSettingsDraft();
       setSettingsDraft(draft);
+      initialDraftRef.current = draft;
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
       onError(error instanceof Error ? error.message : "Failed to load settings.");
@@ -80,6 +87,8 @@ export function useSettingsModal({
       onSnapshotUpdate(nextSnapshot);
       setSettingsDraft(null);
       setSettingsErrorMessage(null);
+      setShowDiscardConfirm(false);
+      initialDraftRef.current = null;
       onNotice("Settings saved.");
     } catch (error: unknown) {
       setSettingsErrorMessage(error instanceof Error ? error.message : "Failed to save settings.");
@@ -88,16 +97,47 @@ export function useSettingsModal({
     }
   }
 
+  function handleCloseSettings(): void {
+    setSettingsDraft(null);
+    setSettingsErrorMessage(null);
+    setShowDiscardConfirm(false);
+    initialDraftRef.current = null;
+  }
+
+  function handleRequestCloseSettings(): void {
+    if (showDiscardConfirm) {
+      return;
+    }
+    const isDirty = JSON.stringify(settingsDraft) !== JSON.stringify(initialDraftRef.current);
+    if (!isDirty) {
+      handleCloseSettings();
+    } else {
+      setShowDiscardConfirm(true);
+    }
+  }
+
+  function handleConfirmDiscardSettings(): void {
+    handleCloseSettings();
+  }
+
+  function handleCancelDiscardSettings(): void {
+    setShowDiscardConfirm(false);
+  }
+
   return {
     settingsDraft,
     isLoadingSettings,
     isSavingSettings,
     isPickingSettingsOutputDirectory,
     settingsErrorMessage,
+    showDiscardConfirm,
     setSettingsDraft,
     setSettingsErrorMessage,
     handleOpenSettings,
     handlePickSettingsOutputDirectory,
     handleSaveSettings,
+    handleRequestCloseSettings,
+    handleConfirmDiscardSettings,
+    handleCancelDiscardSettings,
   };
 }
