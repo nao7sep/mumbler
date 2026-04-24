@@ -26,23 +26,24 @@ export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactE
             ✕
           </button>
         </div>
-        <div className="shortcut-groups">
-          {groups.map((group) => (
-            <div key={group.name} className="shortcut-group">
-              <p className="shortcut-group__name">{group.name}</p>
-              <div className="shortcut-list">
-                {group.commands.map((command) => (
-                  <div key={command.id} className="shortcut-item">
-                    <span>{command.label}</span>
-                    <kbd>{command.defaultShortcut}</kbd>
-                  </div>
-                ))}
+        <div className="modal-card__body">
+          <div className="shortcut-groups">
+            {groups.map((group) => (
+              <div key={group.name} className="shortcut-group">
+                <p className="shortcut-group__name">{group.name}</p>
+                <div className="shortcut-list">
+                  {group.commands.map((command) => (
+                    <div key={command.id} className="shortcut-item">
+                      <span>{command.label}</span>
+                      <kbd>{command.defaultShortcut}</kbd>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </section>
     </div>
   );
 }
-

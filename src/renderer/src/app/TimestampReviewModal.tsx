@@ -193,7 +193,7 @@ export function TimestampReviewModal({
         </div>
 
         <div className="modal-footer-note">
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <label className="modal-checkbox">
             <input
               type="checkbox"
               checked={items.length > 0 && items.every((i) => i.deleteOriginalOnConfirm)}
@@ -229,4 +229,3 @@ export function TimestampReviewModal({
     </div>
   );
 }
-

@@ -14,7 +14,10 @@ import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.e
 
 import type { CardTrim, MumblerCard } from "@shared/app-shell";
 
-const REGION_COLOR = "rgba(29, 97, 118, 0.22)";
+const REGION_COLOR = "rgba(61, 122, 90, 0.22)";
+const WAVE_COLOR = "rgba(72, 108, 88, 0.24)";
+const PROGRESS_COLOR = "rgba(47, 99, 74, 0.86)";
+const CURSOR_COLOR = "#2f634a";
 const MARKER_EPSILON_SEC = 0.05;
 
 // Renders a symmetric waveform by merging all channels and centering bars.
@@ -172,9 +175,9 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     const waveSurfer = WaveSurfer.create({
       container: containerRef.current,
       height: 184,
-      waveColor: "rgba(29, 97, 118, 0.2)",
-      progressColor: "rgba(191, 79, 47, 0.84)",
-      cursorColor: "#8f351b",
+      waveColor: WAVE_COLOR,
+      progressColor: PROGRESS_COLOR,
+      cursorColor: CURSOR_COLOR,
       renderFunction: renderSymmetricWaveform,
       dragToSeek: true,
       autoScroll: true,
