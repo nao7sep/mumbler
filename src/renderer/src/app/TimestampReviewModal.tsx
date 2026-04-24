@@ -92,7 +92,8 @@ export function TimestampReviewModal({
           </button>
         </div>
 
-        <div className="review-table">
+        <div className="modal-card__body">
+          <div className="review-table">
           {items.map((item) => {
             const timezoneError = isSupportedTimezone(item.timezone)
               ? null
@@ -187,6 +188,8 @@ export function TimestampReviewModal({
               </div>
             );
           })}
+        </div>
+
         </div>
 
         <div className="modal-footer-note">

@@ -126,9 +126,11 @@ export function SettingsModal({
           </button>
         </div>
 
-        {errorMessage ? <p className="inline-error">{errorMessage}</p> : null}
+        <div className="modal-card__body">
 
-        <div className="settings-sections">
+          {errorMessage ? <p className="inline-error">{errorMessage}</p> : null}
+
+          <div className="settings-sections">
 
           <section className="settings-section">
             <h3>Timestamps</h3>
@@ -397,6 +399,8 @@ export function SettingsModal({
               <p className="field-hint">Where exported files are saved. Can be changed per recording.</p>
             </div>
           </section>
+
+          </div>
 
         </div>
 
