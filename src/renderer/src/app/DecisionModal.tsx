@@ -53,7 +53,9 @@ export function DecisionModal({ title, body, actions, onBackdropClick }: Decisio
         <div className="modal-card__header">
           <h2>{title}</h2>
         </div>
-        <p className="empty-state__body">{body}</p>
+        <div className="modal-card__body">
+          <p className="empty-state__body">{body}</p>
+        </div>
         <div className="modal-actions">
           {actions.map((action) => (
             <button

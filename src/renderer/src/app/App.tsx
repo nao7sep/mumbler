@@ -9,6 +9,7 @@ import {
 import type {
   AppSnapshot,
   MumblerCard,
+  PendingImportReviewItem,
   SaveCardResult,
   TrimDecision,
 } from "@shared/app-shell";
@@ -180,6 +181,8 @@ export function App(): ReactElement {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [showReviewDiscardConfirm, setShowReviewDiscardConfirm] = useState(false);
+  const initialReviewDraftsRef = useRef<PendingImportReviewItem[] | null>(null);
   const waveformEditorRef = useRef<WaveformEditorHandle | null>(null);
 
   const importFlow = useImportFlow({
@@ -194,6 +197,51 @@ export function App(): ReactElement {
     onError: (msg) => { if (msg !== null) addPersistent(msg, "error"); },
     onNotice: addToast,
   });
+
+  useEffect(() => {
+    if (importFlow.pendingReviewDrafts.length === 0) {
+      initialReviewDraftsRef.current = null;
+      setShowReviewDiscardConfirm(false);
+      return;
+    }
+    if (initialReviewDraftsRef.current === null) {
+      initialReviewDraftsRef.current = importFlow.pendingReviewDrafts;
+    }
+  }, [importFlow.pendingReviewDrafts]);
+
+  function isReviewDirty(): boolean {
+    const initial = initialReviewDraftsRef.current;
+    if (initial === null) return false;
+    const current = importFlow.pendingReviewDrafts;
+    if (initial.length !== current.length) return true;
+    const project = (item: PendingImportReviewItem): string =>
+      JSON.stringify({
+        id: item.id,
+        localTimestampText: item.localTimestampText,
+        timezone: item.timezone,
+        utcTimestampText: item.utcTimestampText,
+        deleteOriginalOnConfirm: item.deleteOriginalOnConfirm,
+      });
+    return initial.map(project).join("|") !== current.map(project).join("|");
+  }
+
+  function handleRequestCloseReview(): void {
+    if (showReviewDiscardConfirm) return;
+    if (isReviewDirty()) {
+      setShowReviewDiscardConfirm(true);
+      return;
+    }
+    void importFlow.handleCancelPendingImports();
+  }
+
+  function handleConfirmDiscardReview(): void {
+    setShowReviewDiscardConfirm(false);
+    void importFlow.handleCancelPendingImports();
+  }
+
+  function handleCancelDiscardReview(): void {
+    setShowReviewDiscardConfirm(false);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -334,6 +382,7 @@ export function App(): ReactElement {
   const modalIsOpen =
     settingsModal.settingsDraft !== null ||
     importFlow.pendingReviewDrafts.length > 0 ||
+    showReviewDiscardConfirm ||
     pendingSaveConflict !== null ||
     pendingRemoveCardId !== null ||
     showAbout ||
@@ -547,7 +596,7 @@ export function App(): ReactElement {
         } else if (pendingSaveConflict !== null) {
           setPendingSaveConflict(null);
         } else if (importFlow.pendingReviewDrafts.length > 0) {
-          void importFlow.handleCancelPendingImports();
+          handleRequestCloseReview();
         } else if (settingsModal.settingsDraft !== null && !settingsModal.isSavingSettings) {
           settingsModal.handleRequestCloseSettings();
         }
@@ -572,7 +621,7 @@ export function App(): ReactElement {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsModal.settingsDraft, settingsModal.isSavingSettings, settingsModal.setSettingsDraft, settingsModal.setSettingsErrorMessage, pendingRemoveCardId, pendingSaveConflict, importFlow.pendingReviewDrafts, importFlow.handleCancelPendingImports]);
+  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsModal.settingsDraft, settingsModal.isSavingSettings, settingsModal.setSettingsDraft, settingsModal.setSettingsErrorMessage, pendingRemoveCardId, pendingSaveConflict, importFlow.pendingReviewDrafts, importFlow.handleCancelPendingImports, showReviewDiscardConfirm]);
 
   async function handleSaveCard(
     cardId: string,
@@ -1162,13 +1211,32 @@ export function App(): ReactElement {
             )
           }
           onConfirm={() => void importFlow.handleConfirmPendingImports()}
-          onCancel={() => void importFlow.handleCancelPendingImports()}
+          onCancel={handleRequestCloseReview}
           onSetDeleteOriginalForAll={(value) =>
             importFlow.setPendingReviewDrafts((current) =>
               current.map((item) => ({ ...item, deleteOriginalOnConfirm: value }))
             )
           }
           isSubmitting={importFlow.isConfirmingReview}
+        />
+      ) : null}
+
+      {showReviewDiscardConfirm ? (
+        <DecisionModal
+          title="Discard Changes?"
+          body="You have unsaved timestamp edits. Discard them and cancel the import?"
+          actions={[
+            {
+              label: "Keep Editing",
+              onClick: handleCancelDiscardReview,
+            },
+            {
+              label: "Discard",
+              variant: "danger",
+              onClick: handleConfirmDiscardReview,
+            },
+          ]}
+          onBackdropClick={handleCancelDiscardReview}
         />
       ) : null}
 
