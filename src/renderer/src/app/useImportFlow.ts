@@ -35,27 +35,25 @@ export function useImportFlow({
   const [isDragActive, setIsDragActive] = useState(false);
 
   useEffect(() => {
-    setPendingReviewDrafts(snapshot?.state?.pendingImports ?? []);
+    const snapshotImports = snapshot?.state?.pendingImports ?? [];
+    setPendingReviewDrafts((current) => {
+      const currentIds = current.map((item) => item.id).join("|");
+      const snapshotIds = snapshotImports.map((item) => item.id).join("|");
+      if (currentIds === snapshotIds && current.length > 0) {
+        return current;
+      }
+      return snapshotImports;
+    });
   }, [snapshot?.state?.pendingImports]);
 
   useEffect(() => {
-    const currentState = snapshot?.state;
-    if (pendingReviewDrafts.length === 0 || currentState == null) {
-      return;
-    }
-
-    const persistedJson = JSON.stringify(currentState.pendingImports);
-    const draftJson = JSON.stringify(pendingReviewDrafts);
-    if (persistedJson === draftJson) {
+    if (pendingReviewDrafts.length === 0) {
       return;
     }
 
     const timeoutId = window.setTimeout(() => {
       void window.mumbler
         .updatePendingImportDrafts(pendingReviewDrafts)
-        .then((nextSnapshot) => {
-          onSnapshotUpdate(nextSnapshot);
-        })
         .catch((error: unknown) => {
           onError(
             error instanceof Error
@@ -68,7 +66,7 @@ export function useImportFlow({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [pendingReviewDrafts, snapshot?.state]);
+  }, [pendingReviewDrafts]);
 
   async function handleImportClick(): Promise<void> {
     setIsImporting(true);

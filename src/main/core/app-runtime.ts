@@ -1009,9 +1009,6 @@ function buildConfirmedTimestamps(
 function normalizePendingImport(item: PendingImportReviewItem): PendingImportReviewItem {
   return {
     ...item,
-    localTimestampText: item.localTimestampText.trim(),
-    timezone: item.timezone.trim(),
-    utcTimestampText: item.utcTimestampText.trim(),
     createdAtUtc: normalizeUtcMs(item.createdAtUtc),
     updatedAtUtc: Date.now(),
   };
