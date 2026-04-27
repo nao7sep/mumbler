@@ -1,11 +1,8 @@
-import { shell } from "electron";
-import { copyFile, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { access } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
 
 import type { AppPaths, MumblerCard, MumblerState, PendingImportReviewItem } from "@shared/app-shell";
-import { fileExists, formatError } from "./file-io";
+import { fileExists, formatError, uniquePathInDirectory } from "./file-io";
 
 import { type AppLogger } from "./logger";
 
@@ -13,58 +10,36 @@ export interface WorkingReconciliationResult {
   state: MumblerState;
   droppedPendingImports: number;
   missingWorkingCards: number;
-  trashedOrphanedFiles: number;
+  deletedOrphanedFiles: number;
   retainedOrphanedFiles: number;
 }
 
-export async function moveImportedSourceToTrash(sourcePath: string, workingDir: string, logger?: AppLogger): Promise<void> {
+export async function deleteImportedSource(sourcePath: string): Promise<void> {
+  await unlink(sourcePath);
+}
+
+export async function copyOriginalToBackup(
+  sourcePath: string,
+  backupDir: string,
+): Promise<string> {
+  await mkdir(backupDir, { recursive: true });
+  const targetPath = await uniquePathInDirectory(backupDir, basename(sourcePath));
+
   try {
-    await shell.trashItem(sourcePath);
-    return;
-  } catch (directTrashError: unknown) {
-    await logger?.warn("trash.fallback", "Direct trash of imported source failed; falling back to staged copy.", {
-      sourcePath,
-      error: directTrashError instanceof Error ? directTrashError.message : String(directTrashError),
-    });
-    const stagingDir = join(workingDir, "trash-staging");
-    const stagedPath = join(stagingDir, basename(sourcePath));
-
-    try {
-      await copyFile(sourcePath, stagedPath);
-      await access(stagedPath, fsConstants.R_OK);
-      await rm(sourcePath);
-    } catch (stageError: unknown) {
-      await rm(stagedPath, { force: true });
-      throw new Error(
-        `Failed to stage imported source for trash after direct trash failed: ${formatError(stageError)}`,
-      );
-    }
-
-    try {
-      await shell.trashItem(stagedPath);
-    } catch (trashError: unknown) {
-      try {
-        await copyFile(stagedPath, sourcePath);
-        await rm(stagedPath, { force: true });
-      } catch (restoreError: unknown) {
-        throw new Error(
-          `Failed to trash staged source and failed to restore it. Staged copy remains at ${stagedPath}. Trash error: ${formatError(trashError)}. Restore error: ${formatError(restoreError)}`,
-        );
-      }
-
-      throw new Error(
-        `Failed to move source to trash after local staging: ${formatError(trashError)}`,
-      );
-    }
+    await copyFile(sourcePath, targetPath);
+  } catch (error: unknown) {
+    throw new Error(`Failed to copy ${sourcePath} to backup directory: ${formatError(error)}`);
   }
+
+  return targetPath;
 }
 
 export async function cleanupOrphanedWorkingFiles(
   paths: AppPaths,
   referencedPaths: Set<string>,
   logger: AppLogger,
-): Promise<{ trashedOrphanedFiles: number; retainedOrphanedFiles: number }> {
-  let trashedOrphanedFiles = 0;
+): Promise<{ deletedOrphanedFiles: number; retainedOrphanedFiles: number }> {
+  let deletedOrphanedFiles = 0;
   let retainedOrphanedFiles = 0;
   const candidates = await listWorkingFiles(paths.workingDir);
 
@@ -74,14 +49,14 @@ export async function cleanupOrphanedWorkingFiles(
     }
 
     try {
-      await shell.trashItem(candidate);
-      trashedOrphanedFiles += 1;
-      await logger.info("working.cleanup", "Moved orphaned working file to trash.", {
+      await rm(candidate, { force: true });
+      deletedOrphanedFiles += 1;
+      await logger.info("working.cleanup", "Deleted orphaned working file.", {
         filePath: candidate,
       });
     } catch (error: unknown) {
       retainedOrphanedFiles += 1;
-      await logger.warn("working.cleanup-failed", "Failed to trash orphaned working file.", {
+      await logger.warn("working.cleanup-failed", "Failed to delete orphaned working file.", {
         filePath: candidate,
         error: formatError(error),
       });
@@ -89,7 +64,7 @@ export async function cleanupOrphanedWorkingFiles(
   }
 
   return {
-    trashedOrphanedFiles,
+    deletedOrphanedFiles,
     retainedOrphanedFiles,
   };
 }
@@ -105,7 +80,7 @@ export async function listWorkingFiles(workingDir: string): Promise<string[]> {
       continue;
     }
 
-    if (entry.isDirectory() && (entry.name === "trash-staging" || entry.name === "derived")) {
+    if (entry.isDirectory() && entry.name === "derived") {
       const subEntries = await readdir(entryPath, { withFileTypes: true });
       for (const subEntry of subEntries) {
         if (subEntry.isFile()) {
@@ -173,7 +148,7 @@ export async function reconcileWorkingState(
   const changed =
     droppedPendingImports > 0 ||
     missingWorkingCards > 0 ||
-    cleanupResult.trashedOrphanedFiles > 0 ||
+    cleanupResult.deletedOrphanedFiles > 0 ||
     cleanupResult.retainedOrphanedFiles > 0;
 
   const nextState =
@@ -195,7 +170,7 @@ export async function reconcileWorkingState(
     state: nextState,
     droppedPendingImports,
     missingWorkingCards,
-    trashedOrphanedFiles: cleanupResult.trashedOrphanedFiles,
+    deletedOrphanedFiles: cleanupResult.deletedOrphanedFiles,
     retainedOrphanedFiles: cleanupResult.retainedOrphanedFiles,
   };
 }
@@ -205,6 +180,8 @@ function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
     ...card,
     status: "Error",
     activeStep: null,
+    queuedMode: null,
+    queuedAtUtc: null,
     lastError: {
       message: "Working audio is missing from working storage — remove this card or re-import the source audio.",
       occurredAtUtc: Date.now(),

@@ -29,6 +29,7 @@ export interface CardPipelineContext {
   logger: AppLogger;
   activeCardOperations: Set<string>;
   persistState: () => Promise<void>;
+  onTranscriptionSlotReleased: () => Promise<void>;
 }
 
 export async function executeCardPipeline(
@@ -45,21 +46,6 @@ export async function executeCardPipeline(
     throw new Error("Card to process does not exist.");
   }
 
-  if (ctx.activeCardOperations.has(cardId)) {
-    throw new Error("This card is already being processed.");
-  }
-
-  if (ctx.activeCardOperations.size >= settings.concurrencyLimit) {
-    throw new Error(
-      `Concurrency limit reached (${settings.concurrencyLimit}). Wait for another card to finish first.`,
-    );
-  }
-
-  const apiKey = decodeGeminiApiKey(settings.geminiApiKeyObfuscated);
-  if (apiKey.length === 0) {
-    throw new Error("Gemini API key is not configured.");
-  }
-
   const startStep = resolvePipelineStartStep(card, mode);
   await logger.info("pipeline.start", "Starting card pipeline.", {
     cardId,
@@ -67,11 +53,21 @@ export async function executeCardPipeline(
     startStep,
   });
   let activeStep: Exclude<CardProcessingStep, null> = startStep;
+  let holdsTranscriptionSlot = false;
 
-  ctx.activeCardOperations.add(cardId);
+  card.queuedMode = null;
+  card.queuedAtUtc = null;
 
   try {
+    const apiKey = decodeGeminiApiKey(settings.geminiApiKeyObfuscated);
+    if (apiKey.length === 0) {
+      throw new Error("Gemini API key is not configured.");
+    }
+
     if (startStep === "transcription") {
+      ctx.activeCardOperations.add(cardId);
+      holdsTranscriptionSlot = true;
+
       clearCardResults(card);
       await setCardStepState(card, "Transcribing", "transcription", ctx);
 
@@ -140,6 +136,10 @@ export async function executeCardPipeline(
       } finally {
         await preparedAudio.cleanup();
       }
+
+      ctx.activeCardOperations.delete(cardId);
+      holdsTranscriptionSlot = false;
+      await ctx.onTranscriptionSlotReleased();
 
       activeStep = "title";
     }
@@ -223,6 +223,8 @@ export async function executeCardPipeline(
   } catch (error: unknown) {
     card.status = "Error";
     card.activeStep = null;
+    card.queuedMode = null;
+    card.queuedAtUtc = null;
     card.lastError = {
       message: getCardErrorMessage(error),
       occurredAtUtc: Date.now(),
@@ -237,7 +239,17 @@ export async function executeCardPipeline(
       status: card.status,
     });
   } finally {
-    ctx.activeCardOperations.delete(cardId);
+    if (holdsTranscriptionSlot) {
+      ctx.activeCardOperations.delete(cardId);
+      try {
+        await ctx.onTranscriptionSlotReleased();
+      } catch (drainError: unknown) {
+        await logger.warn("pipeline.drain-failed", "Failed to drain queued cards after slot release.", {
+          cardId,
+          error: drainError instanceof Error ? drainError.message : String(drainError),
+        });
+      }
+    }
   }
 }
 
@@ -303,11 +315,13 @@ export function clearCardResults(card: MumblerCard): void {
   card.ai = { transcription: null, title: null, slug: null };
   card.status = "Imported";
   card.activeStep = null;
+  card.queuedMode = null;
+  card.queuedAtUtc = null;
   card.lastError = null;
   card.updatedAtUtc = Date.now();
 }
 
-function resolvePipelineStartStep(
+export function resolvePipelineStartStep(
   card: MumblerCard,
   mode: "transcribe" | "retry",
 ): Exclude<CardProcessingStep, null> {

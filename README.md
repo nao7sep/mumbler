@@ -6,10 +6,10 @@ A desktop app for transcribing audio recordings using Google Gemini AI. Import r
 
 - **Waveform editor** — visualize audio with WaveSurfer.js; set front/back trim markers to cut unwanted silence before transcription
 - **AI transcription** — sends audio to Google Gemini and generates a transcript, title, and URL slug
-- **Queue** — import multiple files and process them concurrently (configurable limit)
+- **Queue** — import multiple files and process them concurrently (configurable limit); extra cards beyond the limit auto-queue and start as slots free
 - **Timestamp parsing** — extracts recording datetime from filenames using configurable regex patterns; falls back to file modification time
 - **Atomic save** — writes audio + JSON sidecar atomically (temp → rename) with rollback on failure
-- **Optional source deletion** — can trash the original source file after confirming an import
+- **Optional source backup and deletion** — can copy the original to a backup folder and/or permanently delete it after confirming an import (backup is on by default)
 
 ## Requirements
 
@@ -25,12 +25,12 @@ npm install
 npm run dev
 ```
 
-On first launch, open Settings and enter your Gemini API key and choose an output directory.
+On first launch, open Settings and enter your Gemini API key. The output directory defaults to `~/.mumbler/output`; configure a custom location in Settings if desired.
 
 ## Usage
 
 1. **Import** — drag audio files onto the window or use the import dialog
-2. **Review** — the import review screen shows filename-parsed timestamps; adjust if needed and confirm (optionally trash the original)
+2. **Review** — the import review screen shows filename-parsed timestamps; adjust if needed and confirm. Originals are copied to the backup folder by default; you can also choose to permanently delete them from their source location.
 3. **Trim** — drag the front/back markers on the waveform to cut unwanted sections
 4. **Transcribe** — click the transcribe button; the app sends the (trimmed) audio to Gemini and generates a transcript, title, and slug
 5. **Save** — save the card to the output directory; produces `<slug>.<ext>` and `<slug>.json`
@@ -49,7 +49,8 @@ On first launch, open Settings and enter your Gemini API key and choose an outpu
 | Setting | Description |
 |---------|-------------|
 | Gemini API Key | API key for Google Gemini |
-| Output Directory | Where saved files are written |
+| Output Directory | Where saved files are written (default: `~/.mumbler/output`) |
+| Backup Directory | Where originals are copied when "Copy originals to backup folder" is selected (default: `~/.mumbler/backups`) |
 | Transcription Model | Gemini model used for transcription |
 | Metadata Model | Gemini model used for title and slug generation |
 | Default Timezone | Timezone for recording timestamps |
@@ -89,6 +90,8 @@ App data is stored in `~/.mumbler` by default. Override with the `MUMBLER_HOME` 
   settings.json     # app settings
   state.json        # queue state
   working/          # working copies of imported audio
+  output/           # default output folder for saved files (configurable)
+  backups/          # default backup folder for originals (configurable)
   logs/             # application logs
 ```
 

@@ -45,7 +45,7 @@ import {
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 import { formatError, uniquePathInDirectory, writeJsonFile } from "./file-io";
-import { moveImportedSourceToTrash, reconcileWorkingState, selectExistingCardId } from "./working-files";
+import { copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, selectExistingCardId } from "./working-files";
 import {
   buildOutputPayload,
   buildUniqueSuffixedTargets,
@@ -54,9 +54,9 @@ import {
   pathsConflict,
 } from "./file-output";
 
-import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, getSecretsForRedaction, getSystemTimezone, loadSettings, loadState, summarizeSettings } from "./settings-schema";
+import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, decodeGeminiApiKey, getSecretsForRedaction, getSystemTimezone, loadSettings, loadState, summarizeSettings } from "./settings-schema";
 import { type AppLogger, createLogger, pruneOldLogs, serializeError } from "./logger";
-import { executeCardPipeline } from "./card-pipeline";
+import { executeCardPipeline, resolvePipelineStartStep, type CardPipelineContext } from "./card-pipeline";
 
 
 interface AppRuntimeState {
@@ -101,7 +101,7 @@ export class ApplicationRuntime {
         recoveredInterruptedCards,
         droppedPendingImports: reconciliation.droppedPendingImports,
         missingWorkingCards: reconciliation.missingWorkingCards,
-        trashedOrphanedFiles: reconciliation.trashedOrphanedFiles,
+        deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
         retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
       });
 
@@ -113,7 +113,7 @@ export class ApplicationRuntime {
         );
       }
 
-      return new ApplicationRuntime({
+      const runtime = new ApplicationRuntime({
         paths,
         settings,
         state: reconciliation.state,
@@ -123,6 +123,8 @@ export class ApplicationRuntime {
         recoveredInterruptedCards,
         shellReadyAtUtc,
       });
+      await runtime.drainQueuedCards();
+      return runtime;
     } catch (error: unknown) {
       return new ApplicationRuntime({
         paths,
@@ -157,7 +159,8 @@ export class ApplicationRuntime {
       isPackaged: app.isPackaged,
       shellReadyAtUtc: this.runtime.shellReadyAtUtc,
       paths,
-      settingsSummary: settings ? summarizeSettings(settings) : null,
+      settingsSummary:
+        settings && paths ? summarizeSettings(settings, paths.outputDir, paths.backupsDir) : null,
       queueSummary:
         state === null
           ? null
@@ -213,7 +216,7 @@ export class ApplicationRuntime {
       await writeJsonFile(paths.statePath, reconciliation.state);
       await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
         workingDir: paths.workingDir,
-        trashedOrphanedFiles: reconciliation.trashedOrphanedFiles,
+        deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
         retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
       });
 
@@ -237,7 +240,11 @@ export class ApplicationRuntime {
 
   getSettingsDraft(): SettingsDraft {
     this.ensureReady();
-    return buildSettingsDraft(this.runtime.settings!);
+    return buildSettingsDraft(
+      this.runtime.settings!,
+      this.runtime.paths!.outputDir,
+      this.runtime.paths!.backupsDir,
+    );
   }
 
   async openImportDialog(window: BrowserWindow): Promise<ImportOperationResult> {
@@ -366,19 +373,48 @@ export class ApplicationRuntime {
         },
         status: "Imported",
         activeStep: null,
+        queuedMode: null,
+        queuedAtUtc: null,
         lastError: null,
         createdAtUtc: Date.now(),
         updatedAtUtc: Date.now(),
       });
 
-      if (pendingImport.deleteOriginalOnConfirm) {
+      let backupSucceeded = true;
+      if (pendingImport.copyToBackupOnConfirm) {
+        const backupDir = this.runtime.settings!.backupDirectory ?? paths.backupsDir;
         try {
-          await moveImportedSourceToTrash(pendingImport.originalSourcePath, paths.workingDir, this.runtime.logger!);
-        } catch (error: unknown) {
-          await this.runtime.logger!.warn("import.trash-original", "Failed to trash original after confirm.", {
+          const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir);
+          await this.runtime.logger!.info("import.backup-original", "Copied original to backup directory.", {
             originalSourcePath: pendingImport.originalSourcePath,
+            backupPath,
+          });
+        } catch (error: unknown) {
+          backupSucceeded = false;
+          await this.runtime.logger!.warn("import.backup-original", "Failed to copy original to backup directory.", {
+            originalSourcePath: pendingImport.originalSourcePath,
+            backupDir,
             error: error instanceof Error ? error.message : String(error),
           });
+        }
+      }
+
+      if (pendingImport.deleteOriginalOnConfirm) {
+        if (pendingImport.copyToBackupOnConfirm && !backupSucceeded) {
+          await this.runtime.logger!.warn(
+            "import.delete-original",
+            "Skipped deleting original because backup copy failed.",
+            { originalSourcePath: pendingImport.originalSourcePath },
+          );
+        } else {
+          try {
+            await deleteImportedSource(pendingImport.originalSourcePath);
+          } catch (error: unknown) {
+            await this.runtime.logger!.warn("import.delete-original", "Failed to delete original after confirm.", {
+              originalSourcePath: pendingImport.originalSourcePath,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
       }
     }
@@ -405,17 +441,12 @@ export class ApplicationRuntime {
 
     for (const pendingImport of pendingImports) {
       try {
-        await shell.trashItem(pendingImport.workingFilePath);
+        await rm(pendingImport.workingFilePath, { force: true });
       } catch (error: unknown) {
-        await this.runtime.logger!.warn("import.cancel-cleanup", "Failed to trash working file on cancel.", {
+        await this.runtime.logger!.warn("import.cancel-cleanup", "Failed to delete working file on cancel.", {
           workingFilePath: pendingImport.workingFilePath,
           error: error instanceof Error ? error.message : String(error),
         });
-        try {
-          await rm(pendingImport.workingFilePath, { force: true });
-        } catch {
-          // Best-effort cleanup; failure here is not actionable.
-        }
       }
     }
 
@@ -450,7 +481,11 @@ export class ApplicationRuntime {
       throw new Error("Card to duplicate does not exist.");
     }
 
-    if (source.status === "Transcribing" || source.status === "Generating Metadata") {
+    if (
+      source.status === "Queued" ||
+      source.status === "Transcribing" ||
+      source.status === "Generating Metadata"
+    ) {
       throw new Error("Cannot duplicate a card while it is being processed.");
     }
 
@@ -478,7 +513,11 @@ export class ApplicationRuntime {
       throw new Error("Card to update does not exist.");
     }
 
-    if (card.status === "Transcribing" || card.status === "Generating Metadata") {
+    if (
+      card.status === "Queued" ||
+      card.status === "Transcribing" ||
+      card.status === "Generating Metadata"
+    ) {
       throw new Error("Cannot change trim markers while this card is being processed.");
     }
 
@@ -541,28 +580,119 @@ export class ApplicationRuntime {
 
   async transcribeCard(cardId: string): Promise<AppSnapshot> {
     this.ensureReady();
-    await executeCardPipeline(cardId, "transcribe", {
-      state: this.runtime.state!,
-      settings: this.runtime.settings!,
-      paths: this.runtime.paths!,
-      logger: this.runtime.logger!,
-      activeCardOperations: this.activeCardOperations,
-      persistState: () => this.persistState(),
-    });
+    await this.startOrEnqueueCard(cardId, "transcribe");
     return this.getSnapshot();
   }
 
   async retryCard(cardId: string): Promise<AppSnapshot> {
     this.ensureReady();
-    await executeCardPipeline(cardId, "retry", {
+    await this.startOrEnqueueCard(cardId, "retry");
+    return this.getSnapshot();
+  }
+
+  private async startOrEnqueueCard(
+    cardId: string,
+    mode: "transcribe" | "retry",
+  ): Promise<void> {
+    const state = this.runtime.state!;
+    const settings = this.runtime.settings!;
+    const card = state.cards.find((entry) => entry.id === cardId);
+
+    if (card === undefined) {
+      throw new Error("Card to process does not exist.");
+    }
+
+    if (
+      card.status === "Queued" ||
+      card.status === "Transcribing" ||
+      card.status === "Generating Metadata" ||
+      this.activeCardOperations.has(cardId)
+    ) {
+      throw new Error("This card is already being processed.");
+    }
+
+    if (decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length === 0) {
+      throw new Error("Gemini API key is not configured.");
+    }
+
+    const startStep = resolvePipelineStartStep(card, mode);
+    const needsTranscriptionSlot = startStep === "transcription";
+    const slotAvailable = this.activeCardOperations.size < settings.concurrencyLimit;
+
+    if (!needsTranscriptionSlot || slotAvailable) {
+      if (needsTranscriptionSlot) {
+        this.activeCardOperations.add(cardId);
+      }
+      this.spawnCardPipeline(cardId, mode);
+      return;
+    }
+
+    card.status = "Queued";
+    card.queuedMode = mode;
+    card.queuedAtUtc = Date.now();
+    card.activeStep = null;
+    card.updatedAtUtc = Date.now();
+    await this.persistState();
+    await this.runtime.logger!.info(
+      "pipeline.queued",
+      "Queued card; awaiting transcription slot.",
+      {
+        cardId,
+        mode,
+        activeSlots: this.activeCardOperations.size,
+        concurrencyLimit: settings.concurrencyLimit,
+      },
+    );
+  }
+
+  private spawnCardPipeline(cardId: string, mode: "transcribe" | "retry"): void {
+    const ctx: CardPipelineContext = {
       state: this.runtime.state!,
       settings: this.runtime.settings!,
       paths: this.runtime.paths!,
       logger: this.runtime.logger!,
       activeCardOperations: this.activeCardOperations,
       persistState: () => this.persistState(),
+      onTranscriptionSlotReleased: () => this.tryStartNextQueuedCards(),
+    };
+
+    void executeCardPipeline(cardId, mode, ctx).catch(async (error: unknown) => {
+      this.activeCardOperations.delete(cardId);
+      await this.runtime.logger?.error(
+        "pipeline.unhandled",
+        "Unhandled pipeline error.",
+        error,
+        { cardId, mode },
+      );
+      await this.tryStartNextQueuedCards();
     });
-    return this.getSnapshot();
+  }
+
+  private async tryStartNextQueuedCards(): Promise<void> {
+    if (this.runtime.state === null || this.runtime.settings === null) {
+      return;
+    }
+
+    const settings = this.runtime.settings;
+    const state = this.runtime.state;
+
+    while (this.activeCardOperations.size < settings.concurrencyLimit) {
+      const next = state.cards
+        .filter(
+          (card) =>
+            card.status === "Queued" &&
+            card.queuedMode !== null &&
+            card.queuedAtUtc !== null,
+        )
+        .sort((a, b) => (a.queuedAtUtc ?? 0) - (b.queuedAtUtc ?? 0))[0];
+
+      if (next === undefined || next.queuedMode === null) {
+        return;
+      }
+
+      this.activeCardOperations.add(next.id);
+      this.spawnCardPipeline(next.id, next.queuedMode);
+    }
   }
 
   async pickOutputDirectory(window: BrowserWindow): Promise<string | null> {
@@ -580,6 +710,19 @@ export class ApplicationRuntime {
     return result.filePaths[0] ?? null;
   }
 
+  async openOutputDirectory(): Promise<void> {
+    this.ensureReady();
+
+    const configured = this.runtime.settings!.outputDirectory?.trim() ?? "";
+    const targetDir = configured.length > 0 ? configured : this.runtime.paths!.outputDir;
+    await mkdir(targetDir, { recursive: true });
+
+    const errorMessage = await shell.openPath(targetDir);
+    if (errorMessage.length > 0) {
+      throw new Error(errorMessage);
+    }
+  }
+
   async saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
     this.ensureReady();
 
@@ -591,6 +734,7 @@ export class ApplicationRuntime {
     await this.persistSettings();
     await logger.info("settings.save", "Updated application settings.", {
       outputDirectory: nextSettings.outputDirectory,
+      backupDirectory: nextSettings.backupDirectory,
       transcriptionModel: nextSettings.transcriptionModel,
       metadataModel: nextSettings.metadataModel,
       defaultTimezone: nextSettings.defaultTimezone,
@@ -599,7 +743,13 @@ export class ApplicationRuntime {
       concurrencyLimit: nextSettings.concurrencyLimit,
     });
 
+    await this.tryStartNextQueuedCards();
+
     return this.getSnapshot();
+  }
+
+  async drainQueuedCards(): Promise<void> {
+    await this.tryStartNextQueuedCards();
   }
 
   async chooseOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
@@ -643,14 +793,12 @@ export class ApplicationRuntime {
       throw new Error("Only cards in Ready to Save state can be finalized.");
     }
 
-    if (this.activeCardOperations.has(cardId)) {
-      throw new Error("Cannot save a card while it is being processed.");
-    }
-
-    const outputDirectory = settings.outputDirectory;
-    if (outputDirectory === null || outputDirectory.trim().length === 0) {
-      throw new Error("Choose an output directory before saving.");
-    }
+    const configuredOutputDirectory = settings.outputDirectory?.trim() ?? "";
+    const outputDirectory =
+      configuredOutputDirectory.length > 0
+        ? configuredOutputDirectory
+        : this.runtime.paths!.outputDir;
+    await mkdir(outputDirectory, { recursive: true });
 
     const finalAudio = await prepareAudioForTranscription({
       sourceFilePath: card.sourceFilePath,
@@ -753,20 +901,20 @@ export class ApplicationRuntime {
       throw new Error("Card to remove does not exist.");
     }
 
-    if (this.activeCardOperations.has(cardId)) {
+    if (card.status === "Transcribing" || card.status === "Generating Metadata") {
       throw new Error("Cannot remove a card while it is being processed.");
     }
 
     try {
-      await shell.trashItem(card.sourceFilePath);
-      await this.runtime.logger!.info("card.remove", "Moved card audio to trash and removed card.", {
+      await rm(card.sourceFilePath, { force: true });
+      await this.runtime.logger!.info("card.remove", "Deleted card working audio and removed card.", {
         cardId,
         sourceFilePath: card.sourceFilePath,
       });
     } catch (error: unknown) {
       await this.runtime.logger!.warn(
         "card.remove",
-        "Working audio could not be trashed; removing card anyway.",
+        "Working audio could not be deleted; removing card anyway.",
         {
           cardId,
           sourceFilePath: card.sourceFilePath,
@@ -870,6 +1018,7 @@ export class ApplicationRuntime {
       utcTimestampText: utcResult.error === null && utcResult.utcMs !== null ? formatUtcForDisplay(utcResult.utcMs) : "",
       parseStatus: parsed.parseStatus,
       deleteOriginalOnConfirm: false,
+      copyToBackupOnConfirm: true,
       createdAtUtc: Date.now(),
       updatedAtUtc: Date.now(),
     };
@@ -898,7 +1047,12 @@ export class ApplicationRuntime {
       this.runtime.state = normalized;
       await writeJsonFile(this.runtime.paths!.statePath, normalized);
 
-      if (this.activeCardOperations.size > 0 && this.onPipelineProgressCallback !== null) {
+      const hasActivePipeline = normalized.cards.some(
+        (card) =>
+          card.status === "Transcribing" ||
+          card.status === "Generating Metadata",
+      );
+      if (hasActivePipeline && this.onPipelineProgressCallback !== null) {
         this.onPipelineProgressCallback();
       }
     };
@@ -929,11 +1083,11 @@ export class ApplicationRuntime {
   private async discardWorkingCard(card: MumblerCard): Promise<void> {
     this.runtime.state!.cards = this.runtime.state!.cards.filter((entry) => entry.id !== card.id);
     try {
-      await shell.trashItem(card.sourceFilePath);
+      await rm(card.sourceFilePath, { force: true });
     } catch (error: unknown) {
       await this.runtime.logger!.warn(
         "card.cleanup",
-        "Saved card was removed from the queue, but working audio could not be trashed.",
+        "Saved card was removed from the queue, but working audio could not be deleted.",
         {
           cardId: card.id,
           sourceFilePath: card.sourceFilePath,
@@ -955,6 +1109,8 @@ function getAppPaths(): AppPaths {
     statePath: join(homeDir, "state.json"),
     logsDir: join(homeDir, "logs"),
     workingDir: join(homeDir, "working"),
+    outputDir: join(homeDir, "output"),
+    backupsDir: join(homeDir, "backups"),
   };
 }
 
@@ -962,7 +1118,6 @@ async function ensureDirectories(paths: AppPaths): Promise<void> {
   await mkdir(paths.homeDir, { recursive: true });
   await mkdir(paths.logsDir, { recursive: true });
   await mkdir(paths.workingDir, { recursive: true });
-  await mkdir(join(paths.workingDir, "trash-staging"), { recursive: true });
 }
 
 function buildConfirmedTimestamps(
@@ -1038,6 +1193,8 @@ function createDuplicatedCard(source: MumblerCard): MumblerCard {
     },
     status: "Imported",
     activeStep: null,
+    queuedMode: null,
+    queuedAtUtc: null,
     lastError: null,
     createdAtUtc: Date.now(),
     updatedAtUtc: Date.now(),

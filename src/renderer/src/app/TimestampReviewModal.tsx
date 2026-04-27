@@ -15,9 +15,11 @@ import {
 export interface TimestampReviewModalProps {
   items: PendingImportReviewItem[];
   defaultTimezone?: string;
+  backupDirectoryLabel: string;
   onChange: (item: PendingImportReviewItem) => void;
   onApplyTimezoneToAll: (timezone: string) => void;
   onSetDeleteOriginalForAll: (value: boolean) => void;
+  onSetCopyToBackupForAll: (value: boolean) => void;
   onConfirm: () => void;
   onCancel: () => void;
   isSubmitting: boolean;
@@ -26,9 +28,11 @@ export interface TimestampReviewModalProps {
 export function TimestampReviewModal({
   items,
   defaultTimezone,
+  backupDirectoryLabel,
   onChange,
   onApplyTimezoneToAll,
   onSetDeleteOriginalForAll,
+  onSetCopyToBackupForAll,
   onConfirm,
   onCancel,
   isSubmitting,
@@ -196,13 +200,24 @@ export function TimestampReviewModal({
           <label className="modal-checkbox">
             <input
               type="checkbox"
+              checked={items.length > 0 && items.every((i) => i.copyToBackupOnConfirm)}
+              onChange={(e) => onSetCopyToBackupForAll(e.target.checked)}
+            />
+            Copy originals to backup folder
+          </label>
+          <p className="field-hint">
+            Backups are saved to <code>{backupDirectoryLabel}</code>. Configure the location in Settings.
+          </p>
+          <label className="modal-checkbox">
+            <input
+              type="checkbox"
               checked={items.length > 0 && items.every((i) => i.deleteOriginalOnConfirm)}
               onChange={(e) => onSetDeleteOriginalForAll(e.target.checked)}
             />
-            Move originals to trash after import
+            Permanently delete originals after import
           </label>
           <p className="field-hint">
-            Working copies also move to trash when you remove cards — redundant copies are better than none.
+            If both options are selected, the backup is made before the original is deleted. A failed backup cancels the deletion for that file.
           </p>
         </div>
 

@@ -49,6 +49,8 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.retryCard, cardId) as Promise<AppSnapshot>,
   pickOutputDirectory: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.pickOutputDirectory) as Promise<string | null>,
+  openOutputDirectory: () =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.openOutputDirectory) as Promise<void>,
   saveSettingsDraft: (draft: SettingsDraft) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.saveSettingsDraft, draft) as Promise<AppSnapshot>,
   chooseOutputDirectory: () =>

@@ -108,6 +108,8 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     return runtime.pickOutputDirectory(window);
   });
 
+  ipcMain.handle(APP_SHELL_CHANNELS.openOutputDirectory, () => runtime.openOutputDirectory());
+
   ipcMain.handle(APP_SHELL_CHANNELS.saveSettingsDraft, (_event, draft: SettingsDraft) =>
     runtime.saveSettingsDraft(draft),
   );

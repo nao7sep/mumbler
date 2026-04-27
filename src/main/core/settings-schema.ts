@@ -56,6 +56,7 @@ function normalizeSettings(
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     geminiApiKeyObfuscated: asString(raw.geminiApiKeyObfuscated) ?? defaults.geminiApiKeyObfuscated,
     outputDirectory: asNullableString(raw.outputDirectory),
+    backupDirectory: asNullableString(raw.backupDirectory),
     transcriptionModel: asString(raw.transcriptionModel) ?? defaults.transcriptionModel,
     metadataModel: asString(raw.metadataModel) ?? defaults.metadataModel,
     defaultTimezone:
@@ -92,7 +93,8 @@ function normalizePendingImportRecord(item: PendingImportReviewItem): PendingImp
   return {
     ...item,
     originalSourcePath: typeof item.originalSourcePath === 'string' ? item.originalSourcePath : '',
-    deleteOriginalOnConfirm: typeof item.deleteOriginalOnConfirm === 'boolean' ? item.deleteOriginalOnConfirm : true,
+    deleteOriginalOnConfirm: typeof item.deleteOriginalOnConfirm === 'boolean' ? item.deleteOriginalOnConfirm : false,
+    copyToBackupOnConfirm: typeof item.copyToBackupOnConfirm === 'boolean' ? item.copyToBackupOnConfirm : false,
     createdAtUtc,
     updatedAtUtc: normalizeUtcMs(item.updatedAtUtc, createdAtUtc),
   };
@@ -134,6 +136,12 @@ function normalizeCardError(error: MumblerCard["lastError"]): MumblerCard["lastE
 function normalizeCardRecord(card: MumblerCard): MumblerCard {
   const createdAtUtc = normalizeUtcMs(card.createdAtUtc);
   const confirmedUtc = normalizeUtcMs(card.timestamps.confirmedUtc);
+  const queuedMode =
+    card.queuedMode === "transcribe" || card.queuedMode === "retry" ? card.queuedMode : null;
+  const queuedAtUtc =
+    queuedMode !== null && typeof card.queuedAtUtc === "number"
+      ? normalizeUtcMs(card.queuedAtUtc)
+      : null;
 
   return {
     ...card,
@@ -149,6 +157,8 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
       title: normalizeAiRunInfo(card.ai?.title),
       slug: normalizeAiRunInfo(card.ai?.slug),
     },
+    queuedMode,
+    queuedAtUtc,
     lastError: normalizeCardError(card.lastError),
     createdAtUtc,
     updatedAtUtc: normalizeUtcMs(card.updatedAtUtc, createdAtUtc),
@@ -278,6 +288,7 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     geminiApiKeyObfuscated: "",
     outputDirectory: null,
+    backupDirectory: null,
     transcriptionModel: "gemini-3.1-pro-preview",
     metadataModel: "gemini-3.1-pro-preview",
     defaultTimezone: systemTimezone,
@@ -348,10 +359,17 @@ export function createEmptyState(): MumblerState {
   };
 }
 
-export function summarizeSettings(settings: MumblerSettings): SettingsSummary {
+export function summarizeSettings(
+  settings: MumblerSettings,
+  defaultOutputDirectory: string,
+  defaultBackupDirectory: string,
+): SettingsSummary {
   return {
     hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
     outputDirectory: settings.outputDirectory,
+    defaultOutputDirectory,
+    backupDirectory: settings.backupDirectory,
+    defaultBackupDirectory,
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
     defaultTimezone: settings.defaultTimezone,
@@ -361,13 +379,20 @@ export function summarizeSettings(settings: MumblerSettings): SettingsSummary {
   };
 }
 
-export function buildSettingsDraft(settings: MumblerSettings): SettingsDraft {
+export function buildSettingsDraft(
+  settings: MumblerSettings,
+  defaultOutputDirectory: string,
+  defaultBackupDirectory: string,
+): SettingsDraft {
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
     geminiApiKeyInput: "",
     clearGeminiApiKey: false,
     outputDirectory: settings.outputDirectory ?? "",
+    defaultOutputDirectory,
+    backupDirectory: settings.backupDirectory ?? "",
+    defaultBackupDirectory,
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
     defaultTimezone: settings.defaultTimezone,
@@ -393,6 +418,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
   const titlePrompt = draft.titlePrompt.trim();
   const slugPrompt = draft.slugPrompt.trim();
   const outputDirectory = draft.outputDirectory.trim();
+  const backupDirectory = draft.backupDirectory.trim();
   const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
 
   if (transcriptionModel.length === 0) {
@@ -441,6 +467,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     ...current,
     geminiApiKeyObfuscated: resolveGeminiApiKeyObfuscated(current, draft),
     outputDirectory: outputDirectory.length === 0 ? null : outputDirectory,
+    backupDirectory: backupDirectory.length === 0 ? null : backupDirectory,
     transcriptionModel,
     metadataModel,
     defaultTimezone,

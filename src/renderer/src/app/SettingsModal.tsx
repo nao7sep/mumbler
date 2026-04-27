@@ -98,19 +98,23 @@ export function SettingsModal({
   draft,
   isSaving,
   isPickingOutputDirectory,
+  isPickingBackupDirectory,
   errorMessage,
   onChange,
   onClose,
   onPickOutputDirectory,
+  onPickBackupDirectory,
   onSave,
 }: {
   draft: SettingsDraft;
   isSaving: boolean;
   isPickingOutputDirectory: boolean;
+  isPickingBackupDirectory: boolean;
   errorMessage: string | null;
   onChange: (draft: SettingsDraft) => void;
   onClose: () => void;
   onPickOutputDirectory: () => void;
+  onPickBackupDirectory: () => void;
   onSave: () => void;
 }): ReactElement {
   const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
@@ -376,6 +380,33 @@ export function SettingsModal({
           </section>
 
           <section className="settings-section">
+            <h3>Backups</h3>
+            <div className="field-stack">
+              <label className="field">
+                <span>Backup Directory</span>
+                <div className="inline-action-field">
+                  <input
+                    value={draft.backupDirectory}
+                    placeholder={draft.defaultBackupDirectory}
+                    onChange={(event) => onChange({ ...draft, backupDirectory: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={onPickBackupDirectory}
+                    disabled={isPickingBackupDirectory}
+                  >
+                    Browse
+                  </button>
+                </div>
+              </label>
+              <p className="field-hint">
+                Used when "Copy originals to backup folder" is selected during import. Leave blank to use the default ({draft.defaultBackupDirectory}).
+              </p>
+            </div>
+          </section>
+
+          <section className="settings-section">
             <h3>Output</h3>
             <div className="field-stack">
               <label className="field">
@@ -383,7 +414,7 @@ export function SettingsModal({
                 <div className="inline-action-field">
                   <input
                     value={draft.outputDirectory}
-                    placeholder="/path/to/output"
+                    placeholder={draft.defaultOutputDirectory}
                     onChange={(event) => onChange({ ...draft, outputDirectory: event.target.value })}
                   />
                   <button
@@ -396,7 +427,9 @@ export function SettingsModal({
                   </button>
                 </div>
               </label>
-              <p className="field-hint">Where exported files are saved. Can be changed per recording.</p>
+              <p className="field-hint">
+                Where exported files are saved. Leave blank to use the default ({draft.defaultOutputDirectory}).
+              </p>
             </div>
           </section>
 

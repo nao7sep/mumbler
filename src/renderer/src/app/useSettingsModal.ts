@@ -13,12 +13,14 @@ interface UseSettingsModalResult {
   isLoadingSettings: boolean;
   isSavingSettings: boolean;
   isPickingSettingsOutputDirectory: boolean;
+  isPickingSettingsBackupDirectory: boolean;
   settingsErrorMessage: string | null;
   showDiscardConfirm: boolean;
   setSettingsDraft: Dispatch<SetStateAction<SettingsDraft | null>>;
   setSettingsErrorMessage: Dispatch<SetStateAction<string | null>>;
   handleOpenSettings: () => Promise<void>;
   handlePickSettingsOutputDirectory: () => Promise<void>;
+  handlePickSettingsBackupDirectory: () => Promise<void>;
   handleSaveSettings: () => Promise<void>;
   handleRequestCloseSettings: () => void;
   handleConfirmDiscardSettings: () => void;
@@ -34,6 +36,7 @@ export function useSettingsModal({
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isPickingSettingsOutputDirectory, setIsPickingSettingsOutputDirectory] = useState(false);
+  const [isPickingSettingsBackupDirectory, setIsPickingSettingsBackupDirectory] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const initialDraftRef = useRef<SettingsDraft | null>(null);
@@ -73,6 +76,30 @@ export function useSettingsModal({
       );
     } finally {
       setIsPickingSettingsOutputDirectory(false);
+    }
+  }
+
+  async function handlePickSettingsBackupDirectory(): Promise<void> {
+    setIsPickingSettingsBackupDirectory(true);
+    try {
+      const nextPath = await window.mumbler.pickOutputDirectory();
+      if (nextPath !== null) {
+        setSettingsDraft((current) =>
+          current === null
+            ? current
+            : {
+                ...current,
+                backupDirectory: nextPath,
+              },
+        );
+      }
+      setSettingsErrorMessage(null);
+    } catch (error: unknown) {
+      setSettingsErrorMessage(
+        error instanceof Error ? error.message : "Failed to choose backup directory.",
+      );
+    } finally {
+      setIsPickingSettingsBackupDirectory(false);
     }
   }
 
@@ -129,12 +156,14 @@ export function useSettingsModal({
     isLoadingSettings,
     isSavingSettings,
     isPickingSettingsOutputDirectory,
+    isPickingSettingsBackupDirectory,
     settingsErrorMessage,
     showDiscardConfirm,
     setSettingsDraft,
     setSettingsErrorMessage,
     handleOpenSettings,
     handlePickSettingsOutputDirectory,
+    handlePickSettingsBackupDirectory,
     handleSaveSettings,
     handleRequestCloseSettings,
     handleConfirmDiscardSettings,

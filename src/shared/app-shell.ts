@@ -18,6 +18,7 @@ export const APP_SHELL_CHANNELS = {
   transcribeCard: "app-shell:transcribe-card",
   retryCard: "app-shell:retry-card",
   pickOutputDirectory: "app-shell:pick-output-directory",
+  openOutputDirectory: "app-shell:open-output-directory",
   saveSettingsDraft: "app-shell:save-settings-draft",
   chooseOutputDirectory: "app-shell:choose-output-directory",
   saveCard: "app-shell:save-card",
@@ -36,6 +37,7 @@ export const APP_SHELL_EVENTS = {
 export type CardStatus =
   | "Pending Review"
   | "Imported"
+  | "Queued"
   | "Transcribing"
   | "Generating Metadata"
   | "Ready to Save"
@@ -81,6 +83,7 @@ export interface MumblerSettings {
   schemaVersion: 1;
   geminiApiKeyObfuscated: string;
   outputDirectory: string | null;
+  backupDirectory: string | null;
   transcriptionModel: string;
   metadataModel: string;
   defaultTimezone: string;
@@ -161,6 +164,7 @@ export interface PendingImportReviewItem {
   utcTimestampText: string;
   parseStatus: TimestampParseStatus;
   deleteOriginalOnConfirm: boolean;
+  copyToBackupOnConfirm: boolean;
   createdAtUtc: number;
   updatedAtUtc: number;
 }
@@ -190,6 +194,8 @@ export interface MumblerCard {
   };
   status: CardStatus;
   activeStep: CardProcessingStep;
+  queuedMode: "transcribe" | "retry" | null;
+  queuedAtUtc: number | null;
   lastError: CardError | null;
   createdAtUtc: number;
   updatedAtUtc: number;
@@ -209,11 +215,16 @@ export interface AppPaths {
   statePath: string;
   logsDir: string;
   workingDir: string;
+  outputDir: string;
+  backupsDir: string;
 }
 
 export interface SettingsSummary {
   hasGeminiApiKey: boolean;
   outputDirectory: string | null;
+  defaultOutputDirectory: string;
+  backupDirectory: string | null;
+  defaultBackupDirectory: string;
   transcriptionModel: string;
   metadataModel: string;
   defaultTimezone: string;
@@ -228,6 +239,9 @@ export interface SettingsDraft {
   geminiApiKeyInput: string;
   clearGeminiApiKey: boolean;
   outputDirectory: string;
+  defaultOutputDirectory: string;
+  backupDirectory: string;
+  defaultBackupDirectory: string;
   transcriptionModel: string;
   metadataModel: string;
   defaultTimezone: string;
@@ -323,6 +337,7 @@ export interface MumblerShellApi {
   transcribeCard(cardId: string): Promise<AppSnapshot>;
   retryCard(cardId: string): Promise<AppSnapshot>;
   pickOutputDirectory(): Promise<string | null>;
+  openOutputDirectory(): Promise<void>;
   saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot>;
   chooseOutputDirectory(): Promise<AppSnapshot>;
   saveCard(cardId: string, resolution?: SaveConflictResolution): Promise<SaveCardResult>;

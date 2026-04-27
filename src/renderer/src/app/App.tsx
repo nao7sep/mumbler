@@ -79,7 +79,6 @@ function getTranscribeDisabledReason(params: {
 
 function getSaveDisabledReason(params: {
   selectedCard: MumblerCard | null;
-  outputDirectory: string | null | undefined;
   selectedCardIsBusy: boolean;
 }): string | null {
   if (params.selectedCard === null) {
@@ -94,10 +93,6 @@ function getSaveDisabledReason(params: {
     return "Processing.";
   }
 
-  if (params.outputDirectory == null || params.outputDirectory.trim().length === 0) {
-    return "No output directory.";
-  }
-
   return null;
 }
 
@@ -108,17 +103,17 @@ function getRemoveConfirmBody(card: MumblerCard): string {
     (card.metadata.slug ?? "").trim().length > 0;
 
   if (hasAiWork) {
-    return "This recording has been processed by AI. Removing it will permanently discard the transcript and generated metadata. Working audio will be moved to trash.";
+    return "This recording has been processed by AI. Removing it will permanently discard the transcript and generated metadata. Working audio will be permanently deleted.";
   }
 
   const hasTrimWork =
     card.trim.frontMarkerSec !== null || card.trim.backMarkerSec !== null;
 
   if (hasTrimWork) {
-    return "You've set trim markers on this recording. Removing it will discard that work. Working audio will be moved to trash.";
+    return "You've set trim markers on this recording. Removing it will discard that work. Working audio will be permanently deleted.";
   }
 
-  return "Working audio will be moved to trash. Saved output is not affected.";
+  return "Working audio will be permanently deleted. Saved output is not affected.";
 }
 
 async function copyTextToClipboard(value: string): Promise<void> {
@@ -221,6 +216,7 @@ export function App(): ReactElement {
         timezone: item.timezone,
         utcTimestampText: item.utcTimestampText,
         deleteOriginalOnConfirm: item.deleteOriginalOnConfirm,
+        copyToBackupOnConfirm: item.copyToBackupOnConfirm,
       });
     return initial.map(project).join("|") !== current.map(project).join("|");
   }
@@ -367,6 +363,7 @@ export function App(): ReactElement {
   const selectedCardIsBusy =
     selectedCard !== null &&
     (activePipelineCards.includes(selectedCard.id) ||
+      selectedCard.status === "Queued" ||
       selectedCard.status === "Transcribing" ||
       selectedCard.status === "Generating Metadata");
   const transcribeDisabledReason = getTranscribeDisabledReason({
@@ -376,7 +373,6 @@ export function App(): ReactElement {
   });
   const saveDisabledReason = getSaveDisabledReason({
     selectedCard,
-    outputDirectory: snapshot?.settingsSummary?.outputDirectory,
     selectedCardIsBusy,
   });
   const modalIsOpen =
@@ -552,11 +548,7 @@ export function App(): ReactElement {
         }
         return;
       case "save-selected":
-        if (
-          selectedCard.status === "Ready to Save" &&
-          !selectedCardIsBusy &&
-          snapshot?.settingsSummary?.outputDirectory
-        ) {
+        if (selectedCard.status === "Ready to Save" && !selectedCardIsBusy) {
           await handleSaveCard(selectedCard.id);
         }
         return;
@@ -653,7 +645,7 @@ export function App(): ReactElement {
     try {
       const nextSnapshot = await window.mumbler.removeCard(cardId);
       setSnapshot(nextSnapshot);
-      addToast("Recording moved to trash.");
+      addToast("Recording removed.");
       window.scrollTo({ top: 0 });
     } catch (error: unknown) {
       addPersistent(error instanceof Error ? error.message : "Failed to remove card.", "error");
@@ -682,6 +674,23 @@ export function App(): ReactElement {
               <>
                 <div className="app-menu-overlay" onClick={() => setIsMenuOpen(false)} />
                 <div className="app-menu">
+                  <button
+                    type="button"
+                    className="app-menu-item"
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      void window.mumbler
+                        .openOutputDirectory()
+                        .catch((error: unknown) =>
+                          addPersistent(
+                            error instanceof Error ? error.message : "Failed to open output directory.",
+                            "error",
+                          ),
+                        );
+                    }}
+                  >
+                    Open Output Directory
+                  </button>
                   <button
                     type="button"
                     className="app-menu-item"
@@ -997,7 +1006,11 @@ export function App(): ReactElement {
                     onClick={() => handleTranscribeCard(selectedCard.id)}
                     disabled={transcribeDisabledReason !== null}
                   >
-                    {selectedCardIsBusy ? "Processing..." : "Transcribe"}
+                    {selectedCard.status === "Queued"
+                      ? "Queued..."
+                      : selectedCardIsBusy
+                        ? "Processing..."
+                        : "Transcribe"}
                   </button>
                   <button
                     type="button"
@@ -1082,7 +1095,11 @@ export function App(): ReactElement {
                 <dl className="meta-list compact-meta-list">
                   <div>
                     <dt>Output directory</dt>
-                    <dd>{snapshot?.settingsSummary?.outputDirectory ?? "Not configured"}</dd>
+                    <dd>
+                      {snapshot?.settingsSummary?.outputDirectory ??
+                        snapshot?.settingsSummary?.defaultOutputDirectory ??
+                        ""}
+                    </dd>
                   </div>
                   {selectedCard.lastError ? (
                     <div>
@@ -1144,10 +1161,12 @@ export function App(): ReactElement {
           draft={settingsModal.settingsDraft}
           isSaving={settingsModal.isSavingSettings}
           isPickingOutputDirectory={settingsModal.isPickingSettingsOutputDirectory}
+          isPickingBackupDirectory={settingsModal.isPickingSettingsBackupDirectory}
           errorMessage={settingsModal.settingsErrorMessage}
           onChange={settingsModal.setSettingsDraft}
           onClose={settingsModal.handleRequestCloseSettings}
           onPickOutputDirectory={() => void settingsModal.handlePickSettingsOutputDirectory()}
+          onPickBackupDirectory={() => void settingsModal.handlePickSettingsBackupDirectory()}
           onSave={() => void settingsModal.handleSaveSettings()}
         />
       ) : null}
@@ -1216,6 +1235,16 @@ export function App(): ReactElement {
             importFlow.setPendingReviewDrafts((current) =>
               current.map((item) => ({ ...item, deleteOriginalOnConfirm: value }))
             )
+          }
+          onSetCopyToBackupForAll={(value) =>
+            importFlow.setPendingReviewDrafts((current) =>
+              current.map((item) => ({ ...item, copyToBackupOnConfirm: value }))
+            )
+          }
+          backupDirectoryLabel={
+            snapshot?.settingsSummary?.backupDirectory ??
+            snapshot?.settingsSummary?.defaultBackupDirectory ??
+            "~/.mumbler/backups"
           }
           isSubmitting={importFlow.isConfirmingReview}
         />
