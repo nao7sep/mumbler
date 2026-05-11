@@ -1,14 +1,15 @@
 # Mumbler
 
-A desktop app for transcribing audio recordings using Google Gemini AI. Import recordings, trim them, transcribe, and save the audio alongside a JSON sidecar with the transcript, title, and metadata.
+A desktop app for transcribing audio recordings using Google Gemini AI. Import recordings, trim them, transcribe them, generate structured transcription, title, and slug metadata, then save audio with JSON and Markdown output files.
 
 ## Features
 
 - **Waveform editor** — visualize audio with WaveSurfer.js; set front/back trim markers to cut unwanted silence before transcription
-- **AI transcription** — sends audio to Google Gemini and generates a transcript, title, and URL slug
-- **Queue** — import multiple files and process them concurrently (configurable limit); extra cards beyond the limit auto-queue and start as slots free
+- **AI pipeline** — sends audio to Google Gemini, then generates a transcript, structured transcription, title, and URL slug as separate dependent steps
+- **Queue** — import multiple files and process transcriptions concurrently (configurable limit); extra cards beyond the limit auto-queue and start as slots free
+- **Cancellation and regeneration** — cancel stuck AI work, retry failed/cancelled steps, or regenerate an output and its dependent downstream outputs
 - **Timestamp parsing** — extracts recording datetime from filenames using configurable regex patterns; falls back to file modification time
-- **Atomic save** — writes audio + JSON sidecar atomically (temp → rename) with rollback on failure
+- **Atomic save** — writes audio + JSON + Markdown atomically (temp → rename) with rollback on failure
 - **Optional source backup and deletion** — can copy the original to a backup folder and/or permanently delete it after confirming an import (backup is on by default)
 
 ## Requirements
@@ -32,8 +33,9 @@ On first launch, open Settings and enter your Gemini API key. The output directo
 1. **Import** — drag audio files onto the window or use the import dialog
 2. **Review** — the import review screen shows filename-parsed timestamps; adjust if needed and confirm. Originals are copied to the backup folder by default; you can also choose to permanently delete them from their source location.
 3. **Trim** — drag the front/back markers on the waveform to cut unwanted sections
-4. **Transcribe** — click the transcribe button; the app sends the (trimmed) audio to Gemini and generates a transcript, title, and slug
-5. **Save** — save the card to the output directory; produces `<slug>.<ext>` and `<slug>.json`
+4. **Transcribe** — click the transcribe button; the app sends the (trimmed) audio to Gemini and runs transcription, structured transcription, title generation, and slug generation
+5. **Repair if needed** — cancel stuck AI work, retry failed/cancelled steps, or regenerate an existing transcript/structured transcription/title/slug; regenerating a step also regenerates dependent later steps
+6. **Save** — save the card to the output directory; produces timestamp-prefixed audio, JSON, and Markdown files
 
 ### Keyboard Shortcuts
 
@@ -52,34 +54,44 @@ On first launch, open Settings and enter your Gemini API key. The output directo
 | Output Directory | Where saved files are written (default: `~/.mumbler/output`) |
 | Backup Directory | Where originals are copied when "Copy originals to backup folder" is selected (default: `~/.mumbler/backups`) |
 | Transcription Model | Gemini model used for transcription |
-| Metadata Model | Gemini model used for title and slug generation |
+| Metadata Model | Gemini model used for structured transcription, title, and slug generation |
 | Default Timezone | Timezone for recording timestamps |
 | Timestamp Patterns | Regex patterns to parse datetime from filenames |
+| Structured Prompt | Custom prompt for structured transcription generation |
 | Title Prompt | Custom prompt for title generation |
 | Slug Prompt | Custom prompt for slug generation |
 | Preview Snippet | Seconds of audio sent for waveform preview |
-| Concurrency Limit | Max cards processed simultaneously |
+| Concurrency Limit | Max audio transcription jobs processed simultaneously |
+| Transcription Timeout | Timeout for each audio transcription request |
+| Text-only AI Timeout | Timeout for each structured transcription, title, or slug request |
+| Retry Policy | Max retries, delay, and jitter for retryable Gemini/network failures |
 
 ## Output Format
 
-Each saved card produces two files in the output directory:
+Each saved card produces three files in the output directory:
 
-**`<slug>.<ext>`** — the audio file (original or trimmed; never re-encoded unless stream-copy trim is impossible)
+**`<timestamp>-<slug>.<ext>`** — the audio file (original or trimmed; never re-encoded unless stream-copy trim is impossible)
 
-**`<slug>.json`** — metadata sidecar:
+**`<timestamp>-<slug>.json`** — metadata sidecar:
 
 ```json
 {
-  "title": "...",
-  "slug": "...",
-  "transcript": "...",
+  "schemaVersion": 1,
+  "originalFilename": "...",
   "timestamps": {
-    "recordedLocal": "2026-04-22 09:44:00",
-    "recordedUtc": "...",
-    "confirmedUtc": "..."
+    "confirmedLocal": "2026-04-22 09:44:00",
+    "effectiveUtc": "..."
+  },
+  "transcription": {
+    "raw": "...",
+    "structured": "...",
+    "title": "...",
+    "slug": "..."
   }
 }
 ```
+
+**`<timestamp>-<slug>.md`** — Markdown export with YAML front matter and the structured transcription body.
 
 ## Data Directory
 

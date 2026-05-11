@@ -13,6 +13,7 @@ export interface GeminiAudioTranscriptionParams {
   mimeType: string;
   model: string;
   timeoutMs: number;
+  signal?: AbortSignal;
   logger?: AppLogger;
 }
 
@@ -21,6 +22,7 @@ export interface GeminiTextGenerationParams {
   prompt: string;
   model: string;
   timeoutMs: number;
+  signal?: AbortSignal;
 }
 
 export interface GeminiRunResult {
@@ -30,22 +32,37 @@ export interface GeminiRunResult {
   transport: "inline" | "files-api";
 }
 
+export class GeminiTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Gemini request timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+    this.name = "GeminiTimeoutError";
+  }
+}
+
+export class GeminiCancelledError extends Error {
+  constructor() {
+    super("AI work cancelled by user.");
+    this.name = "GeminiCancelledError";
+  }
+}
+
 export async function transcribeWithGemini(
   params: GeminiAudioTranscriptionParams,
 ): Promise<GeminiRunResult> {
   const ai = new GoogleGenAI({ apiKey: params.apiKey });
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), params.timeoutMs);
+  const abortState = createGeminiAbortState(params.timeoutMs, params.signal);
   let uploadedFileName: string | null = null;
   let transport: GeminiRunResult["transport"] = "inline";
 
   try {
+    throwIfExternallyCancelled(params.signal);
     const fileStats = await stat(params.filePath);
     const prompt = buildTranscriptionPrompt();
 
     let response: GenerateContentResponse;
     if (fileStats.size <= INLINE_AUDIO_SAFETY_LIMIT_BYTES) {
       const inlineData = await readFile(params.filePath, { encoding: "base64" });
+      throwIfExternallyCancelled(params.signal);
       response = await ai.models.generateContent({
         model: params.model,
         contents: [
@@ -63,16 +80,17 @@ export async function transcribeWithGemini(
           },
         ],
         config: {
-          abortSignal: controller.signal,
+          abortSignal: abortState.signal,
         },
       });
     } else {
       transport = "files-api";
+      throwIfExternallyCancelled(params.signal);
       const uploadedFile = await ai.files.upload({
         file: params.filePath,
         config: {
           mimeType: params.mimeType,
-          abortSignal: controller.signal,
+          abortSignal: abortState.signal,
         },
       });
       uploadedFileName = uploadedFile.name ?? null;
@@ -99,7 +117,7 @@ export async function transcribeWithGemini(
           },
         ],
         config: {
-          abortSignal: controller.signal,
+          abortSignal: abortState.signal,
         },
       });
     }
@@ -111,22 +129,24 @@ export async function transcribeWithGemini(
       usageMetadata: response.usageMetadata ?? null,
       transport,
     };
+  } catch (error: unknown) {
+    throw normalizeGeminiAbortError(error, abortState, params.timeoutMs);
   } finally {
-    clearTimeout(timeoutId);
+    abortState.cleanup();
     if (uploadedFileName !== null) {
-        try {
-          await ai.files.delete({ name: uploadedFileName });
-        } catch (cleanupError: unknown) {
-          await params.logger?.warn(
-            "gemini.upload-cleanup",
-            "Failed to delete uploaded file from Files API.",
-            {
-              uploadedFileName,
-              error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-            },
-          );
-        }
+      try {
+        await ai.files.delete({ name: uploadedFileName });
+      } catch (cleanupError: unknown) {
+        await params.logger?.warn(
+          "gemini.upload-cleanup",
+          "Failed to delete uploaded file from Files API.",
+          {
+            uploadedFileName,
+            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          },
+        );
       }
+    }
   }
 }
 
@@ -134,10 +154,10 @@ export async function generateTextWithGemini(
   params: GeminiTextGenerationParams,
 ): Promise<Omit<GeminiRunResult, "transport">> {
   const ai = new GoogleGenAI({ apiKey: params.apiKey });
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), params.timeoutMs);
+  const abortState = createGeminiAbortState(params.timeoutMs, params.signal);
 
   try {
+    throwIfExternallyCancelled(params.signal);
     const response = await ai.models.generateContent({
       model: params.model,
       contents: [
@@ -147,7 +167,7 @@ export async function generateTextWithGemini(
         },
       ],
       config: {
-        abortSignal: controller.signal,
+        abortSignal: abortState.signal,
       },
     });
 
@@ -156,24 +176,31 @@ export async function generateTextWithGemini(
       modelVersion: response.modelVersion ?? null,
       usageMetadata: response.usageMetadata ?? null,
     };
+  } catch (error: unknown) {
+    throw normalizeGeminiAbortError(error, abortState, params.timeoutMs);
   } finally {
-    clearTimeout(timeoutId);
+    abortState.cleanup();
   }
 }
 
 export function isRetryableGeminiError(error: unknown): boolean {
+  if (error instanceof GeminiTimeoutError || error instanceof GeminiCancelledError) {
+    return false;
+  }
+
   if (error instanceof ApiError) {
     return error.status === 429 || error.status >= 500;
   }
 
   if (error instanceof Error) {
-    return (
-      error.name === "AbortError" ||
-      /network|timeout|timed out|fetch|stream/i.test(error.message)
-    );
+    return /network|fetch|stream/i.test(error.message);
   }
 
   return false;
+}
+
+export function isGeminiCancelledError(error: unknown): boolean {
+  return error instanceof GeminiCancelledError;
 }
 
 export function getInlineAudioSafetyLimitBytes(): number {
@@ -199,4 +226,77 @@ function normalizeResponseText(value: string | undefined): string {
   }
 
   return normalized;
+}
+
+interface GeminiAbortState {
+  signal: AbortSignal;
+  timedOut: () => boolean;
+  externallyCancelled: () => boolean;
+  cleanup: () => void;
+}
+
+function createGeminiAbortState(
+  timeoutMs: number,
+  externalSignal: AbortSignal | undefined,
+): GeminiAbortState {
+  const controller = new AbortController();
+  let didTimeOut = false;
+  let didExternalCancel = false;
+  const timeoutId = setTimeout(() => {
+    didTimeOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  const onExternalAbort = (): void => {
+    didExternalCancel = true;
+    controller.abort();
+  };
+
+  if (externalSignal?.aborted) {
+    onExternalAbort();
+  } else {
+    externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    timedOut: () => didTimeOut,
+    externallyCancelled: () => didExternalCancel,
+    cleanup: () => {
+      clearTimeout(timeoutId);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    },
+  };
+}
+
+function throwIfExternallyCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new GeminiCancelledError();
+  }
+}
+
+function normalizeGeminiAbortError(
+  error: unknown,
+  abortState: GeminiAbortState,
+  timeoutMs: number,
+): unknown {
+  if (error instanceof GeminiTimeoutError || error instanceof GeminiCancelledError) {
+    return error;
+  }
+
+  if (isAbortError(error)) {
+    if (abortState.externallyCancelled()) {
+      return new GeminiCancelledError();
+    }
+
+    if (abortState.timedOut()) {
+      return new GeminiTimeoutError(timeoutMs);
+    }
+  }
+
+  return error;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }

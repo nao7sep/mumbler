@@ -74,26 +74,29 @@ export function TimestampReviewModal({
         </div>
 
         <div className="modal-toolbar">
-          <label className="field">
-            <span>Set all timezones to</span>
-            <select
-              value={bulkTimezone}
-              onChange={(event) => setBulkTimezone(event.target.value)}
-            >
-              <option value="">— select —</option>
-              {timezoneOptions.map((tz) => (
-                <option key={tz} value={tz}>{tz}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="button button--ghost"
-            onClick={() => onApplyTimezoneToAll(bulkTimezone)}
-            disabled={bulkTimezone.trim().length === 0}
-          >
-            Apply to All
-          </button>
+          <div className="field modal-toolbar__field">
+            <span id="bulk-timezone-label">Set all timezones to</span>
+            <div className="bulk-timezone-controls">
+              <select
+                aria-labelledby="bulk-timezone-label"
+                value={bulkTimezone}
+                onChange={(event) => setBulkTimezone(event.target.value)}
+              >
+                <option value="">— select —</option>
+                {timezoneOptions.map((tz) => (
+                  <option key={tz} value={tz}>{tz}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={() => onApplyTimezoneToAll(bulkTimezone)}
+                disabled={bulkTimezone.trim().length === 0}
+              >
+                Apply to All
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="modal-card__body">

@@ -190,7 +190,7 @@ export function SettingsModal({
             <div className="settings-number-grid">
               <div>
                 <label className="field">
-                  <span>Concurrent Jobs</span>
+                  <span>Concurrent Transcriptions</span>
                   <input
                     type="number"
                     min={1}
@@ -199,7 +199,7 @@ export function SettingsModal({
                     onChange={(e) => onChange({ ...draft, concurrencyLimit: Number.parseInt(e.target.value, 10) })}
                   />
                 </label>
-                <p className="field-hint">Maximum number of cards processed simultaneously.</p>
+                <p className="field-hint">Maximum number of audio transcription jobs that can run at once.</p>
               </div>
             </div>
 
@@ -373,42 +373,16 @@ export function SettingsModal({
               </div>
               <div>
                 <label className="field">
-                  <span>Structured Generation Timeout (ms)</span>
+                  <span>Text-only AI Timeout (ms)</span>
                   <input
                     type="number"
                     min={1}
                     step={1000}
-                    value={draft.structuredTimeoutMs}
-                    onChange={(event) => onChange({ ...draft, structuredTimeoutMs: Number.parseInt(event.target.value, 10) })}
+                    value={draft.textTimeoutMs}
+                    onChange={(event) => onChange({ ...draft, textTimeoutMs: Number.parseInt(event.target.value, 10) })}
                   />
                 </label>
-                <p className="field-hint">Time allowed per structured outline request.</p>
-              </div>
-              <div>
-                <label className="field">
-                  <span>Title Generation Timeout (ms)</span>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1000}
-                    value={draft.titleTimeoutMs}
-                    onChange={(event) => onChange({ ...draft, titleTimeoutMs: Number.parseInt(event.target.value, 10) })}
-                  />
-                </label>
-                <p className="field-hint">Time allowed per title generation request.</p>
-              </div>
-              <div>
-                <label className="field">
-                  <span>Slug Generation Timeout (ms)</span>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1000}
-                    value={draft.slugTimeoutMs}
-                    onChange={(event) => onChange({ ...draft, slugTimeoutMs: Number.parseInt(event.target.value, 10) })}
-                  />
-                </label>
-                <p className="field-hint">Time allowed per slug generation request.</p>
+                <p className="field-hint">Time allowed for each structured transcription, title, or slug request.</p>
               </div>
             </div>
           </section>

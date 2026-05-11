@@ -18,6 +18,8 @@ export const APP_SHELL_CHANNELS = {
   getCardMediaSource: "app-shell:get-card-media-source",
   transcribeCard: "app-shell:transcribe-card",
   retryCard: "app-shell:retry-card",
+  cancelCardProcessing: "app-shell:cancel-card-processing",
+  regenerateCardStep: "app-shell:regenerate-card-step",
   pickOutputDirectory: "app-shell:pick-output-directory",
   openOutputDirectory: "app-shell:open-output-directory",
   saveSettingsDraft: "app-shell:save-settings-draft",
@@ -42,6 +44,7 @@ export type CardStatus =
   | "Transcribing"
   | "Generating Metadata"
   | "Ready to Save"
+  | "Cancelled"
   | "Error";
 
 export type CommandId =
@@ -71,9 +74,7 @@ export interface RetryPolicy {
 
 export interface OperationTimeouts {
   transcriptionMs: number;
-  structuredMs: number;
-  titleMs: number;
-  slugMs: number;
+  textMs: number;
 }
 
 export interface PromptTemplates {
@@ -100,6 +101,7 @@ export interface MumblerSettings {
 
 export type ImportSource = "file-picker" | "drag-and-drop";
 export type CardProcessingStep = "transcription" | "structured" | "title" | "slug" | null;
+export type RegenerateTarget = Exclude<CardProcessingStep, null>;
 export type TimestampParseStatus = "parsed" | "manual-required";
 
 export interface CardError {
@@ -261,9 +263,7 @@ export interface SettingsDraft {
   retryMaxDelayMs: number;
   retryJitterRatio: number;
   transcriptionTimeoutMs: number;
-  structuredTimeoutMs: number;
-  titleTimeoutMs: number;
-  slugTimeoutMs: number;
+  textTimeoutMs: number;
 }
 
 export interface QueueSummary {
@@ -346,6 +346,8 @@ export interface MumblerShellApi {
   getCardMediaSource(cardId: string): Promise<string>;
   transcribeCard(cardId: string): Promise<AppSnapshot>;
   retryCard(cardId: string): Promise<AppSnapshot>;
+  cancelCardProcessing(cardId: string): Promise<AppSnapshot>;
+  regenerateCardStep(cardId: string, target: RegenerateTarget): Promise<AppSnapshot>;
   pickOutputDirectory(): Promise<string | null>;
   openOutputDirectory(): Promise<void>;
   saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot>;

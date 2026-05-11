@@ -10,6 +10,7 @@ import type {
   AppSnapshot,
   MumblerCard,
   PendingImportReviewItem,
+  RegenerateTarget,
   SaveCardResult,
   TrimDecision,
 } from "@shared/app-shell";
@@ -32,6 +33,7 @@ import { AboutModal } from "./AboutModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
 import { useSettingsModal } from "./useSettingsModal";
+import { formatActiveStepMessage, formatCardStatusMessage, formatStepName, isCardBusy } from "./card-status";
 
 function formatOptionalSeconds(value: number | null): string {
   if (value === null) {
@@ -71,7 +73,7 @@ function getTranscribeDisabledReason(params: {
   }
 
   if (params.selectedCardIsBusy) {
-    return "Processing.";
+    return formatCardStatusMessage(params.selectedCard);
   }
 
   return null;
@@ -90,7 +92,7 @@ function getSaveDisabledReason(params: {
   }
 
   if (params.selectedCardIsBusy) {
-    return "Processing.";
+    return formatCardStatusMessage(params.selectedCard);
   }
 
   return null;
@@ -99,6 +101,7 @@ function getSaveDisabledReason(params: {
 function getRemoveConfirmBody(card: MumblerCard): string {
   const hasAiWork =
     (card.transcription.text ?? "").trim().length > 0 ||
+    (card.metadata.structured ?? "").trim().length > 0 ||
     (card.metadata.title ?? "").trim().length > 0 ||
     (card.metadata.slug ?? "").trim().length > 0;
 
@@ -114,6 +117,47 @@ function getRemoveConfirmBody(card: MumblerCard): string {
   }
 
   return "Working audio will be permanently deleted. Saved output is not affected.";
+}
+
+const resultLabels: Record<RegenerateTarget, string> = {
+  transcription: "Transcript",
+  structured: "Structured transcription",
+  title: "Title",
+  slug: "Slug",
+};
+
+function getResultValue(card: MumblerCard, target: RegenerateTarget): string | null {
+  switch (target) {
+    case "transcription":
+      return card.transcription.text;
+    case "structured":
+      return card.metadata.structured;
+    case "title":
+      return card.metadata.title;
+    case "slug":
+      return card.metadata.slug;
+  }
+}
+
+function getInvalidatedRegenerateTargets(target: RegenerateTarget): RegenerateTarget[] {
+  switch (target) {
+    case "transcription":
+      return ["transcription", "structured", "title", "slug"];
+    case "structured":
+      return ["structured", "title", "slug"];
+    case "title":
+      return ["title", "slug"];
+    case "slug":
+      return ["slug"];
+  }
+}
+
+function getRegenerateConfirmBody(card: MumblerCard, target: RegenerateTarget): string {
+  const invalidated = getInvalidatedRegenerateTargets(target)
+    .filter((entry) => (getResultValue(card, entry) ?? "").trim().length > 0)
+    .map((entry) => resultLabels[entry]);
+  const labelText = invalidated.join(", ");
+  return `Regenerating ${resultLabels[target].toLowerCase()} will replace existing data for: ${labelText}.`;
 }
 
 async function copyTextToClipboard(value: string): Promise<void> {
@@ -172,6 +216,11 @@ export function App(): ReactElement {
     result: Extract<SaveCardResult, { kind: "conflict" }>;
   } | null>(null);
   const [pendingRemoveCardId, setPendingRemoveCardId] = useState<string | null>(null);
+  const [pendingRegenerate, setPendingRegenerate] = useState<{
+    cardId: string;
+    target: RegenerateTarget;
+    body: string;
+  } | null>(null);
   const [isResettingState, setIsResettingState] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -362,10 +411,7 @@ export function App(): ReactElement {
     snapshot?.state?.cards.find((card) => card.id === snapshot.state?.selectedCardId) ?? null;
   const selectedCardIsBusy =
     selectedCard !== null &&
-    (activePipelineCards.includes(selectedCard.id) ||
-      selectedCard.status === "Queued" ||
-      selectedCard.status === "Transcribing" ||
-      selectedCard.status === "Generating Metadata");
+    (activePipelineCards.includes(selectedCard.id) || isCardBusy(selectedCard));
   const transcribeDisabledReason = getTranscribeDisabledReason({
     selectedCard,
     hasGeminiKey: snapshot?.settingsSummary?.hasGeminiApiKey ?? false,
@@ -381,6 +427,7 @@ export function App(): ReactElement {
     showReviewDiscardConfirm ||
     pendingSaveConflict !== null ||
     pendingRemoveCardId !== null ||
+    pendingRegenerate !== null ||
     showAbout ||
     showShortcutsHelp ||
     snapshot?.startupDiagnostic != null ||
@@ -452,6 +499,50 @@ export function App(): ReactElement {
       })
       .finally(() => {
         endCardOperation(cardId);
+      });
+  }
+
+  function handleCancelCardProcessing(cardId: string): void {
+    void window.mumbler
+      .cancelCardProcessing(cardId)
+      .then((nextSnapshot) => {
+        setSnapshot(nextSnapshot);
+      })
+      .catch((error: unknown) => {
+        addPersistent(error instanceof Error ? error.message : "Failed to cancel AI work.", "error");
+      });
+  }
+
+  function handleRequestRegenerate(card: MumblerCard, target: RegenerateTarget): void {
+    if ((getResultValue(card, target) ?? "").trim().length === 0) {
+      return;
+    }
+
+    setPendingRegenerate({
+      cardId: card.id,
+      target,
+      body: getRegenerateConfirmBody(card, target),
+    });
+  }
+
+  function handleConfirmRegenerate(): void {
+    const pending = pendingRegenerate;
+    if (pending === null) {
+      return;
+    }
+
+    setPendingRegenerate(null);
+    beginCardOperation(pending.cardId);
+    void window.mumbler
+      .regenerateCardStep(pending.cardId, pending.target)
+      .then((nextSnapshot) => {
+        setSnapshot(nextSnapshot);
+      })
+      .catch((error: unknown) => {
+        addPersistent(error instanceof Error ? error.message : "Failed to regenerate AI output.", "error");
+      })
+      .finally(() => {
+        endCardOperation(pending.cardId);
       });
   }
 
@@ -585,6 +676,8 @@ export function App(): ReactElement {
           setShowShortcutsHelp(false);
         } else if (pendingRemoveCardId !== null) {
           setPendingRemoveCardId(null);
+        } else if (pendingRegenerate !== null) {
+          setPendingRegenerate(null);
         } else if (pendingSaveConflict !== null) {
           setPendingSaveConflict(null);
         } else if (importFlow.pendingReviewDrafts.length > 0) {
@@ -613,7 +706,7 @@ export function App(): ReactElement {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsModal.settingsDraft, settingsModal.isSavingSettings, settingsModal.setSettingsDraft, settingsModal.setSettingsErrorMessage, pendingRemoveCardId, pendingSaveConflict, importFlow.pendingReviewDrafts, importFlow.handleCancelPendingImports, showReviewDiscardConfirm]);
+  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsModal.settingsDraft, settingsModal.isSavingSettings, settingsModal.setSettingsDraft, settingsModal.setSettingsErrorMessage, pendingRemoveCardId, pendingRegenerate, pendingSaveConflict, importFlow.pendingReviewDrafts, importFlow.handleCancelPendingImports, showReviewDiscardConfirm]);
 
   async function handleSaveCard(
     cardId: string,
@@ -1006,19 +1099,30 @@ export function App(): ReactElement {
                     onClick={() => handleTranscribeCard(selectedCard.id)}
                     disabled={transcribeDisabledReason !== null}
                   >
-                    {selectedCard.status === "Queued"
-                      ? "Queued..."
-                      : selectedCardIsBusy
-                        ? "Processing..."
-                        : "Transcribe"}
+                    {selectedCardIsBusy
+                      ? (selectedCard.activeStep === null
+                          ? formatCardStatusMessage(selectedCard)
+                          : formatActiveStepMessage(selectedCard.activeStep))
+                      : "Transcribe"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={() => handleCancelCardProcessing(selectedCard.id)}
+                    disabled={!selectedCardIsBusy}
+                  >
+                    Cancel
                   </button>
                   <button
                     type="button"
                     className="button button--ghost"
                     onClick={() => handleRetryCard(selectedCard.id)}
-                    disabled={selectedCard.status !== "Error" || selectedCardIsBusy}
+                    disabled={
+                      (selectedCard.status !== "Error" && selectedCard.status !== "Cancelled") ||
+                      selectedCardIsBusy
+                    }
                   >
-                    Retry Failed Step
+                    Retry Failed Steps
                   </button>
                 </div>
                 {transcribeDisabledReason && !selectedCardIsBusy ? (
@@ -1028,14 +1132,24 @@ export function App(): ReactElement {
                   <label className="field field--tall">
                     <span className="field-label-with-action">
                       <span>Transcript</span>
-                      <button
-                        type="button"
-                        className="button button--ghost button--compact"
-                        onClick={() => void handleCopyResult("Transcript", selectedCard.transcription.text)}
-                        disabled={(selectedCard.transcription.text ?? "").trim().length === 0}
-                      >
-                        Copy
-                      </button>
+                      <span className="field-actions">
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact"
+                          onClick={() => void handleCopyResult("Transcript", selectedCard.transcription.text)}
+                          disabled={(selectedCard.transcription.text ?? "").trim().length === 0}
+                        >
+                          Copy
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact"
+                          onClick={() => handleRequestRegenerate(selectedCard, "transcription")}
+                          disabled={selectedCardIsBusy || (selectedCard.transcription.text ?? "").trim().length === 0}
+                        >
+                          Regenerate
+                        </button>
+                      </span>
                     </span>
                     <textarea
                       readOnly
@@ -1047,15 +1161,25 @@ export function App(): ReactElement {
                   <div className="result-secondary">
                     <label className="field field--tall">
                       <span className="field-label-with-action">
-                        <span>Structured</span>
-                        <button
-                          type="button"
-                          className="button button--ghost button--compact"
-                          onClick={() => void handleCopyResult("Structured transcription", selectedCard.metadata.structured)}
-                          disabled={(selectedCard.metadata.structured ?? "").trim().length === 0}
-                        >
-                          Copy
-                        </button>
+                        <span>Structured transcription</span>
+                        <span className="field-actions">
+                          <button
+                            type="button"
+                            className="button button--ghost button--compact"
+                            onClick={() => void handleCopyResult("Structured transcription", selectedCard.metadata.structured)}
+                            disabled={(selectedCard.metadata.structured ?? "").trim().length === 0}
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            className="button button--ghost button--compact"
+                            onClick={() => handleRequestRegenerate(selectedCard, "structured")}
+                            disabled={selectedCardIsBusy || (selectedCard.metadata.structured ?? "").trim().length === 0}
+                          >
+                            Regenerate
+                          </button>
+                        </span>
                       </span>
                       <textarea
                         readOnly
@@ -1067,14 +1191,24 @@ export function App(): ReactElement {
                     <label className="field">
                       <span className="field-label-with-action">
                         <span>Title</span>
-                        <button
-                          type="button"
-                          className="button button--ghost button--compact"
-                          onClick={() => void handleCopyResult("Title", selectedCard.metadata.title)}
-                          disabled={(selectedCard.metadata.title ?? "").trim().length === 0}
-                        >
-                          Copy
-                        </button>
+                        <span className="field-actions">
+                          <button
+                            type="button"
+                            className="button button--ghost button--compact"
+                            onClick={() => void handleCopyResult("Title", selectedCard.metadata.title)}
+                            disabled={(selectedCard.metadata.title ?? "").trim().length === 0}
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            className="button button--ghost button--compact"
+                            onClick={() => handleRequestRegenerate(selectedCard, "title")}
+                            disabled={selectedCardIsBusy || (selectedCard.metadata.title ?? "").trim().length === 0}
+                          >
+                            Regenerate
+                          </button>
+                        </span>
                       </span>
                       <textarea
                         readOnly
@@ -1086,14 +1220,24 @@ export function App(): ReactElement {
                     <label className="field">
                       <span className="field-label-with-action">
                         <span>Slug</span>
-                        <button
-                          type="button"
-                          className="button button--ghost button--compact"
-                          onClick={() => void handleCopyResult("Slug", selectedCard.metadata.slug)}
-                          disabled={(selectedCard.metadata.slug ?? "").trim().length === 0}
-                        >
-                          Copy
-                        </button>
+                        <span className="field-actions">
+                          <button
+                            type="button"
+                            className="button button--ghost button--compact"
+                            onClick={() => void handleCopyResult("Slug", selectedCard.metadata.slug)}
+                            disabled={(selectedCard.metadata.slug ?? "").trim().length === 0}
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            className="button button--ghost button--compact"
+                            onClick={() => handleRequestRegenerate(selectedCard, "slug")}
+                            disabled={selectedCardIsBusy || (selectedCard.metadata.slug ?? "").trim().length === 0}
+                          >
+                            Regenerate
+                          </button>
+                        </span>
                       </span>
                       <textarea
                         readOnly
@@ -1122,8 +1266,8 @@ export function App(): ReactElement {
                   </div>
                   {selectedCard.lastError ? (
                     <div>
-                      <dt>Last failed step</dt>
-                      <dd>{selectedCard.lastError.failedStep}</dd>
+                      <dt>Last stopped step</dt>
+                      <dd>{formatStepName(selectedCard.lastError.failedStep)}</dd>
                     </div>
                   ) : null}
                 </dl>
@@ -1292,7 +1436,7 @@ export function App(): ReactElement {
       {pendingSaveConflict ? (
         <DecisionModal
           title="File Exists"
-          body={`${pendingSaveConflict.result.audioPath} already exists.`}
+          body={`One or more output files already exist: ${pendingSaveConflict.result.audioPath}, ${pendingSaveConflict.result.jsonPath}, ${pendingSaveConflict.result.markdownPath}.`}
           actions={[
             {
               label: "Cancel",
@@ -1316,6 +1460,27 @@ export function App(): ReactElement {
             },
           ]}
           onBackdropClick={() => setPendingSaveConflict(null)}
+        />
+      ) : null}
+
+      {pendingRegenerate ? (
+        <DecisionModal
+          title={`Regenerate ${resultLabels[pendingRegenerate.target]}?`}
+          body={pendingRegenerate.body}
+          actions={[
+            {
+              label: "Cancel",
+              onClick: () => {
+                setPendingRegenerate(null);
+              },
+            },
+            {
+              label: "Regenerate",
+              variant: "danger",
+              onClick: handleConfirmRegenerate,
+            },
+          ]}
+          onBackdropClick={() => setPendingRegenerate(null)}
         />
       ) : null}
 

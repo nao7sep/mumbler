@@ -4,6 +4,7 @@ import {
   APP_SHELL_CHANNELS,
   type CardTrim,
   type PendingImportReviewItem,
+  type RegenerateTarget,
   type RendererErrorReport,
   type SaveConflictResolution,
   type SettingsDraft,
@@ -34,6 +35,17 @@ function assertCardTrim(value: unknown): asserts value is CardTrim {
   }
   if (obj.backMarkerSec !== null && typeof obj.backMarkerSec !== "number") {
     throw new Error("Invalid IPC parameter: trim.backMarkerSec must be number or null.");
+  }
+}
+
+function assertRegenerateTarget(value: unknown): asserts value is RegenerateTarget {
+  if (
+    value !== "transcription" &&
+    value !== "structured" &&
+    value !== "title" &&
+    value !== "slug"
+  ) {
+    throw new Error("Invalid IPC parameter: target must be a card processing step.");
   }
 }
 
@@ -99,6 +111,20 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     assertString(cardId, "cardId");
     return runtime.retryCard(cardId);
   });
+
+  ipcMain.handle(APP_SHELL_CHANNELS.cancelCardProcessing, (_event, cardId: string) => {
+    assertString(cardId, "cardId");
+    return runtime.cancelCardProcessing(cardId);
+  });
+
+  ipcMain.handle(
+    APP_SHELL_CHANNELS.regenerateCardStep,
+    (_event, cardId: string, target: RegenerateTarget) => {
+      assertString(cardId, "cardId");
+      assertRegenerateTarget(target);
+      return runtime.regenerateCardStep(cardId, target);
+    },
+  );
 
   ipcMain.handle(APP_SHELL_CHANNELS.pickOutputDirectory, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);

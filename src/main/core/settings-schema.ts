@@ -82,9 +82,7 @@ function normalizeSettings(
     timeouts: {
       transcriptionMs:
         asPositiveInteger(timeouts?.transcriptionMs) ?? defaults.timeouts.transcriptionMs,
-      structuredMs: asPositiveInteger(timeouts?.structuredMs) ?? defaults.timeouts.structuredMs,
-      titleMs: asPositiveInteger(timeouts?.titleMs) ?? defaults.timeouts.titleMs,
-      slugMs: asPositiveInteger(timeouts?.slugMs) ?? defaults.timeouts.slugMs,
+      textMs: asPositiveInteger(timeouts?.textMs) ?? defaults.timeouts.textMs,
     },
   };
 }
@@ -336,10 +334,8 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
       jitterRatio: 0.2,
     },
     timeouts: {
-      transcriptionMs: 5 * 60 * 1000,
-      structuredMs: 5 * 60 * 1000,
-      titleMs: 2 * 60 * 1000,
-      slugMs: 2 * 60 * 1000,
+      transcriptionMs: 30 * 60 * 1000,
+      textMs: 5 * 60 * 1000,
     },
   };
 }
@@ -434,9 +430,7 @@ export function buildSettingsDraft(
     retryMaxDelayMs: settings.retryPolicy.maxDelayMs,
     retryJitterRatio: settings.retryPolicy.jitterRatio,
     transcriptionTimeoutMs: settings.timeouts.transcriptionMs,
-    structuredTimeoutMs: settings.timeouts.structuredMs,
-    titleTimeoutMs: settings.timeouts.titleMs,
-    slugTimeoutMs: settings.timeouts.slugMs,
+    textTimeoutMs: settings.timeouts.textMs,
   };
 }
 
@@ -487,9 +481,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     draft.transcriptionTimeoutMs,
     "Transcription timeout",
   );
-  const structuredTimeoutMs = requirePositiveInteger(draft.structuredTimeoutMs, "Structured timeout");
-  const titleTimeoutMs = requirePositiveInteger(draft.titleTimeoutMs, "Title timeout");
-  const slugTimeoutMs = requirePositiveInteger(draft.slugTimeoutMs, "Slug timeout");
+  const textTimeoutMs = requirePositiveInteger(draft.textTimeoutMs, "Text-only AI timeout");
 
   if (retryMaxDelayMs < retryInitialDelayMs) {
     throw new Error("Retry max delay must be greater than or equal to retry initial delay.");
@@ -519,9 +511,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     },
     timeouts: {
       transcriptionMs: transcriptionTimeoutMs,
-      structuredMs: structuredTimeoutMs,
-      titleMs: titleTimeoutMs,
-      slugMs: slugTimeoutMs,
+      textMs: textTimeoutMs,
     },
   };
 }

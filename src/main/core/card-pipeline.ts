@@ -14,9 +14,11 @@ import {
   prepareAudioForTranscription,
 } from "./audio-tools";
 import {
+  GeminiCancelledError,
   generateTextWithGemini,
   getInlineAudioSafetyLimitBytes,
   getInlineRequestLimitBytes,
+  isGeminiCancelledError,
   isRetryableGeminiError,
   transcribeWithGemini,
 } from "./gemini-adapter";
@@ -28,13 +30,18 @@ export interface CardPipelineContext {
   paths: AppPaths;
   logger: AppLogger;
   activeCardOperations: Set<string>;
+  signal: AbortSignal;
   persistState: () => Promise<void>;
   onTranscriptionSlotReleased: () => Promise<void>;
 }
 
+export type PipelineMode = "transcribe" | "retry" | "regenerate";
+export type PipelineStartStep = Exclude<CardProcessingStep, null>;
+
 export async function executeCardPipeline(
   cardId: string,
-  mode: "transcribe" | "retry",
+  startStep: PipelineStartStep,
+  mode: PipelineMode,
   ctx: CardPipelineContext,
 ): Promise<void> {
   const state = ctx.state;
@@ -46,19 +53,19 @@ export async function executeCardPipeline(
     throw new Error("Card to process does not exist.");
   }
 
-  const startStep = resolvePipelineStartStep(card, mode);
   await logger.info("pipeline.start", "Starting card pipeline.", {
     cardId,
     mode,
     startStep,
   });
-  let activeStep: Exclude<CardProcessingStep, null> = startStep;
+  let activeStep: PipelineStartStep = startStep;
   let holdsTranscriptionSlot = false;
 
   card.queuedMode = null;
   card.queuedAtUtc = null;
 
   try {
+    throwIfCancelled(ctx.signal);
     const apiKey = decodeGeminiApiKey(settings.geminiApiKeyObfuscated);
     if (apiKey.length === 0) {
       throw new Error("Gemini API key is not configured.");
@@ -68,12 +75,13 @@ export async function executeCardPipeline(
       ctx.activeCardOperations.add(cardId);
       holdsTranscriptionSlot = true;
 
-      clearCardResults(card);
+      clearCardResultsFromStep(card, "transcription");
       await setCardStepState(card, "Transcribing", "transcription", ctx);
 
       const trimDecision =
         card.trimDecision ??
         (await analyzeTrimDecision(card.sourceFilePath, card.trim, card.durationSec));
+      throwIfCancelled(ctx.signal);
       card.trimDecision = trimDecision;
       card.updatedAtUtc = Date.now();
       await ctx.persistState();
@@ -115,6 +123,7 @@ export async function executeCardPipeline(
               mimeType: preparedAudio.mimeType,
               model: settings.transcriptionModel,
               timeoutMs: settings.timeouts.transcriptionMs,
+              signal: ctx.signal,
               logger,
             }),
         }, ctx);
@@ -145,6 +154,7 @@ export async function executeCardPipeline(
     }
 
     if (activeStep === "structured") {
+      clearCardResultsFromStep(card, "structured");
       await setCardStepState(card, "Generating Metadata", "structured", ctx);
       const structuredPrompt = renderPromptTemplate(settings.prompts.structured, {
         transcript: card.transcription.text ?? "",
@@ -160,7 +170,8 @@ export async function executeCardPipeline(
             apiKey,
             prompt: structuredPrompt,
             model: settings.metadataModel,
-            timeoutMs: settings.timeouts.structuredMs,
+            timeoutMs: settings.timeouts.textMs,
+            signal: ctx.signal,
           }),
       }, ctx);
 
@@ -182,6 +193,7 @@ export async function executeCardPipeline(
     }
 
     if (activeStep === "title") {
+      clearCardResultsFromStep(card, "title");
       await setCardStepState(card, "Generating Metadata", "title", ctx);
       const titlePrompt = renderPromptTemplate(settings.prompts.title, {
         transcript: card.transcription.text ?? "",
@@ -197,7 +209,8 @@ export async function executeCardPipeline(
             apiKey,
             prompt: titlePrompt,
             model: settings.metadataModel,
-            timeoutMs: settings.timeouts.titleMs,
+            timeoutMs: settings.timeouts.textMs,
+            signal: ctx.signal,
           }),
       }, ctx);
 
@@ -219,6 +232,7 @@ export async function executeCardPipeline(
     }
 
     if (activeStep === "slug") {
+      clearCardResultsFromStep(card, "slug");
       await setCardStepState(card, "Generating Metadata", "slug", ctx);
       const slugPrompt = renderPromptTemplate(settings.prompts.slug, {
         transcript: card.transcription.text ?? "",
@@ -234,7 +248,8 @@ export async function executeCardPipeline(
             apiKey,
             prompt: slugPrompt,
             model: settings.metadataModel,
-            timeoutMs: settings.timeouts.slugMs,
+            timeoutMs: settings.timeouts.textMs,
+            signal: ctx.signal,
           }),
       }, ctx);
 
@@ -260,7 +275,8 @@ export async function executeCardPipeline(
       });
     }
   } catch (error: unknown) {
-    card.status = "Error";
+    const wasCancelled = isGeminiCancelledError(error);
+    card.status = wasCancelled ? "Cancelled" : "Error";
     card.activeStep = null;
     card.queuedMode = null;
     card.queuedAtUtc = null;
@@ -272,11 +288,7 @@ export async function executeCardPipeline(
     card.updatedAtUtc = Date.now();
 
     await ctx.persistState();
-    await logger.error("pipeline.failed", "Card pipeline failed.", error, {
-      cardId,
-      failedStep: activeStep,
-      status: card.status,
-    });
+    await logPipelineFailure(logger, error, cardId, activeStep, card.status);
   } finally {
     if (holdsTranscriptionSlot) {
       ctx.activeCardOperations.delete(cardId);
@@ -292,12 +304,36 @@ export async function executeCardPipeline(
   }
 }
 
+async function logPipelineFailure(
+  logger: AppLogger,
+  error: unknown,
+  cardId: string,
+  activeStep: PipelineStartStep,
+  status: MumblerCard["status"],
+): Promise<void> {
+  if (isGeminiCancelledError(error)) {
+    await logger.info("pipeline.cancelled", "Card pipeline cancelled.", {
+      cardId,
+      failedStep: activeStep,
+      status,
+    });
+    return;
+  }
+
+  await logger.error("pipeline.failed", "Card pipeline failed.", error, {
+    cardId,
+    failedStep: activeStep,
+    status,
+  });
+}
+
 async function setCardStepState(
   card: MumblerCard,
   status: Extract<MumblerCard["status"], "Transcribing" | "Generating Metadata">,
   step: Exclude<CardProcessingStep, null>,
   ctx: CardPipelineContext,
 ): Promise<void> {
+  throwIfCancelled(ctx.signal);
   card.status = status;
   card.activeStep = step;
   card.lastError = null;
@@ -316,11 +352,12 @@ async function executeWithRetry<T>(params: {
 
   let attempt = 1;
   while (true) {
+    throwIfCancelled(ctx.signal);
     try {
       return await params.execute();
     } catch (error: unknown) {
       const retryable = isRetryableGeminiError(error);
-      const exhausted = attempt >= retryPolicy.maxRetries;
+      const exhausted = attempt > retryPolicy.maxRetries;
 
       await logger.warn(params.op, "Gemini step attempt failed.", {
         cardId: params.cardId,
@@ -342,16 +379,14 @@ async function executeWithRetry<T>(params: {
         nextAttempt: attempt + 1,
         delayMs,
       });
-      await sleep(delayMs);
+      await sleep(delayMs, ctx.signal);
       attempt += 1;
     }
   }
 }
 
 export function clearCardResults(card: MumblerCard): void {
-  card.transcription = { text: null };
-  card.metadata = { structured: null, title: null, slug: null };
-  card.ai = { transcription: null, structured: null, title: null, slug: null };
+  clearCardResultsFromStep(card, "transcription");
   card.status = "Imported";
   card.activeStep = null;
   card.queuedMode = null;
@@ -360,31 +395,80 @@ export function clearCardResults(card: MumblerCard): void {
   card.updatedAtUtc = Date.now();
 }
 
+export function clearCardResultsFromStep(
+  card: MumblerCard,
+  step: PipelineStartStep,
+): void {
+  if (step === "transcription") {
+    card.transcription = { text: null };
+    card.ai.transcription = null;
+  }
+
+  if (step === "transcription" || step === "structured") {
+    card.metadata.structured = null;
+    card.ai.structured = null;
+  }
+
+  if (step === "transcription" || step === "structured" || step === "title") {
+    card.metadata.title = null;
+    card.ai.title = null;
+  }
+
+  card.metadata.slug = null;
+  card.ai.slug = null;
+}
+
+export function clearAllCardResults(card: MumblerCard): void {
+  card.transcription = { text: null };
+  card.metadata = { structured: null, title: null, slug: null };
+  card.ai = { transcription: null, structured: null, title: null, slug: null };
+}
+
 export function resolvePipelineStartStep(
   card: MumblerCard,
   mode: "transcribe" | "retry",
-): Exclude<CardProcessingStep, null> {
+): PipelineStartStep {
   if (mode === "transcribe") {
     return "transcription";
   }
 
-  if (card.lastError?.failedStep === "structured" && card.transcription.text !== null) {
-    return "structured";
-  }
-
-  if (card.lastError?.failedStep === "title" && card.transcription.text !== null) {
-    return "title";
-  }
-
+  const failedStep = card.lastError?.failedStep;
   if (
-    card.lastError?.failedStep === "slug" &&
-    card.transcription.text !== null &&
-    card.metadata.title !== null
+    failedStep === "transcription" ||
+    failedStep === "structured" ||
+    failedStep === "title" ||
+    failedStep === "slug"
   ) {
-    return "slug";
+    return resolveEarliestRequiredStep(card, failedStep);
   }
 
   return "transcription";
+}
+
+export function resolveRegenerateStartStep(
+  card: MumblerCard,
+  target: PipelineStartStep,
+): PipelineStartStep {
+  return resolveEarliestRequiredStep(card, target);
+}
+
+function resolveEarliestRequiredStep(
+  card: MumblerCard,
+  target: PipelineStartStep,
+): PipelineStartStep {
+  if (target !== "transcription" && card.transcription.text === null) {
+    return "transcription";
+  }
+
+  if ((target === "title" || target === "slug") && card.metadata.structured === null) {
+    return "structured";
+  }
+
+  if (target === "slug" && card.metadata.title === null) {
+    return "title";
+  }
+
+  return target;
 }
 
 function renderPromptTemplate(
@@ -444,8 +528,29 @@ function computeRetryDelayMs(
   return Math.max(0, baseDelay + jitterOffset);
 }
 
-function sleep(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
+function sleep(delayMs: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new GeminiCancelledError());
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+
+    const onAbort = (): void => {
+      clearTimeout(timeoutId);
+      reject(new GeminiCancelledError());
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+function throwIfCancelled(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw new GeminiCancelledError();
+  }
 }

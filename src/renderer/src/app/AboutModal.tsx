@@ -15,7 +15,7 @@ export function AboutModal({ onClose }: { onClose: () => void }): ReactElement {
         <div className="modal-card__body about-content">
           <p className="about-title">Mumbler</p>
           <p className="about-copy">
-            Keep your voice recordings organized. Import, transcribe, and export — all in one place.
+            Keep your voice recordings organized. Import, transcribe, structure, title, slug, and export — all in one place.
           </p>
           <div className="about-links">
             <a href={GITHUB_URL} target="_blank" rel="noreferrer">

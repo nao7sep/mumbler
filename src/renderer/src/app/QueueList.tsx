@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 
 import type { CardStatus, MumblerCard } from "@shared/app-shell";
+import { formatCardStatusMessage } from "./card-status";
 
 export function slugify(value: string): string {
   return value.toLowerCase().replaceAll(" ", "-");
@@ -8,13 +9,6 @@ export function slugify(value: string): string {
 
 export function statusModifier(status: CardStatus): string {
   return slugify(status);
-}
-
-function formatStatusLabel(status: CardStatus): string {
-  if (status === "Generating Metadata") {
-    return "Generating";
-  }
-  return status;
 }
 
 export function formatBytes(value: number): string {
@@ -47,10 +41,6 @@ export function formatDuration(value: number | null): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}.${tenths}`;
 }
 
-export function StatusChip({ label }: { label: CardStatus }): ReactElement {
-  return <span className={`status-chip status-chip--${slugify(label)}`}>{formatStatusLabel(label)}</span>;
-}
-
 export interface QueueListProps {
   cards: MumblerCard[];
   selectedCardId: string | null;
@@ -67,10 +57,7 @@ export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): 
           className={`queue-row queue-row--${statusModifier(card.status)}${card.id === selectedCardId ? " queue-row--selected" : ""}`}
           onClick={() => onSelect(card.id)}
         >
-          <div className="queue-row__top">
-            <strong className="queue-row__filename">{card.originalFilename}</strong>
-            <StatusChip label={card.status} />
-          </div>
+          <strong className="queue-row__filename">{card.originalFilename}</strong>
           <div className="queue-row__meta">
             <span>{card.timestamps.effectiveLocal}</span>
             {card.durationSec !== null ? (
@@ -79,6 +66,9 @@ export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): 
                 <span>{formatDuration(card.durationSec)}</span>
               </>
             ) : null}
+          </div>
+          <div className={`queue-row__status status-text status-text--${slugify(card.status)}`}>
+            {formatCardStatusMessage(card)}
           </div>
           {card.lastError ? (
             <div className="queue-row__error">{card.lastError.message}</div>

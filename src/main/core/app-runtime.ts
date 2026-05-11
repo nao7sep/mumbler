@@ -24,6 +24,7 @@ import {
   type MumblerState,
   type PendingImportReviewItem,
   type RendererErrorReport,
+  type RegenerateTarget,
   type SaveCardResult,
   type SaveConflictResolution,
   type SettingsDraft,
@@ -58,7 +59,15 @@ import {
 
 import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, decodeGeminiApiKey, getSecretsForRedaction, getSystemTimezone, loadSettings, loadState, summarizeSettings } from "./settings-schema";
 import { type AppLogger, createLogger, pruneOldLogs, serializeError } from "./logger";
-import { executeCardPipeline, resolvePipelineStartStep, type CardPipelineContext } from "./card-pipeline";
+import {
+  clearCardResultsFromStep,
+  executeCardPipeline,
+  resolvePipelineStartStep,
+  resolveRegenerateStartStep,
+  type CardPipelineContext,
+  type PipelineMode,
+  type PipelineStartStep,
+} from "./card-pipeline";
 
 
 interface AppRuntimeState {
@@ -75,6 +84,7 @@ interface AppRuntimeState {
 export class ApplicationRuntime {
   private readonly runtime: AppRuntimeState;
   private readonly activeCardOperations = new Set<string>();
+  private readonly activeCardAbortControllers = new Map<string, AbortController>();
   private persistQueue: Promise<void> = Promise.resolve();
   private onPipelineProgressCallback: (() => void) | null = null;
 
@@ -598,9 +608,86 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
+  async cancelCardProcessing(cardId: string): Promise<AppSnapshot> {
+    this.ensureReady();
+    const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
+
+    if (card === undefined) {
+      throw new Error("Card to cancel does not exist.");
+    }
+
+    if (card.status === "Queued") {
+      const failedStep =
+        card.queuedMode === null ? "transcription" : resolvePipelineStartStep(card, card.queuedMode);
+      card.status = "Cancelled";
+      card.activeStep = null;
+      card.queuedMode = null;
+      card.queuedAtUtc = null;
+      card.lastError = {
+        message: "AI work cancelled by user.",
+        occurredAtUtc: Date.now(),
+        failedStep,
+      };
+      card.updatedAtUtc = Date.now();
+      await this.persistState();
+      await this.runtime.logger!.info("pipeline.cancel-queued", "Cancelled queued card.", {
+        cardId,
+        failedStep,
+      });
+      return this.getSnapshot();
+    }
+
+    const controller = this.activeCardAbortControllers.get(cardId);
+    if (controller === undefined) {
+      throw new Error("This card is not being processed.");
+    }
+
+    controller.abort();
+    await this.runtime.logger!.info("pipeline.cancel-requested", "Requested card pipeline cancellation.", {
+      cardId,
+      activeStep: card.activeStep,
+    });
+    return this.getSnapshot();
+  }
+
+  async regenerateCardStep(cardId: string, target: RegenerateTarget): Promise<AppSnapshot> {
+    this.ensureReady();
+    const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
+
+    if (card === undefined) {
+      throw new Error("Card to regenerate does not exist.");
+    }
+
+    this.assertCardCanStartPipeline(card);
+
+    if (decodeGeminiApiKey(this.runtime.settings!.geminiApiKeyObfuscated).length === 0) {
+      throw new Error("Gemini API key is not configured.");
+    }
+
+    const startStep = resolveRegenerateStartStep(card, target);
+    clearCardResultsFromStep(card, startStep);
+    card.status = "Imported";
+    card.activeStep = null;
+    card.lastError = null;
+    card.updatedAtUtc = Date.now();
+    await this.persistState();
+    await this.startOrEnqueueCard(
+      cardId,
+      startStep === "transcription" ? "transcribe" : "regenerate",
+      startStep,
+    );
+    await this.runtime.logger!.info("pipeline.regenerate", "Started dependency-aware regeneration.", {
+      cardId,
+      requestedStep: target,
+      startStep,
+    });
+    return this.getSnapshot();
+  }
+
   private async startOrEnqueueCard(
     cardId: string,
-    mode: "transcribe" | "retry",
+    mode: PipelineMode,
+    requestedStartStep?: PipelineStartStep,
   ): Promise<void> {
     const state = this.runtime.state!;
     const settings = this.runtime.settings!;
@@ -610,20 +697,13 @@ export class ApplicationRuntime {
       throw new Error("Card to process does not exist.");
     }
 
-    if (
-      card.status === "Queued" ||
-      card.status === "Transcribing" ||
-      card.status === "Generating Metadata" ||
-      this.activeCardOperations.has(cardId)
-    ) {
-      throw new Error("This card is already being processed.");
-    }
+    this.assertCardCanStartPipeline(card);
 
     if (decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length === 0) {
       throw new Error("Gemini API key is not configured.");
     }
 
-    const startStep = resolvePipelineStartStep(card, mode);
+    const startStep = requestedStartStep ?? resolvePipelineStartStep(card, mode === "regenerate" ? "transcribe" : mode);
     const needsTranscriptionSlot = startStep === "transcription";
     const slotAvailable = this.activeCardOperations.size < settings.concurrencyLimit;
 
@@ -631,8 +711,12 @@ export class ApplicationRuntime {
       if (needsTranscriptionSlot) {
         this.activeCardOperations.add(cardId);
       }
-      this.spawnCardPipeline(cardId, mode);
+      this.spawnCardPipeline(cardId, startStep, mode);
       return;
+    }
+
+    if (mode === "regenerate") {
+      throw new Error("Regeneration from transcription could not be queued.");
     }
 
     card.status = "Queued";
@@ -653,27 +737,39 @@ export class ApplicationRuntime {
     );
   }
 
-  private spawnCardPipeline(cardId: string, mode: "transcribe" | "retry"): void {
+  private spawnCardPipeline(
+    cardId: string,
+    startStep: PipelineStartStep,
+    mode: PipelineMode,
+  ): void {
+    const controller = new AbortController();
+    this.activeCardAbortControllers.set(cardId, controller);
     const ctx: CardPipelineContext = {
       state: this.runtime.state!,
       settings: this.runtime.settings!,
       paths: this.runtime.paths!,
       logger: this.runtime.logger!,
       activeCardOperations: this.activeCardOperations,
+      signal: controller.signal,
       persistState: () => this.persistState(),
       onTranscriptionSlotReleased: () => this.tryStartNextQueuedCards(),
     };
 
-    void executeCardPipeline(cardId, mode, ctx).catch(async (error: unknown) => {
-      this.activeCardOperations.delete(cardId);
-      await this.runtime.logger?.error(
-        "pipeline.unhandled",
-        "Unhandled pipeline error.",
-        error,
-        { cardId, mode },
-      );
-      await this.tryStartNextQueuedCards();
-    });
+    void executeCardPipeline(cardId, startStep, mode, ctx)
+      .catch(async (error: unknown) => {
+        this.activeCardOperations.delete(cardId);
+        await this.runtime.logger?.error(
+          "pipeline.unhandled",
+          "Unhandled pipeline error.",
+          error,
+          { cardId, mode, startStep },
+        );
+      })
+      .finally(() => {
+        this.activeCardAbortControllers.delete(cardId);
+        this.activeCardOperations.delete(cardId);
+        void this.tryStartNextQueuedCards();
+      });
   }
 
   private async tryStartNextQueuedCards(): Promise<void> {
@@ -699,7 +795,7 @@ export class ApplicationRuntime {
       }
 
       this.activeCardOperations.add(next.id);
-      this.spawnCardPipeline(next.id, next.queuedMode);
+      this.spawnCardPipeline(next.id, resolvePipelineStartStep(next, next.queuedMode), next.queuedMode);
     }
   }
 
@@ -1050,6 +1146,18 @@ export class ApplicationRuntime {
     }
   }
 
+  private assertCardCanStartPipeline(card: MumblerCard): void {
+    if (
+      card.status === "Queued" ||
+      card.status === "Transcribing" ||
+      card.status === "Generating Metadata" ||
+      this.activeCardOperations.has(card.id) ||
+      this.activeCardAbortControllers.has(card.id)
+    ) {
+      throw new Error("This card is already being processed.");
+    }
+  }
+
   private async persistState(): Promise<void> {
     const work = async (): Promise<void> => {
       const state = this.runtime.state!;
@@ -1065,12 +1173,7 @@ export class ApplicationRuntime {
       this.runtime.state = normalized;
       await writeJsonFile(this.runtime.paths!.statePath, normalized);
 
-      const hasActivePipeline = normalized.cards.some(
-        (card) =>
-          card.status === "Transcribing" ||
-          card.status === "Generating Metadata",
-      );
-      if (hasActivePipeline && this.onPipelineProgressCallback !== null) {
+      if (this.onPipelineProgressCallback !== null) {
         this.onPipelineProgressCallback();
       }
     };
