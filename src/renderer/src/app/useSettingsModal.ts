@@ -22,6 +22,7 @@ interface UseSettingsModalResult {
   handlePickSettingsOutputDirectory: () => Promise<void>;
   handlePickSettingsBackupDirectory: () => Promise<void>;
   handleSaveSettings: () => Promise<void>;
+  handleRestoreDefaultPrompts: () => Promise<void>;
   handleRequestCloseSettings: () => void;
   handleConfirmDiscardSettings: () => void;
   handleCancelDiscardSettings: () => void;
@@ -124,6 +125,27 @@ export function useSettingsModal({
     }
   }
 
+  async function handleRestoreDefaultPrompts(): Promise<void> {
+    try {
+      const defaults = await window.mumbler.getDefaultPrompts();
+      setSettingsDraft((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              structuredPrompt: defaults.structured,
+              titlePrompt: defaults.title,
+              slugPrompt: defaults.slug,
+            },
+      );
+      setSettingsErrorMessage(null);
+    } catch (error: unknown) {
+      setSettingsErrorMessage(
+        error instanceof Error ? error.message : "Failed to load default prompts.",
+      );
+    }
+  }
+
   function handleCloseSettings(): void {
     setSettingsDraft(null);
     setSettingsErrorMessage(null);
@@ -165,6 +187,7 @@ export function useSettingsModal({
     handlePickSettingsOutputDirectory,
     handlePickSettingsBackupDirectory,
     handleSaveSettings,
+    handleRestoreDefaultPrompts,
     handleRequestCloseSettings,
     handleConfirmDiscardSettings,
     handleCancelDiscardSettings,

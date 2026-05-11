@@ -104,6 +104,7 @@ export function SettingsModal({
   onClose,
   onPickOutputDirectory,
   onPickBackupDirectory,
+  onRestoreDefaultPrompts,
   onSave,
 }: {
   draft: SettingsDraft;
@@ -115,6 +116,7 @@ export function SettingsModal({
   onClose: () => void;
   onPickOutputDirectory: () => void;
   onPickBackupDirectory: () => void;
+  onRestoreDefaultPrompts: () => void;
   onSave: () => void;
 }): ReactElement {
   const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
@@ -265,6 +267,14 @@ export function SettingsModal({
                 </select>
               </label>
               <label className="field">
+                <span>Structured Prompt</span>
+                <textarea
+                  rows={6}
+                  value={draft.structuredPrompt}
+                  onChange={(event) => onChange({ ...draft, structuredPrompt: event.target.value })}
+                />
+              </label>
+              <label className="field">
                 <span>Title Prompt</span>
                 <textarea
                   rows={5}
@@ -280,6 +290,17 @@ export function SettingsModal({
                   onChange={(event) => onChange({ ...draft, slugPrompt: event.target.value })}
                 />
               </label>
+              <div>
+                <button
+                  type="button"
+                  className="button button--danger"
+                  onClick={onRestoreDefaultPrompts}
+                  disabled={isSaving}
+                >
+                  Restore Default Prompts
+                </button>
+                <p className="field-hint">Replaces all three prompts above with the app defaults. Save to persist.</p>
+              </div>
             </div>
 
             <h4 className="settings-subheading">Pipeline</h4>
@@ -349,6 +370,19 @@ export function SettingsModal({
                   />
                 </label>
                 <p className="field-hint">Time allowed per transcription request.</p>
+              </div>
+              <div>
+                <label className="field">
+                  <span>Structured Generation Timeout (ms)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1000}
+                    value={draft.structuredTimeoutMs}
+                    onChange={(event) => onChange({ ...draft, structuredTimeoutMs: Number.parseInt(event.target.value, 10) })}
+                  />
+                </label>
+                <p className="field-hint">Time allowed per structured outline request.</p>
               </div>
               <div>
                 <label className="field">

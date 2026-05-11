@@ -4,89 +4,120 @@ import { basename, dirname, join } from "node:path";
 import { nanoid } from "nanoid";
 
 import type { MumblerCard } from "@shared/app-shell";
+import { formatUtcIsoCompact } from "@shared/timestamps";
 import { fileExists, formatError, syncFile } from "./file-io";
 
-export async function pathsConflict(audioPath: string, jsonPath: string): Promise<boolean> {
-  const [audioExists, jsonExists] = await Promise.all([fileExists(audioPath), fileExists(jsonPath)]);
-  return audioExists || jsonExists;
+export interface SaveTargetPaths {
+  audioPath: string;
+  jsonPath: string;
+  markdownPath: string;
+}
+
+export async function pathsConflict(targets: SaveTargetPaths): Promise<boolean> {
+  const exists = await Promise.all([
+    fileExists(targets.audioPath),
+    fileExists(targets.jsonPath),
+    fileExists(targets.markdownPath),
+  ]);
+  return exists.some((value) => value);
 }
 
 export async function buildUniqueSuffixedTargets(
   outputDirectory: string,
   baseName: string,
   extension: string,
-): Promise<{ audioPath: string; jsonPath: string }> {
+): Promise<SaveTargetPaths> {
   while (true) {
     const suffixedBase = `${baseName}-${nanoid(8)}`;
-    const audioPath = join(outputDirectory, `${suffixedBase}${extension}`);
-    const jsonPath = join(outputDirectory, `${suffixedBase}.json`);
-    if (!(await pathsConflict(audioPath, jsonPath))) {
-      return { audioPath, jsonPath };
+    const candidate: SaveTargetPaths = {
+      audioPath: join(outputDirectory, `${suffixedBase}${extension}`),
+      jsonPath: join(outputDirectory, `${suffixedBase}.json`),
+      markdownPath: join(outputDirectory, `${suffixedBase}.md`),
+    };
+    if (!(await pathsConflict(candidate))) {
+      return candidate;
     }
   }
 }
 
 export async function finalizeOutputsAtomically(params: {
   sourceAudioPath: string;
-  audioTargetPath: string;
-  jsonTargetPath: string;
+  targets: SaveTargetPaths;
   overwrite: boolean;
   jsonContent: string;
+  markdownContent: string;
 }): Promise<void> {
-  await mkdir(dirname(params.audioTargetPath), { recursive: true });
+  await mkdir(dirname(params.targets.audioPath), { recursive: true });
 
   const token = nanoid(8);
-  const audioTempPath = join(
-    dirname(params.audioTargetPath),
-    `.${basename(params.audioTargetPath)}.${token}.tmp`,
-  );
-  const jsonTempPath = join(
-    dirname(params.jsonTargetPath),
-    `.${basename(params.jsonTargetPath)}.${token}.tmp`,
-  );
+  const tempPathFor = (targetPath: string): string =>
+    join(dirname(targetPath), `.${basename(targetPath)}.${token}.tmp`);
+  const backupPathFor = (targetPath: string): string => `${targetPath}.${token}.bak`;
+
+  const audioTempPath = tempPathFor(params.targets.audioPath);
+  const jsonTempPath = tempPathFor(params.targets.jsonPath);
+  const markdownTempPath = tempPathFor(params.targets.markdownPath);
 
   await copyFile(params.sourceAudioPath, audioTempPath);
   await syncFile(audioTempPath);
   await writeFile(jsonTempPath, params.jsonContent, "utf8");
   await syncFile(jsonTempPath);
+  await writeFile(markdownTempPath, params.markdownContent, "utf8");
+  await syncFile(markdownTempPath);
 
-  const audioBackupPath = `${params.audioTargetPath}.${token}.bak`;
-  const jsonBackupPath = `${params.jsonTargetPath}.${token}.bak`;
-  const audioHadExisting = params.overwrite && (await fileExists(params.audioTargetPath));
-  const jsonHadExisting = params.overwrite && (await fileExists(params.jsonTargetPath));
+  const audioBackupPath = backupPathFor(params.targets.audioPath);
+  const jsonBackupPath = backupPathFor(params.targets.jsonPath);
+  const markdownBackupPath = backupPathFor(params.targets.markdownPath);
+
+  const audioHadExisting = params.overwrite && (await fileExists(params.targets.audioPath));
+  const jsonHadExisting = params.overwrite && (await fileExists(params.targets.jsonPath));
+  const markdownHadExisting = params.overwrite && (await fileExists(params.targets.markdownPath));
 
   let audioFinalized = false;
   let jsonFinalized = false;
+  let markdownFinalized = false;
 
   try {
     if (audioHadExisting) {
-      await rename(params.audioTargetPath, audioBackupPath);
+      await rename(params.targets.audioPath, audioBackupPath);
     }
     if (jsonHadExisting) {
-      await rename(params.jsonTargetPath, jsonBackupPath);
+      await rename(params.targets.jsonPath, jsonBackupPath);
+    }
+    if (markdownHadExisting) {
+      await rename(params.targets.markdownPath, markdownBackupPath);
     }
 
-    await rename(audioTempPath, params.audioTargetPath);
+    await rename(audioTempPath, params.targets.audioPath);
     audioFinalized = true;
-    await rename(jsonTempPath, params.jsonTargetPath);
+    await rename(jsonTempPath, params.targets.jsonPath);
     jsonFinalized = true;
+    await rename(markdownTempPath, params.targets.markdownPath);
+    markdownFinalized = true;
   } catch (error: unknown) {
+    if (markdownFinalized) {
+      await rm(params.targets.markdownPath, { force: true }).catch(() => undefined);
+    }
     if (jsonFinalized) {
-      await rm(params.jsonTargetPath, { force: true }).catch(() => undefined);
+      await rm(params.targets.jsonPath, { force: true }).catch(() => undefined);
     }
     if (audioFinalized) {
-      await rm(params.audioTargetPath, { force: true }).catch(() => undefined);
+      await rm(params.targets.audioPath, { force: true }).catch(() => undefined);
     }
 
     if (audioHadExisting && (await fileExists(audioBackupPath))) {
-      await rename(audioBackupPath, params.audioTargetPath).catch(() => undefined);
+      await rename(audioBackupPath, params.targets.audioPath).catch(() => undefined);
     }
     if (jsonHadExisting && (await fileExists(jsonBackupPath))) {
-      await rename(jsonBackupPath, params.jsonTargetPath).catch(() => undefined);
+      await rename(jsonBackupPath, params.targets.jsonPath).catch(() => undefined);
+    }
+    if (markdownHadExisting && (await fileExists(markdownBackupPath))) {
+      await rename(markdownBackupPath, params.targets.markdownPath).catch(() => undefined);
     }
 
     await rm(audioTempPath, { force: true }).catch(() => undefined);
     await rm(jsonTempPath, { force: true }).catch(() => undefined);
+    await rm(markdownTempPath, { force: true }).catch(() => undefined);
 
     throw new Error(`Failed to finalize output files: ${formatError(error)}`);
   }
@@ -98,6 +129,9 @@ export async function finalizeOutputsAtomically(params: {
   }
   if (jsonHadExisting) {
     await rm(jsonBackupPath, { force: true }).catch(() => undefined);
+  }
+  if (markdownHadExisting) {
+    await rm(markdownBackupPath, { force: true }).catch(() => undefined);
   }
 }
 
@@ -114,12 +148,12 @@ export function buildOutputPayload(params: {
     importSource: params.card.importSource,
     timestamps: {
       confirmedLocal: params.card.timestamps.confirmedLocal,
-      confirmedUtc: new Date(params.card.timestamps.confirmedUtc).toISOString(),
+      confirmedUtc: formatUtcIsoCompact(params.card.timestamps.confirmedUtc),
       effectiveLocal: params.card.timestamps.effectiveLocal,
-      effectiveUtc: new Date(params.card.timestamps.effectiveUtc).toISOString(),
+      effectiveUtc: formatUtcIsoCompact(params.card.timestamps.effectiveUtc),
       timezone: params.card.timestamps.timezone,
-      transcribedAtUtc: params.card.ai.transcription !== null ? new Date(params.card.ai.transcription.generatedAtUtc).toISOString() : null,
-      finalizedAtUtc: new Date(params.finalizedAtUtc).toISOString(),
+      transcribedAtUtc: params.card.ai.transcription !== null ? formatUtcIsoCompact(params.card.ai.transcription.generatedAtUtc) : null,
+      finalizedAtUtc: formatUtcIsoCompact(params.finalizedAtUtc),
     },
     trim:
       params.card.trim.frontMarkerSec === null && params.card.trim.backMarkerSec === null
@@ -131,21 +165,26 @@ export function buildOutputPayload(params: {
     },
     transcription: {
       raw: params.card.transcription.text,
+      structured: params.card.metadata.structured,
       title: params.card.metadata.title,
       slug: params.card.metadata.slug,
     },
     providers: {
       transcription: params.card.ai.transcription !== null ? {
         ...params.card.ai.transcription,
-        generatedAtUtc: new Date(params.card.ai.transcription.generatedAtUtc).toISOString(),
+        generatedAtUtc: formatUtcIsoCompact(params.card.ai.transcription.generatedAtUtc),
+      } : null,
+      structured: params.card.ai.structured !== null ? {
+        ...params.card.ai.structured,
+        generatedAtUtc: formatUtcIsoCompact(params.card.ai.structured.generatedAtUtc),
       } : null,
       title: params.card.ai.title !== null ? {
         ...params.card.ai.title,
-        generatedAtUtc: new Date(params.card.ai.title.generatedAtUtc).toISOString(),
+        generatedAtUtc: formatUtcIsoCompact(params.card.ai.title.generatedAtUtc),
       } : null,
       slug: params.card.ai.slug !== null ? {
         ...params.card.ai.slug,
-        generatedAtUtc: new Date(params.card.ai.slug.generatedAtUtc).toISOString(),
+        generatedAtUtc: formatUtcIsoCompact(params.card.ai.slug.generatedAtUtc),
       } : null,
     },
     audio: {
@@ -156,6 +195,45 @@ export function buildOutputPayload(params: {
       trimDecision: params.card.trimDecision?.kind ?? "not-needed",
     },
   };
+}
+
+function yamlDoubleQuotedString(value: string): string {
+  const escaped = value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r?\n/g, "\\n");
+  return `"${escaped}"`;
+}
+
+export function buildMarkdownContent(params: {
+  card: MumblerCard;
+  audioFilename: string;
+  finalDurationSec: number | null;
+}): string {
+  const title = params.card.metadata.title ?? "";
+  const slug = params.card.metadata.slug ?? "";
+  const date = formatUtcIsoCompact(params.card.timestamps.effectiveUtc);
+  const duration = params.finalDurationSec ?? null;
+  const body = params.card.metadata.structured ?? "";
+
+  const lines: string[] = [
+    "---",
+    `title: ${yamlDoubleQuotedString(title)}`,
+    `slug: ${yamlDoubleQuotedString(slug)}`,
+    `date: ${yamlDoubleQuotedString(date)}`,
+    `duration: ${duration === null ? "null" : duration}`,
+    `audio: ${yamlDoubleQuotedString(params.audioFilename)}`,
+    `schema_version: 1`,
+    "---",
+    "",
+    body,
+  ];
+
+  let content = lines.join("\n");
+  if (!content.endsWith("\n")) {
+    content += "\n";
+  }
+  return content;
 }
 
 export function computeFinalDuration(card: MumblerCard, probedDurationSec: number | null): number | null {

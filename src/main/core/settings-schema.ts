@@ -65,6 +65,7 @@ function normalizeSettings(
         : defaults.defaultTimezone,
     timestampPatterns: asStringArray(raw.timestampPatterns) ?? defaults.timestampPatterns,
     prompts: {
+      structured: asString(prompts?.structured) ?? defaults.prompts.structured,
       title: asString(prompts?.title) ?? defaults.prompts.title,
       slug: asString(prompts?.slug) ?? defaults.prompts.slug,
     },
@@ -81,6 +82,7 @@ function normalizeSettings(
     timeouts: {
       transcriptionMs:
         asPositiveInteger(timeouts?.transcriptionMs) ?? defaults.timeouts.transcriptionMs,
+      structuredMs: asPositiveInteger(timeouts?.structuredMs) ?? defaults.timeouts.structuredMs,
       titleMs: asPositiveInteger(timeouts?.titleMs) ?? defaults.timeouts.titleMs,
       slugMs: asPositiveInteger(timeouts?.slugMs) ?? defaults.timeouts.slugMs,
     },
@@ -111,8 +113,10 @@ function normalizeTrimDecisionRecord(cardTrimDecision: MumblerCard["trimDecision
   };
 }
 
-function normalizeAiRunInfo(run: MumblerCard["ai"]["transcription"]): MumblerCard["ai"]["transcription"] {
-  if (run === null) {
+function normalizeAiRunInfo(
+  run: MumblerCard["ai"]["transcription"] | undefined,
+): MumblerCard["ai"]["transcription"] {
+  if (run === null || run === undefined) {
     return null;
   }
 
@@ -152,8 +156,14 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
       effectiveUtc: normalizeUtcMs(card.timestamps.effectiveUtc, confirmedUtc),
     },
     trimDecision: normalizeTrimDecisionRecord(card.trimDecision),
+    metadata: {
+      structured: card.metadata?.structured ?? null,
+      title: card.metadata?.title ?? null,
+      slug: card.metadata?.slug ?? null,
+    },
     ai: {
       transcription: normalizeAiRunInfo(card.ai?.transcription),
+      structured: normalizeAiRunInfo(card.ai?.structured),
       title: normalizeAiRunInfo(card.ai?.title),
       slug: normalizeAiRunInfo(card.ai?.slug),
     },
@@ -258,6 +268,20 @@ function requirePromptPlaceholders(
   }
 }
 
+function requirePromptAnyPlaceholder(
+  prompt: string,
+  acceptedPlaceholders: string[],
+  label: string,
+): void {
+  if (prompt.length === 0) {
+    throw new Error(`${label} is required.`);
+  }
+
+  if (!acceptedPlaceholders.some((placeholder) => prompt.includes(placeholder))) {
+    throw new Error(`${label} must include one of ${acceptedPlaceholders.join(" or ")}.`);
+  }
+}
+
 function requirePositiveInteger(value: number, label: string): number {
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`${label} must be a positive integer.`);
@@ -296,10 +320,12 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
       "(?<year>\\d{2}(?:\\d{2})?)(?<month>\\d{2})(?<day>\\d{2})[-_](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})?",
     ],
     prompts: {
+      structured:
+        "Reorganize the transcript into a well-structured Markdown outline. Preserve all information; resolve obvious self-contradictions using surrounding context. Use the transcript's language. Output Markdown only.\n\n<transcript>\n{transcript}\n</transcript>",
       title:
-        "Write a single concise title in the same language as the transcript that accurately summarizes the content. Output only the title text — no prefix such as \"Title:\", no quotes, no markdown formatting, no explanation, and no trailing period unless the title is a naturally complete sentence.\n\nTranscript:\n{transcript}",
+        "Write a single concise title in the source's language that summarizes the content. Output only the title — no prefix, no quotes, no markdown, no trailing period unless it is a complete sentence.\n\n<source>\n{structured}\n</source>",
       slug:
-        "Create a short English URL slug for the title below. Use only lowercase letters (a–z), digits (0–9), and hyphens (-). Do not start or end with a hyphen. Aim for 3–6 words. Output only the slug — no label, no quotes, no markdown, no explanation.\n\nTitle:\n{title}",
+        "Create a short English URL slug for the title. Lowercase a–z, digits, and hyphens only. No leading or trailing hyphen. Aim for 3–6 words. Output only the slug.\n\n<title>\n{title}\n</title>",
     },
     previewSnippetSeconds: 10,
     concurrencyLimit: 3,
@@ -311,6 +337,7 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
     },
     timeouts: {
       transcriptionMs: 5 * 60 * 1000,
+      structuredMs: 5 * 60 * 1000,
       titleMs: 2 * 60 * 1000,
       slugMs: 2 * 60 * 1000,
     },
@@ -397,6 +424,7 @@ export function buildSettingsDraft(
     metadataModel: settings.metadataModel,
     defaultTimezone: settings.defaultTimezone,
     timestampPatternsText: settings.timestampPatterns.join("\n"),
+    structuredPrompt: settings.prompts.structured,
     titlePrompt: settings.prompts.title,
     slugPrompt: settings.prompts.slug,
     previewSnippetSeconds: settings.previewSnippetSeconds,
@@ -406,6 +434,7 @@ export function buildSettingsDraft(
     retryMaxDelayMs: settings.retryPolicy.maxDelayMs,
     retryJitterRatio: settings.retryPolicy.jitterRatio,
     transcriptionTimeoutMs: settings.timeouts.transcriptionMs,
+    structuredTimeoutMs: settings.timeouts.structuredMs,
     titleTimeoutMs: settings.timeouts.titleMs,
     slugTimeoutMs: settings.timeouts.slugMs,
   };
@@ -415,6 +444,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
   const transcriptionModel = draft.transcriptionModel.trim();
   const metadataModel = draft.metadataModel.trim();
   const defaultTimezone = draft.defaultTimezone.trim();
+  const structuredPrompt = draft.structuredPrompt.trim();
   const titlePrompt = draft.titlePrompt.trim();
   const slugPrompt = draft.slugPrompt.trim();
   const outputDirectory = draft.outputDirectory.trim();
@@ -437,7 +467,8 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     throw new Error("Add at least one timestamp regex pattern.");
   }
 
-  requirePromptPlaceholders(titlePrompt, ["{transcript}"], "Title prompt");
+  requirePromptPlaceholders(structuredPrompt, ["{transcript}"], "Structured prompt");
+  requirePromptAnyPlaceholder(titlePrompt, ["{transcript}", "{structured}"], "Title prompt");
   requirePromptPlaceholders(slugPrompt, ["{title}"], "Slug prompt");
 
   const previewSnippetSeconds = requirePositiveInteger(
@@ -456,6 +487,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     draft.transcriptionTimeoutMs,
     "Transcription timeout",
   );
+  const structuredTimeoutMs = requirePositiveInteger(draft.structuredTimeoutMs, "Structured timeout");
   const titleTimeoutMs = requirePositiveInteger(draft.titleTimeoutMs, "Title timeout");
   const slugTimeoutMs = requirePositiveInteger(draft.slugTimeoutMs, "Slug timeout");
 
@@ -473,6 +505,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     defaultTimezone,
     timestampPatterns,
     prompts: {
+      structured: structuredPrompt,
       title: titlePrompt,
       slug: slugPrompt,
     },
@@ -486,6 +519,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     },
     timeouts: {
       transcriptionMs: transcriptionTimeoutMs,
+      structuredMs: structuredTimeoutMs,
       titleMs: titleTimeoutMs,
       slugMs: slugTimeoutMs,
     },

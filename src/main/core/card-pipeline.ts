@@ -141,6 +141,43 @@ export async function executeCardPipeline(
       holdsTranscriptionSlot = false;
       await ctx.onTranscriptionSlotReleased();
 
+      activeStep = "structured";
+    }
+
+    if (activeStep === "structured") {
+      await setCardStepState(card, "Generating Metadata", "structured", ctx);
+      const structuredPrompt = renderPromptTemplate(settings.prompts.structured, {
+        transcript: card.transcription.text ?? "",
+        structured: "",
+        title: "",
+      });
+      const structuredResult = await executeWithRetry({
+        cardId,
+        step: "structured",
+        op: "gemini.structured",
+        execute: () =>
+          generateTextWithGemini({
+            apiKey,
+            prompt: structuredPrompt,
+            model: settings.metadataModel,
+            timeoutMs: settings.timeouts.structuredMs,
+          }),
+      }, ctx);
+
+      card.metadata.structured = structuredResult.text.trim();
+      card.ai.structured = {
+        provider: "gemini",
+        model: structuredResult.modelVersion ?? settings.metadataModel,
+        generatedAtUtc: Date.now(),
+      };
+      card.updatedAtUtc = Date.now();
+      await ctx.persistState();
+      await logger.info("pipeline.structured-complete", "Generated structured outline.", {
+        cardId,
+        modelVersion: structuredResult.modelVersion,
+        usageMetadata: structuredResult.usageMetadata,
+      });
+
       activeStep = "title";
     }
 
@@ -148,6 +185,7 @@ export async function executeCardPipeline(
       await setCardStepState(card, "Generating Metadata", "title", ctx);
       const titlePrompt = renderPromptTemplate(settings.prompts.title, {
         transcript: card.transcription.text ?? "",
+        structured: card.metadata.structured ?? "",
         title: "",
       });
       const titleResult = await executeWithRetry({
@@ -184,6 +222,7 @@ export async function executeCardPipeline(
       await setCardStepState(card, "Generating Metadata", "slug", ctx);
       const slugPrompt = renderPromptTemplate(settings.prompts.slug, {
         transcript: card.transcription.text ?? "",
+        structured: card.metadata.structured ?? "",
         title: card.metadata.title ?? "",
       });
       const slugResult = await executeWithRetry({
@@ -311,8 +350,8 @@ async function executeWithRetry<T>(params: {
 
 export function clearCardResults(card: MumblerCard): void {
   card.transcription = { text: null };
-  card.metadata = { title: null, slug: null };
-  card.ai = { transcription: null, title: null, slug: null };
+  card.metadata = { structured: null, title: null, slug: null };
+  card.ai = { transcription: null, structured: null, title: null, slug: null };
   card.status = "Imported";
   card.activeStep = null;
   card.queuedMode = null;
@@ -327,6 +366,10 @@ export function resolvePipelineStartStep(
 ): Exclude<CardProcessingStep, null> {
   if (mode === "transcribe") {
     return "transcription";
+  }
+
+  if (card.lastError?.failedStep === "structured" && card.transcription.text !== null) {
+    return "structured";
   }
 
   if (card.lastError?.failedStep === "title" && card.transcription.text !== null) {
@@ -348,11 +391,13 @@ function renderPromptTemplate(
   template: string,
   values: {
     transcript: string;
+    structured: string;
     title: string;
   },
 ): string {
   return template
     .replaceAll("{transcript}", values.transcript)
+    .replaceAll("{structured}", values.structured)
     .replaceAll("{title}", values.title);
 }
 

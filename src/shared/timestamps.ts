@@ -117,6 +117,19 @@ export function getUtcTimestampError(utcTimestampText: string): string | null {
     : null;
 }
 
+export function formatUtcIsoCompact(utcMs: number): string {
+  const date = new Date(utcMs);
+  const base =
+    `${date.getUTCFullYear().toString().padStart(4, "0")}-` +
+    `${(date.getUTCMonth() + 1).toString().padStart(2, "0")}-` +
+    `${date.getUTCDate().toString().padStart(2, "0")}T` +
+    `${date.getUTCHours().toString().padStart(2, "0")}:` +
+    `${date.getUTCMinutes().toString().padStart(2, "0")}:` +
+    `${date.getUTCSeconds().toString().padStart(2, "0")}`;
+  const ms = date.getUTCMilliseconds();
+  return ms === 0 ? `${base}Z` : `${base}.${ms.toString().padStart(3, "0")}Z`;
+}
+
 export function formatUtcForDisplay(utcMs: number): string {
   const date = new Date(utcMs);
   return formatLocalTimestamp({

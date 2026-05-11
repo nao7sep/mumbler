@@ -40,6 +40,7 @@ function assertCardTrim(value: unknown): asserts value is CardTrim {
 export function registerAppShellIpc(runtime: ApplicationRuntime): void {
   ipcMain.handle(APP_SHELL_CHANNELS.getSnapshot, () => runtime.getSnapshot());
   ipcMain.handle(APP_SHELL_CHANNELS.getSettingsDraft, () => runtime.getSettingsDraft());
+  ipcMain.handle(APP_SHELL_CHANNELS.getDefaultPrompts, () => runtime.getDefaultPrompts());
 
   ipcMain.handle(APP_SHELL_CHANNELS.openImportDialog, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);

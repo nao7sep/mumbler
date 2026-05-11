@@ -10,6 +10,13 @@ export function statusModifier(status: CardStatus): string {
   return slugify(status);
 }
 
+function formatStatusLabel(status: CardStatus): string {
+  if (status === "Generating Metadata") {
+    return "Generating";
+  }
+  return status;
+}
+
 export function formatBytes(value: number): string {
   if (value < 1024) {
     return `${value} B`;
@@ -41,7 +48,7 @@ export function formatDuration(value: number | null): string {
 }
 
 export function StatusChip({ label }: { label: CardStatus }): ReactElement {
-  return <span className={`status-chip status-chip--${slugify(label)}`}>{label}</span>;
+  return <span className={`status-chip status-chip--${slugify(label)}`}>{formatStatusLabel(label)}</span>;
 }
 
 export interface QueueListProps {

@@ -47,11 +47,13 @@ import {
 import { formatError, uniquePathInDirectory, writeJsonFile } from "./file-io";
 import { copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, selectExistingCardId } from "./working-files";
 import {
+  buildMarkdownContent,
   buildOutputPayload,
   buildUniqueSuffixedTargets,
   computeFinalDuration,
   finalizeOutputsAtomically,
   pathsConflict,
+  type SaveTargetPaths,
 } from "./file-output";
 
 import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, decodeGeminiApiKey, getSecretsForRedaction, getSystemTimezone, loadSettings, loadState, summarizeSettings } from "./settings-schema";
@@ -247,6 +249,10 @@ export class ApplicationRuntime {
     );
   }
 
+  getDefaultPrompts(): MumblerSettings["prompts"] {
+    return createDefaultSettings(getSystemTimezone()).prompts;
+  }
+
   async openImportDialog(window: BrowserWindow): Promise<ImportOperationResult> {
     this.ensureReady();
 
@@ -363,11 +369,13 @@ export class ApplicationRuntime {
           text: null,
         },
         metadata: {
+          structured: null,
           title: null,
           slug: null,
         },
         ai: {
           transcription: null,
+          structured: null,
           title: null,
           slug: null,
         },
@@ -532,8 +540,8 @@ export class ApplicationRuntime {
     card.trimDecision = trimDecision;
     card.timestamps = applyFrontTrimOffset(card.timestamps, normalizedTrim.frontMarkerSec ?? 0);
     card.transcription = { text: null };
-    card.metadata = { title: null, slug: null };
-    card.ai = { transcription: null, title: null, slug: null };
+    card.metadata = { structured: null, title: null, slug: null };
+    card.ai = { transcription: null, structured: null, title: null, slug: null };
     card.status = "Imported";
     card.activeStep = null;
     card.lastError = null;
@@ -813,23 +821,26 @@ export class ApplicationRuntime {
     try {
       const extension = extname(finalAudio.filePath) || extname(card.sourceFilePath);
       const baseName = `${formatUtcMarker(new Date(card.timestamps.effectiveUtc))}-${card.metadata.slug}`;
-      const initialTargets = {
+      const initialTargets: SaveTargetPaths = {
         audioPath: join(outputDirectory, `${baseName}${extension}`),
         jsonPath: join(outputDirectory, `${baseName}.json`),
+        markdownPath: join(outputDirectory, `${baseName}.md`),
       };
 
-      const conflictExists = await pathsConflict(initialTargets.audioPath, initialTargets.jsonPath);
+      const conflictExists = await pathsConflict(initialTargets);
       if (conflictExists && resolution === undefined) {
         await logger.info("save.conflict", "Output path conflict detected, awaiting resolution.", {
           cardId,
           audioPath: initialTargets.audioPath,
           jsonPath: initialTargets.jsonPath,
+          markdownPath: initialTargets.markdownPath,
         });
         return {
           kind: "conflict",
           snapshot: this.getSnapshot(),
           audioPath: initialTargets.audioPath,
           jsonPath: initialTargets.jsonPath,
+          markdownPath: initialTargets.markdownPath,
         };
       }
 
@@ -841,7 +852,7 @@ export class ApplicationRuntime {
         };
       }
 
-      const targetPaths =
+      const targetPaths: SaveTargetPaths =
         resolution === "suffix"
           ? await buildUniqueSuffixedTargets(outputDirectory, baseName, extension)
           : initialTargets;
@@ -864,19 +875,25 @@ export class ApplicationRuntime {
         finalDurationSec,
         finalizedAtUtc,
       });
+      const markdownContent = buildMarkdownContent({
+        card,
+        audioFilename: basename(targetPaths.audioPath),
+        finalDurationSec,
+      });
 
       await finalizeOutputsAtomically({
         sourceAudioPath: finalAudio.filePath,
-        audioTargetPath: targetPaths.audioPath,
-        jsonTargetPath: targetPaths.jsonPath,
+        targets: targetPaths,
         overwrite: resolution === "overwrite",
         jsonContent: `${JSON.stringify(outputPayload, null, 2)}\n`,
+        markdownContent,
       });
 
       await logger.info("save.completed", "Saved finalized audio and metadata.", {
         cardId,
         audioTargetPath: targetPaths.audioPath,
         jsonTargetPath: targetPaths.jsonPath,
+        markdownTargetPath: targetPaths.markdownPath,
         overwrite: resolution === "overwrite",
       });
 
@@ -886,6 +903,7 @@ export class ApplicationRuntime {
         snapshot: this.getSnapshot(),
         audioPath: targetPaths.audioPath,
         jsonPath: targetPaths.jsonPath,
+        markdownPath: targetPaths.markdownPath,
       };
     } finally {
       await finalAudio.cleanup();
@@ -1183,11 +1201,13 @@ function createDuplicatedCard(source: MumblerCard): MumblerCard {
       text: null,
     },
     metadata: {
+      structured: null,
       title: null,
       slug: null,
     },
     ai: {
       transcription: null,
+      structured: null,
       title: null,
       slug: null,
     },

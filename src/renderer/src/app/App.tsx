@@ -1045,6 +1045,25 @@ export function App(): ReactElement {
                     />
                   </label>
                   <div className="result-secondary">
+                    <label className="field field--tall">
+                      <span className="field-label-with-action">
+                        <span>Structured</span>
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact"
+                          onClick={() => void handleCopyResult("Structured transcription", selectedCard.metadata.structured)}
+                          disabled={(selectedCard.metadata.structured ?? "").trim().length === 0}
+                        >
+                          Copy
+                        </button>
+                      </span>
+                      <textarea
+                        readOnly
+                        className="result-output result-output--structured"
+                        value={selectedCard.metadata.structured ?? ""}
+                        placeholder=""
+                      />
+                    </label>
                     <label className="field">
                       <span className="field-label-with-action">
                         <span>Title</span>
@@ -1059,7 +1078,7 @@ export function App(): ReactElement {
                       </span>
                       <textarea
                         readOnly
-                        className="result-output"
+                        className="result-output result-output--short"
                         value={selectedCard.metadata.title ?? ""}
                         placeholder=""
                       />
@@ -1078,7 +1097,7 @@ export function App(): ReactElement {
                       </span>
                       <textarea
                         readOnly
-                        className="result-output"
+                        className="result-output result-output--slug"
                         value={selectedCard.metadata.slug ?? ""}
                         placeholder=""
                       />
@@ -1167,6 +1186,7 @@ export function App(): ReactElement {
           onClose={settingsModal.handleRequestCloseSettings}
           onPickOutputDirectory={() => void settingsModal.handlePickSettingsOutputDirectory()}
           onPickBackupDirectory={() => void settingsModal.handlePickSettingsBackupDirectory()}
+          onRestoreDefaultPrompts={() => void settingsModal.handleRestoreDefaultPrompts()}
           onSave={() => void settingsModal.handleSaveSettings()}
         />
       ) : null}

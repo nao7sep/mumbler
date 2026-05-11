@@ -221,6 +221,9 @@ textarea:focus-visible,
 
 .panel {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .panel--nested {
@@ -236,7 +239,6 @@ textarea:focus-visible,
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
 }
 
 .panel__header h2 {
@@ -262,9 +264,6 @@ textarea:focus-visible,
 }
 
 .queue-pane {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
   max-height: calc(100vh - 100px);
   overflow-y: auto;
   align-self: start;
@@ -272,13 +271,16 @@ textarea:focus-visible,
 
 .queue-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
 }
 
 .queue-row {
   display: grid;
   gap: 4px;
   width: 100%;
+  min-width: 0;
   padding: 10px 12px;
   text-align: left;
   border: 1px solid transparent;
@@ -328,7 +330,7 @@ textarea:focus-visible,
   flex-wrap: wrap;
 }
 
-.queue-row__top strong {
+.queue-row__filename {
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--text);
@@ -360,6 +362,7 @@ textarea:focus-visible,
 .row-error {
   color: var(--danger);
   font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
 .toolbar {
@@ -473,6 +476,8 @@ textarea:focus-visible,
   font: inherit;
   font-size: 0.8125rem;
   color: var(--text);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .app-menu-item:hover:not(:disabled) {
@@ -586,8 +591,7 @@ textarea:focus-visible,
 }
 
 .detail-pane {
-  display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .detail-grid {
@@ -604,6 +608,9 @@ textarea:focus-visible,
 
 .detail-card {
   padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .detail-card--status {
@@ -648,7 +655,7 @@ textarea:focus-visible,
 .meta-list {
   display: grid;
   gap: 10px;
-  margin: 12px 0 0;
+  margin: 0;
 }
 
 .status-summary {
@@ -708,13 +715,13 @@ textarea:focus-visible,
   margin: 0;
   font-size: 0.8125rem;
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .field-stack,
 .result-stack {
   display: grid;
   gap: 12px;
-  margin-top: 12px;
 }
 
 .field {
@@ -775,24 +782,50 @@ textarea:focus-visible,
   min-height: 360px;
 }
 
+.result-output--structured {
+  min-height: 220px;
+}
+
+.result-output--short {
+  min-height: 52px;
+  resize: vertical;
+}
+
+.result-output--slug {
+  min-height: 36px;
+  resize: none;
+}
+
 .result-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  margin-top: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .result-secondary {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  min-height: 0;
+}
+
+.field--tall {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+}
+
+.field--tall > .result-output {
+  flex: 1;
 }
 
 .action-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
 }
 
 .trim-analysis {
@@ -848,7 +881,6 @@ textarea:focus-visible,
 .waveform-editor {
   display: grid;
   gap: 12px;
-  margin-top: 12px;
 }
 
 .waveform-editor__status {
@@ -957,7 +989,6 @@ textarea:focus-visible,
 .storage-grid {
   display: grid;
   gap: 8px;
-  margin-top: 12px;
 }
 
 .control-row {
@@ -981,14 +1012,12 @@ textarea:focus-visible,
 }
 
 .compact-meta-list {
-  margin-top: 10px;
   gap: 8px;
 }
 
 .action-hints {
   display: grid;
   gap: 4px;
-  margin-top: 10px;
 }
 
 .provenance-value {
@@ -1201,7 +1230,6 @@ textarea:focus-visible,
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 12px;
 }
 
 .field-hint {
@@ -1336,6 +1364,7 @@ textarea:focus-visible,
 
 .persistent-notice__message {
   flex: 1;
+  overflow-wrap: anywhere;
 }
 
 /* Toast container */

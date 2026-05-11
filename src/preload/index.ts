@@ -8,6 +8,7 @@ import {
   type ImportOperationResult,
   type MumblerShellApi,
   type PendingImportReviewItem,
+  type PromptTemplates,
   type RendererErrorReport,
   type SaveCardResult,
   type SaveConflictResolution,
@@ -18,6 +19,8 @@ const api: MumblerShellApi = {
   getSnapshot: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.getSnapshot) as Promise<AppSnapshot>,
   getSettingsDraft: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getSettingsDraft) as Promise<SettingsDraft>,
+  getDefaultPrompts: () =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.getDefaultPrompts) as Promise<PromptTemplates>,
   openImportDialog: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.openImportDialog) as Promise<ImportOperationResult>,
   importDroppedPaths: (paths: string[]) =>

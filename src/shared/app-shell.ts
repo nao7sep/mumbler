@@ -7,6 +7,7 @@ export const GEMINI_MODELS = [
 export const APP_SHELL_CHANNELS = {
   getSnapshot: "app-shell:get-snapshot",
   getSettingsDraft: "app-shell:get-settings-draft",
+  getDefaultPrompts: "app-shell:get-default-prompts",
   openImportDialog: "app-shell:open-import-dialog",
   importDroppedPaths: "app-shell:import-dropped-paths",
   updatePendingImportDrafts: "app-shell:update-pending-import-drafts",
@@ -70,11 +71,13 @@ export interface RetryPolicy {
 
 export interface OperationTimeouts {
   transcriptionMs: number;
+  structuredMs: number;
   titleMs: number;
   slugMs: number;
 }
 
 export interface PromptTemplates {
+  structured: string;
   title: string;
   slug: string;
 }
@@ -96,7 +99,7 @@ export interface MumblerSettings {
 }
 
 export type ImportSource = "file-picker" | "drag-and-drop";
-export type CardProcessingStep = "transcription" | "title" | "slug" | null;
+export type CardProcessingStep = "transcription" | "structured" | "title" | "slug" | null;
 export type TimestampParseStatus = "parsed" | "manual-required";
 
 export interface CardError {
@@ -184,11 +187,13 @@ export interface MumblerCard {
     text: string | null;
   };
   metadata: {
+    structured: string | null;
     title: string | null;
     slug: string | null;
   };
   ai: {
     transcription: AiRunInfo | null;
+    structured: AiRunInfo | null;
     title: AiRunInfo | null;
     slug: AiRunInfo | null;
   };
@@ -246,6 +251,7 @@ export interface SettingsDraft {
   metadataModel: string;
   defaultTimezone: string;
   timestampPatternsText: string;
+  structuredPrompt: string;
   titlePrompt: string;
   slugPrompt: string;
   previewSnippetSeconds: number;
@@ -255,6 +261,7 @@ export interface SettingsDraft {
   retryMaxDelayMs: number;
   retryJitterRatio: number;
   transcriptionTimeoutMs: number;
+  structuredTimeoutMs: number;
   titleTimeoutMs: number;
   slugTimeoutMs: number;
 }
@@ -311,12 +318,14 @@ export type SaveCardResult =
       snapshot: AppSnapshot;
       audioPath: string;
       jsonPath: string;
+      markdownPath: string;
     }
   | {
       kind: "conflict";
       snapshot: AppSnapshot;
       audioPath: string;
       jsonPath: string;
+      markdownPath: string;
     }
   | {
       kind: "cancelled";
@@ -326,6 +335,7 @@ export type SaveCardResult =
 export interface MumblerShellApi {
   getSnapshot(): Promise<AppSnapshot>;
   getSettingsDraft(): Promise<SettingsDraft>;
+  getDefaultPrompts(): Promise<PromptTemplates>;
   openImportDialog(): Promise<ImportOperationResult>;
   importDroppedPaths(paths: string[]): Promise<ImportOperationResult>;
   updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot>;
