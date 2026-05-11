@@ -2,15 +2,10 @@ import type { CardProcessingStep, MumblerCard } from "@shared/app-shell";
 
 export function isCardBusy(card: MumblerCard): boolean {
   return (
-    card.cancelRequestedAtUtc !== null ||
     card.status === "Queued" ||
     card.status === "Transcribing" ||
     card.status === "Generating Metadata"
   );
-}
-
-function isCancellationRequested(card: MumblerCard): boolean {
-  return card.cancelRequestedAtUtc !== null;
 }
 
 export function formatStepName(step: Exclude<CardProcessingStep, null> | "startup-recovery"): string {
@@ -44,12 +39,6 @@ export function formatActiveStepMessage(step: CardProcessingStep): string {
 }
 
 export function formatCardStatusMessage(card: MumblerCard): string {
-  if (isCancellationRequested(card)) {
-    return card.activeStep === null
-      ? "Cancelling..."
-      : `Cancelling ${formatStepName(card.activeStep)}...`;
-  }
-
   switch (card.status) {
     case "Pending Review":
       return "Pending timestamp review";

@@ -33,7 +33,7 @@ import { AboutModal } from "./AboutModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
 import { useSettingsModal } from "./useSettingsModal";
-import { formatActiveStepMessage, formatCardStatusMessage, formatStepName, isCardBusy } from "./card-status";
+import { formatCardStatusMessage, formatStepName, isCardBusy } from "./card-status";
 
 function formatOptionalSeconds(value: number | null): string {
   if (value === null) {
@@ -62,7 +62,6 @@ function describeTrimDecision(decision: TrimDecision | null): string {
 function getGenerateDisabledReason(params: {
   selectedCard: MumblerCard | null;
   hasGeminiKey: boolean;
-  selectedCardIsBusy: boolean;
 }): string | null {
   if (params.selectedCard === null) {
     return null;
@@ -70,10 +69,6 @@ function getGenerateDisabledReason(params: {
 
   if (!params.hasGeminiKey) {
     return "Gemini API key not configured.";
-  }
-
-  if (params.selectedCardIsBusy) {
-    return formatCardStatusMessage(params.selectedCard);
   }
 
   return null;
@@ -418,7 +413,6 @@ export function App(): ReactElement {
   const generateDisabledReason = getGenerateDisabledReason({
     selectedCard,
     hasGeminiKey: snapshot?.settingsSummary?.hasGeminiApiKey ?? false,
-    selectedCardIsBusy,
   });
   const saveDisabledReason = getSaveDisabledReason({
     selectedCard,
@@ -1076,27 +1070,25 @@ export function App(): ReactElement {
                     type="button"
                     className="button button--primary"
                     onClick={() => executeGenerate(selectedCard.id, "slug")}
-                    disabled={generateDisabledReason !== null}
+                    disabled={selectedCardIsBusy || generateDisabledReason !== null}
                   >
-                    {selectedCardIsBusy
-                      ? formatActiveStepMessage(selectedCard.activeStep)
-                      : "Generate All"}
+                    Generate All
                   </button>
                   <button
                     type="button"
                     className="button button--ghost"
                     onClick={() => handleCancelCardProcessing(selectedCard.id)}
-                    disabled={!selectedCardIsBusy || selectedCard.cancelRequestedAtUtc !== null}
+                    disabled={!selectedCardIsBusy}
                   >
-                    {selectedCard.cancelRequestedAtUtc !== null ? "Cancelling..." : "Cancel"}
+                    Cancel
                   </button>
                 </div>
-                {generateDisabledReason && !selectedCardIsBusy ? (
+                {generateDisabledReason ? (
                   <p className="panel__note">{generateDisabledReason}</p>
                 ) : null}
-                {selectedCard.cancelRequestedAtUtc !== null && selectedCardIsBusy ? (
-                  <p className="panel__note">{formatCardStatusMessage(selectedCard)}</p>
-                ) : null}
+                <p className={`panel__note status-text status-text--${statusModifier(selectedCard.status)}`}>
+                  {formatCardStatusMessage(selectedCard)}
+                </p>
                 <div className="result-grid">
                   <label className="field field--tall">
                     <span className="field-label-with-action">

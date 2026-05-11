@@ -201,7 +201,6 @@ export interface MumblerCard {
   activeStep: CardProcessingStep;
   queuedMode: "generate" | null;
   queuedAtUtc: number | null;
-  cancelRequestedAtUtc: number | null;
   lastError: CardError | null;
   createdAtUtc: number;
   updatedAtUtc: number;

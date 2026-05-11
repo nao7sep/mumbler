@@ -392,7 +392,6 @@ export class ApplicationRuntime {
         activeStep: null,
         queuedMode: null,
         queuedAtUtc: null,
-        cancelRequestedAtUtc: null,
         lastError: null,
         createdAtUtc: Date.now(),
         updatedAtUtc: Date.now(),
@@ -616,7 +615,6 @@ export class ApplicationRuntime {
     card.activeStep = null;
     card.queuedMode = null;
     card.queuedAtUtc = null;
-    card.cancelRequestedAtUtc = null;
     card.lastError = null;
     card.updatedAtUtc = Date.now();
     await this.startOrEnqueueCard(cardId, "generate", startStep);
@@ -630,49 +628,56 @@ export class ApplicationRuntime {
 
   async cancelCardProcessing(cardId: string): Promise<AppSnapshot> {
     this.ensureReady();
-    const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
+    const state = this.runtime.state!;
+    const cardIndex = state.cards.findIndex((entry) => entry.id === cardId);
 
-    if (card === undefined) {
+    if (cardIndex === -1) {
       throw new Error("Card to cancel does not exist.");
     }
 
-    if (card.status === "Queued") {
-      const failedStep = "transcription";
-      card.status = "Cancelled";
-      card.activeStep = null;
-      card.queuedMode = null;
-      card.queuedAtUtc = null;
-      card.cancelRequestedAtUtc = null;
-      card.lastError = {
-        message: "AI work cancelled by user.",
-        occurredAtUtc: Date.now(),
-        failedStep,
-      };
-      card.updatedAtUtc = Date.now();
-      await this.persistState();
-      await this.runtime.logger!.info("pipeline.cancel-queued", "Cancelled queued card.", {
-        cardId,
-        failedStep,
-      });
-      return this.getSnapshot();
-    }
+    const oldCard = state.cards[cardIndex];
+    const isQueued = oldCard.status === "Queued";
+    const isActive = this.activeCardAbortControllers.has(cardId);
 
-    const controller = this.activeCardAbortControllers.get(cardId);
-    if (controller === undefined) {
+    if (!isQueued && !isActive) {
       throw new Error("This card is not being processed.");
     }
 
-    if (card.cancelRequestedAtUtc !== null) {
-      return this.getSnapshot();
-    }
+    const failedStep = oldCard.activeStep ?? "transcription";
 
-    card.cancelRequestedAtUtc = Date.now();
-    card.updatedAtUtc = Date.now();
+    // Immediately replace the card with a cancelled copy.
+    // The orphaned pipeline still holds a reference to the old card object,
+    // so any further writes it makes are invisible to the live state.
+    state.cards[cardIndex] = {
+      ...oldCard,
+      status: "Cancelled",
+      activeStep: null,
+      queuedMode: null,
+      queuedAtUtc: null,
+      lastError: {
+        message: "AI work cancelled by user.",
+        occurredAtUtc: Date.now(),
+        failedStep,
+      },
+      updatedAtUtc: Date.now(),
+    };
+
+    // Release resources immediately so the user can generate again at once.
+    const controller = this.activeCardAbortControllers.get(cardId);
+    this.activeCardAbortControllers.delete(cardId);
+    this.activeCardOperations.delete(cardId);
+
     await this.persistState();
-    controller.abort();
-    await this.runtime.logger!.info("pipeline.cancel-requested", "Requested card pipeline cancellation.", {
+
+    // Best-effort abort of the orphaned pipeline and queue drain (fire and forget).
+    if (controller !== undefined) {
+      controller.abort();
+    }
+    void this.tryStartNextQueuedCards();
+
+    await this.runtime.logger!.info("pipeline.cancel-immediate", "Immediately detached and cancelled card pipeline.", {
       cardId,
-      activeStep: card.activeStep,
+      failedStep,
     });
     return this.getSnapshot();
   }
@@ -708,7 +713,6 @@ export class ApplicationRuntime {
       card.activeStep = startStep;
       card.queuedMode = null;
       card.queuedAtUtc = null;
-      card.cancelRequestedAtUtc = null;
       card.updatedAtUtc = Date.now();
       await this.persistState();
       this.spawnCardPipeline(cardId, startStep, mode);
@@ -719,7 +723,6 @@ export class ApplicationRuntime {
     card.queuedMode = mode;
     card.queuedAtUtc = Date.now();
     card.activeStep = null;
-    card.cancelRequestedAtUtc = null;
     card.updatedAtUtc = Date.now();
     await this.persistState();
     await this.runtime.logger!.info(
@@ -754,7 +757,6 @@ export class ApplicationRuntime {
 
     void executeCardPipeline(cardId, startStep, mode, ctx)
       .catch(async (error: unknown) => {
-        this.activeCardOperations.delete(cardId);
         await this.runtime.logger?.error(
           "pipeline.unhandled",
           "Unhandled pipeline error.",
@@ -763,21 +765,21 @@ export class ApplicationRuntime {
         );
       })
       .finally(() => {
-        void this.finalizeCardPipeline(cardId);
+        void this.finalizeCardPipeline(cardId, controller);
       });
   }
 
-  private async finalizeCardPipeline(cardId: string): Promise<void> {
+  private async finalizeCardPipeline(cardId: string, ownController: AbortController): Promise<void> {
     try {
-      this.activeCardAbortControllers.delete(cardId);
-      this.activeCardOperations.delete(cardId);
-      const card = this.runtime.state?.cards.find((entry) => entry.id === cardId);
-      if (card !== undefined && card.cancelRequestedAtUtc !== null) {
-        card.cancelRequestedAtUtc = null;
-        card.updatedAtUtc = Date.now();
-        await this.persistState();
+      // Only clean up if this is still the active pipeline for this card.
+      // If the card was cancelled via the detach path, the controller was already
+      // removed from the map, so this check prevents an orphaned pipeline from
+      // clobbering a freshly-started replacement pipeline.
+      if (this.activeCardAbortControllers.get(cardId) === ownController) {
+        this.activeCardAbortControllers.delete(cardId);
+        this.activeCardOperations.delete(cardId);
+        await this.tryStartNextQueuedCards();
       }
-      await this.tryStartNextQueuedCards();
     } catch (error: unknown) {
       await this.runtime.logger?.error(
         "pipeline.finalize-failed",
@@ -1167,7 +1169,6 @@ export class ApplicationRuntime {
       card.status === "Queued" ||
       card.status === "Transcribing" ||
       card.status === "Generating Metadata" ||
-      card.cancelRequestedAtUtc !== null ||
       this.activeCardOperations.has(card.id) ||
       this.activeCardAbortControllers.has(card.id)
     ) {
@@ -1335,7 +1336,6 @@ function createDuplicatedCard(source: MumblerCard): MumblerCard {
     activeStep: null,
     queuedMode: null,
     queuedAtUtc: null,
-    cancelRequestedAtUtc: null,
     lastError: null,
     createdAtUtc: Date.now(),
     updatedAtUtc: Date.now(),

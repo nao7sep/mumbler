@@ -63,7 +63,6 @@ export async function executeCardPipeline(
 
   card.queuedMode = null;
   card.queuedAtUtc = null;
-  card.cancelRequestedAtUtc = null;
 
   try {
     throwIfCancelled(ctx.signal);
@@ -265,7 +264,6 @@ export async function executeCardPipeline(
       };
       card.status = "Ready to Save";
       card.activeStep = null;
-      card.cancelRequestedAtUtc = null;
       card.lastError = null;
       card.updatedAtUtc = Date.now();
 
@@ -282,9 +280,6 @@ export async function executeCardPipeline(
     card.activeStep = null;
     card.queuedMode = null;
     card.queuedAtUtc = null;
-    if (!wasCancelled) {
-      card.cancelRequestedAtUtc = null;
-    }
     card.lastError = {
       message: getCardErrorMessage(error),
       occurredAtUtc: Date.now(),
@@ -396,7 +391,6 @@ export function clearCardResults(card: MumblerCard): void {
   card.activeStep = null;
   card.queuedMode = null;
   card.queuedAtUtc = null;
-  card.cancelRequestedAtUtc = null;
   card.lastError = null;
   card.updatedAtUtc = Date.now();
 }
