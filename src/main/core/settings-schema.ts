@@ -138,11 +138,14 @@ function normalizeCardError(error: MumblerCard["lastError"]): MumblerCard["lastE
 function normalizeCardRecord(card: MumblerCard): MumblerCard {
   const createdAtUtc = normalizeUtcMs(card.createdAtUtc);
   const confirmedUtc = normalizeUtcMs(card.timestamps.confirmedUtc);
-  const queuedMode =
-    card.queuedMode === "transcribe" || card.queuedMode === "retry" ? card.queuedMode : null;
+  const queuedMode = card.queuedMode === "generate" ? card.queuedMode : null;
   const queuedAtUtc =
     queuedMode !== null && typeof card.queuedAtUtc === "number"
       ? normalizeUtcMs(card.queuedAtUtc)
+      : null;
+  const cancelRequestedAtUtc =
+    typeof card.cancelRequestedAtUtc === "number"
+      ? normalizeUtcMs(card.cancelRequestedAtUtc)
       : null;
 
   return {
@@ -167,6 +170,7 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
     },
     queuedMode,
     queuedAtUtc,
+    cancelRequestedAtUtc,
     lastError: normalizeCardError(card.lastError),
     createdAtUtc,
     updatedAtUtc: normalizeUtcMs(card.updatedAtUtc, createdAtUtc),
@@ -202,8 +206,9 @@ function recoverInterruptedCards(
       ...card,
       status: "Error" as const,
       activeStep: null,
+      cancelRequestedAtUtc: null,
       lastError: {
-        message: "Interrupted — retry to resume",
+        message: "Interrupted — generate again to resume",
         occurredAtUtc: Date.now(),
         failedStep: "startup-recovery" as const,
       },

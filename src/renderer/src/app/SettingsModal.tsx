@@ -369,7 +369,7 @@ export function SettingsModal({
                     onChange={(event) => onChange({ ...draft, transcriptionTimeoutMs: Number.parseInt(event.target.value, 10) })}
                   />
                 </label>
-                <p className="field-hint">Time allowed per transcription request.</p>
+                <p className="field-hint">Time allowed per audio transcription request. Gemini docs support up to 9.5 hours of audio in one prompt, so this default is intentionally much higher than text-only steps.</p>
               </div>
               <div>
                 <label className="field">

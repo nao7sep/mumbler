@@ -17,6 +17,7 @@ import {
   type AppPaths,
   type AppSnapshot,
   type FailedImport,
+  type GenerateTarget,
   type ImportOperationResult,
   type ImportSource,
   type MumblerCard,
@@ -24,7 +25,6 @@ import {
   type MumblerState,
   type PendingImportReviewItem,
   type RendererErrorReport,
-  type RegenerateTarget,
   type SaveCardResult,
   type SaveConflictResolution,
   type SettingsDraft,
@@ -62,8 +62,7 @@ import { type AppLogger, createLogger, pruneOldLogs, serializeError } from "./lo
 import {
   clearCardResultsFromStep,
   executeCardPipeline,
-  resolvePipelineStartStep,
-  resolveRegenerateStartStep,
+  resolveGenerateStartStep,
   type CardPipelineContext,
   type PipelineMode,
   type PipelineStartStep,
@@ -393,6 +392,7 @@ export class ApplicationRuntime {
         activeStep: null,
         queuedMode: null,
         queuedAtUtc: null,
+        cancelRequestedAtUtc: null,
         lastError: null,
         createdAtUtc: Date.now(),
         updatedAtUtc: Date.now(),
@@ -596,15 +596,35 @@ export class ApplicationRuntime {
     return `mumbler-asset://local?path=${encodeURIComponent(card.sourceFilePath)}`;
   }
 
-  async transcribeCard(cardId: string): Promise<AppSnapshot> {
+  async generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
     this.ensureReady();
-    await this.startOrEnqueueCard(cardId, "transcribe");
-    return this.getSnapshot();
-  }
+    const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
 
-  async retryCard(cardId: string): Promise<AppSnapshot> {
-    this.ensureReady();
-    await this.startOrEnqueueCard(cardId, "retry");
+    if (card === undefined) {
+      throw new Error("Card to generate does not exist.");
+    }
+
+    this.assertCardCanStartPipeline(card);
+
+    if (decodeGeminiApiKey(this.runtime.settings!.geminiApiKeyObfuscated).length === 0) {
+      throw new Error("Gemini API key is not configured.");
+    }
+
+    const startStep = resolveGenerateStartStep(card, target);
+    clearCardResultsFromStep(card, startStep);
+    card.status = "Imported";
+    card.activeStep = null;
+    card.queuedMode = null;
+    card.queuedAtUtc = null;
+    card.cancelRequestedAtUtc = null;
+    card.lastError = null;
+    card.updatedAtUtc = Date.now();
+    await this.startOrEnqueueCard(cardId, "generate", startStep);
+    await this.runtime.logger!.info("pipeline.generate", "Started dependency-aware generation.", {
+      cardId,
+      requestedStep: target,
+      startStep,
+    });
     return this.getSnapshot();
   }
 
@@ -617,12 +637,12 @@ export class ApplicationRuntime {
     }
 
     if (card.status === "Queued") {
-      const failedStep =
-        card.queuedMode === null ? "transcription" : resolvePipelineStartStep(card, card.queuedMode);
+      const failedStep = "transcription";
       card.status = "Cancelled";
       card.activeStep = null;
       card.queuedMode = null;
       card.queuedAtUtc = null;
+      card.cancelRequestedAtUtc = null;
       card.lastError = {
         message: "AI work cancelled by user.",
         occurredAtUtc: Date.now(),
@@ -642,44 +662,17 @@ export class ApplicationRuntime {
       throw new Error("This card is not being processed.");
     }
 
+    if (card.cancelRequestedAtUtc !== null) {
+      return this.getSnapshot();
+    }
+
+    card.cancelRequestedAtUtc = Date.now();
+    card.updatedAtUtc = Date.now();
+    await this.persistState();
     controller.abort();
     await this.runtime.logger!.info("pipeline.cancel-requested", "Requested card pipeline cancellation.", {
       cardId,
       activeStep: card.activeStep,
-    });
-    return this.getSnapshot();
-  }
-
-  async regenerateCardStep(cardId: string, target: RegenerateTarget): Promise<AppSnapshot> {
-    this.ensureReady();
-    const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
-
-    if (card === undefined) {
-      throw new Error("Card to regenerate does not exist.");
-    }
-
-    this.assertCardCanStartPipeline(card);
-
-    if (decodeGeminiApiKey(this.runtime.settings!.geminiApiKeyObfuscated).length === 0) {
-      throw new Error("Gemini API key is not configured.");
-    }
-
-    const startStep = resolveRegenerateStartStep(card, target);
-    clearCardResultsFromStep(card, startStep);
-    card.status = "Imported";
-    card.activeStep = null;
-    card.lastError = null;
-    card.updatedAtUtc = Date.now();
-    await this.persistState();
-    await this.startOrEnqueueCard(
-      cardId,
-      startStep === "transcription" ? "transcribe" : "regenerate",
-      startStep,
-    );
-    await this.runtime.logger!.info("pipeline.regenerate", "Started dependency-aware regeneration.", {
-      cardId,
-      requestedStep: target,
-      startStep,
     });
     return this.getSnapshot();
   }
@@ -703,7 +696,7 @@ export class ApplicationRuntime {
       throw new Error("Gemini API key is not configured.");
     }
 
-    const startStep = requestedStartStep ?? resolvePipelineStartStep(card, mode === "regenerate" ? "transcribe" : mode);
+    const startStep = requestedStartStep ?? "transcription";
     const needsTranscriptionSlot = startStep === "transcription";
     const slotAvailable = this.activeCardOperations.size < settings.concurrencyLimit;
 
@@ -711,18 +704,22 @@ export class ApplicationRuntime {
       if (needsTranscriptionSlot) {
         this.activeCardOperations.add(cardId);
       }
+      card.status = startStep === "transcription" ? "Transcribing" : "Generating Metadata";
+      card.activeStep = startStep;
+      card.queuedMode = null;
+      card.queuedAtUtc = null;
+      card.cancelRequestedAtUtc = null;
+      card.updatedAtUtc = Date.now();
+      await this.persistState();
       this.spawnCardPipeline(cardId, startStep, mode);
       return;
-    }
-
-    if (mode === "regenerate") {
-      throw new Error("Regeneration from transcription could not be queued.");
     }
 
     card.status = "Queued";
     card.queuedMode = mode;
     card.queuedAtUtc = Date.now();
     card.activeStep = null;
+    card.cancelRequestedAtUtc = null;
     card.updatedAtUtc = Date.now();
     await this.persistState();
     await this.runtime.logger!.info(
@@ -766,10 +763,29 @@ export class ApplicationRuntime {
         );
       })
       .finally(() => {
-        this.activeCardAbortControllers.delete(cardId);
-        this.activeCardOperations.delete(cardId);
-        void this.tryStartNextQueuedCards();
+        void this.finalizeCardPipeline(cardId);
       });
+  }
+
+  private async finalizeCardPipeline(cardId: string): Promise<void> {
+    try {
+      this.activeCardAbortControllers.delete(cardId);
+      this.activeCardOperations.delete(cardId);
+      const card = this.runtime.state?.cards.find((entry) => entry.id === cardId);
+      if (card !== undefined && card.cancelRequestedAtUtc !== null) {
+        card.cancelRequestedAtUtc = null;
+        card.updatedAtUtc = Date.now();
+        await this.persistState();
+      }
+      await this.tryStartNextQueuedCards();
+    } catch (error: unknown) {
+      await this.runtime.logger?.error(
+        "pipeline.finalize-failed",
+        "Failed to finalize card pipeline state.",
+        error,
+        { cardId },
+      );
+    }
   }
 
   private async tryStartNextQueuedCards(): Promise<void> {
@@ -795,7 +811,7 @@ export class ApplicationRuntime {
       }
 
       this.activeCardOperations.add(next.id);
-      this.spawnCardPipeline(next.id, resolvePipelineStartStep(next, next.queuedMode), next.queuedMode);
+      this.spawnCardPipeline(next.id, "transcription", next.queuedMode);
     }
   }
 
@@ -1151,6 +1167,7 @@ export class ApplicationRuntime {
       card.status === "Queued" ||
       card.status === "Transcribing" ||
       card.status === "Generating Metadata" ||
+      card.cancelRequestedAtUtc !== null ||
       this.activeCardOperations.has(card.id) ||
       this.activeCardAbortControllers.has(card.id)
     ) {
@@ -1318,6 +1335,7 @@ function createDuplicatedCard(source: MumblerCard): MumblerCard {
     activeStep: null,
     queuedMode: null,
     queuedAtUtc: null,
+    cancelRequestedAtUtc: null,
     lastError: null,
     createdAtUtc: Date.now(),
     updatedAtUtc: Date.now(),

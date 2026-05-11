@@ -1,13 +1,13 @@
 # Mumbler
 
-A desktop app for transcribing audio recordings using Google Gemini AI. Import recordings, trim them, transcribe them, generate structured transcription, title, and slug metadata, then save audio with JSON and Markdown output files.
+A desktop app for generating transcription and metadata from audio recordings using Google Gemini AI. Import recordings, trim them, generate transcription, structured transcription, title, and slug metadata, then save audio with JSON and Markdown output files.
 
 ## Features
 
-- **Waveform editor** — visualize audio with WaveSurfer.js; set front/back trim markers to cut unwanted silence before transcription
-- **AI pipeline** — sends audio to Google Gemini, then generates a transcript, structured transcription, title, and URL slug as separate dependent steps
+- **Waveform editor** — visualize audio with WaveSurfer.js; set front/back trim markers to cut unwanted silence before generation
+- **AI pipeline** — sends audio to Google Gemini, then generates transcription, structured transcription, title, and URL slug as separate dependent steps
 - **Queue** — import multiple files and process transcriptions concurrently (configurable limit); extra cards beyond the limit auto-queue and start as slots free
-- **Cancellation and regeneration** — cancel stuck AI work, retry failed/cancelled steps, or regenerate an output and its dependent downstream outputs
+- **Cancellation and generation** — cancel stuck AI work or generate any step on demand; generating a step also regenerates the dependent downstream outputs it invalidates
 - **Timestamp parsing** — extracts recording datetime from filenames using configurable regex patterns; falls back to file modification time
 - **Atomic save** — writes audio + JSON + Markdown atomically (temp → rename) with rollback on failure
 - **Optional source backup and deletion** — can copy the original to a backup folder and/or permanently delete it after confirming an import (backup is on by default)
@@ -33,8 +33,8 @@ On first launch, open Settings and enter your Gemini API key. The output directo
 1. **Import** — drag audio files onto the window or use the import dialog
 2. **Review** — the import review screen shows filename-parsed timestamps; adjust if needed and confirm. Originals are copied to the backup folder by default; you can also choose to permanently delete them from their source location.
 3. **Trim** — drag the front/back markers on the waveform to cut unwanted sections
-4. **Transcribe** — click the transcribe button; the app sends the (trimmed) audio to Gemini and runs transcription, structured transcription, title generation, and slug generation
-5. **Repair if needed** — cancel stuck AI work, retry failed/cancelled steps, or regenerate an existing transcript/structured transcription/title/slug; regenerating a step also regenerates dependent later steps
+4. **Generate** — click Generate All; the app sends the (trimmed) audio to Gemini and runs transcription, structured transcription, title generation, and slug generation
+5. **Repair if needed** — cancel stuck AI work or use Generate beside any field; generation automatically ensures prerequisites and regenerates dependent later steps when needed
 6. **Save** — save the card to the output directory; produces timestamp-prefixed audio, JSON, and Markdown files
 
 ### Keyboard Shortcuts
@@ -62,7 +62,7 @@ On first launch, open Settings and enter your Gemini API key. The output directo
 | Slug Prompt | Custom prompt for slug generation |
 | Preview Snippet | Seconds of audio sent for waveform preview |
 | Concurrency Limit | Max audio transcription jobs processed simultaneously |
-| Transcription Timeout | Timeout for each audio transcription request |
+| Transcription Timeout | Timeout for each audio transcription request; the default is intentionally higher because Gemini docs support up to 9.5 hours of audio in one prompt |
 | Text-only AI Timeout | Timeout for each structured transcription, title, or slug request |
 | Retry Policy | Max retries, delay, and jitter for retryable Gemini/network failures |
 

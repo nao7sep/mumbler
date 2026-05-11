@@ -35,7 +35,7 @@ export interface CardPipelineContext {
   onTranscriptionSlotReleased: () => Promise<void>;
 }
 
-export type PipelineMode = "transcribe" | "retry" | "regenerate";
+export type PipelineMode = "generate";
 export type PipelineStartStep = Exclude<CardProcessingStep, null>;
 
 export async function executeCardPipeline(
@@ -63,6 +63,7 @@ export async function executeCardPipeline(
 
   card.queuedMode = null;
   card.queuedAtUtc = null;
+  card.cancelRequestedAtUtc = null;
 
   try {
     throwIfCancelled(ctx.signal);
@@ -264,6 +265,7 @@ export async function executeCardPipeline(
       };
       card.status = "Ready to Save";
       card.activeStep = null;
+      card.cancelRequestedAtUtc = null;
       card.lastError = null;
       card.updatedAtUtc = Date.now();
 
@@ -280,6 +282,9 @@ export async function executeCardPipeline(
     card.activeStep = null;
     card.queuedMode = null;
     card.queuedAtUtc = null;
+    if (!wasCancelled) {
+      card.cancelRequestedAtUtc = null;
+    }
     card.lastError = {
       message: getCardErrorMessage(error),
       occurredAtUtc: Date.now(),
@@ -391,6 +396,7 @@ export function clearCardResults(card: MumblerCard): void {
   card.activeStep = null;
   card.queuedMode = null;
   card.queuedAtUtc = null;
+  card.cancelRequestedAtUtc = null;
   card.lastError = null;
   card.updatedAtUtc = Date.now();
 }
@@ -418,34 +424,7 @@ export function clearCardResultsFromStep(
   card.ai.slug = null;
 }
 
-export function clearAllCardResults(card: MumblerCard): void {
-  card.transcription = { text: null };
-  card.metadata = { structured: null, title: null, slug: null };
-  card.ai = { transcription: null, structured: null, title: null, slug: null };
-}
-
-export function resolvePipelineStartStep(
-  card: MumblerCard,
-  mode: "transcribe" | "retry",
-): PipelineStartStep {
-  if (mode === "transcribe") {
-    return "transcription";
-  }
-
-  const failedStep = card.lastError?.failedStep;
-  if (
-    failedStep === "transcription" ||
-    failedStep === "structured" ||
-    failedStep === "title" ||
-    failedStep === "slug"
-  ) {
-    return resolveEarliestRequiredStep(card, failedStep);
-  }
-
-  return "transcription";
-}
-
-export function resolveRegenerateStartStep(
+export function resolveGenerateStartStep(
   card: MumblerCard,
   target: PipelineStartStep,
 ): PipelineStartStep {

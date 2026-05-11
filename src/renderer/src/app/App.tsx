@@ -8,9 +8,9 @@ import {
 
 import type {
   AppSnapshot,
+  GenerateTarget,
   MumblerCard,
   PendingImportReviewItem,
-  RegenerateTarget,
   SaveCardResult,
   TrimDecision,
 } from "@shared/app-shell";
@@ -59,7 +59,7 @@ function describeTrimDecision(decision: TrimDecision | null): string {
   return "Re-encode required.";
 }
 
-function getTranscribeDisabledReason(params: {
+function getGenerateDisabledReason(params: {
   selectedCard: MumblerCard | null;
   hasGeminiKey: boolean;
   selectedCardIsBusy: boolean;
@@ -106,7 +106,7 @@ function getRemoveConfirmBody(card: MumblerCard): string {
     (card.metadata.slug ?? "").trim().length > 0;
 
   if (hasAiWork) {
-    return "This recording has been processed by AI. Removing it will permanently discard the transcript and generated metadata. Working audio will be permanently deleted.";
+    return "This recording has been processed by AI. Removing it will permanently discard the transcription and generated metadata. Working audio will be permanently deleted.";
   }
 
   const hasTrimWork =
@@ -119,14 +119,14 @@ function getRemoveConfirmBody(card: MumblerCard): string {
   return "Working audio will be permanently deleted. Saved output is not affected.";
 }
 
-const resultLabels: Record<RegenerateTarget, string> = {
-  transcription: "Transcript",
+const resultLabels: Record<GenerateTarget, string> = {
+  transcription: "Transcription",
   structured: "Structured transcription",
   title: "Title",
   slug: "Slug",
 };
 
-function getResultValue(card: MumblerCard, target: RegenerateTarget): string | null {
+function getResultValue(card: MumblerCard, target: GenerateTarget): string | null {
   switch (target) {
     case "transcription":
       return card.transcription.text;
@@ -139,7 +139,7 @@ function getResultValue(card: MumblerCard, target: RegenerateTarget): string | n
   }
 }
 
-function getInvalidatedRegenerateTargets(target: RegenerateTarget): RegenerateTarget[] {
+function getInvalidatedGenerateTargets(target: GenerateTarget): GenerateTarget[] {
   switch (target) {
     case "transcription":
       return ["transcription", "structured", "title", "slug"];
@@ -152,12 +152,15 @@ function getInvalidatedRegenerateTargets(target: RegenerateTarget): RegenerateTa
   }
 }
 
-function getRegenerateConfirmBody(card: MumblerCard, target: RegenerateTarget): string {
-  const invalidated = getInvalidatedRegenerateTargets(target)
+function getGenerateConfirmBody(card: MumblerCard, target: GenerateTarget): string | null {
+  const invalidated = getInvalidatedGenerateTargets(target)
     .filter((entry) => (getResultValue(card, entry) ?? "").trim().length > 0)
     .map((entry) => resultLabels[entry]);
+  if (invalidated.length === 0) {
+    return null;
+  }
   const labelText = invalidated.join(", ");
-  return `Regenerating ${resultLabels[target].toLowerCase()} will replace existing data for: ${labelText}.`;
+  return `Generating ${resultLabels[target].toLowerCase()} will replace existing data for: ${labelText}.`;
 }
 
 async function copyTextToClipboard(value: string): Promise<void> {
@@ -216,9 +219,9 @@ export function App(): ReactElement {
     result: Extract<SaveCardResult, { kind: "conflict" }>;
   } | null>(null);
   const [pendingRemoveCardId, setPendingRemoveCardId] = useState<string | null>(null);
-  const [pendingRegenerate, setPendingRegenerate] = useState<{
+  const [pendingGenerate, setPendingGenerate] = useState<{
     cardId: string;
-    target: RegenerateTarget;
+    target: GenerateTarget;
     body: string;
   } | null>(null);
   const [isResettingState, setIsResettingState] = useState(false);
@@ -299,7 +302,7 @@ export function App(): ReactElement {
           setSnapshot(data);
           const recovered = data.queueSummary?.recoveredInterruptedCards ?? 0;
           if (recovered > 0) {
-            addPersistent(`${recovered} recording${recovered === 1 ? "" : "s"} recovered from an interrupted session — retry to resume.`);
+            addPersistent(`${recovered} recording${recovered === 1 ? "" : "s"} recovered from an interrupted session — generate again to resume.`);
           }
         }
       })
@@ -412,7 +415,7 @@ export function App(): ReactElement {
   const selectedCardIsBusy =
     selectedCard !== null &&
     (activePipelineCards.includes(selectedCard.id) || isCardBusy(selectedCard));
-  const transcribeDisabledReason = getTranscribeDisabledReason({
+  const generateDisabledReason = getGenerateDisabledReason({
     selectedCard,
     hasGeminiKey: snapshot?.settingsSummary?.hasGeminiApiKey ?? false,
     selectedCardIsBusy,
@@ -427,7 +430,7 @@ export function App(): ReactElement {
     showReviewDiscardConfirm ||
     pendingSaveConflict !== null ||
     pendingRemoveCardId !== null ||
-    pendingRegenerate !== null ||
+    pendingGenerate !== null ||
     showAbout ||
     showShortcutsHelp ||
     snapshot?.startupDiagnostic != null ||
@@ -472,30 +475,15 @@ export function App(): ReactElement {
     setActivePipelineCards((current) => current.filter((value) => value !== cardId));
   }
 
-  function handleTranscribeCard(cardId: string): void {
+  function executeGenerate(cardId: string, target: GenerateTarget): void {
     beginCardOperation(cardId);
     void window.mumbler
-      .transcribeCard(cardId)
+      .generateCardStep(cardId, target)
       .then((nextSnapshot) => {
         setSnapshot(nextSnapshot);
       })
       .catch((error: unknown) => {
-        addPersistent(error instanceof Error ? error.message : "Failed to transcribe card.", "error");
-      })
-      .finally(() => {
-        endCardOperation(cardId);
-      });
-  }
-
-  function handleRetryCard(cardId: string): void {
-    beginCardOperation(cardId);
-    void window.mumbler
-      .retryCard(cardId)
-      .then((nextSnapshot) => {
-        setSnapshot(nextSnapshot);
-      })
-      .catch((error: unknown) => {
-        addPersistent(error instanceof Error ? error.message : "Failed to retry card.", "error");
+        addPersistent(error instanceof Error ? error.message : "Failed to generate AI output.", "error");
       })
       .finally(() => {
         endCardOperation(cardId);
@@ -513,37 +501,28 @@ export function App(): ReactElement {
       });
   }
 
-  function handleRequestRegenerate(card: MumblerCard, target: RegenerateTarget): void {
-    if ((getResultValue(card, target) ?? "").trim().length === 0) {
+  function handleRequestGenerate(card: MumblerCard, target: GenerateTarget): void {
+    const body = getGenerateConfirmBody(card, target);
+    if (body === null) {
+      executeGenerate(card.id, target);
       return;
     }
 
-    setPendingRegenerate({
+    setPendingGenerate({
       cardId: card.id,
       target,
-      body: getRegenerateConfirmBody(card, target),
+      body,
     });
   }
 
-  function handleConfirmRegenerate(): void {
-    const pending = pendingRegenerate;
+  function handleConfirmGenerate(): void {
+    const pending = pendingGenerate;
     if (pending === null) {
       return;
     }
 
-    setPendingRegenerate(null);
-    beginCardOperation(pending.cardId);
-    void window.mumbler
-      .regenerateCardStep(pending.cardId, pending.target)
-      .then((nextSnapshot) => {
-        setSnapshot(nextSnapshot);
-      })
-      .catch((error: unknown) => {
-        addPersistent(error instanceof Error ? error.message : "Failed to regenerate AI output.", "error");
-      })
-      .finally(() => {
-        endCardOperation(pending.cardId);
-      });
+    setPendingGenerate(null);
+    executeGenerate(pending.cardId, pending.target);
   }
 
   async function handleChooseOutputDirectory(): Promise<void> {
@@ -635,7 +614,7 @@ export function App(): ReactElement {
         return;
       case "transcribe-selected":
         if (snapshot?.settingsSummary?.hasGeminiApiKey && !selectedCardIsBusy) {
-          handleTranscribeCard(selectedCard.id);
+          executeGenerate(selectedCard.id, "slug");
         }
         return;
       case "save-selected":
@@ -676,8 +655,8 @@ export function App(): ReactElement {
           setShowShortcutsHelp(false);
         } else if (pendingRemoveCardId !== null) {
           setPendingRemoveCardId(null);
-        } else if (pendingRegenerate !== null) {
-          setPendingRegenerate(null);
+        } else if (pendingGenerate !== null) {
+          setPendingGenerate(null);
         } else if (pendingSaveConflict !== null) {
           setPendingSaveConflict(null);
         } else if (importFlow.pendingReviewDrafts.length > 0) {
@@ -706,7 +685,7 @@ export function App(): ReactElement {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsModal.settingsDraft, settingsModal.isSavingSettings, settingsModal.setSettingsDraft, settingsModal.setSettingsErrorMessage, pendingRemoveCardId, pendingRegenerate, pendingSaveConflict, importFlow.pendingReviewDrafts, importFlow.handleCancelPendingImports, showReviewDiscardConfirm]);
+  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsModal.settingsDraft, settingsModal.isSavingSettings, settingsModal.setSettingsDraft, settingsModal.setSettingsErrorMessage, pendingRemoveCardId, pendingGenerate, pendingSaveConflict, importFlow.pendingReviewDrafts, importFlow.handleCancelPendingImports, showReviewDiscardConfirm]);
 
   async function handleSaveCard(
     cardId: string,
@@ -1096,58 +1075,48 @@ export function App(): ReactElement {
                   <button
                     type="button"
                     className="button button--primary"
-                    onClick={() => handleTranscribeCard(selectedCard.id)}
-                    disabled={transcribeDisabledReason !== null}
+                    onClick={() => executeGenerate(selectedCard.id, "slug")}
+                    disabled={generateDisabledReason !== null}
                   >
                     {selectedCardIsBusy
-                      ? (selectedCard.activeStep === null
-                          ? formatCardStatusMessage(selectedCard)
-                          : formatActiveStepMessage(selectedCard.activeStep))
-                      : "Transcribe"}
+                      ? formatActiveStepMessage(selectedCard.activeStep)
+                      : "Generate All"}
                   </button>
                   <button
                     type="button"
                     className="button button--ghost"
                     onClick={() => handleCancelCardProcessing(selectedCard.id)}
-                    disabled={!selectedCardIsBusy}
+                    disabled={!selectedCardIsBusy || selectedCard.cancelRequestedAtUtc !== null}
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="button button--ghost"
-                    onClick={() => handleRetryCard(selectedCard.id)}
-                    disabled={
-                      (selectedCard.status !== "Error" && selectedCard.status !== "Cancelled") ||
-                      selectedCardIsBusy
-                    }
-                  >
-                    Retry Failed Steps
+                    {selectedCard.cancelRequestedAtUtc !== null ? "Cancelling..." : "Cancel"}
                   </button>
                 </div>
-                {transcribeDisabledReason && !selectedCardIsBusy ? (
-                  <p className="panel__note">{transcribeDisabledReason}</p>
+                {generateDisabledReason && !selectedCardIsBusy ? (
+                  <p className="panel__note">{generateDisabledReason}</p>
+                ) : null}
+                {selectedCard.cancelRequestedAtUtc !== null && selectedCardIsBusy ? (
+                  <p className="panel__note">{formatCardStatusMessage(selectedCard)}</p>
                 ) : null}
                 <div className="result-grid">
                   <label className="field field--tall">
                     <span className="field-label-with-action">
-                      <span>Transcript</span>
+                      <span>Transcription</span>
                       <span className="field-actions">
                         <button
                           type="button"
                           className="button button--ghost button--compact"
-                          onClick={() => void handleCopyResult("Transcript", selectedCard.transcription.text)}
-                          disabled={(selectedCard.transcription.text ?? "").trim().length === 0}
+                          onClick={() => handleRequestGenerate(selectedCard, "transcription")}
+                          disabled={selectedCardIsBusy}
                         >
-                          Copy
+                          Generate
                         </button>
                         <button
                           type="button"
                           className="button button--ghost button--compact"
-                          onClick={() => handleRequestRegenerate(selectedCard, "transcription")}
-                          disabled={selectedCardIsBusy || (selectedCard.transcription.text ?? "").trim().length === 0}
+                          onClick={() => void handleCopyResult("Transcription", selectedCard.transcription.text)}
+                          disabled={(selectedCard.transcription.text ?? "").trim().length === 0}
                         >
-                          Regenerate
+                          Copy
                         </button>
                       </span>
                     </span>
@@ -1166,18 +1135,18 @@ export function App(): ReactElement {
                           <button
                             type="button"
                             className="button button--ghost button--compact"
-                            onClick={() => void handleCopyResult("Structured transcription", selectedCard.metadata.structured)}
-                            disabled={(selectedCard.metadata.structured ?? "").trim().length === 0}
+                            onClick={() => handleRequestGenerate(selectedCard, "structured")}
+                            disabled={selectedCardIsBusy}
                           >
-                            Copy
+                            Generate
                           </button>
                           <button
                             type="button"
                             className="button button--ghost button--compact"
-                            onClick={() => handleRequestRegenerate(selectedCard, "structured")}
-                            disabled={selectedCardIsBusy || (selectedCard.metadata.structured ?? "").trim().length === 0}
+                            onClick={() => void handleCopyResult("Structured transcription", selectedCard.metadata.structured)}
+                            disabled={(selectedCard.metadata.structured ?? "").trim().length === 0}
                           >
-                            Regenerate
+                            Copy
                           </button>
                         </span>
                       </span>
@@ -1195,18 +1164,18 @@ export function App(): ReactElement {
                           <button
                             type="button"
                             className="button button--ghost button--compact"
-                            onClick={() => void handleCopyResult("Title", selectedCard.metadata.title)}
-                            disabled={(selectedCard.metadata.title ?? "").trim().length === 0}
+                            onClick={() => handleRequestGenerate(selectedCard, "title")}
+                            disabled={selectedCardIsBusy}
                           >
-                            Copy
+                            Generate
                           </button>
                           <button
                             type="button"
                             className="button button--ghost button--compact"
-                            onClick={() => handleRequestRegenerate(selectedCard, "title")}
-                            disabled={selectedCardIsBusy || (selectedCard.metadata.title ?? "").trim().length === 0}
+                            onClick={() => void handleCopyResult("Title", selectedCard.metadata.title)}
+                            disabled={(selectedCard.metadata.title ?? "").trim().length === 0}
                           >
-                            Regenerate
+                            Copy
                           </button>
                         </span>
                       </span>
@@ -1224,18 +1193,18 @@ export function App(): ReactElement {
                           <button
                             type="button"
                             className="button button--ghost button--compact"
-                            onClick={() => void handleCopyResult("Slug", selectedCard.metadata.slug)}
-                            disabled={(selectedCard.metadata.slug ?? "").trim().length === 0}
+                            onClick={() => handleRequestGenerate(selectedCard, "slug")}
+                            disabled={selectedCardIsBusy}
                           >
-                            Copy
+                            Generate
                           </button>
                           <button
                             type="button"
                             className="button button--ghost button--compact"
-                            onClick={() => handleRequestRegenerate(selectedCard, "slug")}
-                            disabled={selectedCardIsBusy || (selectedCard.metadata.slug ?? "").trim().length === 0}
+                            onClick={() => void handleCopyResult("Slug", selectedCard.metadata.slug)}
+                            disabled={(selectedCard.metadata.slug ?? "").trim().length === 0}
                           >
-                            Regenerate
+                            Copy
                           </button>
                         </span>
                       </span>
@@ -1463,24 +1432,24 @@ export function App(): ReactElement {
         />
       ) : null}
 
-      {pendingRegenerate ? (
+      {pendingGenerate ? (
         <DecisionModal
-          title={`Regenerate ${resultLabels[pendingRegenerate.target]}?`}
-          body={pendingRegenerate.body}
+          title={`Generate ${resultLabels[pendingGenerate.target]}?`}
+          body={pendingGenerate.body}
           actions={[
             {
               label: "Cancel",
               onClick: () => {
-                setPendingRegenerate(null);
+                setPendingGenerate(null);
               },
             },
             {
-              label: "Regenerate",
+              label: "Generate",
               variant: "danger",
-              onClick: handleConfirmRegenerate,
+              onClick: handleConfirmGenerate,
             },
           ]}
-          onBackdropClick={() => setPendingRegenerate(null)}
+          onBackdropClick={() => setPendingGenerate(null)}
         />
       ) : null}
 

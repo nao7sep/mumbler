@@ -16,10 +16,8 @@ export const APP_SHELL_CHANNELS = {
   duplicateCard: "app-shell:duplicate-card",
   updateCardTrim: "app-shell:update-card-trim",
   getCardMediaSource: "app-shell:get-card-media-source",
-  transcribeCard: "app-shell:transcribe-card",
-  retryCard: "app-shell:retry-card",
+  generateCardStep: "app-shell:generate-card-step",
   cancelCardProcessing: "app-shell:cancel-card-processing",
-  regenerateCardStep: "app-shell:regenerate-card-step",
   pickOutputDirectory: "app-shell:pick-output-directory",
   openOutputDirectory: "app-shell:open-output-directory",
   saveSettingsDraft: "app-shell:save-settings-draft",
@@ -101,7 +99,7 @@ export interface MumblerSettings {
 
 export type ImportSource = "file-picker" | "drag-and-drop";
 export type CardProcessingStep = "transcription" | "structured" | "title" | "slug" | null;
-export type RegenerateTarget = Exclude<CardProcessingStep, null>;
+export type GenerateTarget = Exclude<CardProcessingStep, null>;
 export type TimestampParseStatus = "parsed" | "manual-required";
 
 export interface CardError {
@@ -201,8 +199,9 @@ export interface MumblerCard {
   };
   status: CardStatus;
   activeStep: CardProcessingStep;
-  queuedMode: "transcribe" | "retry" | null;
+  queuedMode: "generate" | null;
   queuedAtUtc: number | null;
+  cancelRequestedAtUtc: number | null;
   lastError: CardError | null;
   createdAtUtc: number;
   updatedAtUtc: number;
@@ -344,10 +343,8 @@ export interface MumblerShellApi {
   duplicateCard(cardId: string): Promise<AppSnapshot>;
   updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot>;
   getCardMediaSource(cardId: string): Promise<string>;
-  transcribeCard(cardId: string): Promise<AppSnapshot>;
-  retryCard(cardId: string): Promise<AppSnapshot>;
+  generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot>;
   cancelCardProcessing(cardId: string): Promise<AppSnapshot>;
-  regenerateCardStep(cardId: string, target: RegenerateTarget): Promise<AppSnapshot>;
   pickOutputDirectory(): Promise<string | null>;
   openOutputDirectory(): Promise<void>;
   saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot>;

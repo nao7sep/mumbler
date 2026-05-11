@@ -3,8 +3,8 @@ import { BrowserWindow, ipcMain } from "electron";
 import {
   APP_SHELL_CHANNELS,
   type CardTrim,
+  type GenerateTarget,
   type PendingImportReviewItem,
-  type RegenerateTarget,
   type RendererErrorReport,
   type SaveConflictResolution,
   type SettingsDraft,
@@ -38,7 +38,7 @@ function assertCardTrim(value: unknown): asserts value is CardTrim {
   }
 }
 
-function assertRegenerateTarget(value: unknown): asserts value is RegenerateTarget {
+function assertGenerateTarget(value: unknown): asserts value is GenerateTarget {
   if (
     value !== "transcription" &&
     value !== "structured" &&
@@ -102,29 +102,16 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     return runtime.getCardMediaSource(cardId);
   });
 
-  ipcMain.handle(APP_SHELL_CHANNELS.transcribeCard, (_event, cardId: string) => {
+  ipcMain.handle(APP_SHELL_CHANNELS.generateCardStep, (_event, cardId: string, target: GenerateTarget) => {
     assertString(cardId, "cardId");
-    return runtime.transcribeCard(cardId);
-  });
-
-  ipcMain.handle(APP_SHELL_CHANNELS.retryCard, (_event, cardId: string) => {
-    assertString(cardId, "cardId");
-    return runtime.retryCard(cardId);
+    assertGenerateTarget(target);
+    return runtime.generateCardStep(cardId, target);
   });
 
   ipcMain.handle(APP_SHELL_CHANNELS.cancelCardProcessing, (_event, cardId: string) => {
     assertString(cardId, "cardId");
     return runtime.cancelCardProcessing(cardId);
   });
-
-  ipcMain.handle(
-    APP_SHELL_CHANNELS.regenerateCardStep,
-    (_event, cardId: string, target: RegenerateTarget) => {
-      assertString(cardId, "cardId");
-      assertRegenerateTarget(target);
-      return runtime.regenerateCardStep(cardId, target);
-    },
-  );
 
   ipcMain.handle(APP_SHELL_CHANNELS.pickOutputDirectory, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);

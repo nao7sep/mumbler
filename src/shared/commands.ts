@@ -12,7 +12,6 @@ export const COMMAND_DEFINITIONS: CommandDefinition[] = [
   { id: "set-front-marker",   label: "Set Front Marker",          group: "Trim",     defaultShortcut: "F" },
   { id: "set-back-marker",    label: "Set Back Marker",           group: "Trim",     defaultShortcut: "B" },
   // Workflow
-  { id: "transcribe-selected", label: "Transcribe",               group: "Workflow", defaultShortcut: "T" },
+  { id: "transcribe-selected", label: "Generate All",             group: "Workflow", defaultShortcut: "T" },
   { id: "save-selected",       label: "Save",                     group: "Workflow", defaultShortcut: "S" },
 ];
-

@@ -5,11 +5,11 @@ import {
   APP_SHELL_EVENTS,
   type AppSnapshot,
   type CardTrim,
+  type GenerateTarget,
   type ImportOperationResult,
   type MumblerShellApi,
   type PendingImportReviewItem,
   type PromptTemplates,
-  type RegenerateTarget,
   type RendererErrorReport,
   type SaveCardResult,
   type SaveConflictResolution,
@@ -47,14 +47,10 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.updateCardTrim, cardId, trim) as Promise<AppSnapshot>,
   getCardMediaSource: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getCardMediaSource, cardId) as Promise<string>,
-  transcribeCard: (cardId: string) =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.transcribeCard, cardId) as Promise<AppSnapshot>,
-  retryCard: (cardId: string) =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.retryCard, cardId) as Promise<AppSnapshot>,
+  generateCardStep: (cardId: string, target: GenerateTarget) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.generateCardStep, cardId, target) as Promise<AppSnapshot>,
   cancelCardProcessing: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelCardProcessing, cardId) as Promise<AppSnapshot>,
-  regenerateCardStep: (cardId: string, target: RegenerateTarget) =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.regenerateCardStep, cardId, target) as Promise<AppSnapshot>,
   pickOutputDirectory: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.pickOutputDirectory) as Promise<string | null>,
   openOutputDirectory: () =>

@@ -182,6 +182,7 @@ function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
     activeStep: null,
     queuedMode: null,
     queuedAtUtc: null,
+    cancelRequestedAtUtc: null,
     lastError: {
       message: "Working audio is missing from working storage — remove this card or re-import the source audio.",
       occurredAtUtc: Date.now(),

@@ -2,10 +2,15 @@ import type { CardProcessingStep, MumblerCard } from "@shared/app-shell";
 
 export function isCardBusy(card: MumblerCard): boolean {
   return (
+    card.cancelRequestedAtUtc !== null ||
     card.status === "Queued" ||
     card.status === "Transcribing" ||
     card.status === "Generating Metadata"
   );
+}
+
+function isCancellationRequested(card: MumblerCard): boolean {
+  return card.cancelRequestedAtUtc !== null;
 }
 
 export function formatStepName(step: Exclude<CardProcessingStep, null> | "startup-recovery"): string {
@@ -26,7 +31,7 @@ export function formatStepName(step: Exclude<CardProcessingStep, null> | "startu
 export function formatActiveStepMessage(step: CardProcessingStep): string {
   switch (step) {
     case "transcription":
-      return "Transcribing audio";
+      return "Generating transcription";
     case "structured":
       return "Generating structured transcription";
     case "title":
@@ -34,18 +39,24 @@ export function formatActiveStepMessage(step: CardProcessingStep): string {
     case "slug":
       return "Generating slug";
     case null:
-      return "Processing";
+      return "Preparing generation";
   }
 }
 
 export function formatCardStatusMessage(card: MumblerCard): string {
+  if (isCancellationRequested(card)) {
+    return card.activeStep === null
+      ? "Cancelling..."
+      : `Cancelling ${formatStepName(card.activeStep)}...`;
+  }
+
   switch (card.status) {
     case "Pending Review":
       return "Pending timestamp review";
     case "Imported":
-      return "Ready to transcribe";
+      return "Ready to generate";
     case "Queued":
-      return card.queuedMode === "retry" ? "Queued to retry failed steps" : "Queued for transcription";
+      return "Queued to generate transcription";
     case "Transcribing":
     case "Generating Metadata":
       return formatActiveStepMessage(card.activeStep);
