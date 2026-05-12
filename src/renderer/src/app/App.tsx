@@ -606,6 +606,12 @@ export function App(): ReactElement {
       case "play-last-snippet":
         await waveformEditorRef.current?.playLastSnippet();
         return;
+      case "skip-backward":
+        waveformEditorRef.current?.skipBackward();
+        return;
+      case "skip-forward":
+        waveformEditorRef.current?.skipForward();
+        return;
       case "transcribe-selected":
         if (snapshot?.settingsSummary?.hasGeminiApiKey && !selectedCardIsBusy) {
           executeGenerate(selectedCard.id, "slug");
@@ -1001,6 +1007,7 @@ export function App(): ReactElement {
                   ref={waveformEditorRef}
                   card={selectedCard}
                   previewSnippetSeconds={snapshot?.settingsSummary?.previewSnippetSeconds ?? 10}
+                  skipIntervalSec={snapshot?.settingsSummary?.skipIntervalSec ?? 5}
                   disabled={selectedCardIsBusy}
                   onDuplicateCard={handleDuplicateCard}
                   onTrimCommit={handleTrimCommit}

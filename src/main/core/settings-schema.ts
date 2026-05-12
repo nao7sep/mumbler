@@ -54,24 +54,29 @@ function normalizeSettings(
 
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
-    geminiApiKeyObfuscated: asString(raw.geminiApiKeyObfuscated) ?? defaults.geminiApiKeyObfuscated,
+    // Files
     outputDirectory: asNullableString(raw.outputDirectory),
     backupDirectory: asNullableString(raw.backupDirectory),
-    transcriptionModel: asString(raw.transcriptionModel) ?? defaults.transcriptionModel,
-    metadataModel: asString(raw.metadataModel) ?? defaults.metadataModel,
+    // Import
     defaultTimezone:
       asString(raw.defaultTimezone) && isSupportedTimezone(asString(raw.defaultTimezone)!)
         ? (asString(raw.defaultTimezone) as string)
         : defaults.defaultTimezone,
     timestampPatterns: asStringArray(raw.timestampPatterns) ?? defaults.timestampPatterns,
+    // Player
+    previewSnippetSeconds:
+      asPositiveInteger(raw.previewSnippetSeconds) ?? defaults.previewSnippetSeconds,
+    skipIntervalSec: asPositiveInteger(raw.skipIntervalSec) ?? defaults.skipIntervalSec,
+    // AI
+    geminiApiKeyObfuscated: asString(raw.geminiApiKeyObfuscated) ?? defaults.geminiApiKeyObfuscated,
+    transcriptionModel: asString(raw.transcriptionModel) ?? defaults.transcriptionModel,
+    metadataModel: asString(raw.metadataModel) ?? defaults.metadataModel,
+    concurrencyLimit: asPositiveInteger(raw.concurrencyLimit) ?? defaults.concurrencyLimit,
     prompts: {
       structured: asString(prompts?.structured) ?? defaults.prompts.structured,
       title: asString(prompts?.title) ?? defaults.prompts.title,
       slug: asString(prompts?.slug) ?? defaults.prompts.slug,
     },
-    previewSnippetSeconds:
-      asPositiveInteger(raw.previewSnippetSeconds) ?? defaults.previewSnippetSeconds,
-    concurrencyLimit: asPositiveInteger(raw.concurrencyLimit) ?? defaults.concurrencyLimit,
     retryPolicy: {
       maxRetries: asPositiveInteger(retryPolicy?.maxRetries) ?? defaults.retryPolicy.maxRetries,
       initialDelayMs:
@@ -307,15 +312,22 @@ export function getSystemTimezone(): string {
 export function createDefaultSettings(systemTimezone: string): MumblerSettings {
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
-    geminiApiKeyObfuscated: "",
+    // Files
     outputDirectory: null,
     backupDirectory: null,
-    transcriptionModel: "gemini-3.1-pro-preview",
-    metadataModel: "gemini-3.1-pro-preview",
+    // Import
     defaultTimezone: systemTimezone,
     timestampPatterns: [
       "(?<year>\\d{2}(?:\\d{2})?)(?<month>\\d{2})(?<day>\\d{2})[-_](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})?",
     ],
+    // Player
+    previewSnippetSeconds: 10,
+    skipIntervalSec: 10,
+    // AI
+    geminiApiKeyObfuscated: "",
+    transcriptionModel: "gemini-3.1-pro-preview",
+    metadataModel: "gemini-3.1-pro-preview",
+    concurrencyLimit: 3,
     prompts: {
       structured:
         "Reorganize the transcript into a well-structured Markdown outline. Preserve all information; resolve obvious self-contradictions using surrounding context. Use the transcript's language. Output Markdown only.\n\n<transcript>\n{transcript}\n</transcript>",
@@ -324,8 +336,6 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
       slug:
         "Create a short English URL slug for the title. Lowercase a–z, digits, and hyphens only. No leading or trailing hyphen. Aim for 3–6 words. Output only the slug.\n\n<title>\n{title}\n</title>",
     },
-    previewSnippetSeconds: 10,
-    concurrencyLimit: 3,
     retryPolicy: {
       maxRetries: 3,
       initialDelayMs: 1000,
@@ -387,16 +397,21 @@ export function summarizeSettings(
   defaultBackupDirectory: string,
 ): SettingsSummary {
   return {
-    hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
+    // Files
     outputDirectory: settings.outputDirectory,
     defaultOutputDirectory,
     backupDirectory: settings.backupDirectory,
     defaultBackupDirectory,
-    transcriptionModel: settings.transcriptionModel,
-    metadataModel: settings.metadataModel,
+    // Import
     defaultTimezone: settings.defaultTimezone,
     timestampPatternCount: settings.timestampPatterns.length,
+    // Player
     previewSnippetSeconds: settings.previewSnippetSeconds,
+    skipIntervalSec: settings.skipIntervalSec,
+    // AI
+    hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
+    transcriptionModel: settings.transcriptionModel,
+    metadataModel: settings.metadataModel,
     concurrencyLimit: settings.concurrencyLimit,
   };
 }
@@ -408,22 +423,27 @@ export function buildSettingsDraft(
 ): SettingsDraft {
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
-    hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
-    geminiApiKeyInput: "",
-    clearGeminiApiKey: false,
+    // Files
     outputDirectory: settings.outputDirectory ?? "",
     defaultOutputDirectory,
     backupDirectory: settings.backupDirectory ?? "",
     defaultBackupDirectory,
-    transcriptionModel: settings.transcriptionModel,
-    metadataModel: settings.metadataModel,
+    // Import
     defaultTimezone: settings.defaultTimezone,
     timestampPatternsText: settings.timestampPatterns.join("\n"),
+    // Player
+    previewSnippetSeconds: settings.previewSnippetSeconds,
+    skipIntervalSec: settings.skipIntervalSec,
+    // AI
+    hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
+    geminiApiKeyInput: "",
+    clearGeminiApiKey: false,
+    transcriptionModel: settings.transcriptionModel,
+    metadataModel: settings.metadataModel,
+    concurrencyLimit: settings.concurrencyLimit,
     structuredPrompt: settings.prompts.structured,
     titlePrompt: settings.prompts.title,
     slugPrompt: settings.prompts.slug,
-    previewSnippetSeconds: settings.previewSnippetSeconds,
-    concurrencyLimit: settings.concurrencyLimit,
     retryMaxRetries: settings.retryPolicy.maxRetries,
     retryInitialDelayMs: settings.retryPolicy.initialDelayMs,
     retryMaxDelayMs: settings.retryPolicy.maxDelayMs,
@@ -434,23 +454,15 @@ export function buildSettingsDraft(
 }
 
 export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraft): MumblerSettings {
+  const outputDirectory = draft.outputDirectory.trim();
+  const backupDirectory = draft.backupDirectory.trim();
+  const defaultTimezone = draft.defaultTimezone.trim();
+  const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
   const transcriptionModel = draft.transcriptionModel.trim();
   const metadataModel = draft.metadataModel.trim();
-  const defaultTimezone = draft.defaultTimezone.trim();
   const structuredPrompt = draft.structuredPrompt.trim();
   const titlePrompt = draft.titlePrompt.trim();
   const slugPrompt = draft.slugPrompt.trim();
-  const outputDirectory = draft.outputDirectory.trim();
-  const backupDirectory = draft.backupDirectory.trim();
-  const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
-
-  if (transcriptionModel.length === 0) {
-    throw new Error("Transcription model is required.");
-  }
-
-  if (metadataModel.length === 0) {
-    throw new Error("Metadata model is required.");
-  }
 
   if (!isSupportedTimezone(defaultTimezone)) {
     throw new Error("Default timezone must be a valid IANA timezone.");
@@ -458,6 +470,14 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
 
   if (timestampPatterns.length === 0) {
     throw new Error("Add at least one timestamp regex pattern.");
+  }
+
+  if (transcriptionModel.length === 0) {
+    throw new Error("Transcription model is required.");
+  }
+
+  if (metadataModel.length === 0) {
+    throw new Error("Metadata model is required.");
   }
 
   requirePromptPlaceholders(structuredPrompt, ["{transcript}"], "Structured prompt");
@@ -468,6 +488,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     draft.previewSnippetSeconds,
     "Preview snippet seconds",
   );
+  const skipIntervalSec = requirePositiveInteger(draft.skipIntervalSec, "Skip interval");
   const concurrencyLimit = requirePositiveInteger(draft.concurrencyLimit, "Concurrency limit");
   const retryMaxRetries = requirePositiveInteger(draft.retryMaxRetries, "Retry max retries");
   const retryInitialDelayMs = requirePositiveInteger(
@@ -488,20 +509,25 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
 
   return {
     ...current,
-    geminiApiKeyObfuscated: resolveGeminiApiKeyObfuscated(current, draft),
+    // Files
     outputDirectory: outputDirectory.length === 0 ? null : outputDirectory,
     backupDirectory: backupDirectory.length === 0 ? null : backupDirectory,
-    transcriptionModel,
-    metadataModel,
+    // Import
     defaultTimezone,
     timestampPatterns,
+    // Player
+    previewSnippetSeconds,
+    skipIntervalSec,
+    // AI
+    geminiApiKeyObfuscated: resolveGeminiApiKeyObfuscated(current, draft),
+    transcriptionModel,
+    metadataModel,
+    concurrencyLimit,
     prompts: {
       structured: structuredPrompt,
       title: titlePrompt,
       slug: slugPrompt,
     },
-    previewSnippetSeconds,
-    concurrencyLimit,
     retryPolicy: {
       maxRetries: retryMaxRetries,
       initialDelayMs: retryInitialDelayMs,

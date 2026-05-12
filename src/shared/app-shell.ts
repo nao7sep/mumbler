@@ -49,6 +49,8 @@ export type CommandId =
   | "select-previous"
   | "select-next"
   | "play-pause"
+  | "skip-backward"
+  | "skip-forward"
   | "play-first-snippet"
   | "play-last-snippet"
   | "set-front-marker"
@@ -83,16 +85,21 @@ export interface PromptTemplates {
 
 export interface MumblerSettings {
   schemaVersion: 1;
-  geminiApiKeyObfuscated: string;
+  // Files
   outputDirectory: string | null;
   backupDirectory: string | null;
-  transcriptionModel: string;
-  metadataModel: string;
+  // Import
   defaultTimezone: string;
   timestampPatterns: string[];
-  prompts: PromptTemplates;
+  // Player
   previewSnippetSeconds: number;
+  skipIntervalSec: number;
+  // AI
+  geminiApiKeyObfuscated: string;
+  transcriptionModel: string;
+  metadataModel: string;
   concurrencyLimit: number;
+  prompts: PromptTemplates;
   retryPolicy: RetryPolicy;
   timeouts: OperationTimeouts;
 }
@@ -225,37 +232,47 @@ export interface AppPaths {
 }
 
 export interface SettingsSummary {
-  hasGeminiApiKey: boolean;
+  // Files
   outputDirectory: string | null;
   defaultOutputDirectory: string;
   backupDirectory: string | null;
   defaultBackupDirectory: string;
-  transcriptionModel: string;
-  metadataModel: string;
+  // Import
   defaultTimezone: string;
   timestampPatternCount: number;
+  // Player
   previewSnippetSeconds: number;
+  skipIntervalSec: number;
+  // AI
+  hasGeminiApiKey: boolean;
+  transcriptionModel: string;
+  metadataModel: string;
   concurrencyLimit: number;
 }
 
 export interface SettingsDraft {
   schemaVersion: 1;
-  hasGeminiApiKey: boolean;
-  geminiApiKeyInput: string;
-  clearGeminiApiKey: boolean;
+  // Files
   outputDirectory: string;
   defaultOutputDirectory: string;
   backupDirectory: string;
   defaultBackupDirectory: string;
-  transcriptionModel: string;
-  metadataModel: string;
+  // Import
   defaultTimezone: string;
   timestampPatternsText: string;
+  // Player
+  previewSnippetSeconds: number;
+  skipIntervalSec: number;
+  // AI
+  hasGeminiApiKey: boolean;
+  geminiApiKeyInput: string;
+  clearGeminiApiKey: boolean;
+  transcriptionModel: string;
+  metadataModel: string;
+  concurrencyLimit: number;
   structuredPrompt: string;
   titlePrompt: string;
   slugPrompt: string;
-  previewSnippetSeconds: number;
-  concurrencyLimit: number;
   retryMaxRetries: number;
   retryInitialDelayMs: number;
   retryMaxDelayMs: number;

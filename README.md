@@ -43,26 +43,30 @@ On first launch, open Settings and enter your Gemini API key. The output directo
 |-----|--------|
 | `↑` / `↓` | Select previous / next card |
 | `Space` | Play / pause |
-| `[` | Set front trim marker at cursor |
-| `]` | Set back trim marker at cursor |
+| `←` / `→` | Skip backward / forward (configurable interval) |
+| `[` | Play first N seconds |
+| `]` | Play last N seconds |
+| `F` | Set front trim marker at cursor |
+| `B` | Set back trim marker at cursor |
 
 ## Settings
 
 | Setting | Description |
 |---------|-------------|
-| Gemini API Key | API key for Google Gemini |
 | Output Directory | Where saved files are written (default: `~/.mumbler/output`) |
 | Backup Directory | Where originals are copied when "Copy originals to backup folder" is selected (default: `~/.mumbler/backups`) |
-| Transcription Model | Gemini model used for transcription |
-| Metadata Model | Gemini model used for structured transcription, title, and slug generation |
 | Default Timezone | Timezone for recording timestamps |
 | Timestamp Patterns | Regex patterns to parse datetime from filenames |
+| Preview Duration | Seconds of audio played by the Play First / Play Last buttons |
+| Skip Interval | Seconds jumped by the ← → keys |
+| Gemini API Key | API key for Google Gemini |
+| Transcription Model | Gemini model used for audio transcription |
+| Metadata Model | Gemini model used for structured transcription, title, and slug generation |
+| Concurrent Transcriptions | Max audio transcription jobs processed simultaneously |
 | Structured Prompt | Custom prompt for structured transcription generation |
 | Title Prompt | Custom prompt for title generation |
 | Slug Prompt | Custom prompt for slug generation |
-| Preview Snippet | Seconds of audio sent for waveform preview |
-| Concurrency Limit | Max audio transcription jobs processed simultaneously |
-| Transcription Timeout | Timeout for each audio transcription request; the default is intentionally higher because Gemini docs support up to 9.5 hours of audio in one prompt |
+| Transcription Timeout | Timeout for each audio transcription request; the default is intentionally higher because Gemini supports up to 9.5 hours of audio in one prompt |
 | Text-only AI Timeout | Timeout for each structured transcription, title, or slug request |
 | Retry Policy | Max retries, delay, and jitter for retryable Gemini/network failures |
 

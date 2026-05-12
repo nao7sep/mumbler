@@ -139,7 +139,55 @@ export function SettingsModal({
           <div className="settings-sections">
 
           <section className="settings-section">
-            <h3>Timestamps</h3>
+            <h3>Files</h3>
+            <div className="field-stack">
+              <label className="field">
+                <span>Output Directory</span>
+                <div className="inline-action-field">
+                  <input
+                    value={draft.outputDirectory}
+                    placeholder={draft.defaultOutputDirectory}
+                    onChange={(event) => onChange({ ...draft, outputDirectory: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={onPickOutputDirectory}
+                    disabled={isPickingOutputDirectory}
+                  >
+                    Browse
+                  </button>
+                </div>
+              </label>
+              <p className="field-hint">
+                Where exported files are saved. Leave blank to use the default ({draft.defaultOutputDirectory}).
+              </p>
+              <label className="field">
+                <span>Backup Directory</span>
+                <div className="inline-action-field">
+                  <input
+                    value={draft.backupDirectory}
+                    placeholder={draft.defaultBackupDirectory}
+                    onChange={(event) => onChange({ ...draft, backupDirectory: event.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={onPickBackupDirectory}
+                    disabled={isPickingBackupDirectory}
+                  >
+                    Browse
+                  </button>
+                </div>
+              </label>
+              <p className="field-hint">
+                Used when "Copy originals to backup folder" is selected during import. Leave blank to use the default ({draft.defaultBackupDirectory}).
+              </p>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <h3>Import</h3>
             <div className="field-stack">
               <label className="field">
                 <span>Default Timezone</span>
@@ -181,27 +229,22 @@ export function SettingsModal({
                   onChange={(e) => onChange({ ...draft, previewSnippetSeconds: Number.parseInt(e.target.value, 10) })}
                 />
               </label>
+              <label className="field">
+                <span>Skip Interval (seconds)</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={draft.skipIntervalSec}
+                  onChange={(e) => onChange({ ...draft, skipIntervalSec: Number.parseInt(e.target.value, 10) })}
+                />
+              </label>
             </div>
-            <p className="field-hint">Seconds of audio played by the Play First and Play Last buttons.</p>
+            <p className="field-hint">Preview Duration: seconds played by the Play First/Last buttons. Skip Interval: seconds jumped by the ← → keys.</p>
           </section>
 
           <section className="settings-section">
             <h3>AI</h3>
-            <div className="settings-number-grid">
-              <div>
-                <label className="field">
-                  <span>Concurrent Transcriptions</span>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={draft.concurrencyLimit}
-                    onChange={(e) => onChange({ ...draft, concurrencyLimit: Number.parseInt(e.target.value, 10) })}
-                  />
-                </label>
-                <p className="field-hint">Maximum number of audio transcription jobs that can run at once.</p>
-              </div>
-            </div>
 
             <h4 className="settings-subheading">Gemini</h4>
             <p className="field-hint">Gemini is the only supported AI provider at this time.</p>
@@ -266,6 +309,27 @@ export function SettingsModal({
                   )}
                 </select>
               </label>
+            </div>
+
+            <h4 className="settings-subheading">Concurrency</h4>
+            <div className="settings-number-grid">
+              <div>
+                <label className="field">
+                  <span>Concurrent Transcriptions</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={draft.concurrencyLimit}
+                    onChange={(e) => onChange({ ...draft, concurrencyLimit: Number.parseInt(e.target.value, 10) })}
+                  />
+                </label>
+                <p className="field-hint">Maximum number of audio transcription jobs that can run at once.</p>
+              </div>
+            </div>
+
+            <h4 className="settings-subheading">Prompts</h4>
+            <div className="field-stack">
               <label className="field">
                 <span>Structured Prompt</span>
                 <textarea
@@ -384,60 +448,6 @@ export function SettingsModal({
                 </label>
                 <p className="field-hint">Time allowed for each structured transcription, title, or slug request.</p>
               </div>
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <h3>Backups</h3>
-            <div className="field-stack">
-              <label className="field">
-                <span>Backup Directory</span>
-                <div className="inline-action-field">
-                  <input
-                    value={draft.backupDirectory}
-                    placeholder={draft.defaultBackupDirectory}
-                    onChange={(event) => onChange({ ...draft, backupDirectory: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="button button--ghost"
-                    onClick={onPickBackupDirectory}
-                    disabled={isPickingBackupDirectory}
-                  >
-                    Browse
-                  </button>
-                </div>
-              </label>
-              <p className="field-hint">
-                Used when "Copy originals to backup folder" is selected during import. Leave blank to use the default ({draft.defaultBackupDirectory}).
-              </p>
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <h3>Output</h3>
-            <div className="field-stack">
-              <label className="field">
-                <span>Default Directory</span>
-                <div className="inline-action-field">
-                  <input
-                    value={draft.outputDirectory}
-                    placeholder={draft.defaultOutputDirectory}
-                    onChange={(event) => onChange({ ...draft, outputDirectory: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="button button--ghost"
-                    onClick={onPickOutputDirectory}
-                    disabled={isPickingOutputDirectory}
-                  >
-                    Browse
-                  </button>
-                </div>
-              </label>
-              <p className="field-hint">
-                Where exported files are saved. Leave blank to use the default ({draft.defaultOutputDirectory}).
-              </p>
             </div>
           </section>
 

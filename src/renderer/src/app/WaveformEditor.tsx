@@ -77,6 +77,7 @@ function renderSymmetricWaveform(
 interface WaveformEditorProps {
   card: MumblerCard;
   previewSnippetSeconds: number;
+  skipIntervalSec: number;
   disabled: boolean;
   onDuplicateCard: (cardId: string) => Promise<void>;
   onTrimCommit: (cardId: string, trim: CardTrim) => Promise<void>;
@@ -85,6 +86,8 @@ interface WaveformEditorProps {
 
 export interface WaveformEditorHandle {
   playPause(): Promise<void>;
+  skipBackward(): void;
+  skipForward(): void;
   setFrontMarkerAtCursor(): Promise<void>;
   setBackMarkerAtCursor(): Promise<void>;
   playFirstSnippet(): Promise<void>;
@@ -94,6 +97,7 @@ export interface WaveformEditorHandle {
 export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorProps>(function WaveformEditor({
   card,
   previewSnippetSeconds,
+  skipIntervalSec,
   disabled,
   onDuplicateCard,
   onTrimCommit,
@@ -120,6 +124,11 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const [draftTrim, setDraftTrim] = useState<CardTrim>(card.trim);
   const [frontInput, setFrontInput] = useState(formatMarkerInput(card.trim.frontMarkerSec));
   const [backInput, setBackInput] = useState(formatMarkerInput(card.trim.backMarkerSec));
+
+  // Keep a ref to draftTrim so the WaveSurfer 'ready' handler can access the
+  // current value without going stale inside the [mediaUrl] effect closure.
+  const draftTrimRef = useRef(draftTrim);
+  draftTrimRef.current = draftTrim;
 
   useEffect(() => {
     setDraftTrim(card.trim);
@@ -196,6 +205,12 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     const subscriptions = [
       waveSurfer.on("ready", (duration) => {
         setResolvedDurationSec(duration);
+        // Sync region immediately after WaveSurfer is ready. Without this,
+        // if resolvedDurationSec doesn't change (already matches card.durationSec),
+        // React skips the re-render and the sync effect never runs after WaveSurfer loads.
+        if (duration > 0) {
+          syncRegionToTrim(regions, regionRef, draftTrimRef.current, duration, isSyncingRegionRef);
+        }
       }),
       waveSurfer.on("decode", (duration) => {
         setResolvedDurationSec(duration);
@@ -395,6 +410,17 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     await waveSurfer.playPause();
   }
 
+  function skipSeconds(seconds: number): void {
+    const waveSurfer = waveSurferRef.current;
+    if (waveSurfer === null) {
+      return;
+    }
+
+    const duration = waveSurfer.getDuration();
+    const next = Math.max(0, Math.min(duration, waveSurfer.getCurrentTime() + seconds));
+    waveSurfer.setTime(next);
+  }
+
   async function duplicateCard(): Promise<void> {
     try {
       await onDuplicateCard(card.id);
@@ -421,12 +447,14 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     ref,
     () => ({
       playPause,
+      skipBackward: () => skipSeconds(-skipIntervalSec),
+      skipForward: () => skipSeconds(skipIntervalSec),
       setFrontMarkerAtCursor: () => setMarkerAtCursor("front"),
       setBackMarkerAtCursor: () => setMarkerAtCursor("back"),
       playFirstSnippet: () => playSnippet("first"),
       playLastSnippet: () => playSnippet("last"),
     }),
-    [cursorSec, draftTrim.backMarkerSec, draftTrim.frontMarkerSec, previewSnippetSeconds, resolvedDurationSec],
+    [cursorSec, draftTrim.backMarkerSec, draftTrim.frontMarkerSec, previewSnippetSeconds, skipIntervalSec, resolvedDurationSec],
   );
 
   const durationLabel = formatDurationLabel(resolvedDurationSec);

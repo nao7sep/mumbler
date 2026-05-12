@@ -298,7 +298,8 @@ textarea:focus-visible,
 }
 
 .queue-row--imported {
-  background: transparent;
+  background: var(--surface-muted);
+  border-color: var(--border-subtle);
 }
 
 .queue-row--queued,
