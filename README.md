@@ -48,6 +48,8 @@ On first launch, open Settings and enter your Gemini API key. The output directo
 | `]` | Play last N seconds |
 | `F` | Set front trim marker at cursor |
 | `B` | Set back trim marker at cursor |
+| `T` | Generate All |
+| `S` | Save |
 
 ## Settings
 

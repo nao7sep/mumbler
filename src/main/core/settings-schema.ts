@@ -326,7 +326,7 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
     // AI
     geminiApiKeyObfuscated: "",
     transcriptionModel: "gemini-3.1-pro-preview",
-    metadataModel: "gemini-3.1-pro-preview",
+    metadataModel: "gemini-3-flash-preview",
     concurrencyLimit: 3,
     prompts: {
       structured:
