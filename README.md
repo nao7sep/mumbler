@@ -41,9 +41,9 @@ On first launch, open Settings and enter your Gemini API key. The output directo
 
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` | Select previous / next card |
+| `Up` / `Down` | Select previous / next card |
 | `Space` | Play / pause |
-| `←` / `→` | Skip backward / forward (configurable interval) |
+| `Left` / `Right` | Skip backward / forward (configurable interval) |
 | `[` | Play first N seconds |
 | `]` | Play last N seconds |
 | `F` | Set front trim marker at cursor |
@@ -57,17 +57,17 @@ On first launch, open Settings and enter your Gemini API key. The output directo
 | Backup Directory | Where originals are copied when "Copy originals to backup folder" is selected (default: `~/.mumbler/backups`) |
 | Default Timezone | Timezone for recording timestamps |
 | Timestamp Patterns | Regex patterns to parse datetime from filenames |
+| Skip Interval | Seconds jumped by the Left / Right keys |
 | Preview Duration | Seconds of audio played by the Play First / Play Last buttons |
-| Skip Interval | Seconds jumped by the ← → keys |
 | Gemini API Key | API key for Google Gemini |
-| Transcription Model | Gemini model used for audio transcription |
-| Metadata Model | Gemini model used for structured transcription, title, and slug generation |
+| Transcription Model | Gemini model used for audio transcription and structured transcription |
+| Metadata Model | Gemini model used for title and slug generation |
 | Concurrent Transcriptions | Max audio transcription jobs processed simultaneously |
 | Structured Prompt | Custom prompt for structured transcription generation |
 | Title Prompt | Custom prompt for title generation |
 | Slug Prompt | Custom prompt for slug generation |
-| Transcription Timeout | Timeout for each audio transcription request; the default is intentionally higher because Gemini supports up to 9.5 hours of audio in one prompt |
-| Text-only AI Timeout | Timeout for each structured transcription, title, or slug request |
+| Transcription Timeout | Timeout for each audio transcription or structured transcription request |
+| Metadata Generation Timeout | Timeout for each title or slug generation request |
 | Retry Policy | Max retries, delay, and jitter for retryable Gemini/network failures |
 
 ## Output Format

@@ -728,7 +728,7 @@ textarea:focus-visible,
 
 .field-label-with-action {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;

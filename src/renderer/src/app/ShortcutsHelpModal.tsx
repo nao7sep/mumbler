@@ -3,6 +3,19 @@ import type { ReactElement } from "react";
 import type { CommandDefinition } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
 
+const KEY_SYMBOLS: Record<string, string> = {
+  ArrowLeft: "Left",
+  ArrowRight: "Right",
+  ArrowUp: "Up",
+  ArrowDown: "Down",
+  Up: "Up",
+  Down: "Down",
+};
+
+function formatShortcutKey(key: string): string {
+  return KEY_SYMBOLS[key] ?? key;
+}
+
 export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactElement {
   const groups = COMMAND_DEFINITIONS.reduce<Array<{ name: string; commands: CommandDefinition[] }>>(
     (acc, command) => {
@@ -35,7 +48,7 @@ export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactE
                   {group.commands.map((command) => (
                     <div key={command.id} className="shortcut-item">
                       <span>{command.label}</span>
-                      <kbd>{command.defaultShortcut}</kbd>
+                      <kbd>{formatShortcutKey(command.defaultShortcut)}</kbd>
                     </div>
                   ))}
                 </div>

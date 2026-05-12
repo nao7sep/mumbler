@@ -169,8 +169,8 @@ export async function executeCardPipeline(
           generateTextWithGemini({
             apiKey,
             prompt: structuredPrompt,
-            model: settings.metadataModel,
-            timeoutMs: settings.timeouts.textMs,
+            model: settings.transcriptionModel,
+            timeoutMs: settings.timeouts.transcriptionMs,
             signal: ctx.signal,
           }),
       }, ctx);
@@ -178,7 +178,7 @@ export async function executeCardPipeline(
       card.metadata.structured = structuredResult.text.trim();
       card.ai.structured = {
         provider: "gemini",
-        model: structuredResult.modelVersion ?? settings.metadataModel,
+        model: structuredResult.modelVersion ?? settings.transcriptionModel,
         generatedAtUtc: Date.now(),
       };
       card.updatedAtUtc = Date.now();
@@ -209,7 +209,7 @@ export async function executeCardPipeline(
             apiKey,
             prompt: titlePrompt,
             model: settings.metadataModel,
-            timeoutMs: settings.timeouts.textMs,
+            timeoutMs: settings.timeouts.metadataMs,
             signal: ctx.signal,
           }),
       }, ctx);
@@ -248,7 +248,7 @@ export async function executeCardPipeline(
             apiKey,
             prompt: slugPrompt,
             model: settings.metadataModel,
-            timeoutMs: settings.timeouts.textMs,
+            timeoutMs: settings.timeouts.metadataMs,
             signal: ctx.signal,
           }),
       }, ctx);

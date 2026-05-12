@@ -218,12 +218,12 @@ export function buildMarkdownContent(params: {
 
   const lines: string[] = [
     "---",
+    `schema_version: 1`,
+    `date: ${yamlDoubleQuotedString(date)}`,
+    `audio: ${yamlDoubleQuotedString(params.audioFilename)}`,
+    `duration: ${duration === null ? "null" : duration}`,
     `title: ${yamlDoubleQuotedString(title)}`,
     `slug: ${yamlDoubleQuotedString(slug)}`,
-    `date: ${yamlDoubleQuotedString(date)}`,
-    `duration: ${duration === null ? "null" : duration}`,
-    `audio: ${yamlDoubleQuotedString(params.audioFilename)}`,
-    `schema_version: 1`,
     "---",
     "",
     body,

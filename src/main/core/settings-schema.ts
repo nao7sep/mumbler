@@ -64,9 +64,9 @@ function normalizeSettings(
         : defaults.defaultTimezone,
     timestampPatterns: asStringArray(raw.timestampPatterns) ?? defaults.timestampPatterns,
     // Player
+    skipIntervalSec: asPositiveInteger(raw.skipIntervalSec) ?? defaults.skipIntervalSec,
     previewSnippetSeconds:
       asPositiveInteger(raw.previewSnippetSeconds) ?? defaults.previewSnippetSeconds,
-    skipIntervalSec: asPositiveInteger(raw.skipIntervalSec) ?? defaults.skipIntervalSec,
     // AI
     geminiApiKeyObfuscated: asString(raw.geminiApiKeyObfuscated) ?? defaults.geminiApiKeyObfuscated,
     transcriptionModel: asString(raw.transcriptionModel) ?? defaults.transcriptionModel,
@@ -87,7 +87,7 @@ function normalizeSettings(
     timeouts: {
       transcriptionMs:
         asPositiveInteger(timeouts?.transcriptionMs) ?? defaults.timeouts.transcriptionMs,
-      textMs: asPositiveInteger(timeouts?.textMs) ?? defaults.timeouts.textMs,
+      metadataMs: asPositiveInteger(timeouts?.metadataMs) ?? defaults.timeouts.metadataMs,
     },
   };
 }
@@ -321,8 +321,8 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
       "(?<year>\\d{2}(?:\\d{2})?)(?<month>\\d{2})(?<day>\\d{2})[-_](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})?",
     ],
     // Player
-    previewSnippetSeconds: 10,
     skipIntervalSec: 10,
+    previewSnippetSeconds: 10,
     // AI
     geminiApiKeyObfuscated: "",
     transcriptionModel: "gemini-3.1-pro-preview",
@@ -344,7 +344,7 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
     },
     timeouts: {
       transcriptionMs: 30 * 60 * 1000,
-      textMs: 5 * 60 * 1000,
+      metadataMs: 5 * 60 * 1000,
     },
   };
 }
@@ -406,8 +406,8 @@ export function summarizeSettings(
     defaultTimezone: settings.defaultTimezone,
     timestampPatternCount: settings.timestampPatterns.length,
     // Player
-    previewSnippetSeconds: settings.previewSnippetSeconds,
     skipIntervalSec: settings.skipIntervalSec,
+    previewSnippetSeconds: settings.previewSnippetSeconds,
     // AI
     hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
     transcriptionModel: settings.transcriptionModel,
@@ -432,8 +432,8 @@ export function buildSettingsDraft(
     defaultTimezone: settings.defaultTimezone,
     timestampPatternsText: settings.timestampPatterns.join("\n"),
     // Player
-    previewSnippetSeconds: settings.previewSnippetSeconds,
     skipIntervalSec: settings.skipIntervalSec,
+    previewSnippetSeconds: settings.previewSnippetSeconds,
     // AI
     hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
     geminiApiKeyInput: "",
@@ -449,7 +449,7 @@ export function buildSettingsDraft(
     retryMaxDelayMs: settings.retryPolicy.maxDelayMs,
     retryJitterRatio: settings.retryPolicy.jitterRatio,
     transcriptionTimeoutMs: settings.timeouts.transcriptionMs,
-    textTimeoutMs: settings.timeouts.textMs,
+    metadataTimeoutMs: settings.timeouts.metadataMs,
   };
 }
 
@@ -484,11 +484,11 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
   requirePromptAnyPlaceholder(titlePrompt, ["{transcript}", "{structured}"], "Title prompt");
   requirePromptPlaceholders(slugPrompt, ["{title}"], "Slug prompt");
 
+  const skipIntervalSec = requirePositiveInteger(draft.skipIntervalSec, "Skip interval");
   const previewSnippetSeconds = requirePositiveInteger(
     draft.previewSnippetSeconds,
     "Preview snippet seconds",
   );
-  const skipIntervalSec = requirePositiveInteger(draft.skipIntervalSec, "Skip interval");
   const concurrencyLimit = requirePositiveInteger(draft.concurrencyLimit, "Concurrency limit");
   const retryMaxRetries = requirePositiveInteger(draft.retryMaxRetries, "Retry max retries");
   const retryInitialDelayMs = requirePositiveInteger(
@@ -501,7 +501,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     draft.transcriptionTimeoutMs,
     "Transcription timeout",
   );
-  const textTimeoutMs = requirePositiveInteger(draft.textTimeoutMs, "Text-only AI timeout");
+  const metadataTimeoutMs = requirePositiveInteger(draft.metadataTimeoutMs, "Metadata timeout");
 
   if (retryMaxDelayMs < retryInitialDelayMs) {
     throw new Error("Retry max delay must be greater than or equal to retry initial delay.");
@@ -516,8 +516,8 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     defaultTimezone,
     timestampPatterns,
     // Player
-    previewSnippetSeconds,
     skipIntervalSec,
+    previewSnippetSeconds,
     // AI
     geminiApiKeyObfuscated: resolveGeminiApiKeyObfuscated(current, draft),
     transcriptionModel,
@@ -536,7 +536,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     },
     timeouts: {
       transcriptionMs: transcriptionTimeoutMs,
-      textMs: textTimeoutMs,
+      metadataMs: metadataTimeoutMs,
     },
   };
 }

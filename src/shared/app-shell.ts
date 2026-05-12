@@ -1,6 +1,6 @@
 export const GEMINI_MODELS = [
   { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
-  { id: "gemini-3.1-flash-preview", label: "Gemini 3.1 Flash" },
+  { id: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
   { id: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash Lite" },
 ] as const;
 
@@ -74,7 +74,7 @@ export interface RetryPolicy {
 
 export interface OperationTimeouts {
   transcriptionMs: number;
-  textMs: number;
+  metadataMs: number;
 }
 
 export interface PromptTemplates {
@@ -92,8 +92,8 @@ export interface MumblerSettings {
   defaultTimezone: string;
   timestampPatterns: string[];
   // Player
-  previewSnippetSeconds: number;
   skipIntervalSec: number;
+  previewSnippetSeconds: number;
   // AI
   geminiApiKeyObfuscated: string;
   transcriptionModel: string;
@@ -241,8 +241,8 @@ export interface SettingsSummary {
   defaultTimezone: string;
   timestampPatternCount: number;
   // Player
-  previewSnippetSeconds: number;
   skipIntervalSec: number;
+  previewSnippetSeconds: number;
   // AI
   hasGeminiApiKey: boolean;
   transcriptionModel: string;
@@ -261,8 +261,8 @@ export interface SettingsDraft {
   defaultTimezone: string;
   timestampPatternsText: string;
   // Player
-  previewSnippetSeconds: number;
   skipIntervalSec: number;
+  previewSnippetSeconds: number;
   // AI
   hasGeminiApiKey: boolean;
   geminiApiKeyInput: string;
@@ -278,7 +278,7 @@ export interface SettingsDraft {
   retryMaxDelayMs: number;
   retryJitterRatio: number;
   transcriptionTimeoutMs: number;
-  textTimeoutMs: number;
+  metadataTimeoutMs: number;
 }
 
 export interface QueueSummary {

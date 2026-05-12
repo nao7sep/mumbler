@@ -219,28 +219,33 @@ export function SettingsModal({
           <section className="settings-section">
             <h3>Player</h3>
             <div className="settings-number-grid">
-              <label className="field">
-                <span>Preview Duration (seconds)</span>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={draft.previewSnippetSeconds}
-                  onChange={(e) => onChange({ ...draft, previewSnippetSeconds: Number.parseInt(e.target.value, 10) })}
-                />
-              </label>
-              <label className="field">
-                <span>Skip Interval (seconds)</span>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={draft.skipIntervalSec}
-                  onChange={(e) => onChange({ ...draft, skipIntervalSec: Number.parseInt(e.target.value, 10) })}
-                />
-              </label>
+              <div>
+                <label className="field">
+                  <span>Skip Interval (seconds)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={draft.skipIntervalSec}
+                    onChange={(e) => onChange({ ...draft, skipIntervalSec: Number.parseInt(e.target.value, 10) })}
+                  />
+                </label>
+                <p className="field-hint">Seconds jumped by the Left / Right keys.</p>
+              </div>
+              <div>
+                <label className="field">
+                  <span>Preview Duration (seconds)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={draft.previewSnippetSeconds}
+                    onChange={(e) => onChange({ ...draft, previewSnippetSeconds: Number.parseInt(e.target.value, 10) })}
+                  />
+                </label>
+                <p className="field-hint">Seconds played by the Play First/Last buttons.</p>
+              </div>
             </div>
-            <p className="field-hint">Preview Duration: seconds played by the Play First/Last buttons. Skip Interval: seconds jumped by the ← → keys.</p>
           </section>
 
           <section className="settings-section">
@@ -295,6 +300,7 @@ export function SettingsModal({
                   )}
                 </select>
               </label>
+              <p className="field-hint">Used for transcription and structured transcription. Choose a capable model for long audio.</p>
               <label className="field">
                 <span>Metadata Model</span>
                 <select
@@ -309,23 +315,22 @@ export function SettingsModal({
                   )}
                 </select>
               </label>
+              <p className="field-hint">Used for title and slug generation. A lighter model is fine for short text tasks.</p>
             </div>
 
             <h4 className="settings-subheading">Concurrency</h4>
-            <div className="settings-number-grid">
-              <div>
-                <label className="field">
-                  <span>Concurrent Transcriptions</span>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={draft.concurrencyLimit}
-                    onChange={(e) => onChange({ ...draft, concurrencyLimit: Number.parseInt(e.target.value, 10) })}
-                  />
-                </label>
-                <p className="field-hint">Maximum number of audio transcription jobs that can run at once.</p>
-              </div>
+            <div className="field-stack">
+              <label className="field">
+                <span>Concurrent Transcriptions</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={draft.concurrencyLimit}
+                  onChange={(e) => onChange({ ...draft, concurrencyLimit: Number.parseInt(e.target.value, 10) })}
+                />
+              </label>
+              <p className="field-hint">Maximum number of audio transcription jobs that can run at once. Each job loads a full audio file into the AI context, so keep this low unless you have a high API quota.</p>
             </div>
 
             <h4 className="settings-subheading">Prompts</h4>
@@ -433,20 +438,20 @@ export function SettingsModal({
                     onChange={(event) => onChange({ ...draft, transcriptionTimeoutMs: Number.parseInt(event.target.value, 10) })}
                   />
                 </label>
-                <p className="field-hint">Time allowed per audio transcription request. Gemini docs support up to 9.5 hours of audio in one prompt, so this default is intentionally much higher than text-only steps.</p>
+                <p className="field-hint">Time allowed per transcription or structured transcription request.</p>
               </div>
               <div>
                 <label className="field">
-                  <span>Text-only AI Timeout (ms)</span>
+                  <span>Metadata Generation Timeout (ms)</span>
                   <input
                     type="number"
                     min={1}
                     step={1000}
-                    value={draft.textTimeoutMs}
-                    onChange={(event) => onChange({ ...draft, textTimeoutMs: Number.parseInt(event.target.value, 10) })}
+                    value={draft.metadataTimeoutMs}
+                    onChange={(event) => onChange({ ...draft, metadataTimeoutMs: Number.parseInt(event.target.value, 10) })}
                   />
                 </label>
-                <p className="field-hint">Time allowed for each structured transcription, title, or slug request.</p>
+                <p className="field-hint">Time allowed for each title or slug generation request.</p>
               </div>
             </div>
           </section>
