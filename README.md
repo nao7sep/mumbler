@@ -9,6 +9,7 @@ A desktop app for generating transcription and metadata from audio recordings us
 - **Queue** — import multiple files and process transcriptions concurrently (configurable limit); extra cards beyond the limit auto-queue and start as slots free
 - **Cancellation and generation** — cancel stuck AI work or generate any step on demand; generating a step also regenerates the dependent downstream outputs it invalidates
 - **Timestamp parsing** — extracts recording datetime from filenames using configurable regex patterns; falls back to file modification time
+- **IME composition support** — Japanese/Chinese/Korean input works correctly in all text fields
 - **Atomic save** — writes audio + JSON + Markdown atomically (temp → rename) with rollback on failure
 - **Optional source backup and deletion** — can copy the original to a backup folder and/or permanently delete it after confirming an import (backup is on by default)
 

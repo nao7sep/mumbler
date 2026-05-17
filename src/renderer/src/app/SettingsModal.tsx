@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, type ReactElement } from "react";
 
 import type { SettingsDraft } from "@shared/app-shell";
 import { getSupportedTimezones } from "@shared/timestamps";
+import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 
 const GEMINI_MODELS = [
   { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
@@ -32,6 +33,7 @@ function EditableList({
 }): ReactElement {
   const [newValue, setNewValue] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const composing = useComposing();
 
   function handleAdd(): void {
     const trimmed = newValue.trim();
@@ -74,7 +76,10 @@ function EditableList({
           value={newValue}
           placeholder={placeholder}
           onChange={(event) => setNewValue(event.target.value)}
+          onCompositionStart={composing.handlers.onCompositionStart}
+          onCompositionEnd={composing.handlers.onCompositionEnd}
           onKeyDown={(event) => {
+            if (isComposingKeyboardEvent(composing.composingRef, event)) return;
             if (event.key === "Enter") {
               event.preventDefault();
               handleAdd();

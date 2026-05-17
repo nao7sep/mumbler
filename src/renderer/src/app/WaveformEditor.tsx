@@ -13,6 +13,7 @@ import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
 
 import type { CardTrim, MumblerCard } from "@shared/app-shell";
+import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 
 const REGION_COLOR = "rgba(61, 122, 90, 0.22)";
 const WAVE_COLOR = "rgba(72, 108, 88, 0.24)";
@@ -124,6 +125,9 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const [draftTrim, setDraftTrim] = useState<CardTrim>(card.trim);
   const [frontInput, setFrontInput] = useState(formatMarkerInput(card.trim.frontMarkerSec));
   const [backInput, setBackInput] = useState(formatMarkerInput(card.trim.backMarkerSec));
+
+  const frontComposing = useComposing();
+  const backComposing = useComposing();
 
   // Keep a ref to draftTrim so the WaveSurfer 'ready' handler can access the
   // current value without going stale inside the [mediaUrl] effect closure.
@@ -435,6 +439,10 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     side: "front" | "back",
     event: KeyboardEvent<HTMLInputElement>,
   ): void {
+    const composing = side === "front" ? frontComposing : backComposing;
+    if (isComposingKeyboardEvent(composing.composingRef, event)) {
+      return;
+    }
     if (event.key !== "Enter") {
       return;
     }
@@ -539,6 +547,8 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               value={frontInput}
               onChange={(event) => setFrontInput(event.target.value)}
               onBlur={() => void handleMarkerInputCommit("front")}
+              onCompositionStart={frontComposing.handlers.onCompositionStart}
+              onCompositionEnd={frontComposing.handlers.onCompositionEnd}
               onKeyDown={(event) => onMarkerInputKeyDown("front", event)}
               placeholder="mm:ss.s"
               disabled={disabled}
@@ -588,6 +598,8 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               value={backInput}
               onChange={(event) => setBackInput(event.target.value)}
               onBlur={() => void handleMarkerInputCommit("back")}
+              onCompositionStart={backComposing.handlers.onCompositionStart}
+              onCompositionEnd={backComposing.handlers.onCompositionEnd}
               onKeyDown={(event) => onMarkerInputKeyDown("back", event)}
               placeholder="mm:ss.s"
               disabled={disabled}
