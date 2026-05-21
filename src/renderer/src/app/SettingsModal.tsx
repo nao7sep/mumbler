@@ -1,14 +1,8 @@
 import { useMemo, useRef, useState, type ReactElement } from "react";
 
-import type { SettingsDraft } from "@shared/app-shell";
+import { GEMINI_MODELS, type SettingsDraft } from "@shared/app-shell";
 import { getSupportedTimezones } from "@shared/timestamps";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
-
-const GEMINI_MODELS = [
-  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
-  { id: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
-  { id: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash Lite" },
-];
 
 function parseEntries(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
