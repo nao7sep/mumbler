@@ -1,7 +1,7 @@
 export const GEMINI_MODELS = [
-  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (Preview)" },
+  // Gemini 3 Pro Preview is documented but marked shut down, so it is not offered here.
   { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
-  { id: "gemini-3-flash", label: "Gemini 3 Flash" },
+  { id: "gemini-3-flash-preview", label: "Gemini 3 Flash (Preview)" },
   { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
 ] as const;
 

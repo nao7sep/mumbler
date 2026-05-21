@@ -29,6 +29,8 @@ npm run dev
 
 On first launch, open Settings and enter your Gemini API key. The output directory defaults to `~/.mumbler/output`; configure a custom location in Settings if desired.
 
+The built-in Gemini model list currently offers **Gemini 3.5 Flash**, **Gemini 3 Flash (Preview)**, and **Gemini 3.1 Flash Lite**. **Gemini 3 Pro (Preview)** is not listed because Google marks it shut down.
+
 ## Usage
 
 1. **Import** — drag audio files onto the window or use the import dialog
@@ -72,6 +74,8 @@ On first launch, open Settings and enter your Gemini API key. The output directo
 | Transcription Timeout | Timeout for each audio transcription or structured transcription request |
 | Metadata Generation Timeout | Timeout for each title or slug generation request |
 | Retry Policy | Max retries, delay, and jitter for retryable Gemini/network failures |
+
+By default, both **Transcription Model** and **Metadata Model** use **Gemini 3 Flash (Preview)**. **Gemini 3.5 Flash** is supported, but it is not the default.
 
 ## Output Format
 
