@@ -47,8 +47,8 @@ The built-in Gemini model list currently offers **Gemini 3.1 Pro (Preview)**, **
 | `Up` / `Down` | Select previous / next card |
 | `Space` | Play / pause |
 | `Left` / `Right` | Skip backward / forward (configurable interval) |
-| `[` | Play first N seconds |
-| `]` | Play last N seconds |
+| `Left Bracket` | Play first N seconds |
+| `Right Bracket` | Play last N seconds |
 | `F` | Set front trim marker at cursor |
 | `B` | Set back trim marker at cursor |
 | `T` | Generate All |
