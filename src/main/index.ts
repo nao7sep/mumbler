@@ -12,7 +12,7 @@ app.setName("Mumbler");
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "mumbler-asset",
-    privileges: { secure: true, standard: true, stream: true, bypassCSP: true, supportFetchAPI: true, corsEnabled: true },
+    privileges: { secure: true, standard: true, stream: true, supportFetchAPI: true, corsEnabled: true },
   },
 ]);
 
@@ -28,10 +28,26 @@ const AUDIO_MIME_TYPES: Record<string, string> = {
 };
 
 async function bootstrap(): Promise<void> {
+  const runtime = await ApplicationRuntime.initialize();
+
   protocol.handle("mumbler-asset", async (request) => {
     const url = new URL(request.url);
-    const filePath = url.searchParams.get("path") ?? "";
-    if (!filePath) {
+    // URL shape: mumbler-asset://media/<cardId>
+    // host = "media", pathname = "/<cardId>"
+    if (url.host !== "media") {
+      return new Response("Not found", { status: 404 });
+    }
+    let cardId: string;
+    try {
+      cardId = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
+    if (cardId.length === 0) {
+      return new Response("Not found", { status: 404 });
+    }
+    const filePath = runtime.resolveCardSourcePath(cardId);
+    if (filePath === null) {
       return new Response("Not found", { status: 404 });
     }
     try {
@@ -47,7 +63,7 @@ async function bootstrap(): Promise<void> {
       return new Response("Not found", { status: 404 });
     }
   });
-  const runtime = await ApplicationRuntime.initialize();
+
   registerAppShellIpc(runtime);
   createMainWindow();
 

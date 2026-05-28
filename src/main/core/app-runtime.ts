@@ -1,12 +1,5 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
-import {
-  access,
-  copyFile,
-  mkdir,
-  rm,
-  stat,
-} from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { mkdir, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -45,8 +38,8 @@ import {
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
-import { formatError, uniquePathInDirectory, writeJsonFile } from "./file-io";
-import { copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, selectExistingCardId } from "./working-files";
+import { formatError, writeJsonFile } from "./file-io";
+import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, selectExistingCardId } from "./working-files";
 import {
   buildMarkdownContent,
   buildOutputPayload,
@@ -492,6 +485,7 @@ export class ApplicationRuntime {
   async duplicateCard(cardId: string): Promise<AppSnapshot> {
     this.ensureReady();
     const state = this.runtime.state!;
+    const paths = this.runtime.paths!;
     const source = state.cards.find((card) => card.id === cardId);
 
     if (source === undefined) {
@@ -506,7 +500,12 @@ export class ApplicationRuntime {
       throw new Error("Cannot duplicate a card while it is being processed.");
     }
 
-    const duplicate = createDuplicatedCard(source);
+    const duplicateSourcePath = await copyIntoWorking(
+      source.sourceFilePath,
+      paths.workingDir,
+      basename(source.sourceFilePath),
+    );
+    const duplicate = createDuplicatedCard(source, duplicateSourcePath);
     state.cards = [...state.cards, duplicate].sort((left, right) =>
       left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
     );
@@ -516,6 +515,7 @@ export class ApplicationRuntime {
     await this.runtime.logger!.info("card.duplicate", "Duplicated card for independent trimming.", {
       sourceCardId: source.id,
       duplicateCardId: duplicate.id,
+      duplicateSourcePath,
     });
 
     return this.getSnapshot();
@@ -592,7 +592,15 @@ export class ApplicationRuntime {
       throw new Error("Card media source no longer exists.");
     }
 
-    return `mumbler-asset://local?path=${encodeURIComponent(card.sourceFilePath)}`;
+    return `mumbler-asset://media/${encodeURIComponent(cardId)}`;
+  }
+
+  resolveCardSourcePath(cardId: string): string | null {
+    if (this.runtime.state === null) {
+      return null;
+    }
+    const card = this.runtime.state.cards.find((entry) => entry.id === cardId);
+    return card?.sourceFilePath ?? null;
   }
 
   async generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
@@ -1113,17 +1121,7 @@ export class ApplicationRuntime {
     }
 
     const originalFilename = basename(sourcePath);
-    const workingFilePath = await uniquePathInDirectory(paths.workingDir, originalFilename);
-
-    try {
-      await copyFile(sourcePath, workingFilePath);
-      await access(workingFilePath, fsConstants.R_OK);
-    } catch (error: unknown) {
-      await rm(workingFilePath, { force: true });
-      throw new Error(
-        `Failed to create a readable working copy for ${originalFilename}: ${formatError(error)}`,
-      );
-    }
+    const workingFilePath = await copyIntoWorking(sourcePath, paths.workingDir, originalFilename);
 
     await this.runtime.logger!.debug("import.file", "Staged file to working storage.", {
       originalFilename,
@@ -1308,10 +1306,11 @@ function normalizePendingImport(item: PendingImportReviewItem): PendingImportRev
   };
 }
 
-function createDuplicatedCard(source: MumblerCard): MumblerCard {
+function createDuplicatedCard(source: MumblerCard, sourceFilePath: string): MumblerCard {
   return {
     ...source,
     id: nanoid(),
+    sourceFilePath,
     trim: {
       frontMarkerSec: null,
       backMarkerSec: null,

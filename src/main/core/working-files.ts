@@ -1,4 +1,5 @@
-import { copyFile, mkdir, readdir, rm, unlink } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, rm, unlink } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { basename, join } from "node:path";
 
 import type { AppPaths, MumblerCard, MumblerState, PendingImportReviewItem } from "@shared/app-shell";
@@ -16,6 +17,27 @@ export interface WorkingReconciliationResult {
 
 export async function deleteImportedSource(sourcePath: string): Promise<void> {
   await unlink(sourcePath);
+}
+
+export async function copyIntoWorking(
+  sourcePath: string,
+  workingDir: string,
+  preferredName: string,
+): Promise<string> {
+  await mkdir(workingDir, { recursive: true });
+  const workingFilePath = await uniquePathInDirectory(workingDir, preferredName);
+
+  try {
+    await copyFile(sourcePath, workingFilePath);
+    await access(workingFilePath, fsConstants.R_OK);
+  } catch (error: unknown) {
+    await rm(workingFilePath, { force: true }).catch(() => undefined);
+    throw new Error(
+      `Failed to create a readable working copy for ${preferredName}: ${formatError(error)}`,
+    );
+  }
+
+  return workingFilePath;
 }
 
 export async function copyOriginalToBackup(
