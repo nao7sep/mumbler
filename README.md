@@ -31,6 +31,16 @@ On first launch, open Settings and enter your Gemini API key. The output directo
 
 The built-in Gemini model list currently offers **Gemini 3.1 Pro (Preview)**, **Gemini 3.5 Flash**, **Gemini 3 Flash (Preview)**, and **Gemini 3.1 Flash Lite**.
 
+## Testing
+
+```bash
+npm test           # run the unit and integration suite once
+npm run test:watch # re-run on change during development
+npm run typecheck  # type-check the project without emitting
+```
+
+Tests run under [Vitest](https://vitest.dev/) and live beside the code they cover as `*.test.ts`.
+
 ## Usage
 
 1. **Import** — drag audio files onto the window or use the import dialog

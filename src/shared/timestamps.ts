@@ -19,12 +19,26 @@ export function getSupportedTimezones(): string[] {
     supportedValuesOf?: (key: string) => string[];
   };
 
-  const supported = intlWithSupportedValues.supportedValuesOf?.("timeZone");
-  return supported && supported.length > 0 ? supported : ["UTC"];
+  const supported = intlWithSupportedValues.supportedValuesOf?.("timeZone") ?? [];
+  // Some platforms omit "UTC" from supportedValuesOf even though it is a usable
+  // zone; ensure it is always offerable (and matches the system fallback).
+  return supported.includes("UTC") ? supported : ["UTC", ...supported];
 }
 
-export function isSupportedTimezone(timezone: string): boolean {
-  return getSupportedTimezones().includes(timezone);
+// Validity is decided by whether Intl can actually use the zone — the same
+// operation every conversion below performs — rather than by membership in the
+// dropdown list, which omits "UTC" and valid aliases such as "US/Eastern".
+export function isValidTimezone(timezone: string): boolean {
+  if (typeof timezone !== "string" || timezone.length === 0) {
+    return false;
+  }
+
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function parseTimestampFromFilename(
@@ -67,7 +81,7 @@ export function recomputeUtcFromLocal(
     return { utcMs: null, error: "Enter local time as YYYY-MM-DD HH:MM:SS." };
   }
 
-  if (!isSupportedTimezone(timezone)) {
+  if (!isValidTimezone(timezone)) {
     return { utcMs: null, error: "Enter a valid IANA timezone." };
   }
 
@@ -95,7 +109,7 @@ export function recomputeLocalFromUtc(
     return { localTimestampText: "", error: "Enter UTC as YYYY-MM-DD HH:MM:SS." };
   }
 
-  if (!isSupportedTimezone(timezone)) {
+  if (!isValidTimezone(timezone)) {
     return { localTimestampText: "", error: "Enter a valid IANA timezone." };
   }
 

@@ -8,7 +8,7 @@ import type {
   SettingsSummary,
 } from "@shared/app-shell";
 import {
-  isSupportedTimezone,
+  isValidTimezone,
   normalizeUtcMs,
 } from "@shared/timestamps";
 import { readJsonFile, writeJsonFile } from "./file-io";
@@ -59,7 +59,7 @@ function normalizeSettings(
     backupDirectory: asNullableString(raw.backupDirectory),
     // Import
     defaultTimezone:
-      asString(raw.defaultTimezone) && isSupportedTimezone(asString(raw.defaultTimezone)!)
+      asString(raw.defaultTimezone) && isValidTimezone(asString(raw.defaultTimezone)!)
         ? (asString(raw.defaultTimezone) as string)
         : defaults.defaultTimezone,
     timestampPatterns: asStringArray(raw.timestampPatterns) ?? defaults.timestampPatterns,
@@ -306,7 +306,7 @@ function encodeGeminiApiKey(value: string): string {
 
 export function getSystemTimezone(): string {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return timezone && timezone.length > 0 && isSupportedTimezone(timezone) ? timezone : "UTC";
+  return timezone && timezone.length > 0 && isValidTimezone(timezone) ? timezone : "UTC";
 }
 
 export function createDefaultSettings(systemTimezone: string): MumblerSettings {
@@ -464,7 +464,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
   const titlePrompt = draft.titlePrompt.trim();
   const slugPrompt = draft.slugPrompt.trim();
 
-  if (!isSupportedTimezone(defaultTimezone)) {
+  if (!isValidTimezone(defaultTimezone)) {
     throw new Error("Default timezone must be a valid IANA timezone.");
   }
 

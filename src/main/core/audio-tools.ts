@@ -334,7 +334,7 @@ async function runFfmpegTrim(params: {
 // Duration = endSec - seekSec - baseOffsetSec, which collapses to endSec - startSec
 // in both stream-copy (seekSec=0, baseOffsetSec=startSec) and re-encode
 // (seekSec=startSec, baseOffsetSec=0) cases.
-function buildOutputTimingArgs(
+export function buildOutputTimingArgs(
   seekSec: number,
   endSec: number | null,
   baseOffsetSec: number,
@@ -353,7 +353,7 @@ function buildOutputTimingArgs(
   return args;
 }
 
-function buildReencodeArgs(outputPath: string, audioProfile: AudioProfile | null): string[] {
+export function buildReencodeArgs(outputPath: string, audioProfile: AudioProfile | null): string[] {
   const extension = extname(outputPath).toLowerCase();
   const bitrateKbps = audioProfile?.bitRateKbps ?? 192;
 

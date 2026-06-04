@@ -10,6 +10,8 @@ const KEY_SYMBOLS: Record<string, string> = {
   ArrowDown: "Down",
   Up: "Up",
   Down: "Down",
+  "[": "Left Bracket",
+  "]": "Right Bracket",
 };
 
 function formatShortcutKey(key: string): string {

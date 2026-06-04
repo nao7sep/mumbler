@@ -197,7 +197,7 @@ export function buildOutputPayload(params: {
   };
 }
 
-function yamlDoubleQuotedString(value: string): string {
+export function yamlDoubleQuotedString(value: string): string {
   const escaped = value
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')

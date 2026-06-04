@@ -32,7 +32,7 @@ import {
 import {
   formatUtcForDisplay,
   formatUtcMarker,
-  isSupportedTimezone,
+  isValidTimezone,
   normalizeUtcMs,
   parseTimestampFromFilename,
   recomputeLocalFromUtc,
@@ -1262,7 +1262,7 @@ function buildConfirmedTimestamps(
   timezone: string,
   utcTimestampText: string,
 ): MumblerCard["timestamps"] {
-  if (!isSupportedTimezone(timezone)) {
+  if (!isValidTimezone(timezone)) {
     throw new Error(`Invalid timezone: ${timezone}`);
   }
 

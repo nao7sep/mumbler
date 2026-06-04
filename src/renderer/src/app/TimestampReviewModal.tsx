@@ -6,7 +6,7 @@ import {
   getLocalTimestampError,
   getSupportedTimezones,
   getUtcTimestampError,
-  isSupportedTimezone,
+  isValidTimezone,
   parseUtcFromDisplay,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
@@ -44,7 +44,7 @@ export function TimestampReviewModal({
   const validationErrors = useMemo(
     () =>
       items.map((item) => {
-        const timezoneError = isSupportedTimezone(item.timezone)
+        const timezoneError = isValidTimezone(item.timezone)
           ? null
           : "Enter a valid IANA timezone.";
         return (
@@ -102,7 +102,7 @@ export function TimestampReviewModal({
         <div className="modal-card__body">
           <div className="review-table">
           {items.map((item) => {
-            const timezoneError = isSupportedTimezone(item.timezone)
+            const timezoneError = isValidTimezone(item.timezone)
               ? null
               : "Enter a valid IANA timezone.";
             const localError = getLocalTimestampError(item.localTimestampText);

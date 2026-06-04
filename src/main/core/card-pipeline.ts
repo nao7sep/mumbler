@@ -458,7 +458,7 @@ function renderPromptTemplate(
     .replaceAll("{title}", values.title);
 }
 
-function sanitizeTitle(value: string): string {
+export function sanitizeTitle(value: string): string {
   return value
     .replaceAll(/\*\*/g, "")
     .replaceAll(/\*/g, "")
@@ -467,7 +467,7 @@ function sanitizeTitle(value: string): string {
     .trim();
 }
 
-function sanitizeSlug(value: string): string {
+export function sanitizeSlug(value: string): string {
   return value
     .toLowerCase()
     .replaceAll(/[`"'""'']/g, "")
@@ -487,7 +487,7 @@ function getCardErrorMessage(error: unknown): string {
 
 // Uses 4^n (not 2^n) for aggressive backoff suited to Gemini API rate limits,
 // which penalize rapid retries more heavily than typical HTTP services.
-function computeRetryDelayMs(
+export function computeRetryDelayMs(
   attempt: number,
   retryPolicy: MumblerSettings["retryPolicy"],
 ): number {
