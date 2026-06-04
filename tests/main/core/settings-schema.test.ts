@@ -9,7 +9,7 @@ import {
   getSecretsForRedaction,
   getSystemTimezone,
   summarizeSettings,
-} from "./settings-schema";
+} from "@main/core/settings-schema";
 
 const OUT = "/home/user/.mumbler/output";
 const BACKUP = "/home/user/.mumbler/backups";

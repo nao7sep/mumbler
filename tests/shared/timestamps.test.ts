@@ -12,7 +12,7 @@ import {
   parseUtcFromDisplay,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
-} from "./timestamps";
+} from "@shared/timestamps";
 
 // The default filename pattern shipped in createDefaultSettings.
 const DEFAULT_PATTERN =

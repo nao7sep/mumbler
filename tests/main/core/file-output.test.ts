@@ -16,8 +16,8 @@ const {
   computeFinalDuration,
   finalizeOutputsAtomically,
   yamlDoubleQuotedString,
-} = await import("./file-output");
-const { fileExists } = await import("./file-io");
+} = await import("@main/core/file-output");
+const { fileExists } = await import("@main/core/file-io");
 
 function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
   return {

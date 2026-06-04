@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CommandId } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
-import { findMatchingCommand, isTypingTarget } from "./shortcut-utils";
+import { findMatchingCommand, isTypingTarget } from "@renderer/app/shortcut-utils";
 
 function keydown(init: KeyboardEventInit): KeyboardEvent {
   return new KeyboardEvent("keydown", init);

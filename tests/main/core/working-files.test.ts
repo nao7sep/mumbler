@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MumblerCard, MumblerState } from "@shared/app-shell";
-import { selectExistingCardId } from "./working-files";
+import { selectExistingCardId } from "@main/core/working-files";
 
 function state(cardIds: string[], selectedCardId: string | null): MumblerState {
   return {

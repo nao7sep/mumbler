@@ -26,7 +26,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-const { finalizeOutputsAtomically } = await import("./file-output");
+const { finalizeOutputsAtomically } = await import("@main/core/file-output");
 
 let dir: string;
 let sourceAudio: string;

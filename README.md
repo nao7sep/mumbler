@@ -39,7 +39,7 @@ npm run test:watch # re-run on change during development
 npm run typecheck  # type-check the project without emitting
 ```
 
-Tests run under [Vitest](https://vitest.dev/) and live beside the code they cover as `*.test.ts`.
+Tests run under [Vitest](https://vitest.dev/) and live under `tests/`, mirroring the `src/` tree.
 
 ## Usage
 

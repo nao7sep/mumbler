@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CardError, CardProcessingStep, CardStatus, MumblerCard } from "@shared/app-shell";
-import { formatActiveStepMessage, formatCardStatusMessage, formatStepName, isCardBusy } from "./card-status";
+import { formatActiveStepMessage, formatCardStatusMessage, formatStepName, isCardBusy } from "@renderer/app/card-status";
 
 // formatCardStatusMessage only reads status, activeStep, and lastError.
 function card(

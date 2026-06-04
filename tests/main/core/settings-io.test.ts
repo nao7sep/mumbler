@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { AppPaths, MumblerCard, MumblerState } from "@shared/app-shell";
-import { loadSettings, loadState } from "./settings-schema";
+import { loadSettings, loadState } from "@main/core/settings-schema";
 
 let home: string;
 

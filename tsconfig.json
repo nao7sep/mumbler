@@ -6,6 +6,7 @@
     "jsx": "react-jsx",
     "paths": {
       "@shared/*": ["./src/shared/*"],
+      "@main/*": ["./src/main/*"],
       "@renderer/*": ["./src/renderer/src/*"]
     },
     "strict": true,
@@ -27,6 +28,7 @@
     "src/renderer/**/*.ts",
     "src/renderer/**/*.tsx",
     "src/shared/**/*.ts",
-    "src/shared/**/*.d.ts"
+    "src/shared/**/*.d.ts",
+    "tests/**/*.ts"
   ]
 }

@@ -5,7 +5,7 @@ import {
   buildOutputTimingArgs,
   buildReencodeArgs,
   inferAudioMimeType,
-} from "./audio-tools";
+} from "@main/core/audio-tools";
 
 describe("inferAudioMimeType", () => {
   it("maps known extensions case-insensitively", () => {

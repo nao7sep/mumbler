@@ -6,7 +6,7 @@ import {
   GeminiTimeoutError,
   isGeminiCancelledError,
   isRetryableGeminiError,
-} from "./gemini-adapter";
+} from "@main/core/gemini-adapter";
 
 describe("isRetryableGeminiError", () => {
   it("does not retry timeouts or cancellations", () => {

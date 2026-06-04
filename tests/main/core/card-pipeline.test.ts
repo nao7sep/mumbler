@@ -8,7 +8,7 @@ import {
   resolveGenerateStartStep,
   sanitizeSlug,
   sanitizeTitle,
-} from "./card-pipeline";
+} from "@main/core/card-pipeline";
 
 function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
   return {
