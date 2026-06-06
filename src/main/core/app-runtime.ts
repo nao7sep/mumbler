@@ -38,7 +38,7 @@ import {
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
-import { formatError, preserveAside } from "./file-io";
+import { formatError } from "./file-io";
 import { CorruptStateError, type JsonStore } from "./json-store";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, selectExistingCardId } from "./working-files";
 import {
@@ -252,9 +252,10 @@ export class ApplicationRuntime {
     try {
       await ensureDirectories(paths);
       // Reset is the explicit escape hatch from a corrupt-data halt, so it must
-      // never silently destroy the unreadable files — preserve them aside first.
-      const preservedSettings = await preserveAside(paths.settingsPath);
-      const preservedState = await preserveAside(paths.statePath);
+      // never silently destroy prior data — set each store's existing files
+      // (canonical + its .bak recovery copy) aside before writing defaults.
+      const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
+      const preservedStateFiles = await stateStore.preserveExistingFiles();
       await settingsStore.save(settings);
       const logger = createLogger(paths.logsDir, getSecretsForRedaction(settings));
       await pruneOldLogs(paths.logsDir);
@@ -262,8 +263,8 @@ export class ApplicationRuntime {
       await stateStore.save(reconciliation.state);
       await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
         workingDir: paths.workingDir,
-        preservedSettings,
-        preservedState,
+        preservedSettingsFiles,
+        preservedStateFiles,
         deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
         retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
       });

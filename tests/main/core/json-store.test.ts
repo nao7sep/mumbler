@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -150,5 +150,71 @@ describe("JsonStore.load — structural edge cases", () => {
     const result = await store.load();
     expect(result.origin).toBe("loaded");
     expect(result.value).toEqual({ schemaVersion: 1, value: "old" });
+  });
+});
+
+describe("JsonStore.preserveExistingFiles", () => {
+  it("returns no paths and throws nothing when neither file exists", async () => {
+    const store = makeStore();
+    await expect(store.preserveExistingFiles()).resolves.toEqual([]);
+  });
+
+  it("moves both the canonical file and its .bak aside, preserving their contents", async () => {
+    const store = makeStore();
+    await writeFile(store.path, JSON.stringify({ schemaVersion: 1, value: "canonical" }), "utf8");
+    await writeFile(store.backupPath, JSON.stringify({ schemaVersion: 1, value: "lastgood" }), "utf8");
+
+    const preserved = await store.preserveExistingFiles();
+
+    // Both originals are gone from their canonical/backup slots...
+    expect(preserved).toHaveLength(2);
+    await expect(readFile(store.path, "utf8")).rejects.toThrow();
+    await expect(readFile(store.backupPath, "utf8")).rejects.toThrow();
+    // ...and their contents survive verbatim in the preserved copies.
+    const contents = await Promise.all(preserved.map((p) => read(p)));
+    expect(contents).toContainEqual({ schemaVersion: 1, value: "canonical" });
+    expect(contents).toContainEqual({ schemaVersion: 1, value: "lastgood" });
+    // Preserved names follow the ".corrupt-<stamp>" convention.
+    for (const p of preserved) {
+      expect(p).toMatch(/\.corrupt-\d{8}-\d{6}-utc$/);
+    }
+  });
+
+  it("preserves whichever file exists when only one is present", async () => {
+    const store = makeStore();
+    await writeFile(store.backupPath, JSON.stringify({ schemaVersion: 1, value: "lastgood" }), "utf8");
+
+    const preserved = await store.preserveExistingFiles();
+
+    expect(preserved).toHaveLength(1);
+    expect(await read(preserved[0]!)).toEqual({ schemaVersion: 1, value: "lastgood" });
+  });
+
+  it("the Reset sequence does not erase the user's last readable copy", async () => {
+    // Regression for the data-loss window: a valid load mints a .bak, then Reset
+    // sets everything aside and writes defaults. A later load must rebuild .bak
+    // from the defaults WITHOUT destroying the original data, which has to remain
+    // recoverable from the preserved files.
+    const store = makeStore();
+    await writeFile(store.path, JSON.stringify({ schemaVersion: 1, value: "real" }), "utf8");
+    await store.load(); // mints .bak = { value: "real" }
+
+    const preserved = await store.preserveExistingFiles();
+    await store.save({ schemaVersion: 1, value: "default" });
+    await store.load(); // refreshes .bak from the freshly-written defaults
+
+    // The live files are now defaults...
+    expect(await read(store.path)).toEqual({ schemaVersion: 1, value: "default" });
+    expect(await read(store.backupPath)).toEqual({ schemaVersion: 1, value: "default" });
+    // ...but the original "real" data is still recoverable from a preserved copy.
+    const contents = await Promise.all(preserved.map((p) => read(p)));
+    expect(contents).toContainEqual({ schemaVersion: 1, value: "real" });
+
+    // And nothing leaked into unexpected files: exactly the canonical, the .bak,
+    // and the preserved copies remain in the directory.
+    const remaining = await readdir(dir);
+    expect(remaining.sort()).toEqual(
+      ["doc.json", "doc.json.bak", ...preserved.map((p) => p.slice(dir.length + 1))].sort(),
+    );
   });
 });

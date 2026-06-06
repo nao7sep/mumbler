@@ -1,6 +1,6 @@
 import { copyFile } from "node:fs/promises";
 
-import { fileExists, formatError, readJsonFile, writeJsonFile } from "./file-io";
+import { fileExists, formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 
 // Thrown when a persisted file exists but cannot be safely loaded — malformed
 // JSON, or an on-disk schema version newer than this build understands. The
@@ -111,6 +111,27 @@ export class JsonStore<T> {
 
   async flush(): Promise<void> {
     await this.queue.catch(() => undefined);
+  }
+
+  // Sets aside every file this store owns — the canonical file AND its .bak
+  // last-known-good copy — to timestamped ".corrupt-<stamp>" names, returning the
+  // paths actually moved. The store is the only thing that knows it maintains a
+  // .bak, so it must be the one to rescue it: this is the explicit-recovery
+  // (Reset) escape hatch. Without it, the next successful load() refreshes .bak
+  // from freshly-written defaults and silently erases the user's last readable
+  // copy.
+  //
+  // Call before save(): it does not go through the write queue, and is meant to
+  // run on a fresh store with no writes in flight (as Reset does).
+  async preserveExistingFiles(): Promise<string[]> {
+    const preserved: string[] = [];
+    for (const filePath of [this.options.path, this.backupPath]) {
+      const movedTo = await preserveAside(filePath);
+      if (movedTo !== null) {
+        preserved.push(movedTo);
+      }
+    }
+    return preserved;
   }
 
   private async existingBackup(): Promise<string | null> {
