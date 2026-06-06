@@ -53,6 +53,13 @@ try {
     Write-Step "Installing dependencies"
     Invoke-Native -FilePath "npm" -ArgumentList @("install")
 
+    # npm install skips the Electron binary if the package is already at the locked version.
+    Write-Step "Verifying Electron binary"
+    if (-not (Test-Path "node_modules/electron/path.txt")) {
+        Write-Host "Electron binary missing; downloading..."
+        Invoke-Native -FilePath "node" -ArgumentList @("node_modules/electron/install.js")
+    }
+
     Write-Step "Starting Mumbler in development mode"
     Invoke-Native -FilePath "npm" -ArgumentList @("run", "dev") -AllowedExitCodes @(0, 130, -1073741510)
 }

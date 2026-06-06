@@ -34,5 +34,12 @@ cd "$REPO_DIR"
 log_step "Installing dependencies"
 npm install
 
+# npm install skips the Electron binary if the package is already at the locked version.
+log_step "Verifying Electron binary"
+if [[ ! -f node_modules/electron/path.txt ]]; then
+  echo "Electron binary missing; downloading..."
+  node node_modules/electron/install.js
+fi
+
 log_step "Starting Mumbler in development mode"
 npm run dev
