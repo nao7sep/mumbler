@@ -121,12 +121,20 @@ App data is stored in `~/.mumbler` by default. Override with the `MUMBLER_HOME` 
 ```
 ~/.mumbler/
   settings.json     # app settings
+  settings.json.bak # last-known-good copy, refreshed on each successful load
   state.json        # queue state
+  state.json.bak    # last-known-good copy, refreshed on each successful load
   working/          # working copies of imported audio
   output/           # default output folder for saved files (configurable)
   backups/          # default backup folder for originals (configurable)
   logs/             # application logs
 ```
+
+`settings.json` and `state.json` are written atomically (temp file → fsync →
+rename) and never overwritten while being read. If one is ever unreadable or
+from a newer version, the app halts on launch with a clear message instead of
+discarding it; its `.bak` is the recovery copy, and **Reset** preserves the
+unreadable file as `<name>.corrupt-<timestamp>` rather than deleting it.
 
 ## Tech Stack
 

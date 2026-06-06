@@ -38,7 +38,8 @@ import {
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
-import { formatError, writeJsonFile } from "./file-io";
+import { formatError, preserveAside } from "./file-io";
+import { CorruptStateError, type JsonStore } from "./json-store";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, selectExistingCardId } from "./working-files";
 import {
   buildMarkdownContent,
@@ -50,7 +51,7 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
-import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, decodeGeminiApiKey, getSecretsForRedaction, getSystemTimezone, loadSettings, loadState, summarizeSettings } from "./settings-schema";
+import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, decodeGeminiApiKey, getSecretsForRedaction, getSystemTimezone, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
 import { type AppLogger, createLogger, pruneOldLogs, serializeError } from "./logger";
 import {
   clearCardResultsFromStep,
@@ -66,6 +67,8 @@ interface AppRuntimeState {
   paths: AppPaths | null;
   settings: MumblerSettings | null;
   state: MumblerState | null;
+  settingsStore: JsonStore<MumblerSettings> | null;
+  stateStore: JsonStore<MumblerState> | null;
   logger: AppLogger | null;
   startupDiagnostic: AppSnapshot["startupDiagnostic"];
   appWideError: AppSnapshot["appWideError"];
@@ -77,7 +80,10 @@ export class ApplicationRuntime {
   private readonly runtime: AppRuntimeState;
   private readonly activeCardOperations = new Set<string>();
   private readonly activeCardAbortControllers = new Map<string, AbortController>();
-  private persistQueue: Promise<void> = Promise.resolve();
+  // In-flight pipeline promises, so shutdown can await them after aborting.
+  private readonly activePipelines = new Set<Promise<void>>();
+  private shuttingDown = false;
+  private shutdownPromise: Promise<void> | null = null;
   private onPipelineProgressCallback: (() => void) | null = null;
 
   private constructor(runtime: AppRuntimeState) {
@@ -88,32 +94,56 @@ export class ApplicationRuntime {
     const shellReadyAtUtc = Date.now();
     const paths = getAppPaths();
 
+    const settingsStore = createSettingsStore(paths.settingsPath);
+    const stateStore = createStateStore(paths.statePath);
+
     try {
       await ensureDirectories(paths);
       assertFfmpegToolingPresent();
 
-      const settings = await loadSettings(paths);
+      const settingsLoad = await settingsStore.load();
+      const settings = settingsLoad.value;
+      // Materialize defaults on first launch so the config file is discoverable
+      // and hand-editable. This writes a missing file; it never overwrites an
+      // existing valid one (that path stays in load()).
+      if (settingsLoad.origin === "created") {
+        await settingsStore.save(settings);
+      }
+
       const logger = createLogger(paths.logsDir, getSecretsForRedaction(settings));
       await pruneOldLogs(paths.logsDir);
 
-      const { state, recoveredInterruptedCards } = await loadState(paths);
-      const reconciliation = await reconcileWorkingState(paths, state, logger);
-      await writeJsonFile(paths.statePath, reconciliation.state);
+      const stateLoad = await stateStore.load();
+      const recovered = recoverInterruptedCards(stateLoad.value);
+      const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
+
+      // Persist startup fix-ups (interrupted-card recovery, working-file
+      // reconciliation) or a freshly created file — but never rewrite an
+      // unchanged, already-good state just because we read it.
+      const stateChanged =
+        stateLoad.origin === "created" ||
+        recovered.recoveredInterruptedCards > 0 ||
+        reconciliation.droppedPendingImports > 0 ||
+        reconciliation.missingWorkingCards > 0;
+      if (stateChanged) {
+        await stateStore.save(reconciliation.state);
+      }
+
       await logger.info("app.startup", "Application runtime initialized.", {
         cardCount: reconciliation.state.cards.length,
         pendingImportCount: reconciliation.state.pendingImports.length,
-        recoveredInterruptedCards,
+        recoveredInterruptedCards: recovered.recoveredInterruptedCards,
         droppedPendingImports: reconciliation.droppedPendingImports,
         missingWorkingCards: reconciliation.missingWorkingCards,
         deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
         retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
       });
 
-      if (recoveredInterruptedCards > 0) {
+      if (recovered.recoveredInterruptedCards > 0) {
         await logger.warn(
           "app.startup-recovery",
           "Recovered interrupted cards from previous session.",
-          { recoveredInterruptedCards },
+          { recoveredInterruptedCards: recovered.recoveredInterruptedCards },
         );
       }
 
@@ -121,10 +151,12 @@ export class ApplicationRuntime {
         paths,
         settings,
         state: reconciliation.state,
+        settingsStore,
+        stateStore,
         logger,
         startupDiagnostic: null,
         appWideError: null,
-        recoveredInterruptedCards,
+        recoveredInterruptedCards: recovered.recoveredInterruptedCards,
         shellReadyAtUtc,
       });
       await runtime.drainQueuedCards();
@@ -134,9 +166,14 @@ export class ApplicationRuntime {
         paths,
         settings: null,
         state: null,
+        settingsStore: null,
+        stateStore: null,
         logger: null,
         startupDiagnostic: {
-          title: "Startup Failed",
+          title:
+            error instanceof CorruptStateError
+              ? "Saved Data Could Not Be Loaded"
+              : "Startup Failed",
           message:
             error instanceof Error
               ? error.message
@@ -207,19 +244,26 @@ export class ApplicationRuntime {
 
   async resetState(): Promise<AppSnapshot> {
     const paths = this.runtime.paths ?? getAppPaths();
+    const settingsStore = createSettingsStore(paths.settingsPath);
+    const stateStore = createStateStore(paths.statePath);
     const settings = createDefaultSettings(getSystemTimezone());
     const state = createEmptyState();
 
     try {
       await ensureDirectories(paths);
-      await writeJsonFile(paths.settingsPath, settings);
-      await writeJsonFile(paths.statePath, state);
+      // Reset is the explicit escape hatch from a corrupt-data halt, so it must
+      // never silently destroy the unreadable files — preserve them aside first.
+      const preservedSettings = await preserveAside(paths.settingsPath);
+      const preservedState = await preserveAside(paths.statePath);
+      await settingsStore.save(settings);
       const logger = createLogger(paths.logsDir, getSecretsForRedaction(settings));
       await pruneOldLogs(paths.logsDir);
       const reconciliation = await reconcileWorkingState(paths, state, logger);
-      await writeJsonFile(paths.statePath, reconciliation.state);
+      await stateStore.save(reconciliation.state);
       await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
         workingDir: paths.workingDir,
+        preservedSettings,
+        preservedState,
         deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
         retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
       });
@@ -227,6 +271,8 @@ export class ApplicationRuntime {
       this.runtime.paths = paths;
       this.runtime.settings = settings;
       this.runtime.state = reconciliation.state;
+      this.runtime.settingsStore = settingsStore;
+      this.runtime.stateStore = stateStore;
       this.runtime.logger = logger;
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
@@ -763,7 +809,7 @@ export class ApplicationRuntime {
       onTranscriptionSlotReleased: () => this.tryStartNextQueuedCards(),
     };
 
-    void executeCardPipeline(cardId, startStep, mode, ctx)
+    const pipeline = executeCardPipeline(cardId, startStep, mode, ctx)
       .catch(async (error: unknown) => {
         await this.runtime.logger?.error(
           "pipeline.unhandled",
@@ -775,6 +821,12 @@ export class ApplicationRuntime {
       .finally(() => {
         void this.finalizeCardPipeline(cardId, controller);
       });
+
+    // Track the chain so shutdown() can await it after aborting.
+    this.activePipelines.add(pipeline);
+    void pipeline.finally(() => {
+      this.activePipelines.delete(pipeline);
+    });
   }
 
   private async finalizeCardPipeline(cardId: string, ownController: AbortController): Promise<void> {
@@ -799,6 +851,9 @@ export class ApplicationRuntime {
   }
 
   private async tryStartNextQueuedCards(): Promise<void> {
+    if (this.shuttingDown) {
+      return;
+    }
     if (this.runtime.state === null || this.runtime.settings === null) {
       return;
     }
@@ -880,6 +935,30 @@ export class ApplicationRuntime {
 
   async drainQueuedCards(): Promise<void> {
     await this.tryStartNextQueuedCards();
+  }
+
+  // Idempotent graceful shutdown, called from the app's before-quit handler.
+  // Stops new pipelines, aborts in-flight ones and lets them unwind, then drains
+  // the store write-queues so the canonical files are current before the process
+  // exits. Cards aborted mid-step are left for startup recovery to mark as
+  // resumable Errors, so no work is silently lost or half-written.
+  async shutdown(): Promise<void> {
+    if (this.shutdownPromise !== null) {
+      return this.shutdownPromise;
+    }
+    this.shutdownPromise = (async () => {
+      this.shuttingDown = true;
+      for (const controller of this.activeCardAbortControllers.values()) {
+        controller.abort();
+      }
+      await Promise.allSettled([...this.activePipelines]);
+      await this.runtime.stateStore?.flush();
+      await this.runtime.settingsStore?.flush();
+      await this.runtime.logger?.info("app.shutdown", "Graceful shutdown complete.", {
+        cardCount: this.runtime.state?.cards.length ?? 0,
+      });
+    })();
+    return this.shutdownPromise;
   }
 
   async chooseOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
@@ -1175,31 +1254,28 @@ export class ApplicationRuntime {
   }
 
   private async persistState(): Promise<void> {
-    const work = async (): Promise<void> => {
-      const state = this.runtime.state!;
-      const normalized =
-        state.cards.length === 0 && state.pendingImports.length === 0
-          ? createEmptyState()
-          : {
-              ...state,
-              selectedCardId: selectExistingCardId(state),
-              updatedAtUtc: Date.now(),
-            };
+    const state = this.runtime.state!;
+    const normalized =
+      state.cards.length === 0 && state.pendingImports.length === 0
+        ? createEmptyState()
+        : {
+            ...state,
+            selectedCardId: selectExistingCardId(state),
+            updatedAtUtc: Date.now(),
+          };
 
-      this.runtime.state = normalized;
-      await writeJsonFile(this.runtime.paths!.statePath, normalized);
+    this.runtime.state = normalized;
+    // The store serializes writes, so overlapping persistState calls can never
+    // interleave on disk.
+    await this.runtime.stateStore!.save(normalized);
 
-      if (this.onPipelineProgressCallback !== null) {
-        this.onPipelineProgressCallback();
-      }
-    };
-
-    this.persistQueue = this.persistQueue.then(work, work);
-    return this.persistQueue;
+    if (this.onPipelineProgressCallback !== null) {
+      this.onPipelineProgressCallback();
+    }
   }
 
   private async persistSettings(): Promise<void> {
-    await writeJsonFile(this.runtime.paths!.settingsPath, this.runtime.settings);
+    await this.runtime.settingsStore!.save(this.runtime.settings!);
   }
 
   private async setAppWideError(

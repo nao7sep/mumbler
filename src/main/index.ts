@@ -27,8 +27,13 @@ const AUDIO_MIME_TYPES: Record<string, string> = {
   ".opus": "audio/ogg",
 };
 
+// Set once bootstrap finishes so the before-quit handler can reach the runtime.
+let runtimeForShutdown: ApplicationRuntime | null = null;
+let shuttingDown = false;
+
 async function bootstrap(): Promise<void> {
   const runtime = await ApplicationRuntime.initialize();
+  runtimeForShutdown = runtime;
 
   protocol.handle("mumbler-asset", async (request) => {
     const url = new URL(request.url);
@@ -110,4 +115,26 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+// Graceful shutdown: hold the quit once, flush pending state + abort in-flight
+// pipelines via the runtime, then exit deterministically with app.exit(0). A
+// second quit during shutdown falls through (force-quit escape hatch).
+app.on("before-quit", (event) => {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  event.preventDefault();
+  const runtime = runtimeForShutdown;
+  if (runtime === null) {
+    app.exit(0);
+    return;
+  }
+  runtime
+    .shutdown()
+    .catch((error: unknown) => {
+      console.error("[mumbler] Shutdown error:", error instanceof Error ? error.stack : String(error));
+    })
+    .finally(() => app.exit(0));
 });

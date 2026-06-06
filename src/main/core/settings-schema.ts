@@ -1,5 +1,4 @@
 import type {
-  AppPaths,
   MumblerCard,
   MumblerSettings,
   MumblerState,
@@ -11,7 +10,7 @@ import {
   isValidTimezone,
   normalizeUtcMs,
 } from "@shared/timestamps";
-import { readJsonFile, writeJsonFile } from "./file-io";
+import { JsonStore } from "./json-store";
 
 const SETTINGS_SCHEMA_VERSION = 1;
 const STATE_SCHEMA_VERSION = 1;
@@ -191,7 +190,7 @@ function normalizeState(raw: Record<string, unknown>, defaults: MumblerState): M
   };
 }
 
-function recoverInterruptedCards(
+export function recoverInterruptedCards(
   state: MumblerState,
 ): { state: MumblerState; recoveredInterruptedCards: number } {
   let recoveredInterruptedCards = 0;
@@ -349,36 +348,27 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
   };
 }
 
-export async function loadSettings(paths: AppPaths): Promise<MumblerSettings> {
-  const systemTimezone = getSystemTimezone();
-  const defaults = createDefaultSettings(systemTimezone);
-  const raw = await readJsonFile<Record<string, unknown> | null>(paths.settingsPath);
-
-  if (raw === null) {
-    await writeJsonFile(paths.settingsPath, defaults);
-    return defaults;
-  }
-
-  const normalized = normalizeSettings(raw, defaults);
-  await writeJsonFile(paths.settingsPath, normalized);
-  return normalized;
+// Stores for the two canonical files. Each owns serialized atomic writes and
+// non-destructive loading (missing → defaults, malformed or newer-than-supported
+// → CorruptStateError with the file left untouched), plus a .bak last-good copy.
+// Startup recovery (recoverInterruptedCards) and filesystem reconciliation are
+// applied by the caller after load, keeping the store a pure persistence layer.
+export function createSettingsStore(path: string): JsonStore<MumblerSettings> {
+  return new JsonStore<MumblerSettings>({
+    path,
+    schemaVersion: SETTINGS_SCHEMA_VERSION,
+    validate: (raw) => normalizeSettings(raw, createDefaultSettings(getSystemTimezone())),
+    createDefault: () => createDefaultSettings(getSystemTimezone()),
+  });
 }
 
-export async function loadState(
-  paths: AppPaths,
-): Promise<{ state: MumblerState; recoveredInterruptedCards: number }> {
-  const raw = await readJsonFile<Record<string, unknown> | null>(paths.statePath);
-  const defaults = createEmptyState();
-
-  if (raw === null) {
-    await writeJsonFile(paths.statePath, defaults);
-    return { state: defaults, recoveredInterruptedCards: 0 };
-  }
-
-  const normalized = normalizeState(raw, defaults);
-  const { state, recoveredInterruptedCards } = recoverInterruptedCards(normalized);
-  await writeJsonFile(paths.statePath, state);
-  return { state, recoveredInterruptedCards };
+export function createStateStore(path: string): JsonStore<MumblerState> {
+  return new JsonStore<MumblerState>({
+    path,
+    schemaVersion: STATE_SCHEMA_VERSION,
+    validate: (raw) => normalizeState(raw, createEmptyState()),
+    createDefault: () => createEmptyState(),
+  });
 }
 
 export function createEmptyState(): MumblerState {
