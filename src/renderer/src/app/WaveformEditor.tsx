@@ -108,7 +108,6 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const waveSurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const regionRef = useRef<Region | null>(null);
-  const isSyncingRegionRef = useRef(false);
   const cardIdRef = useRef(card.id);
   const onTrimCommitRef = useRef(onTrimCommit);
 
@@ -213,7 +212,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         // if resolvedDurationSec doesn't change (already matches card.durationSec),
         // React skips the re-render and the sync effect never runs after WaveSurfer loads.
         if (duration > 0) {
-          syncRegionToTrim(regions, regionRef, draftTrimRef.current, duration, isSyncingRegionRef);
+          syncRegionToTrim(regions, regionRef, draftTrimRef.current, duration);
         }
       }),
       waveSurfer.on("decode", (duration) => {
@@ -241,31 +240,29 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         setPlayerError(message);
         onError(message);
       }),
+      // region-update / region-updated fire only from a user drag or resize:
+      // WaveSurfer's programmatic setOptions emits "render", not "update", so
+      // syncing the region to our own state never echoes back through these.
       regions.on("region-update", (region) => {
-        if (isSyncingRegionRef.current) {
-          return;
-        }
-
         const nextTrim = regionToTrim(region, waveSurfer.getDuration());
         setDraftTrim(nextTrim);
         setFrontInput(formatMarkerInput(nextTrim.frontMarkerSec));
         setBackInput(formatMarkerInput(nextTrim.backMarkerSec));
       }),
       regions.on("region-updated", (region) => {
-        if (isSyncingRegionRef.current) {
-          return;
-        }
-
         const nextTrim = regionToTrim(region, waveSurfer.getDuration());
         void commitTrim(nextTrim);
       }),
       regions.on("region-removed", () => {
-        if (isSyncingRegionRef.current) {
+        // A removal we initiated clears regionRef *before* calling remove(), so a
+        // null ref here means this is the synchronous echo of our own sync —
+        // ignore it. No user gesture removes the region, so the body below only
+        // runs if some external force did, in which case we mirror the cleared state.
+        if (regionRef.current === null) {
           return;
         }
 
-        const clearedTrim = { frontMarkerSec: null, backMarkerSec: null };
-        setDraftTrim(clearedTrim);
+        setDraftTrim({ frontMarkerSec: null, backMarkerSec: null });
         setFrontInput("");
         setBackInput("");
       }),
@@ -292,7 +289,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       return;
     }
 
-    syncRegionToTrim(regions, regionRef, draftTrim, durationSec, isSyncingRegionRef);
+    syncRegionToTrim(regions, regionRef, draftTrim, durationSec);
   }, [draftTrim.backMarkerSec, draftTrim.frontMarkerSec, resolvedDurationSec]);
 
   async function commitTrim(nextTrim: CardTrim): Promise<void> {
@@ -645,41 +642,34 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   );
 });
 
+// Pushes our trim state into the WaveSurfer region. This is the programmatic half
+// of the two-way sync; the user-driven half lives in the region-* handlers. No
+// guard flag is needed because addRegion/setOptions don't emit the region-update
+// events those handlers react to (they emit "render"). The only echo is the
+// synchronous "region-removed" on remove(), which the handler recognizes by
+// regionRef already being null.
 function syncRegionToTrim(
   regions: RegionsPlugin,
   regionRef: MutableRefObject<Region | null>,
   trim: CardTrim,
   durationSec: number,
-  isSyncingRegionRef: MutableRefObject<boolean>,
 ): void {
   const hasTrim = trim.frontMarkerSec !== null || trim.backMarkerSec !== null;
   const startSec = trim.frontMarkerSec ?? 0;
   const endSec = trim.backMarkerSec ?? durationSec;
 
-  isSyncingRegionRef.current = true;
+  if (!hasTrim) {
+    // Detach our reference before removing so the synchronous "region-removed"
+    // echo sees a null ref and is ignored as self-inflicted.
+    const existing = regionRef.current;
+    regionRef.current = null;
+    existing?.remove();
+    return;
+  }
 
-  try {
-    if (!hasTrim) {
-      regionRef.current?.remove();
-      regionRef.current = null;
-      return;
-    }
-
-    if (regionRef.current === null) {
-      regionRef.current = regions.addRegion({
-        id: "keep-range",
-        start: startSec,
-        end: endSec,
-        drag: false,
-        resize: true,
-        resizeStart: true,
-        resizeEnd: true,
-        color: REGION_COLOR,
-      });
-      return;
-    }
-
-    regionRef.current.setOptions({
+  if (regionRef.current === null) {
+    regionRef.current = regions.addRegion({
+      id: "keep-range",
       start: startSec,
       end: endSec,
       drag: false,
@@ -688,11 +678,18 @@ function syncRegionToTrim(
       resizeEnd: true,
       color: REGION_COLOR,
     });
-  } finally {
-    window.setTimeout(() => {
-      isSyncingRegionRef.current = false;
-    }, 0);
+    return;
   }
+
+  regionRef.current.setOptions({
+    start: startSec,
+    end: endSec,
+    drag: false,
+    resize: true,
+    resizeStart: true,
+    resizeEnd: true,
+    color: REGION_COLOR,
+  });
 }
 
 function regionToTrim(region: Region, durationSec: number): CardTrim {

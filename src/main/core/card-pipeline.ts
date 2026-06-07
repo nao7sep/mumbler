@@ -29,10 +29,13 @@ export interface CardPipelineContext {
   settings: MumblerSettings;
   paths: AppPaths;
   logger: AppLogger;
-  activeCardOperations: Set<string>;
   signal: AbortSignal;
   persistState: () => Promise<void>;
-  onTranscriptionSlotReleased: () => Promise<void>;
+  // Releases the transcription concurrency slot this run holds, then admits any
+  // queued cards into the freed capacity. A no-op when the run never acquired a
+  // slot (e.g. a metadata-only regeneration), and idempotent so it can be called
+  // both when transcription finishes and again on the way out.
+  releaseTranscriptionSlot: () => Promise<void>;
 }
 
 export type PipelineMode = "generate";
@@ -59,7 +62,6 @@ export async function executeCardPipeline(
     startStep,
   });
   let activeStep: PipelineStartStep = startStep;
-  let holdsTranscriptionSlot = false;
 
   card.queuedMode = null;
   card.queuedAtUtc = null;
@@ -72,9 +74,6 @@ export async function executeCardPipeline(
     }
 
     if (startStep === "transcription") {
-      ctx.activeCardOperations.add(cardId);
-      holdsTranscriptionSlot = true;
-
       clearCardResultsFromStep(card, "transcription");
       await setCardStepState(card, "Transcribing", "transcription", ctx);
 
@@ -146,9 +145,9 @@ export async function executeCardPipeline(
         await preparedAudio.cleanup();
       }
 
-      ctx.activeCardOperations.delete(cardId);
-      holdsTranscriptionSlot = false;
-      await ctx.onTranscriptionSlotReleased();
+      // Release the concurrency slot the moment transcription is done so other
+      // queued transcriptions can start while this card continues with metadata.
+      await ctx.releaseTranscriptionSlot();
 
       activeStep = "structured";
     }
@@ -290,16 +289,16 @@ export async function executeCardPipeline(
     await ctx.persistState();
     await logPipelineFailure(logger, error, cardId, activeStep, card.status);
   } finally {
-    if (holdsTranscriptionSlot) {
-      ctx.activeCardOperations.delete(cardId);
-      try {
-        await ctx.onTranscriptionSlotReleased();
-      } catch (drainError: unknown) {
-        await logger.warn("pipeline.drain-failed", "Failed to drain queued cards after slot release.", {
-          cardId,
-          error: drainError instanceof Error ? drainError.message : String(drainError),
-        });
-      }
+    // Always release on the way out. Idempotent: a no-op if transcription already
+    // released the slot above; otherwise it frees the slot still held by a run
+    // that failed or was cancelled before transcription completed.
+    try {
+      await ctx.releaseTranscriptionSlot();
+    } catch (drainError: unknown) {
+      await logger.warn("pipeline.drain-failed", "Failed to drain queued cards after slot release.", {
+        cardId,
+        error: drainError instanceof Error ? drainError.message : String(drainError),
+      });
     }
   }
 }

@@ -61,6 +61,11 @@ import {
   type PipelineMode,
   type PipelineStartStep,
 } from "./card-pipeline";
+import {
+  TranscriptionSlotPool,
+  selectNextQueuedCard,
+  type TranscriptionSlot,
+} from "./transcription-queue";
 
 
 interface AppRuntimeState {
@@ -76,10 +81,19 @@ interface AppRuntimeState {
   shellReadyAtUtc: number;
 }
 
+// One active (non-detached) pipeline per card: its abort controller plus the
+// transcription slot it holds (null for a metadata-only run). Cancel detaches a
+// run by removing it here; the detached run keeps its own reference and so can
+// only ever release its *own* slot, never a replacement's.
+interface ActivePipelineRun {
+  controller: AbortController;
+  slot: TranscriptionSlot | null;
+}
+
 export class ApplicationRuntime {
   private readonly runtime: AppRuntimeState;
-  private readonly activeCardOperations = new Set<string>();
-  private readonly activeCardAbortControllers = new Map<string, AbortController>();
+  private readonly transcriptionSlots = new TranscriptionSlotPool();
+  private readonly activeRuns = new Map<string, ActivePipelineRun>();
   // In-flight pipeline promises, so shutdown can await them after aborting.
   private readonly activePipelines = new Set<Promise<void>>();
   private shuttingDown = false;
@@ -691,8 +705,9 @@ export class ApplicationRuntime {
     }
 
     const oldCard = state.cards[cardIndex];
+    const run = this.activeRuns.get(cardId);
     const isQueued = oldCard.status === "Queued";
-    const isActive = this.activeCardAbortControllers.has(cardId);
+    const isActive = run !== undefined;
 
     if (!isQueued && !isActive) {
       throw new Error("This card is not being processed.");
@@ -717,18 +732,19 @@ export class ApplicationRuntime {
       updatedAtUtc: Date.now(),
     };
 
-    // Release resources immediately so the user can generate again at once.
-    const controller = this.activeCardAbortControllers.get(cardId);
-    this.activeCardAbortControllers.delete(cardId);
-    this.activeCardOperations.delete(cardId);
+    // Detach the run so its later unwind can't touch a replacement's bookkeeping,
+    // then free its slot immediately so the user can generate again at once.
+    this.activeRuns.delete(cardId);
 
     await this.persistState();
 
-    // Best-effort abort of the orphaned pipeline and queue drain (fire and forget).
-    if (controller !== undefined) {
-      controller.abort();
+    if (run !== undefined) {
+      run.controller.abort();
+      // Releasing the run's own slot is idempotent and admits any queued cards
+      // into the freed capacity. A no-op if the slot was already released (e.g.
+      // the card was cancelled during the metadata phase).
+      await this.releaseSlotAndDrain(run.slot);
     }
-    void this.tryStartNextQueuedCards();
 
     await this.runtime.logger!.info("pipeline.cancel-immediate", "Immediately detached and cancelled card pipeline.", {
       cardId,
@@ -758,19 +774,17 @@ export class ApplicationRuntime {
 
     const startStep = requestedStartStep ?? "transcription";
     const needsTranscriptionSlot = startStep === "transcription";
-    const slotAvailable = this.activeCardOperations.size < settings.concurrencyLimit;
+    const slotAvailable = this.transcriptionSlots.inUse < settings.concurrencyLimit;
 
     if (!needsTranscriptionSlot || slotAvailable) {
-      if (needsTranscriptionSlot) {
-        this.activeCardOperations.add(cardId);
-      }
+      const slot = needsTranscriptionSlot ? this.transcriptionSlots.acquire() : null;
       card.status = startStep === "transcription" ? "Transcribing" : "Generating Metadata";
       card.activeStep = startStep;
       card.queuedMode = null;
       card.queuedAtUtc = null;
       card.updatedAtUtc = Date.now();
       await this.persistState();
-      this.spawnCardPipeline(cardId, startStep, mode);
+      this.spawnCardPipeline(cardId, startStep, mode, slot);
       return;
     }
 
@@ -786,7 +800,7 @@ export class ApplicationRuntime {
       {
         cardId,
         mode,
-        activeSlots: this.activeCardOperations.size,
+        activeSlots: this.transcriptionSlots.inUse,
         concurrencyLimit: settings.concurrencyLimit,
       },
     );
@@ -796,18 +810,19 @@ export class ApplicationRuntime {
     cardId: string,
     startStep: PipelineStartStep,
     mode: PipelineMode,
+    slot: TranscriptionSlot | null,
   ): void {
     const controller = new AbortController();
-    this.activeCardAbortControllers.set(cardId, controller);
+    const run: ActivePipelineRun = { controller, slot };
+    this.activeRuns.set(cardId, run);
     const ctx: CardPipelineContext = {
       state: this.runtime.state!,
       settings: this.runtime.settings!,
       paths: this.runtime.paths!,
       logger: this.runtime.logger!,
-      activeCardOperations: this.activeCardOperations,
       signal: controller.signal,
       persistState: () => this.persistState(),
-      onTranscriptionSlotReleased: () => this.tryStartNextQueuedCards(),
+      releaseTranscriptionSlot: () => this.releaseSlotAndDrain(slot),
     };
 
     const pipeline = executeCardPipeline(cardId, startStep, mode, ctx)
@@ -820,7 +835,7 @@ export class ApplicationRuntime {
         );
       })
       .finally(() => {
-        void this.finalizeCardPipeline(cardId, controller);
+        void this.finalizeCardPipeline(cardId, run);
       });
 
     // Track the chain so shutdown() can await it after aborting.
@@ -830,17 +845,29 @@ export class ApplicationRuntime {
     });
   }
 
-  private async finalizeCardPipeline(cardId: string, ownController: AbortController): Promise<void> {
+  // Frees one transcription slot (if still held) and admits any queued cards into
+  // the freed capacity. Idempotent on the slot, so every release path — mid-run
+  // after transcription, the pipeline's finally, finalize, and cancel — can call
+  // it freely without double-counting.
+  private async releaseSlotAndDrain(slot: TranscriptionSlot | null): Promise<void> {
+    if (slot === null || !slot.held) {
+      return;
+    }
+    slot.release();
+    await this.tryStartNextQueuedCards();
+  }
+
+  private async finalizeCardPipeline(cardId: string, run: ActivePipelineRun): Promise<void> {
     try {
-      // Only clean up if this is still the active pipeline for this card.
-      // If the card was cancelled via the detach path, the controller was already
-      // removed from the map, so this check prevents an orphaned pipeline from
-      // clobbering a freshly-started replacement pipeline.
-      if (this.activeCardAbortControllers.get(cardId) === ownController) {
-        this.activeCardAbortControllers.delete(cardId);
-        this.activeCardOperations.delete(cardId);
-        await this.tryStartNextQueuedCards();
+      // Only the still-current run for this card may touch shared bookkeeping. A
+      // run detached by cancel was replaced (or removed) in activeRuns, so this
+      // identity check stops an orphaned pipeline from clobbering its replacement;
+      // the orphan's own slot was already freed on its release path.
+      if (this.activeRuns.get(cardId) !== run) {
+        return;
       }
+      this.activeRuns.delete(cardId);
+      await this.releaseSlotAndDrain(run.slot);
     } catch (error: unknown) {
       await this.runtime.logger?.error(
         "pipeline.finalize-failed",
@@ -862,22 +889,23 @@ export class ApplicationRuntime {
     const settings = this.runtime.settings;
     const state = this.runtime.state;
 
-    while (this.activeCardOperations.size < settings.concurrencyLimit) {
-      const next = state.cards
-        .filter(
-          (card) =>
-            card.status === "Queued" &&
-            card.queuedMode !== null &&
-            card.queuedAtUtc !== null,
-        )
-        .sort((a, b) => (a.queuedAtUtc ?? 0) - (b.queuedAtUtc ?? 0))[0];
+    // Cards with an active run are excluded from selection: spawnCardPipeline
+    // registers the run synchronously, but a card's status flips to "Transcribing"
+    // only later inside the pipeline. Without this, one drain pass with capacity
+    // for several cards would re-select — and double-spawn — the card it just
+    // started. We seed the set from active runs and extend it in lockstep as we
+    // spawn, rather than rebuilding it from activeRuns on every iteration.
+    const excludedCardIds = new Set(this.activeRuns.keys());
+    while (this.transcriptionSlots.inUse < settings.concurrencyLimit) {
+      const next = selectNextQueuedCard(state.cards, excludedCardIds);
 
-      if (next === undefined || next.queuedMode === null) {
+      if (next === null || next.queuedMode === null) {
         return;
       }
 
-      this.activeCardOperations.add(next.id);
-      this.spawnCardPipeline(next.id, "transcription", next.queuedMode);
+      const slot = this.transcriptionSlots.acquire();
+      this.spawnCardPipeline(next.id, "transcription", next.queuedMode, slot);
+      excludedCardIds.add(next.id);
     }
   }
 
@@ -949,8 +977,8 @@ export class ApplicationRuntime {
     }
     this.shutdownPromise = (async () => {
       this.shuttingDown = true;
-      for (const controller of this.activeCardAbortControllers.values()) {
-        controller.abort();
+      for (const run of this.activeRuns.values()) {
+        run.controller.abort();
       }
       await Promise.allSettled([...this.activePipelines]);
       await this.runtime.stateStore?.flush();
@@ -1247,8 +1275,7 @@ export class ApplicationRuntime {
       card.status === "Queued" ||
       card.status === "Transcribing" ||
       card.status === "Generating Metadata" ||
-      this.activeCardOperations.has(card.id) ||
-      this.activeCardAbortControllers.has(card.id)
+      this.activeRuns.has(card.id)
     ) {
       throw new Error("This card is already being processed.");
     }
