@@ -24,6 +24,9 @@ export async function writeJsonFile(filePath: string, value: unknown): Promise<v
     await rename(tempPath, filePath);
     await syncDirectory(dirname(filePath));
   } catch (error) {
+    // Best-effort removal of the half-written temp file; the original write error
+    // is the meaningful one and is always rethrown below, so a failed cleanup is
+    // deliberately not surfaced on top of it.
     await rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   }

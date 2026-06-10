@@ -127,7 +127,7 @@ App data is stored in `~/.mumbler` by default. Override with the `MUMBLER_HOME` 
   working/          # working copies of imported audio
   output/           # default output folder for saved files (configurable)
   backups/          # default backup folder for originals (configurable)
-  logs/             # application logs
+  logs/             # one JSON-Lines log file per launch, named yyyymmdd-hhmmss-utc.log; never pruned
 ```
 
 `settings.json` and `state.json` are written atomically (temp file → fsync →
@@ -136,6 +136,12 @@ from a newer version, the app halts on launch with a clear message instead of
 discarding it; its `.bak` is the recovery copy, and **Reset** preserves both the
 unreadable file and its `.bak` as `<name>.corrupt-<timestamp>` copies rather than
 deleting them.
+
+Each launch writes one JSON-Lines log file under `logs/`, named with its UTC
+session-start timestamp. Logs are never pruned or rotated — an old log is often
+what's needed to debug a problem that surfaces later. `debug`-level lines are
+developer-only: they are written only from a dev build, or when `MUMBLER_DEBUG=1`
+is set, and never in a packaged release.
 
 ## Tech Stack
 

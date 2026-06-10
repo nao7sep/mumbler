@@ -119,6 +119,12 @@ export class JsonStore<T> {
     return this.queue;
   }
 
+  // Awaits all queued writes — used by graceful shutdown. A failed save() rejects
+  // to its own awaiter (every caller awaits save()/persistState(), and those
+  // rejections are logged at the IPC boundary or in the pipeline's catch), so the
+  // error is never lost. flush() is only a drain barrier: it must not re-reject on
+  // an error already delivered there, or one failed final write would wedge
+  // shutdown. This is deliberate control flow, not a swallowed failure.
   async flush(): Promise<void> {
     await this.queue.catch(() => undefined);
   }

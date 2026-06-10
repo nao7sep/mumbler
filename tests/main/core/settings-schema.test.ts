@@ -6,7 +6,6 @@ import {
   buildSettingsDraft,
   createDefaultSettings,
   decodeGeminiApiKey,
-  getSecretsForRedaction,
   getSystemTimezone,
   summarizeSettings,
 } from "@main/core/settings-schema";
@@ -127,14 +126,6 @@ describe("Gemini API key handling", () => {
     expect(() => applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft)).toThrow(/clear/i);
   });
 
-  it("exposes the decoded key for log redaction only when present", () => {
-    const current = createDefaultSettings("Asia/Tokyo");
-    expect(getSecretsForRedaction(current)).toEqual([]);
-    const draft = buildSettingsDraft(current, OUT, BACKUP);
-    draft.geminiApiKeyInput = "AIzaSecretKey123";
-    const withKey = applySettingsDraft(current, draft);
-    expect(getSecretsForRedaction(withKey)).toEqual(["AIzaSecretKey123"]);
-  });
 });
 
 describe("summarizeSettings", () => {

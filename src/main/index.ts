@@ -64,7 +64,15 @@ async function bootstrap(): Promise<void> {
           "Content-Length": String(data.byteLength),
         },
       });
-    } catch {
+    } catch (error: unknown) {
+      // A resolved card pointed at a file we could not read — unexpected at this
+      // boundary, so log it rather than silently 404. Earlier 404s above (bad URL
+      // shape, unknown card) are expected and stay quiet.
+      void runtime.currentLogger().warn("media.read", "Failed to read card media file.", {
+        cardId,
+        filePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return new Response("Not found", { status: 404 });
     }
   });

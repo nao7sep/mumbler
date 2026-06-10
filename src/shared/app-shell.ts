@@ -300,10 +300,26 @@ export interface RendererErrorReport {
   stack?: string;
 }
 
+// The Node platform string (the member set of NodeJS.Platform), spelled out as a
+// portable union so shared code carries no dependency on @types/node — it is
+// imported by the renderer, which is typechecked without Node types.
+export type Platform =
+  | "aix"
+  | "android"
+  | "darwin"
+  | "freebsd"
+  | "haiku"
+  | "linux"
+  | "openbsd"
+  | "sunos"
+  | "win32"
+  | "cygwin"
+  | "netbsd";
+
 export interface AppSnapshot {
   appName: string;
   appVersion: string;
-  platform: NodeJS.Platform;
+  platform: Platform;
   isPackaged: boolean;
   shellReadyAtUtc: number;
   paths: AppPaths | null;

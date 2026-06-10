@@ -14,7 +14,10 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web && npm run typecheck:test",
     "test": "vitest run",
     "test:watch": "vitest"
   },

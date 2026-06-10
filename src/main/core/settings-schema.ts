@@ -13,6 +13,7 @@ import {
 } from "@shared/timestamps";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
 import { JsonStore } from "./json-store";
+import { OperationError } from "./operation-error";
 
 const SETTINGS_SCHEMA_VERSION = 1;
 const STATE_SCHEMA_VERSION = 1;
@@ -261,7 +262,7 @@ function resolveGeminiApiKeyObfuscated(current: MumblerSettings, draft: Settings
   const nextApiKey = draft.geminiApiKeyInput.trim();
 
   if (draft.clearGeminiApiKey && nextApiKey.length > 0) {
-    throw new Error("Enter a new Gemini API key or clear the saved key, not both.");
+    throw new OperationError("Enter a new Gemini API key or clear the saved key, not both.");
   }
 
   if (draft.clearGeminiApiKey) {
@@ -292,12 +293,12 @@ function requirePromptPlaceholders(
   label: string,
 ): void {
   if (prompt.length === 0) {
-    throw new Error(`${label} is required.`);
+    throw new OperationError(`${label} is required.`);
   }
 
   for (const placeholder of requiredPlaceholders) {
     if (!prompt.includes(placeholder)) {
-      throw new Error(`${label} must include ${placeholder}.`);
+      throw new OperationError(`${label} must include ${placeholder}.`);
     }
   }
 }
@@ -308,17 +309,17 @@ function requirePromptAnyPlaceholder(
   label: string,
 ): void {
   if (prompt.length === 0) {
-    throw new Error(`${label} is required.`);
+    throw new OperationError(`${label} is required.`);
   }
 
   if (!acceptedPlaceholders.some((placeholder) => prompt.includes(placeholder))) {
-    throw new Error(`${label} must include one of ${acceptedPlaceholders.join(" or ")}.`);
+    throw new OperationError(`${label} must include one of ${acceptedPlaceholders.join(" or ")}.`);
   }
 }
 
 function requirePositiveInteger(value: number, label: string): number {
   if (!isPositiveIntegerSetting(value)) {
-    throw new Error(`${label} must be a positive integer.`);
+    throw new OperationError(`${label} must be a positive integer.`);
   }
 
   return value;
@@ -326,7 +327,7 @@ function requirePositiveInteger(value: number, label: string): number {
 
 function requireRatio(value: number, label: string): number {
   if (!isRatioSetting(value)) {
-    throw new Error(`${label} must be between 0 and 1.`);
+    throw new OperationError(`${label} must be between 0 and 1.`);
   }
 
   return value;
@@ -489,19 +490,19 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
   const slugPrompt = draft.slugPrompt.trim();
 
   if (!isValidTimezone(defaultTimezone)) {
-    throw new Error("Default timezone must be a valid IANA timezone.");
+    throw new OperationError("Default timezone must be a valid IANA timezone.");
   }
 
   if (timestampPatterns.length === 0) {
-    throw new Error("Add at least one timestamp regex pattern.");
+    throw new OperationError("Add at least one timestamp regex pattern.");
   }
 
   if (transcriptionModel.length === 0) {
-    throw new Error("Transcription model is required.");
+    throw new OperationError("Transcription model is required.");
   }
 
   if (metadataModel.length === 0) {
-    throw new Error("Metadata model is required.");
+    throw new OperationError("Metadata model is required.");
   }
 
   requirePromptPlaceholders(structuredPrompt, ["{transcript}"], "Structured prompt");
@@ -528,7 +529,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
   const metadataTimeoutMs = requirePositiveInteger(draft.metadataTimeoutMs, "Metadata timeout");
 
   if (retryMaxDelayMs < retryInitialDelayMs) {
-    throw new Error("Retry max delay must be greater than or equal to retry initial delay.");
+    throw new OperationError("Retry max delay must be greater than or equal to retry initial delay.");
   }
 
   return {
@@ -575,9 +576,4 @@ export function decodeGeminiApiKey(obfuscated: string): string {
   } catch {
     return "";
   }
-}
-
-export function getSecretsForRedaction(settings: MumblerSettings): string[] {
-  const decodedKey = decodeGeminiApiKey(settings.geminiApiKeyObfuscated);
-  return decodedKey.length > 0 ? [decodedKey] : [];
 }

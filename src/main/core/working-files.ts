@@ -31,6 +31,9 @@ export async function copyIntoWorking(
     await copyFile(sourcePath, workingFilePath);
     await access(workingFilePath, fsConstants.R_OK);
   } catch (error: unknown) {
+    // Best-effort removal of the partial copy; the wrapped error below is the
+    // meaningful failure and is always thrown, so a failed cleanup is deliberately
+    // not surfaced on top of it.
     await rm(workingFilePath, { force: true }).catch(() => undefined);
     throw new Error(
       `Failed to create a readable working copy for ${preferredName}: ${formatError(error)}`,

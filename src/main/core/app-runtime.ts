@@ -51,8 +51,9 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
-import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, decodeGeminiApiKey, getSecretsForRedaction, getSystemTimezone, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
-import { type AppLogger, createLogger, pruneOldLogs, serializeError } from "./logger";
+import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, decodeGeminiApiKey, getSystemTimezone, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
+import { type AppLogger, createLogger, serializeError } from "./logger";
+import { OperationError } from "./operation-error";
 import {
   clearCardResultsFromStep,
   executeCardPipeline,
@@ -68,13 +69,18 @@ import {
 } from "./transcription-queue";
 
 
+// Debug logging is developer-only: on for an unpackaged/dev build, or when an
+// explicit MUMBLER_DEBUG=1 is set; off in a packaged release so the firehose
+// never reaches an end-user's disk.
+const DEBUG_LOGGING_ENABLED = !app.isPackaged || process.env.MUMBLER_DEBUG === "1";
+
 interface AppRuntimeState {
   paths: AppPaths | null;
   settings: MumblerSettings | null;
   state: MumblerState | null;
   settingsStore: JsonStore<MumblerSettings> | null;
   stateStore: JsonStore<MumblerState> | null;
-  logger: AppLogger | null;
+  logger: AppLogger;
   startupDiagnostic: AppSnapshot["startupDiagnostic"];
   appWideError: AppSnapshot["appWideError"];
   recoveredInterruptedCards: number;
@@ -108,6 +114,16 @@ export class ApplicationRuntime {
     const shellReadyAtUtc = Date.now();
     const paths = getAppPaths();
 
+    // The session logger is a per-launch singleton: built once here, before any
+    // fallible startup step, and never rebuilt for the life of the launch — so a
+    // launch's lines always land in a single file (createLogger stamps the
+    // filename from the current time, so rebuilding it would fork a new file). It
+    // is created before ensureDirectories() deliberately: createLogger touches no
+    // filesystem until its first append, and that append degrades to stderr
+    // without throwing if the directory is missing — so the logger is on hand to
+    // record a startup failure on the very path that could not create it.
+    const logger = createLogger(paths.logsDir, { debugEnabled: DEBUG_LOGGING_ENABLED });
+
     const settingsStore = createSettingsStore(paths.settingsPath);
     const stateStore = createStateStore(paths.statePath);
 
@@ -123,9 +139,6 @@ export class ApplicationRuntime {
       if (settingsLoad.origin === "created") {
         await settingsStore.save(settings);
       }
-
-      const logger = createLogger(paths.logsDir, getSecretsForRedaction(settings));
-      await pruneOldLogs(paths.logsDir);
 
       const stateLoad = await stateStore.load();
       const recovered = recoverInterruptedCards(stateLoad.value);
@@ -144,6 +157,12 @@ export class ApplicationRuntime {
       }
 
       await logger.info("app.startup", "Application runtime initialized.", {
+        appVersion: app.getVersion(),
+        isPackaged: app.isPackaged,
+        debugLogging: DEBUG_LOGGING_ENABLED,
+        // Key effective configuration, secrets redacted: summarizeSettings reports
+        // the API key only as a presence boolean, never the value.
+        config: summarizeSettings(settings, paths.outputDir, paths.backupsDir),
         cardCount: reconciliation.state.cards.length,
         pendingImportCount: reconciliation.state.pendingImports.length,
         recoveredInterruptedCards: recovered.recoveredInterruptedCards,
@@ -176,13 +195,18 @@ export class ApplicationRuntime {
       await runtime.drainQueuedCards();
       return runtime;
     } catch (error: unknown) {
+      // Record the startup failure in the session log before surfacing it as a
+      // diagnostic. The logger was built before any fallible step, so it exists
+      // here even when the failure was ensureDirectories() itself — in which case
+      // the append simply degrades to stderr.
+      await logger.error("app.startup-failed", "Application runtime failed to start.", error);
       return new ApplicationRuntime({
         paths,
         settings: null,
         state: null,
         settingsStore: null,
         stateStore: null,
-        logger: null,
+        logger,
         startupDiagnostic: {
           title:
             error instanceof CorruptStateError
@@ -202,6 +226,14 @@ export class ApplicationRuntime {
 
   onPipelineProgress(callback: () => void): void {
     this.onPipelineProgressCallback = callback;
+  }
+
+  // The per-launch session logger. Exposed so the IPC boundary and the asset
+  // protocol handler can log from outside the runtime instance. Always present:
+  // it is built once at startup, before any step that could fail, and lives for
+  // the whole launch — never null, never swapped.
+  currentLogger(): AppLogger {
+    return this.runtime.logger;
   }
 
   getSnapshot(): AppSnapshot {
@@ -250,7 +282,7 @@ export class ApplicationRuntime {
   async dismissAppWideError(): Promise<AppSnapshot> {
     const title = this.runtime.appWideError?.title ?? null;
     this.runtime.appWideError = null;
-    await this.runtime.logger?.info("app.error-dismissed", "App-wide error dismissed by user.", {
+    await this.runtime.logger.info("app.error-dismissed", "App-wide error dismissed by user.", {
       dismissedTitle: title,
     });
     return this.getSnapshot();
@@ -271,8 +303,9 @@ export class ApplicationRuntime {
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
       const preservedStateFiles = await stateStore.preserveExistingFiles();
       await settingsStore.save(settings);
-      const logger = createLogger(paths.logsDir, getSecretsForRedaction(settings));
-      await pruneOldLogs(paths.logsDir);
+      // Reuse the per-launch session logger rather than building a new one, so a
+      // reset keeps writing to the same file as the rest of the launch.
+      const logger = this.runtime.logger;
       const reconciliation = await reconcileWorkingState(paths, state, logger);
       await stateStore.save(reconciliation.state);
       await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
@@ -288,7 +321,6 @@ export class ApplicationRuntime {
       this.runtime.state = reconciliation.state;
       this.runtime.settingsStore = settingsStore;
       this.runtime.stateStore = stateStore;
-      this.runtime.logger = logger;
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
       this.runtime.recoveredInterruptedCards = 0;
@@ -365,7 +397,7 @@ export class ApplicationRuntime {
     const nextIds = new Set(items.map((item) => item.id));
 
     if (currentIds.size !== nextIds.size || [...currentIds].some((id) => !nextIds.has(id))) {
-      throw new Error("Pending import drafts are out of date. Reopen the timestamp review.");
+      throw new OperationError("Pending import drafts are out of date. Reopen the timestamp review.");
     }
 
     state.pendingImports = items.map((item) => normalizePendingImport(item));
@@ -385,7 +417,7 @@ export class ApplicationRuntime {
     for (const pendingImport of pendingImports) {
       const candidate = byId.get(pendingImport.id);
       if (candidate === undefined) {
-        throw new Error(`Pending import ${pendingImport.originalFilename} is missing review data.`);
+        throw new OperationError(`Pending import ${pendingImport.originalFilename} is missing review data.`);
       }
 
       const normalized = normalizePendingImport(candidate);
@@ -397,7 +429,7 @@ export class ApplicationRuntime {
       let probed: Awaited<ReturnType<typeof probeAudioProfile>>;
       try {
         probed = await probeAudioProfile(pendingImport.workingFilePath);
-        await this.runtime.logger!.debug("audio.probe", "Probed audio profile for imported file.", {
+        await this.runtime.logger.debug("audio.probe", "Probed audio profile for imported file.", {
           filename: pendingImport.originalFilename,
           durationSec: probed.durationSec,
           formatName: probed.audioProfile?.formatName,
@@ -407,7 +439,7 @@ export class ApplicationRuntime {
           channels: probed.audioProfile?.channels,
         });
       } catch (error: unknown) {
-        await this.runtime.logger!.warn("audio.probe", "Failed to probe imported audio metadata.", {
+        await this.runtime.logger.warn("audio.probe", "Failed to probe imported audio metadata.", {
           filePath: pendingImport.workingFilePath,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -456,13 +488,13 @@ export class ApplicationRuntime {
         const backupDir = this.runtime.settings!.backupDirectory ?? paths.backupsDir;
         try {
           const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir);
-          await this.runtime.logger!.info("import.backup-original", "Copied original to backup directory.", {
+          await this.runtime.logger.info("import.backup-original", "Copied original to backup directory.", {
             originalSourcePath: pendingImport.originalSourcePath,
             backupPath,
           });
         } catch (error: unknown) {
           backupSucceeded = false;
-          await this.runtime.logger!.warn("import.backup-original", "Failed to copy original to backup directory.", {
+          await this.runtime.logger.warn("import.backup-original", "Failed to copy original to backup directory.", {
             originalSourcePath: pendingImport.originalSourcePath,
             backupDir,
             error: error instanceof Error ? error.message : String(error),
@@ -472,7 +504,7 @@ export class ApplicationRuntime {
 
       if (pendingImport.deleteOriginalOnConfirm) {
         if (pendingImport.copyToBackupOnConfirm && !backupSucceeded) {
-          await this.runtime.logger!.warn(
+          await this.runtime.logger.warn(
             "import.delete-original",
             "Skipped deleting original because backup copy failed.",
             { originalSourcePath: pendingImport.originalSourcePath },
@@ -481,7 +513,7 @@ export class ApplicationRuntime {
           try {
             await deleteImportedSource(pendingImport.originalSourcePath);
           } catch (error: unknown) {
-            await this.runtime.logger!.warn("import.delete-original", "Failed to delete original after confirm.", {
+            await this.runtime.logger.warn("import.delete-original", "Failed to delete original after confirm.", {
               originalSourcePath: pendingImport.originalSourcePath,
               error: error instanceof Error ? error.message : String(error),
             });
@@ -497,7 +529,7 @@ export class ApplicationRuntime {
     state.selectedCardId = cardsToAdd[0]?.id ?? state.selectedCardId;
 
     await this.persistState();
-    await this.runtime.logger!.info(
+    await this.runtime.logger.info(
       "import.confirm-review",
       "Confirmed pending imports into queue.",
       { addedCards: cardsToAdd.length },
@@ -514,7 +546,7 @@ export class ApplicationRuntime {
       try {
         await rm(pendingImport.workingFilePath, { force: true });
       } catch (error: unknown) {
-        await this.runtime.logger!.warn("import.cancel-cleanup", "Failed to delete working file on cancel.", {
+        await this.runtime.logger.warn("import.cancel-cleanup", "Failed to delete working file on cancel.", {
           workingFilePath: pendingImport.workingFilePath,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -523,7 +555,7 @@ export class ApplicationRuntime {
 
     this.runtime.state!.pendingImports = [];
     await this.persistState();
-    await this.runtime.logger!.info("import.cancelled", "Cancelled pending imports.", {
+    await this.runtime.logger.info("import.cancelled", "Cancelled pending imports.", {
       cancelledCount: pendingImports.length,
     });
 
@@ -535,11 +567,14 @@ export class ApplicationRuntime {
     const state = this.runtime.state!;
 
     if (cardId !== null && !state.cards.some((card) => card.id === cardId)) {
-      throw new Error("Selected card no longer exists.");
+      throw new OperationError("Selected card no longer exists.");
     }
 
     state.selectedCardId = cardId;
     await this.persistState();
+    // Selection is a high-frequency navigation action (arrow keys), so it is
+    // traced at debug — developer-only — rather than info, per the volume rules.
+    await this.runtime.logger.debug("card.select", "Selected card.", { cardId });
     return this.getSnapshot();
   }
 
@@ -550,7 +585,7 @@ export class ApplicationRuntime {
     const source = state.cards.find((card) => card.id === cardId);
 
     if (source === undefined) {
-      throw new Error("Card to duplicate does not exist.");
+      throw new OperationError("Card to duplicate does not exist.");
     }
 
     if (
@@ -558,7 +593,7 @@ export class ApplicationRuntime {
       source.status === "Transcribing" ||
       source.status === "Generating Metadata"
     ) {
-      throw new Error("Cannot duplicate a card while it is being processed.");
+      throw new OperationError("Cannot duplicate a card while it is being processed.");
     }
 
     const duplicateSourcePath = await copyIntoWorking(
@@ -573,7 +608,7 @@ export class ApplicationRuntime {
     state.selectedCardId = duplicate.id;
 
     await this.persistState();
-    await this.runtime.logger!.info("card.duplicate", "Duplicated card for independent trimming.", {
+    await this.runtime.logger.info("card.duplicate", "Duplicated card for independent trimming.", {
       sourceCardId: source.id,
       duplicateCardId: duplicate.id,
       duplicateSourcePath,
@@ -588,7 +623,7 @@ export class ApplicationRuntime {
     const card = state.cards.find((entry) => entry.id === cardId);
 
     if (card === undefined) {
-      throw new Error("Card to update does not exist.");
+      throw new OperationError("Card to update does not exist.");
     }
 
     if (
@@ -596,7 +631,7 @@ export class ApplicationRuntime {
       card.status === "Transcribing" ||
       card.status === "Generating Metadata"
     ) {
-      throw new Error("Cannot change trim markers while this card is being processed.");
+      throw new OperationError("Cannot change trim markers while this card is being processed.");
     }
 
     const normalizedTrim = normalizeTrim(trim, card.durationSec);
@@ -622,7 +657,7 @@ export class ApplicationRuntime {
     );
 
     await this.persistState();
-    await this.runtime.logger!.info("trim.analyze", "Analyzed trim decision.", {
+    await this.runtime.logger.info("trim.analyze", "Analyzed trim decision.", {
       cardId,
       sourceFilePath: card.sourceFilePath,
       codec: card.audioProfile?.codecName,
@@ -650,9 +685,12 @@ export class ApplicationRuntime {
     const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
 
     if (card === undefined) {
-      throw new Error("Card media source no longer exists.");
+      throw new OperationError("Card media source no longer exists.");
     }
 
+    await this.runtime.logger.debug("card.media-source", "Resolved card media source URL.", {
+      cardId,
+    });
     return `mumbler-asset://media/${encodeURIComponent(cardId)}`;
   }
 
@@ -669,13 +707,13 @@ export class ApplicationRuntime {
     const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
 
     if (card === undefined) {
-      throw new Error("Card to generate does not exist.");
+      throw new OperationError("Card to generate does not exist.");
     }
 
     this.assertCardCanStartPipeline(card);
 
     if (decodeGeminiApiKey(this.runtime.settings!.geminiApiKeyObfuscated).length === 0) {
-      throw new Error("Gemini API key is not configured.");
+      throw new OperationError("Gemini API key is not configured.");
     }
 
     const startStep = resolveGenerateStartStep(card, target);
@@ -687,7 +725,7 @@ export class ApplicationRuntime {
     card.lastError = null;
     card.updatedAtUtc = Date.now();
     await this.startOrEnqueueCard(cardId, "generate", startStep);
-    await this.runtime.logger!.info("pipeline.generate", "Started dependency-aware generation.", {
+    await this.runtime.logger.info("pipeline.generate", "Started dependency-aware generation.", {
       cardId,
       requestedStep: target,
       startStep,
@@ -701,7 +739,7 @@ export class ApplicationRuntime {
     const cardIndex = state.cards.findIndex((entry) => entry.id === cardId);
 
     if (cardIndex === -1) {
-      throw new Error("Card to cancel does not exist.");
+      throw new OperationError("Card to cancel does not exist.");
     }
 
     const oldCard = state.cards[cardIndex];
@@ -710,7 +748,7 @@ export class ApplicationRuntime {
     const isActive = run !== undefined;
 
     if (!isQueued && !isActive) {
-      throw new Error("This card is not being processed.");
+      throw new OperationError("This card is not being processed.");
     }
 
     const failedStep = oldCard.activeStep ?? "transcription";
@@ -746,7 +784,7 @@ export class ApplicationRuntime {
       await this.releaseSlotAndDrain(run.slot);
     }
 
-    await this.runtime.logger!.info("pipeline.cancel-immediate", "Immediately detached and cancelled card pipeline.", {
+    await this.runtime.logger.info("pipeline.cancel-immediate", "Immediately detached and cancelled card pipeline.", {
       cardId,
       failedStep,
     });
@@ -763,13 +801,13 @@ export class ApplicationRuntime {
     const card = state.cards.find((entry) => entry.id === cardId);
 
     if (card === undefined) {
-      throw new Error("Card to process does not exist.");
+      throw new OperationError("Card to process does not exist.");
     }
 
     this.assertCardCanStartPipeline(card);
 
     if (decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length === 0) {
-      throw new Error("Gemini API key is not configured.");
+      throw new OperationError("Gemini API key is not configured.");
     }
 
     const startStep = requestedStartStep ?? "transcription";
@@ -794,7 +832,7 @@ export class ApplicationRuntime {
     card.activeStep = null;
     card.updatedAtUtc = Date.now();
     await this.persistState();
-    await this.runtime.logger!.info(
+    await this.runtime.logger.info(
       "pipeline.queued",
       "Queued card; awaiting transcription slot.",
       {
@@ -819,7 +857,7 @@ export class ApplicationRuntime {
       state: this.runtime.state!,
       settings: this.runtime.settings!,
       paths: this.runtime.paths!,
-      logger: this.runtime.logger!,
+      logger: this.runtime.logger,
       signal: controller.signal,
       persistState: () => this.persistState(),
       releaseTranscriptionSlot: () => this.releaseSlotAndDrain(slot),
@@ -827,7 +865,7 @@ export class ApplicationRuntime {
 
     const pipeline = executeCardPipeline(cardId, startStep, mode, ctx)
       .catch(async (error: unknown) => {
-        await this.runtime.logger?.error(
+        await this.runtime.logger.error(
           "pipeline.unhandled",
           "Unhandled pipeline error.",
           error,
@@ -869,7 +907,7 @@ export class ApplicationRuntime {
       this.activeRuns.delete(cardId);
       await this.releaseSlotAndDrain(run.slot);
     } catch (error: unknown) {
-      await this.runtime.logger?.error(
+      await this.runtime.logger.error(
         "pipeline.finalize-failed",
         "Failed to finalize card pipeline state.",
         error,
@@ -935,18 +973,20 @@ export class ApplicationRuntime {
     if (errorMessage.length > 0) {
       throw new Error(errorMessage);
     }
+
+    await this.runtime.logger.info("output.open-directory", "Opened output directory.", {
+      targetDir,
+    });
   }
 
   async saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
     this.ensureReady();
 
     const nextSettings = applySettingsDraft(this.runtime.settings!, draft);
-    const logger = createLogger(this.runtime.paths!.logsDir, getSecretsForRedaction(nextSettings));
     this.runtime.settings = nextSettings;
-    this.runtime.logger = logger;
 
     await this.persistSettings();
-    await logger.info("settings.save", "Updated application settings.", {
+    await this.runtime.logger.info("settings.save", "Updated application settings.", {
       outputDirectory: nextSettings.outputDirectory,
       backupDirectory: nextSettings.backupDirectory,
       transcriptionModel: nextSettings.transcriptionModel,
@@ -983,7 +1023,8 @@ export class ApplicationRuntime {
       await Promise.allSettled([...this.activePipelines]);
       await this.runtime.stateStore?.flush();
       await this.runtime.settingsStore?.flush();
-      await this.runtime.logger?.info("app.shutdown", "Graceful shutdown complete.", {
+      await this.runtime.logger.info("app.shutdown", "Graceful shutdown complete.", {
+        reason: "before-quit",
         cardCount: this.runtime.state?.cards.length ?? 0,
       });
     })();
@@ -1006,7 +1047,7 @@ export class ApplicationRuntime {
       throw error;
     }
 
-    await this.runtime.logger!.info("settings.output-directory", "Updated output directory.", {
+    await this.runtime.logger.info("settings.output-directory", "Updated output directory.", {
       outputDirectory: this.runtime.settings!.outputDirectory,
     });
     return this.getSnapshot();
@@ -1020,15 +1061,15 @@ export class ApplicationRuntime {
 
     const settings = this.runtime.settings!;
     const state = this.runtime.state!;
-    const logger = this.runtime.logger!;
+    const logger = this.runtime.logger;
     const card = state.cards.find((entry) => entry.id === cardId);
 
     if (card === undefined) {
-      throw new Error("Card to save does not exist.");
+      throw new OperationError("Card to save does not exist.");
     }
 
     if (card.status !== "Ready to Save") {
-      throw new Error("Only cards in Ready to Save state can be finalized.");
+      throw new OperationError("Only cards in Ready to Save state can be finalized.");
     }
 
     const configuredOutputDirectory = settings.outputDirectory?.trim() ?? "";
@@ -1146,21 +1187,21 @@ export class ApplicationRuntime {
     const card = state.cards.find((entry) => entry.id === cardId);
 
     if (card === undefined) {
-      throw new Error("Card to remove does not exist.");
+      throw new OperationError("Card to remove does not exist.");
     }
 
     if (card.status === "Transcribing" || card.status === "Generating Metadata") {
-      throw new Error("Cannot remove a card while it is being processed.");
+      throw new OperationError("Cannot remove a card while it is being processed.");
     }
 
     try {
       await rm(card.sourceFilePath, { force: true });
-      await this.runtime.logger!.info("card.remove", "Deleted card working audio and removed card.", {
+      await this.runtime.logger.info("card.remove", "Deleted card working audio and removed card.", {
         cardId,
         sourceFilePath: card.sourceFilePath,
       });
     } catch (error: unknown) {
-      await this.runtime.logger!.warn(
+      await this.runtime.logger.warn(
         "card.remove",
         "Working audio could not be deleted; removing card anyway.",
         {
@@ -1194,7 +1235,7 @@ export class ApplicationRuntime {
           sourcePath,
           message: error instanceof Error ? error.message : "Unknown import failure.",
         });
-        await this.runtime.logger!.error(
+        await this.runtime.logger.error(
           "import.failed",
           "Failed to import source file.",
           error,
@@ -1205,7 +1246,7 @@ export class ApplicationRuntime {
 
     if (importedCount > 0) {
       await this.persistState();
-      await this.runtime.logger!.info("import.completed", "Imported files into pending review.", {
+      await this.runtime.logger.info("import.completed", "Imported files into pending review.", {
         importedCount,
         failedCount: failedImports.length,
         importSource,
@@ -1231,7 +1272,7 @@ export class ApplicationRuntime {
     const originalFilename = basename(sourcePath);
     const workingFilePath = await copyIntoWorking(sourcePath, paths.workingDir, originalFilename);
 
-    await this.runtime.logger!.debug("import.file", "Staged file to working storage.", {
+    await this.runtime.logger.debug("import.file", "Staged file to working storage.", {
       originalFilename,
       fileSizeBytes: sourceStats.size,
       importSource,
@@ -1266,7 +1307,7 @@ export class ApplicationRuntime {
 
   private ensureReady(): void {
     if (this.runtime.paths === null || this.runtime.settings === null || this.runtime.state === null) {
-      throw new Error("Application runtime is not ready.");
+      throw new OperationError("Application runtime is not ready.");
     }
   }
 
@@ -1277,7 +1318,7 @@ export class ApplicationRuntime {
       card.status === "Generating Metadata" ||
       this.activeRuns.has(card.id)
     ) {
-      throw new Error("This card is already being processed.");
+      throw new OperationError("This card is already being processed.");
     }
   }
 
@@ -1316,9 +1357,7 @@ export class ApplicationRuntime {
       message,
     };
 
-    if (this.runtime.logger !== null) {
-      await this.runtime.logger.error("app.unhandled", title, new Error(message), details);
-    }
+    await this.runtime.logger.error("app.unhandled", title, new Error(message), details);
   }
 
   private async discardWorkingCard(card: MumblerCard): Promise<void> {
@@ -1326,7 +1365,7 @@ export class ApplicationRuntime {
     try {
       await rm(card.sourceFilePath, { force: true });
     } catch (error: unknown) {
-      await this.runtime.logger!.warn(
+      await this.runtime.logger.warn(
         "card.cleanup",
         "Saved card was removed from the queue, but working audio could not be deleted.",
         {
@@ -1367,7 +1406,7 @@ function buildConfirmedTimestamps(
   utcTimestampText: string,
 ): MumblerCard["timestamps"] {
   if (!isValidTimezone(timezone)) {
-    throw new Error(`Invalid timezone: ${timezone}`);
+    throw new OperationError(`Invalid timezone: ${timezone}`);
   }
 
   const localResult = recomputeUtcFromLocal(localTimestampText, timezone);
@@ -1386,7 +1425,7 @@ function buildConfirmedTimestamps(
   if (utcResult.error === null) {
     const normalizedUtc = recomputeUtcFromLocal(utcResult.localTimestampText, timezone);
     if (normalizedUtc.error !== null) {
-      throw new Error(normalizedUtc.error);
+      throw new OperationError(normalizedUtc.error);
     }
 
     return {
@@ -1399,7 +1438,7 @@ function buildConfirmedTimestamps(
     };
   }
 
-  throw new Error("Pending import timestamps are incomplete.");
+  throw new OperationError("Pending import timestamps are incomplete.");
 }
 
 function normalizePendingImport(item: PendingImportReviewItem): PendingImportReviewItem {
@@ -1455,15 +1494,15 @@ function normalizeTrim(trim: CardTrim, durationSec: number | null): CardTrim {
     backMarkerSec !== null &&
     frontMarkerSec >= backMarkerSec
   ) {
-    throw new Error("Front trim must be earlier than back trim.");
+    throw new OperationError("Front trim must be earlier than back trim.");
   }
 
   if (durationSec !== null && frontMarkerSec !== null && frontMarkerSec > durationSec) {
-    throw new Error("Front trim cannot exceed audio duration.");
+    throw new OperationError("Front trim cannot exceed audio duration.");
   }
 
   if (durationSec !== null && backMarkerSec !== null && backMarkerSec > durationSec) {
-    throw new Error("Back trim cannot exceed audio duration.");
+    throw new OperationError("Back trim cannot exceed audio duration.");
   }
 
   return {
@@ -1478,7 +1517,7 @@ function normalizeMarker(value: number | null): number | null {
   }
 
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error("Trim markers must be positive numbers.");
+    throw new OperationError("Trim markers must be positive numbers.");
   }
 
   return Math.round(value * 10) / 10;
