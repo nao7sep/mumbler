@@ -36,10 +36,18 @@ The built-in Gemini model list currently offers **Gemini 3.1 Pro (Preview)**, **
 ```bash
 npm test           # run the unit and integration suite once
 npm run test:watch # re-run on change during development
-npm run typecheck  # type-check the project without emitting
+npm run typecheck  # type-check every environment: main, renderer, and tests
 ```
 
 Tests run under [Vitest](https://vitest.dev/) and live under `tests/`, mirroring the `src/` tree.
+
+Type-checking is split by runtime environment so cross-environment mistakes are caught
+statically: `tsconfig.node.json` (main + preload — Node, no DOM), `tsconfig.web.json`
+(renderer — DOM, no Node types), and `tsconfig.test.json` (the tests, which use both).
+`npm run typecheck` runs all three, so a main-process file reaching for a browser global
+(`document`), or a renderer file reaching for a Node global (`process`), fails the check.
+Preload is type-checked on the Node side because it imports `electron`; the contextBridge
+API type lives in `src/shared`, so the renderer never imports preload.
 
 ## Usage
 
