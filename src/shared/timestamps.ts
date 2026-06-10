@@ -131,17 +131,14 @@ export function getUtcTimestampError(utcTimestampText: string): string | null {
     : null;
 }
 
+// The canonical serialized form for internal/stored/exported UTC instants:
+// ISO 8601 extended, always exactly 3 fractional digits, Z suffix
+// (e.g. 2026-04-22T00:44:00.000Z). toISOString() emits precisely this; an
+// earlier hand-rolled variant dropped the fraction at .000, which violated the
+// "exactly 3 digits" rule, so this is now the single canonical writer used by
+// both the state store and the file-output sidecar/front matter.
 export function formatUtcIsoCompact(utcMs: number): string {
-  const date = new Date(utcMs);
-  const base =
-    `${date.getUTCFullYear().toString().padStart(4, "0")}-` +
-    `${(date.getUTCMonth() + 1).toString().padStart(2, "0")}-` +
-    `${date.getUTCDate().toString().padStart(2, "0")}T` +
-    `${date.getUTCHours().toString().padStart(2, "0")}:` +
-    `${date.getUTCMinutes().toString().padStart(2, "0")}:` +
-    `${date.getUTCSeconds().toString().padStart(2, "0")}`;
-  const ms = date.getUTCMilliseconds();
-  return ms === 0 ? `${base}Z` : `${base}.${ms.toString().padStart(3, "0")}Z`;
+  return new Date(utcMs).toISOString();
 }
 
 export function formatUtcForDisplay(utcMs: number): string {

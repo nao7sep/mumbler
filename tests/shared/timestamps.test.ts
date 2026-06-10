@@ -128,11 +128,11 @@ describe("recomputeUtcFromLocal / recomputeLocalFromUtc", () => {
 });
 
 describe("formatUtcIsoCompact", () => {
-  it("omits the fractional part when milliseconds are zero", () => {
-    expect(formatUtcIsoCompact(Date.UTC(2026, 3, 22, 0, 44, 0))).toBe("2026-04-22T00:44:00Z");
+  it("always emits exactly three fractional digits, even when milliseconds are zero", () => {
+    expect(formatUtcIsoCompact(Date.UTC(2026, 3, 22, 0, 44, 0))).toBe("2026-04-22T00:44:00.000Z");
   });
 
-  it("includes zero-padded milliseconds when nonzero", () => {
+  it("zero-pads nonzero milliseconds to three digits", () => {
     expect(formatUtcIsoCompact(Date.UTC(2026, 3, 22, 0, 44, 0, 123))).toBe(
       "2026-04-22T00:44:00.123Z",
     );

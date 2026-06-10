@@ -88,7 +88,7 @@ describe("buildMarkdownContent", () => {
       [
         "---",
         "schema_version: 1",
-        'date: "2026-04-22T00:44:00Z"',
+        'date: "2026-04-22T00:44:00.000Z"',
         'audio: "20260422-004400-my-slug.m4a"',
         "duration: 42",
         'title: "My Title"',
@@ -154,7 +154,7 @@ describe("buildOutputPayload", () => {
       slug: "my-slug",
     });
     expect((payload.timestamps as Record<string, unknown>).finalizedAtUtc).toBe(
-      "2026-04-22T02:00:00Z",
+      "2026-04-22T02:00:00.000Z",
     );
   });
 

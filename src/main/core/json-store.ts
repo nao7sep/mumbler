@@ -29,6 +29,15 @@ export interface JsonStoreOptions<T> {
   validate: (raw: Record<string, unknown>) => T;
   /** Build the in-memory default when no file exists yet. Pure, no I/O. */
   createDefault: () => T;
+  /**
+   * Render the typed value into its on-disk shape before writing. Pure, no I/O.
+   * The write-side mirror of validate(): validate() parses a raw file into T;
+   * serialize() renders T back to the canonical on-disk form. Defaults to
+   * identity, so stores whose in-memory shape is already the on-disk shape omit
+   * it. Used to convert in-memory epoch-ms instants to canonical ISO at the
+   * persistence edge while keeping the core in epoch-ms.
+   */
+  serialize?: (value: T) => unknown;
 }
 
 export interface LoadResult<T> {
@@ -101,7 +110,8 @@ export class JsonStore<T> {
 
   async save(value: T): Promise<void> {
     const work = async (): Promise<void> => {
-      await writeJsonFile(this.options.path, value);
+      const wire = this.options.serialize ? this.options.serialize(value) : value;
+      await writeJsonFile(this.options.path, wire);
     };
     // Chain on the tail so writes never overlap, and a failed write doesn't
     // wedge the queue (errors propagate to that caller but the chain continues).

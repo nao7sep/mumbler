@@ -7,6 +7,7 @@ import type {
   SettingsSummary,
 } from "@shared/app-shell";
 import {
+  formatUtcIsoCompact,
   isValidTimezone,
   normalizeUtcMs,
 } from "@shared/timestamps";
@@ -190,6 +191,34 @@ function normalizeState(raw: Record<string, unknown>, defaults: MumblerState): M
   };
 }
 
+// Render in-memory state to its on-disk shape: every UTC instant (stored as an
+// epoch-ms number and named with the convention's `*Utc` suffix) becomes the
+// canonical ISO-8601 string, while everything else passes through unchanged.
+// The model keeps epoch-ms for arithmetic/sorting; this converts only at the
+// persistence edge. The read path (normalizeUtcMs) accepts both ISO and
+// epoch-ms, so a legacy numeric state.json keeps loading and is rewritten as ISO
+// on the next save — no migration step.
+function serializeUtcInstants(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(serializeUtcInstants);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, fieldValue]) => [
+        key,
+        /Utc$/.test(key) && typeof fieldValue === "number" && Number.isFinite(fieldValue)
+          ? formatUtcIsoCompact(fieldValue)
+          : serializeUtcInstants(fieldValue),
+      ]),
+    );
+  }
+  return value;
+}
+
+export function serializeState(state: MumblerState): unknown {
+  return serializeUtcInstants(state);
+}
+
 export function recoverInterruptedCards(
   state: MumblerState,
 ): { state: MumblerState; recoveredInterruptedCards: number } {
@@ -368,6 +397,7 @@ export function createStateStore(path: string): JsonStore<MumblerState> {
     schemaVersion: STATE_SCHEMA_VERSION,
     validate: (raw) => normalizeState(raw, createEmptyState()),
     createDefault: () => createEmptyState(),
+    serialize: serializeState,
   });
 }
 

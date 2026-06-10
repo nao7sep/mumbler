@@ -90,6 +90,43 @@ describe("state store", () => {
     expect(value.cards.map((c) => c.id)).toEqual(["x"]);
   });
 
+  it("writes UTC instants as canonical ISO strings and reads epoch-ms back", async () => {
+    const store = createStateStore(statePath());
+    await store.save(stateWith([card({ id: "x" })]));
+
+    // On disk: every *Utc instant is the canonical exactly-3-digit Z form.
+    const raw = JSON.parse(await readFile(statePath(), "utf8"));
+    const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+    expect(raw.cards[0].createdAtUtc).toMatch(ISO);
+    expect(raw.cards[0].updatedAtUtc).toMatch(ISO);
+    expect(raw.cards[0].timestamps.confirmedUtc).toMatch(ISO);
+    expect(raw.cards[0].timestamps.effectiveUtc).toMatch(ISO);
+    // Non-instant fields pass through untouched.
+    expect(raw.cards[0].timestamps.confirmedLocal).toBe("2026-04-22 09:44:00");
+    expect(raw.cards[0].queuedAtUtc).toBeNull();
+
+    // Round-trips back to epoch-ms numbers in memory.
+    const { value } = await store.load();
+    expect(typeof value.cards[0].createdAtUtc).toBe("number");
+    expect(value.cards[0].createdAtUtc).toBe(Date.UTC(2026, 3, 22, 0, 0, 0));
+    expect(value.cards[0].timestamps.confirmedUtc).toBe(Date.UTC(2026, 3, 22, 0, 44, 0));
+  });
+
+  it("loads a legacy epoch-ms state.json and rewrites it as ISO on save", async () => {
+    // Legacy on-disk shape: numeric *Utc fields.
+    await writeFile(statePath(), JSON.stringify(stateWith([card({ id: "old" })])), "utf8");
+    const store = createStateStore(statePath());
+
+    const { value, origin } = await store.load();
+    expect(origin).toBe("loaded");
+    expect(value.cards[0].createdAtUtc).toBe(Date.UTC(2026, 3, 22, 0, 0, 0));
+
+    // Saving canonicalizes the file to ISO without changing the instant.
+    await store.save(value);
+    const raw = JSON.parse(await readFile(statePath(), "utf8"));
+    expect(raw.cards[0].createdAtUtc).toBe("2026-04-22T00:00:00.000Z");
+  });
+
   it("refuses (does not overwrite) a state file from a newer schema version", async () => {
     const newer = JSON.stringify({ ...stateWith([card()]), schemaVersion: 99 });
     await writeFile(statePath(), newer, "utf8");

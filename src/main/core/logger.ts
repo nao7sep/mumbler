@@ -1,6 +1,8 @@
 import { readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { formatUtcMarker } from "@shared/timestamps";
+
 const LOG_RETENTION_DAYS = 30;
 
 export interface AppLogger {
@@ -39,6 +41,11 @@ function formatUtcDate(date: Date): string {
 }
 
 export function createLogger(logsDir: string, secrets: string[]): AppLogger {
+  // One file per launch, named with the full UTC timestamp (matching the other
+  // apps' log naming). The stamp is captured once here — not per write — so
+  // every line of a session lands in the same file.
+  const filePath = join(logsDir, `${formatUtcMarker(new Date())}.log`);
+
   const write = async (
     level: "debug" | "info" | "warn" | "error",
     op: string,
@@ -46,9 +53,8 @@ export function createLogger(logsDir: string, secrets: string[]): AppLogger {
     details?: unknown,
     error?: unknown,
   ): Promise<void> => {
-    const filePath = join(logsDir, `${formatUtcDate(new Date())}.log`);
     const payload = {
-      time: Date.now(),
+      time: new Date().toISOString(),
       level,
       op,
       message,
@@ -68,6 +74,11 @@ export function createLogger(logsDir: string, secrets: string[]): AppLogger {
   };
 }
 
+// Matches both the per-launch form (yyyymmdd-hhmmss-utc.log) and the legacy
+// daily form (yyyymmdd.log), so logs written before the naming change are still
+// pruned. The leading 8 digits are the UTC date in either form.
+const LOG_FILE_PATTERN = /^(\d{8})(?:-\d{6}-utc)?\.log$/;
+
 export async function pruneOldLogs(logsDir: string): Promise<void> {
   const entries = await readdir(logsDir, { withFileTypes: true });
   const cutoff = new Date();
@@ -76,7 +87,7 @@ export async function pruneOldLogs(logsDir: string): Promise<void> {
 
   await Promise.all(
     entries
-      .filter((entry) => entry.isFile() && /^\d{8}\.log$/.test(entry.name))
+      .filter((entry) => entry.isFile() && LOG_FILE_PATTERN.test(entry.name))
       .map(async (entry) => {
         const stamp = Number(entry.name.slice(0, 8));
         if (stamp < cutoffStamp) {
