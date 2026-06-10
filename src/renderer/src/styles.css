@@ -1118,8 +1118,8 @@ textarea:focus-visible,
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  /* Above the toast layer (2000): an open modal must cover transient toasts so
-     they can never sit over the footer's primary actions. */
+  /* Base above the toast layer (2000). ModalShell assigns the live stack z-index
+     inline so visual topmost always matches keyboard/focus topmost. */
   z-index: 2100;
   display: grid;
   place-items: center;

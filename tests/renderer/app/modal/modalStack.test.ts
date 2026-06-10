@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 
-import { isTopmostModal, registerModal, unregisterModal } from "@renderer/app/modal/modalStack";
+import {
+  MODAL_BASE_Z_INDEX,
+  getModalLayer,
+  isTopmostModal,
+  registerModal,
+  unregisterModal,
+} from "@renderer/app/modal/modalStack";
 
 // modalStack keeps module-global state. Record every modal a test opens and
 // drain whatever is left in afterEach, so a failed assertion before a test's own
@@ -29,10 +35,25 @@ describe("modal stack ordering", () => {
     const second = openModal();
     expect(isTopmostModal(first)).toBe(false);
     expect(isTopmostModal(second)).toBe(true);
+    expect(getModalLayer(first)).toEqual({
+      index: 0,
+      isTopmost: false,
+      zIndex: MODAL_BASE_Z_INDEX,
+    });
+    expect(getModalLayer(second)).toEqual({
+      index: 1,
+      isTopmost: true,
+      zIndex: MODAL_BASE_Z_INDEX + 10,
+    });
 
     // Unwinding one level restores the modal underneath as topmost.
     unregisterModal(second);
     expect(isTopmostModal(first)).toBe(true);
+    expect(getModalLayer(first)).toEqual({
+      index: 0,
+      isTopmost: true,
+      zIndex: MODAL_BASE_Z_INDEX,
+    });
 
     unregisterModal(first);
     expect(isTopmostModal(first)).toBe(false);
@@ -48,6 +69,7 @@ describe("modal stack ordering", () => {
 
     unregisterModal(second);
     expect(isTopmostModal(second)).toBe(false);
+    expect(getModalLayer(second)).toBeNull();
   });
 });
 

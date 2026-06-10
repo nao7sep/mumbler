@@ -1,15 +1,28 @@
 import {
-  useEffect,
   useId,
+  useLayoutEffect,
+  useMemo,
   useRef,
+  useState,
+  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { getFocusableElements, trapTabFocus } from "./focusTrap";
-import { isTopmostModal, registerModal, unregisterModal } from "./modalStack";
+import {
+  MODAL_BASE_Z_INDEX,
+  getModalLayer,
+  getModalStackVersion,
+  isTopmostModal,
+  registerModal,
+  subscribeModalStack,
+  unregisterModal,
+  type ModalId,
+} from "./modalStack";
 
 export type ModalSize = "narrow" | "default" | "settings";
 
@@ -57,11 +70,22 @@ export function ModalShell({
 }: ModalShellProps): ReactElement {
   const titleId = useId();
   const cardRef = useRef<HTMLElement>(null);
+  const [modalId, setModalId] = useState<ModalId | null>(null);
+  const stackVersion = useSyncExternalStore(
+    subscribeModalStack,
+    getModalStackVersion,
+    getModalStackVersion,
+  );
+  const modalLayer = useMemo(
+    () => (modalId === null ? null : getModalLayer(modalId)),
+    [modalId, stackVersion],
+  );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const card = cardRef.current;
     const previouslyFocused = document.activeElement;
     const id = registerModal();
+    setModalId(id);
 
     if (card !== null) {
       const target =
@@ -97,8 +121,15 @@ export function ModalShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function ownsTopmostInteraction(): boolean {
+    return modalId !== null && isTopmostModal(modalId);
+  }
+
   function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>): void {
     if (event.key === "Escape") {
+      if (!ownsTopmostInteraction()) {
+        return;
+      }
       // The topmost modal owns Escape unconditionally: swallow it so it never
       // reaches the window-level shortcut/menu handler, then close only if a
       // busy operation isn't holding the modal open.
@@ -108,20 +139,25 @@ export function ModalShell({
       }
       return;
     }
-    if (event.key === "Tab" && cardRef.current !== null) {
+    if (event.key === "Tab" && cardRef.current !== null && ownsTopmostInteraction()) {
       trapTabFocus(cardRef.current, event.nativeEvent);
     }
   }
 
   function handleBackdropClick(event: ReactMouseEvent<HTMLDivElement>): void {
-    if (event.target !== event.currentTarget || closeDisabled) {
+    if (event.target !== event.currentTarget || closeDisabled || !ownsTopmostInteraction()) {
       return;
     }
     onRequestClose();
   }
 
-  return (
-    <div className="modal-backdrop" onClick={handleBackdropClick}>
+  const modalMarkup = (
+    <div
+      className="modal-backdrop"
+      style={{ zIndex: modalLayer?.zIndex ?? MODAL_BASE_Z_INDEX }}
+      data-modal-layer={modalLayer?.index ?? 0}
+      onClick={handleBackdropClick}
+    >
       <section
         ref={cardRef}
         className={SIZE_CLASS[size]}
@@ -151,4 +187,6 @@ export function ModalShell({
       </section>
     </div>
   );
+
+  return createPortal(modalMarkup, document.body);
 }
