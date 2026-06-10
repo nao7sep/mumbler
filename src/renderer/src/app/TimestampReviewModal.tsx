@@ -12,6 +12,8 @@ import {
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 
+import { ModalShell } from "./modal/ModalShell";
+
 export interface TimestampReviewModalProps {
   items: PendingImportReviewItem[];
   defaultTimezone?: string;
@@ -59,20 +61,32 @@ export function TimestampReviewModal({
   const isConfirmDisabled = validationErrors.some((error) => error !== null);
 
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <section className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-card__header">
-          <h2>Import Recordings</h2>
+    <ModalShell
+      title="Import Recordings"
+      size="default"
+      onRequestClose={onCancel}
+      closeDisabled={isSubmitting}
+      footer={
+        <>
           <button
             type="button"
-            className="button button--ghost button--compact modal-close"
+            className="button button--ghost"
             onClick={onCancel}
             disabled={isSubmitting}
           >
-            ✕
+            Cancel
           </button>
-        </div>
-
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={onConfirm}
+            disabled={isConfirmDisabled || isSubmitting}
+          >
+            {isSubmitting ? "Confirming…" : "Confirm"}
+          </button>
+        </>
+      }
+    >
         <div className="modal-toolbar">
           <div className="field modal-toolbar__field">
             <span id="bulk-timezone-label">Set all timezones to</span>
@@ -223,27 +237,6 @@ export function TimestampReviewModal({
             If both options are selected, the backup is made before the original is deleted. A failed backup cancels the deletion for that file.
           </p>
         </div>
-
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="button button--ghost"
-            onClick={onCancel}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="button button--primary"
-            onClick={onConfirm}
-            disabled={isConfirmDisabled || isSubmitting}
-          >
-            {isSubmitting ? "Confirming…" : "Confirm"}
-          </button>
-        </div>
-
-      </section>
-    </div>
+    </ModalShell>
   );
 }

@@ -3,6 +3,8 @@ import type { ReactElement } from "react";
 import type { CommandDefinition } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
 
+import { ModalShell } from "./modal/ModalShell";
+
 const KEY_SYMBOLS: Record<string, string> = {
   ArrowLeft: "Left",
   ArrowRight: "Right",
@@ -33,32 +35,24 @@ export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactE
   );
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <section className="modal-card modal-card--narrow" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-card__header">
-          <h2>Keyboard Shortcuts</h2>
-          <button type="button" className="button button--ghost button--compact modal-close" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-        <div className="modal-card__body">
-          <div className="shortcut-groups">
-            {groups.map((group) => (
-              <div key={group.name} className="shortcut-group">
-                <p className="shortcut-group__name">{group.name}</p>
-                <div className="shortcut-list">
-                  {group.commands.map((command) => (
-                    <div key={command.id} className="shortcut-item">
-                      <span>{command.label}</span>
-                      <kbd>{formatShortcutKey(command.defaultShortcut)}</kbd>
-                    </div>
-                  ))}
-                </div>
+    <ModalShell title="Keyboard Shortcuts" size="narrow" onRequestClose={onClose}>
+      <div className="modal-card__body">
+        <div className="shortcut-groups">
+          {groups.map((group) => (
+            <div key={group.name} className="shortcut-group">
+              <p className="shortcut-group__name">{group.name}</p>
+              <div className="shortcut-list">
+                {group.commands.map((command) => (
+                  <div key={command.id} className="shortcut-item">
+                    <span>{command.label}</span>
+                    <kbd>{formatShortcutKey(command.defaultShortcut)}</kbd>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
-      </section>
-    </div>
+      </div>
+    </ModalShell>
   );
 }

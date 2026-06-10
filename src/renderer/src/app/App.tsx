@@ -645,24 +645,11 @@ export function App(): ReactElement {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
-        if (snapshot?.appWideError) {
-          void handleDismissAppWideError();
-        } else if (isMenuOpen) {
+        // Each open modal/dialog owns its own Escape through ModalShell and
+        // stops propagation before the event reaches here, so the only thing
+        // left for the window to close is the lightweight app-menu popover.
+        if (isMenuOpen) {
           setIsMenuOpen(false);
-        } else if (showAbout) {
-          setShowAbout(false);
-        } else if (showShortcutsHelp) {
-          setShowShortcutsHelp(false);
-        } else if (pendingRemoveCardId !== null) {
-          setPendingRemoveCardId(null);
-        } else if (pendingGenerate !== null) {
-          setPendingGenerate(null);
-        } else if (pendingSaveConflict !== null) {
-          setPendingSaveConflict(null);
-        } else if (importFlow.pendingReviewDrafts.length > 0) {
-          handleRequestCloseReview();
-        } else if (settingsModal.settingsDraft !== null && !settingsModal.isSavingSettings) {
-          settingsModal.handleRequestCloseSettings();
         }
         return;
       }
@@ -685,7 +672,7 @@ export function App(): ReactElement {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [modalIsOpen, isMenuOpen, showAbout, showShortcutsHelp, selectedCard, selectedCardIsBusy, snapshot, settingsModal.settingsDraft, settingsModal.isSavingSettings, settingsModal.setSettingsDraft, settingsModal.setSettingsErrorMessage, pendingRemoveCardId, pendingGenerate, pendingSaveConflict, importFlow.pendingReviewDrafts, importFlow.handleCancelPendingImports, showReviewDiscardConfirm]);
+  }, [modalIsOpen, isMenuOpen, selectedCard, selectedCardIsBusy, snapshot]);
 
   async function handleSaveCard(
     cardId: string,
@@ -1290,6 +1277,7 @@ export function App(): ReactElement {
       {settingsModal.settingsDraft ? (
         <SettingsModal
           draft={settingsModal.settingsDraft}
+          isDirty={settingsModal.isSettingsDirty}
           isSaving={settingsModal.isSavingSettings}
           isPickingOutputDirectory={settingsModal.isPickingSettingsOutputDirectory}
           isPickingBackupDirectory={settingsModal.isPickingSettingsBackupDirectory}
@@ -1318,7 +1306,7 @@ export function App(): ReactElement {
               onClick: settingsModal.handleConfirmDiscardSettings,
             },
           ]}
-          onBackdropClick={settingsModal.handleCancelDiscardSettings}
+          onRequestClose={settingsModal.handleCancelDiscardSettings}
         />
       ) : null}
 
@@ -1397,7 +1385,7 @@ export function App(): ReactElement {
               onClick: handleConfirmDiscardReview,
             },
           ]}
-          onBackdropClick={handleCancelDiscardReview}
+          onRequestClose={handleCancelDiscardReview}
         />
       ) : null}
 
@@ -1427,7 +1415,7 @@ export function App(): ReactElement {
               },
             },
           ]}
-          onBackdropClick={() => setPendingSaveConflict(null)}
+          onRequestClose={() => setPendingSaveConflict(null)}
         />
       ) : null}
 
@@ -1448,7 +1436,7 @@ export function App(): ReactElement {
               onClick: handleConfirmGenerate,
             },
           ]}
-          onBackdropClick={() => setPendingGenerate(null)}
+          onRequestClose={() => setPendingGenerate(null)}
         />
       ) : null}
 
@@ -1465,7 +1453,7 @@ export function App(): ReactElement {
               },
             },
           ]}
-          onBackdropClick={() => void handleDismissAppWideError()}
+          onRequestClose={() => void handleDismissAppWideError()}
         />
       ) : null}
 
@@ -1491,12 +1479,12 @@ export function App(): ReactElement {
               },
             },
           ]}
-          onBackdropClick={() => setPendingRemoveCardId(null)}
+          onRequestClose={() => setPendingRemoveCardId(null)}
         />
       ) : null}
 
       {showAbout ? (
-        <AboutModal onClose={() => setShowAbout(false)} />
+        <AboutModal version={snapshot?.appVersion ?? ""} onClose={() => setShowAbout(false)} />
       ) : null}
 
       {showShortcutsHelp ? (

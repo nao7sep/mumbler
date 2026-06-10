@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState, type ReactElement } from "react";
 
 import { GEMINI_MODELS, type SettingsDraft } from "@shared/app-shell";
+import { getSettingsNumberErrors } from "@shared/settings-validation";
 import { getSupportedTimezones } from "@shared/timestamps";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
+import { ModalShell } from "./modal/ModalShell";
 
 function parseEntries(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
@@ -95,6 +97,7 @@ function EditableList({
 
 export function SettingsModal({
   draft,
+  isDirty,
   isSaving,
   isPickingOutputDirectory,
   isPickingBackupDirectory,
@@ -107,6 +110,7 @@ export function SettingsModal({
   onSave,
 }: {
   draft: SettingsDraft;
+  isDirty: boolean;
   isSaving: boolean;
   isPickingOutputDirectory: boolean;
   isPickingBackupDirectory: boolean;
@@ -120,22 +124,39 @@ export function SettingsModal({
 }): ReactElement {
   const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
+  const numberErrors = useMemo(() => getSettingsNumberErrors(draft), [draft]);
+  const canSave = isDirty && numberErrors.length === 0 && !isSaving;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <section className="modal-card modal-card--settings" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-card__header">
-          <h2>Settings</h2>
-          <button type="button" className="button button--ghost button--compact modal-close" onClick={onClose} disabled={isSaving}>
-            ✕
+    <ModalShell
+      title="Settings"
+      size="settings"
+      onRequestClose={onClose}
+      closeDisabled={isSaving}
+      footer={
+        <>
+          <button type="button" className="button button--ghost" onClick={onClose} disabled={isSaving}>
+            Cancel
           </button>
-        </div>
+          <button type="button" className="button button--primary" onClick={onSave} disabled={!canSave}>
+            {isSaving ? "Saving…" : "Save"}
+          </button>
+        </>
+      }
+    >
+      <div className="modal-card__body">
 
-        <div className="modal-card__body">
+        {errorMessage ? <p className="inline-error">{errorMessage}</p> : null}
 
-          {errorMessage ? <p className="inline-error">{errorMessage}</p> : null}
+        {numberErrors.length > 0 ? (
+          <ul className="inline-error settings-number-errors">
+            {numberErrors.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+        ) : null}
 
-          <div className="settings-sections">
+        <div className="settings-sections">
 
           <section className="settings-section">
             <h3>Files</h3>
@@ -455,16 +476,9 @@ export function SettingsModal({
             </div>
           </section>
 
-          </div>
-
         </div>
 
-        <div className="modal-actions">
-          <button type="button" className="button button--primary" onClick={onSave} disabled={isSaving}>
-            {isSaving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </section>
-    </div>
+      </div>
+    </ModalShell>
   );
 }

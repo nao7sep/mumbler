@@ -263,6 +263,14 @@ textarea:focus-visible,
   font-weight: 500;
 }
 
+.settings-number-errors {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .queue-pane {
   max-height: calc(100vh - 100px);
   overflow-y: auto;
@@ -1110,7 +1118,9 @@ textarea:focus-visible,
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  /* Above the toast layer (2000): an open modal must cover transient toasts so
+     they can never sit over the footer's primary actions. */
+  z-index: 2100;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -1128,6 +1138,13 @@ textarea:focus-visible,
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
   box-shadow: var(--shadow-lg);
+}
+
+/* The dialog surface receives focus on open only so its accessible name is
+   announced; the user immediately tabs into real controls, which carry their
+   own focus rings. An outline around the whole card here would be noise. */
+.modal-card:focus {
+  outline: none;
 }
 
 .modal-card__body {
@@ -1413,7 +1430,8 @@ textarea:focus-visible,
   overflow-wrap: anywhere;
 }
 
-/* Toast container */
+/* Toast container. Sits above base content and the app menu but below the
+   modal layer (2100), so an open modal covers toasts rather than the reverse. */
 .toast-container {
   position: fixed;
   bottom: 20px;
@@ -1458,6 +1476,12 @@ textarea:focus-visible,
 .about-title {
   margin: 0;
   font-weight: 600;
+}
+
+.about-version {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
 }
 
 .about-copy {

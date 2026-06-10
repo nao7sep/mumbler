@@ -11,6 +11,7 @@ import {
   isValidTimezone,
   normalizeUtcMs,
 } from "@shared/timestamps";
+import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
 import { JsonStore } from "./json-store";
 
 const SETTINGS_SCHEMA_VERSION = 1;
@@ -316,7 +317,7 @@ function requirePromptAnyPlaceholder(
 }
 
 function requirePositiveInteger(value: number, label: string): number {
-  if (!Number.isInteger(value) || value <= 0) {
+  if (!isPositiveIntegerSetting(value)) {
     throw new Error(`${label} must be a positive integer.`);
   }
 
@@ -324,7 +325,7 @@ function requirePositiveInteger(value: number, label: string): number {
 }
 
 function requireRatio(value: number, label: string): number {
-  if (!Number.isFinite(value) || value < 0 || value > 1) {
+  if (!isRatioSetting(value)) {
     throw new Error(`${label} must be between 0 and 1.`);
   }
 

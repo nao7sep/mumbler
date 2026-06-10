@@ -1,4 +1,4 @@
-import { useState, useRef, type Dispatch, type SetStateAction } from "react";
+import { useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
 
 import type { AppSnapshot, SettingsDraft } from "@shared/app-shell";
 
@@ -10,6 +10,7 @@ interface UseSettingsModalOptions {
 
 interface UseSettingsModalResult {
   settingsDraft: SettingsDraft | null;
+  isSettingsDirty: boolean;
   isLoadingSettings: boolean;
   isSavingSettings: boolean;
   isPickingSettingsOutputDirectory: boolean;
@@ -41,6 +42,16 @@ export function useSettingsModal({
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const initialDraftRef = useRef<SettingsDraft | null>(null);
+
+  // Recomputes only when the draft object changes, not on every App re-render
+  // (App re-renders on each pipeline-progress snapshot while Settings is open).
+  // initialDraftRef is only reassigned together with settingsDraft (open/save).
+  const isSettingsDirty = useMemo(
+    () =>
+      settingsDraft !== null &&
+      JSON.stringify(settingsDraft) !== JSON.stringify(initialDraftRef.current),
+    [settingsDraft],
+  );
 
   async function handleOpenSettings(): Promise<void> {
     setIsLoadingSettings(true);
@@ -157,8 +168,7 @@ export function useSettingsModal({
     if (showDiscardConfirm) {
       return;
     }
-    const isDirty = JSON.stringify(settingsDraft) !== JSON.stringify(initialDraftRef.current);
-    if (!isDirty) {
+    if (!isSettingsDirty) {
       handleCloseSettings();
     } else {
       setShowDiscardConfirm(true);
@@ -175,6 +185,7 @@ export function useSettingsModal({
 
   return {
     settingsDraft,
+    isSettingsDirty,
     isLoadingSettings,
     isSavingSettings,
     isPickingSettingsOutputDirectory,
