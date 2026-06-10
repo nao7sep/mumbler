@@ -144,10 +144,13 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
   const createdAtUtc = normalizeUtcMs(card.createdAtUtc);
   const confirmedUtc = normalizeUtcMs(card.timestamps.confirmedUtc);
   const queuedMode = card.queuedMode === "generate" ? card.queuedMode : null;
-  const queuedAtUtc =
-    queuedMode !== null && typeof card.queuedAtUtc === "number"
-      ? normalizeUtcMs(card.queuedAtUtc)
-      : null;
+  // queuedAtUtc is paired with queuedMode: when the card is queued, parse it
+  // through normalizeUtcMs (which accepts both a number and the canonical ISO
+  // string the store now writes) — the same way every other instant field is
+  // read. A `typeof number` guard here would drop the value to null after a
+  // save/reload now that instants serialize as ISO, and selectNextQueuedCard
+  // would then skip the card forever.
+  const queuedAtUtc = queuedMode !== null ? normalizeUtcMs(card.queuedAtUtc) : null;
 
   return {
     ...card,

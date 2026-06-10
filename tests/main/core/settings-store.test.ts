@@ -92,24 +92,68 @@ describe("state store", () => {
 
   it("writes UTC instants as canonical ISO strings and reads epoch-ms back", async () => {
     const store = createStateStore(statePath());
-    await store.save(stateWith([card({ id: "x" })]));
+    await store.save(
+      stateWith([
+        card({
+          id: "x",
+          ai: {
+            transcription: {
+              provider: "gemini",
+              model: "gemini-3.1-pro-preview",
+              generatedAtUtc: Date.UTC(2026, 3, 22, 1, 0, 0),
+            },
+            structured: null,
+            title: null,
+            slug: null,
+          },
+        }),
+      ]),
+    );
 
-    // On disk: every *Utc instant is the canonical exactly-3-digit Z form.
+    // On disk: every *Utc instant is the canonical exactly-3-digit Z form,
+    // including a deeply nested one the generic serializer must recurse into.
     const raw = JSON.parse(await readFile(statePath(), "utf8"));
     const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
     expect(raw.cards[0].createdAtUtc).toMatch(ISO);
     expect(raw.cards[0].updatedAtUtc).toMatch(ISO);
     expect(raw.cards[0].timestamps.confirmedUtc).toMatch(ISO);
     expect(raw.cards[0].timestamps.effectiveUtc).toMatch(ISO);
-    // Non-instant fields pass through untouched.
+    expect(raw.cards[0].ai.transcription.generatedAtUtc).toMatch(ISO);
+    // Non-instant fields pass through untouched; null instants stay null.
     expect(raw.cards[0].timestamps.confirmedLocal).toBe("2026-04-22 09:44:00");
+    expect(raw.cards[0].ai.transcription.model).toBe("gemini-3.1-pro-preview");
     expect(raw.cards[0].queuedAtUtc).toBeNull();
 
-    // Round-trips back to epoch-ms numbers in memory.
+    // Round-trips back to epoch-ms numbers in memory, nested fields included.
     const { value } = await store.load();
     expect(typeof value.cards[0].createdAtUtc).toBe("number");
     expect(value.cards[0].createdAtUtc).toBe(Date.UTC(2026, 3, 22, 0, 0, 0));
     expect(value.cards[0].timestamps.confirmedUtc).toBe(Date.UTC(2026, 3, 22, 0, 44, 0));
+    expect(value.cards[0].ai.transcription?.generatedAtUtc).toBe(Date.UTC(2026, 3, 22, 1, 0, 0));
+  });
+
+  it("keeps a queued card resumable across an ISO save/reload (regression)", async () => {
+    const store = createStateStore(statePath());
+    await store.save(
+      stateWith([
+        card({
+          id: "q",
+          status: "Queued",
+          queuedMode: "generate",
+          queuedAtUtc: Date.UTC(2026, 3, 22, 3, 0, 0),
+        }),
+      ]),
+    );
+
+    // On disk the queue time is the canonical ISO string...
+    const raw = JSON.parse(await readFile(statePath(), "utf8"));
+    expect(raw.cards[0].queuedAtUtc).toBe("2026-04-22T03:00:00.000Z");
+
+    // ...and it must round-trip back to a usable epoch-ms number — NOT null, or
+    // selectNextQueuedCard would skip the card and it would stay stuck "Queued".
+    const { value } = await store.load();
+    expect(value.cards[0].queuedMode).toBe("generate");
+    expect(value.cards[0].queuedAtUtc).toBe(Date.UTC(2026, 3, 22, 3, 0, 0));
   });
 
   it("loads a legacy epoch-ms state.json and rewrites it as ISO on save", async () => {

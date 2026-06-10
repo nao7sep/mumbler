@@ -46,6 +46,19 @@ describe("createLogger", () => {
     expect(text).not.toContain("s3cr3t");
     expect(text).toContain("[REDACTED]");
   });
+
+  it("captures details and a serialized error on the error level, with an ISO time", async () => {
+    const logger = createLogger(dir, []);
+    await logger.error("convert", "boom", new Error("nope"), { cardId: "c1" });
+
+    const files = await logFiles();
+    const line = JSON.parse((await readFile(join(dir, files[0]), "utf8")).trim());
+    expect(line.time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(line.level).toBe("error");
+    expect(line.details).toEqual({ cardId: "c1" });
+    expect(line.error).toMatchObject({ name: "Error", message: "nope" });
+    expect(typeof line.error.stack).toBe("string");
+  });
 });
 
 describe("pruneOldLogs", () => {
