@@ -76,7 +76,7 @@ export async function cleanupOrphanedWorkingFiles(
     try {
       await rm(candidate, { force: true });
       deletedOrphanedFiles += 1;
-      await logger.info("working.cleanup", "Deleted orphaned working file.", {
+      await logger.debug("working.cleanup", "Deleted orphaned working file.", {
         filePath: candidate,
       });
     } catch (error: unknown) {
