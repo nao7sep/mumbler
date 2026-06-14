@@ -24,6 +24,7 @@ import {
 } from "@shared/timestamps";
 
 import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
+import { HamburgerIcon } from "./Icon";
 import { Menu, MenuItem } from "./Menu";
 import { SettingsModal } from "./SettingsModal";
 import { findMatchingCommand, isActivationTarget, isTypingTarget } from "./shortcut-utils";
@@ -747,7 +748,7 @@ export function App(): ReactElement {
                   className="button button--ghost button--icon"
                   aria-label="Open menu"
                 >
-                  ☰
+                  <HamburgerIcon />
                 </button>
               )}
             >
@@ -797,7 +798,10 @@ export function App(): ReactElement {
                 type="button"
                 className="button button--ghost button--compact"
                 onClick={() => dismissNotification(n.id)}
-              >✕</button>
+                aria-label="Dismiss notification"
+              >
+                ✕
+              </button>
             </div>
           ))}
         </div>
