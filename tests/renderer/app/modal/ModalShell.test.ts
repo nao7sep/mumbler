@@ -96,4 +96,30 @@ describe("ModalShell layering", () => {
     expect(closeNew).toHaveBeenCalledTimes(1);
     expect(closeExisting).not.toHaveBeenCalled();
   });
+
+  it("ignores Escape pressed during an IME composition, then closes on a plain Escape", async () => {
+    const close = vi.fn();
+    const appRoot = mountRoot();
+
+    await act(async () => {
+      appRoot.render(modal("Composing Modal", close));
+    });
+
+    // Escape mid-composition cancels the IME candidate, not the modal.
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(close).not.toHaveBeenCalled();
+
+    // A plain Escape still closes the modal.
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+    expect(close).toHaveBeenCalledTimes(1);
+  });
 });

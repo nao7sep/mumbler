@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { useComposing, isComposingKeyboardEvent } from "../useComposing";
 import { getFocusableElements, trapTabFocus } from "./focusTrap";
 import {
   MODAL_BASE_Z_INDEX,
@@ -70,6 +71,7 @@ export function ModalShell({
 }: ModalShellProps): ReactElement {
   const titleId = useId();
   const cardRef = useRef<HTMLElement>(null);
+  const composing = useComposing();
   const [modalId, setModalId] = useState<ModalId | null>(null);
   const stackVersion = useSyncExternalStore(
     subscribeModalStack,
@@ -127,6 +129,11 @@ export function ModalShell({
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>): void {
     if (event.key === "Escape") {
+      // During an IME composition Escape cancels the pending candidate; it
+      // belongs to the input, not to the modal-close path. Bail before closing.
+      if (isComposingKeyboardEvent(composing.composingRef, event)) {
+        return;
+      }
       if (!ownsTopmostInteraction()) {
         return;
       }
@@ -167,6 +174,8 @@ export function ModalShell({
         aria-describedby={describedById}
         tabIndex={-1}
         onKeyDown={handleKeyDown}
+        onCompositionStart={composing.handlers.onCompositionStart}
+        onCompositionEnd={composing.handlers.onCompositionEnd}
       >
         <div className="modal-card__header">
           <h2 id={titleId}>{title}</h2>
