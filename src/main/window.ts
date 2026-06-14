@@ -27,14 +27,30 @@ const PRODUCTION_CSP = [
   "frame-ancestors 'none'",
 ].join("; ");
 
-function openExternalIfAllowed(rawUrl: string): void {
-  let parsed: URL;
+// Whether a URL may be handed to the OS browser. Exported so the allowlist is
+// covered without driving a real BrowserWindow.
+export function isAllowedExternalUrl(rawUrl: string): boolean {
   try {
-    parsed = new URL(rawUrl);
+    return ALLOWED_EXTERNAL_PROTOCOLS.has(new URL(rawUrl).protocol);
   } catch {
-    return;
+    return false;
   }
-  if (ALLOWED_EXTERNAL_PROTOCOLS.has(parsed.protocol)) {
+}
+
+// The response-header transform applied in the packaged build: stamp the CSP on
+// without disturbing the headers already present. Exported so the exact policy is
+// verified in a unit test (the runtime path can't be exercised headlessly).
+export function withContentSecurityPolicy(
+  responseHeaders: Record<string, string[]> | undefined,
+): Record<string, string[]> {
+  return {
+    ...(responseHeaders ?? {}),
+    "Content-Security-Policy": [PRODUCTION_CSP],
+  };
+}
+
+function openExternalIfAllowed(rawUrl: string): void {
+  if (isAllowedExternalUrl(rawUrl)) {
     void shell.openExternal(rawUrl);
   }
 }
@@ -122,12 +138,7 @@ export function createMainWindow(): BrowserWindow {
     // Packaged build only: enforce the CSP via a response header. (Re-registering
     // on a subsequent window replaces the single handler, which is harmless.)
     window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-      callback({
-        responseHeaders: {
-          ...details.responseHeaders,
-          "Content-Security-Policy": [PRODUCTION_CSP],
-        },
-      });
+      callback({ responseHeaders: withContentSecurityPolicy(details.responseHeaders) });
     });
     void window.loadFile(join(__dirname, "../renderer/index.html"));
   }
