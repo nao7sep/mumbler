@@ -470,12 +470,6 @@ textarea:focus-visible,
   position: relative;
 }
 
-.app-menu-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 99;
-}
-
 .app-menu {
   position: absolute;
   right: 0;

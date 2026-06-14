@@ -522,6 +522,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         <button
           type="button"
           className={`button ${activeSnippet === "first" && isPlaying ? "button--primary" : "button--ghost"}`}
+          aria-pressed={activeSnippet === "first" && isPlaying}
           onClick={() => void playSnippet("first")}
         >
           Play First {previewSnippetSeconds}s
@@ -529,6 +530,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         <button
           type="button"
           className={`button ${activeSnippet === "last" && isPlaying ? "button--primary" : "button--ghost"}`}
+          aria-pressed={activeSnippet === "last" && isPlaying}
           onClick={() => void playSnippet("last")}
         >
           Play Last {previewSnippetSeconds}s

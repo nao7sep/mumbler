@@ -1,7 +1,17 @@
+// The queue is one composite listbox (per the composite-control conventions),
+// realized through the projection-only `useQueueListbox` hook: it supplies the
+// `role="listbox"`/`option`, `aria-selected`, roving tabindex, and focus-follow.
+//
+// Navigation is NOT handled here. Up/Down/Home/End are owned by the window-level
+// command layer in App.tsx (`select-previous` / `select-next`), which advances the
+// backend `selectedCardId`; this component only renders the projection of that
+// state and reports clicks back through `onSelect`. Type-ahead is consciously
+// ceded because the queue's single-letter keys (F/B/T/S) are app commands.
 import type { ReactElement } from "react";
 
 import type { CardStatus, MumblerCard } from "@shared/app-shell";
 import { formatCardStatusMessage } from "./card-status";
+import { useQueueListbox } from "./useQueueListbox";
 
 export function slugify(value: string): string {
   return value.toLowerCase().replaceAll(" ", "-");
@@ -48,12 +58,18 @@ export interface QueueListProps {
 }
 
 export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): ReactElement {
+  const { containerProps, getOptionProps } = useQueueListbox({
+    cardIds: cards.map((card) => card.id),
+    selectedCardId,
+    label: "Queue",
+  });
+
   return (
-    <div className="queue-list">
+    <div className="queue-list" {...containerProps}>
       {cards.map((card) => (
-        <button
+        <div
           key={card.id}
-          type="button"
+          {...getOptionProps(card.id)}
           className={`queue-row queue-row--${statusModifier(card.status)}${card.id === selectedCardId ? " queue-row--selected" : ""}`}
           onClick={() => onSelect(card.id)}
         >
@@ -73,7 +89,7 @@ export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): 
           {card.lastError ? (
             <div className="queue-row__error">{card.lastError.message}</div>
           ) : null}
-        </button>
+        </div>
       ))}
     </div>
   );

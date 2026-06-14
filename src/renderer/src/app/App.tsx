@@ -24,6 +24,7 @@ import {
 } from "@shared/timestamps";
 
 import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
+import { Menu, MenuItem } from "./Menu";
 import { SettingsModal } from "./SettingsModal";
 import { findMatchingCommand, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
@@ -645,17 +646,24 @@ export function App(): ReactElement {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
-        // Each open modal/dialog owns its own Escape through ModalShell and
-        // stops propagation before the event reaches here, so the only thing
-        // left for the window to close is the lightweight app-menu popover.
-        if (isMenuOpen) {
-          setIsMenuOpen(false);
-        }
+        // Escape is owned by whatever is open: each modal/dialog handles it
+        // through ModalShell and the app menu handles it itself (closing and
+        // returning focus to its trigger), both stopping it before it reaches
+        // here. The window has nothing left to close on Escape.
         return;
       }
 
       const settingsSummary = snapshot?.settingsSummary;
-      if (modalIsOpen || isTypingTarget(event.target) || settingsSummary == null) {
+      // The open app menu is a composite that owns the arrow / type-ahead /
+      // activation keys while it has focus; suppress the global command layer so
+      // those keys don't also fire a queue/player shortcut (the key-bleed the
+      // composite-control conventions warn against).
+      if (
+        modalIsOpen ||
+        isMenuOpen ||
+        isTypingTarget(event.target) ||
+        settingsSummary == null
+      ) {
         return;
       }
 
@@ -721,61 +729,55 @@ export function App(): ReactElement {
         </div>
         <div className="topbar__meta">
           <div className="app-menu-anchor">
-            <button
-              type="button"
-              className="button button--ghost button--icon"
-              aria-label="Open menu"
-              onClick={() => setIsMenuOpen((prev) => !prev)}
+            <Menu
+              open={isMenuOpen}
+              onOpenChange={setIsMenuOpen}
+              label="Application menu"
+              className="app-menu"
+              trigger={(props) => (
+                <button
+                  {...props}
+                  type="button"
+                  className="button button--ghost button--icon"
+                  aria-label="Open menu"
+                >
+                  ☰
+                </button>
+              )}
             >
-              ☰
-            </button>
-            {isMenuOpen && (
-              <>
-                <div className="app-menu-overlay" onClick={() => setIsMenuOpen(false)} />
-                <div className="app-menu">
-                  <button
-                    type="button"
-                    className="app-menu-item"
-                    onClick={() => {
-                      setIsMenuOpen(false);
-                      void window.mumbler
-                        .openOutputDirectory()
-                        .catch((error: unknown) =>
-                          addPersistent(
-                            error instanceof Error ? error.message : "Failed to open output directory.",
-                            "error",
-                          ),
-                        );
-                    }}
-                  >
-                    Open Output Directory
-                  </button>
-                  <button
-                    type="button"
-                    className="app-menu-item"
-                    onClick={() => { setIsMenuOpen(false); void settingsModal.handleOpenSettings(); }}
-                    disabled={importFlow.isImporting || settingsModal.isLoadingSettings}
-                  >
-                    Settings
-                  </button>
-                  <button
-                    type="button"
-                    className="app-menu-item"
-                    onClick={() => { setIsMenuOpen(false); setShowShortcutsHelp(true); }}
-                    disabled={snapshot === null}
-                  >
-                    Keyboard Shortcuts
-                  </button>
-                  <button
-                    type="button"
-                    className="app-menu-item"
-                    onClick={() => { setIsMenuOpen(false); setShowAbout(true); }}
-                  >
-                    About
-                  </button>
-                </div>
-              </>
-            )}
+              <MenuItem
+                className="app-menu-item"
+                onSelect={() => {
+                  void window.mumbler
+                    .openOutputDirectory()
+                    .catch((error: unknown) =>
+                      addPersistent(
+                        error instanceof Error ? error.message : "Failed to open output directory.",
+                        "error",
+                      ),
+                    );
+                }}
+              >
+                Open Output Directory
+              </MenuItem>
+              <MenuItem
+                className="app-menu-item"
+                disabled={importFlow.isImporting || settingsModal.isLoadingSettings}
+                onSelect={() => void settingsModal.handleOpenSettings()}
+              >
+                Settings
+              </MenuItem>
+              <MenuItem
+                className="app-menu-item"
+                disabled={snapshot === null}
+                onSelect={() => setShowShortcutsHelp(true)}
+              >
+                Keyboard Shortcuts
+              </MenuItem>
+              <MenuItem className="app-menu-item" onSelect={() => setShowAbout(true)}>
+                About
+              </MenuItem>
+            </Menu>
           </div>
         </div>
       </header>

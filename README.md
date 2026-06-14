@@ -66,6 +66,12 @@ Type-checking is split by runtime environment so cross-environment mistakes are 
 | `T` | Generate All |
 | `S` | Save |
 
+### Navigation
+
+The **queue** is a single composite listbox: one `Tab` press enters it (landing on the selected card) and one more leaves it. `Up` / `Down` move the selection — they are global command-layer shortcuts (the same ones above), so they work from anywhere, not just when the list has focus. The queue has no type-ahead by design, because its single-letter keys (`F`, `B`, `T`, `S`) are app commands.
+
+The **app menu** (the ☰ button) opens into arrow navigation: `Up` / `Down` move between items (stopping at the ends), `Home` / `End` jump to the ends, and type-ahead jumps to an item by its label. `Enter` / `Space` activate an item, and `Escape`, `Tab`, or a click outside close the menu and return focus to the button.
+
 ## Settings
 
 | Setting | Description |
