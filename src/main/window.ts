@@ -9,6 +9,24 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // else a renderer asks to open (file:, smb:, custom handlers, …) is ignored.
 const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
 
+// Production Content-Security-Policy (defense-in-depth on top of context
+// isolation + sandbox). Applied only to the packaged build, not the dev server,
+// which needs inline/eval and a websocket for HMR. Audio is served from the
+// custom `mumbler-asset://` scheme, so it is allowed for media and fetch; styles
+// allow 'unsafe-inline' because React and WaveSurfer inject inline styles.
+const PRODUCTION_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' mumbler-asset: blob:",
+  "connect-src 'self' mumbler-asset:",
+  "font-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
 function openExternalIfAllowed(rawUrl: string): void {
   let parsed: URL;
   try {
@@ -101,6 +119,16 @@ export function createMainWindow(): BrowserWindow {
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
+    // Packaged build only: enforce the CSP via a response header. (Re-registering
+    // on a subsequent window replaces the single handler, which is harmless.)
+    window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          "Content-Security-Policy": [PRODUCTION_CSP],
+        },
+      });
+    });
     void window.loadFile(join(__dirname, "../renderer/index.html"));
   }
 
