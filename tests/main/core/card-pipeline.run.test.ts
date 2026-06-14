@@ -1,0 +1,145 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { AppPaths, MumblerCard } from "@shared/app-shell";
+import type { AppLogger } from "@main/core/logger";
+
+// Drive the real executeCardPipeline orchestration with the Gemini call mocked,
+// so the multi-step metadata chain and the cancellation path are covered without
+// a network or a key. Only the two external-call functions are replaced; the rest
+// of the module (retry/cancel classifiers, helpers) stays real.
+const { mockGenerateText, mockTranscribe } = vi.hoisted(() => ({
+  mockGenerateText: vi.fn(),
+  mockTranscribe: vi.fn(),
+}));
+
+vi.mock("@main/core/gemini-adapter", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@main/core/gemini-adapter")>();
+  return { ...actual, generateTextWithGemini: mockGenerateText, transcribeWithGemini: mockTranscribe };
+});
+
+import { executeCardPipeline, type CardPipelineContext } from "@main/core/card-pipeline";
+import { createDefaultSettings, createEmptyState } from "@main/core/settings-schema";
+
+function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
+  return {
+    id: "card-1",
+    originalFilename: "rec.m4a",
+    importSource: "file-picker",
+    sourceFilePath: "/tmp/rec.m4a",
+    audioProfile: null,
+    durationSec: 60,
+    fileSizeBytes: 1024,
+    timestamps: {
+      confirmedLocal: "2026-04-22 09:44:00",
+      confirmedUtc: Date.UTC(2026, 3, 22, 0, 44, 0),
+      timezone: "Asia/Tokyo",
+      frontTrimOffsetSec: 0,
+      effectiveLocal: "2026-04-22 09:44:00",
+      effectiveUtc: Date.UTC(2026, 3, 22, 0, 44, 0),
+    },
+    trim: { frontMarkerSec: null, backMarkerSec: null },
+    trimDecision: null,
+    transcription: { text: "hello world" },
+    metadata: { structured: null, title: null, slug: null },
+    ai: { transcription: null, structured: null, title: null, slug: null },
+    status: "Imported",
+    activeStep: null,
+    queuedMode: null,
+    queuedAtUtc: null,
+    lastError: null,
+    createdAtUtc: 1,
+    updatedAtUtc: 1,
+    ...overrides,
+  };
+}
+
+function makeLogger(): AppLogger {
+  return {
+    debug: vi.fn().mockResolvedValue(undefined),
+    info: vi.fn().mockResolvedValue(undefined),
+    warn: vi.fn().mockResolvedValue(undefined),
+    error: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function makePaths(): AppPaths {
+  return {
+    homeDir: "/tmp/.mumbler",
+    settingsPath: "/tmp/.mumbler/settings.json",
+    statePath: "/tmp/.mumbler/state.json",
+    logsDir: "/tmp/.mumbler/logs",
+    workingDir: "/tmp/.mumbler/working",
+    outputDir: "/tmp/.mumbler/output",
+    backupsDir: "/tmp/.mumbler/backups",
+  };
+}
+
+function makeContext(card: MumblerCard, signal: AbortSignal): CardPipelineContext {
+  const state = createEmptyState();
+  state.cards = [card];
+  state.selectedCardId = card.id;
+  const settings = createDefaultSettings("Asia/Tokyo");
+  // decodeGeminiApiKey is base64 -> reverse, so the obfuscated form is base64 of
+  // the reversed key. A non-empty decode is all the pipeline's key check needs.
+  settings.geminiApiKeyObfuscated = Buffer.from(
+    "test-key".split("").reverse().join(""),
+    "utf8",
+  ).toString("base64");
+  return {
+    state,
+    settings,
+    paths: makePaths(),
+    logger: makeLogger(),
+    signal,
+    persistState: vi.fn().mockResolvedValue(undefined),
+    releaseTranscriptionSlot: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("executeCardPipeline", () => {
+  it("runs the structured -> title -> slug metadata chain and marks the card ready", async () => {
+    mockGenerateText.mockResolvedValue({ text: "result", modelVersion: "m", usageMetadata: null });
+    const card = makeCard();
+    const ctx = makeContext(card, new AbortController().signal);
+
+    await executeCardPipeline(card.id, "structured", "generate", ctx);
+
+    expect(mockGenerateText).toHaveBeenCalledTimes(3);
+    expect(card.metadata.structured).toBe("result");
+    expect(card.metadata.title).toBe("result");
+    expect(card.metadata.slug).toBe("result");
+    expect(card.status).toBe("Ready to Save");
+    expect(card.lastError).toBeNull();
+    expect(ctx.releaseTranscriptionSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks the card cancelled and makes no Gemini call when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const card = makeCard();
+    const ctx = makeContext(card, controller.signal);
+
+    await executeCardPipeline(card.id, "structured", "generate", ctx);
+
+    expect(mockGenerateText).not.toHaveBeenCalled();
+    expect(card.status).toBe("Cancelled");
+    expect(ctx.releaseTranscriptionSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it("records an error outcome (not a throw) when a metadata step fails unrecoverably", async () => {
+    // A non-retryable error (not network/timeout/cancel) ends the run as Error.
+    mockGenerateText.mockRejectedValue(new Error("Gemini returned an empty text response."));
+    const card = makeCard();
+    const ctx = makeContext(card, new AbortController().signal);
+
+    await executeCardPipeline(card.id, "structured", "generate", ctx);
+
+    expect(card.status).toBe("Error");
+    expect(card.lastError?.failedStep).toBe("structured");
+    expect(ctx.releaseTranscriptionSlot).toHaveBeenCalledTimes(1);
+  });
+});

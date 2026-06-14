@@ -8,7 +8,7 @@ A desktop app for generating transcription and metadata from audio recordings us
 - **AI pipeline** — sends audio to Google Gemini, then generates transcription, structured transcription, title, and URL slug as separate dependent steps
 - **Queue** — import multiple files and process transcriptions concurrently (configurable limit); extra cards beyond the limit auto-queue and start as slots free
 - **Cancellation and generation** — cancel stuck AI work or generate any step on demand; generating a step also regenerates the dependent downstream outputs it invalidates
-- **Timestamp parsing** — extracts recording datetime from filenames using configurable regex patterns; falls back to file modification time
+- **Timestamp parsing** — extracts recording datetime from filenames using configurable regex patterns; when no pattern matches, the import review prompts you to enter the timestamp manually
 - **IME composition support** — Japanese/Chinese/Korean input works correctly in all text fields
 - **Atomic save** — writes audio + JSON + Markdown atomically (temp → rename) with rollback on failure
 - **Optional source backup and deletion** — can copy the original to a backup folder and/or permanently delete it after confirming an import (backup is on by default)
@@ -101,22 +101,33 @@ Each saved card produces three files in the output directory:
 
 **`<timestamp>-<slug>.<ext>`** — the audio file (original or trimmed; never re-encoded unless stream-copy trim is impossible)
 
-**`<timestamp>-<slug>.json`** — metadata sidecar:
+**`<timestamp>-<slug>.json`** — metadata sidecar (abbreviated; `providers` holds the per-step AI run records — provider, model, and generation time):
 
 ```json
 {
   "schemaVersion": 1,
+  "appVersion": "0.1.0",
   "originalFilename": "...",
+  "importSource": "drag-and-drop",
   "timestamps": {
     "confirmedLocal": "2026-04-22 09:44:00",
-    "effectiveUtc": "..."
+    "confirmedUtc": "2026-04-22T00:44:00.000Z",
+    "effectiveLocal": "2026-04-22 09:44:00",
+    "effectiveUtc": "2026-04-22T00:44:00.000Z",
+    "timezone": "Asia/Tokyo",
+    "transcribedAtUtc": "...",
+    "finalizedAtUtc": "..."
   },
+  "trim": { "frontMarkerSec": null, "backMarkerSec": null },
+  "duration": { "originalSec": 0, "finalSec": 0 },
   "transcription": {
     "raw": "...",
     "structured": "...",
     "title": "...",
     "slug": "..."
-  }
+  },
+  "providers": { "transcription": { "provider": "gemini", "model": "...", "generatedAtUtc": "..." } },
+  "audio": { "finalCodec": "...", "finalBitrateKbps": null, "finalSampleRateHz": null, "finalChannels": null, "trimDecision": "not-needed" }
 }
 ```
 

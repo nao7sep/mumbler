@@ -33,7 +33,6 @@ import {
   formatUtcForDisplay,
   formatUtcMarker,
   isValidTimezone,
-  normalizeUtcMs,
   parseTimestampFromFilename,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
@@ -400,7 +399,11 @@ export class ApplicationRuntime {
       throw new OperationError("Pending import drafts are out of date. Reopen the timestamp review.");
     }
 
-    state.pendingImports = items.map((item) => normalizePendingImport(item));
+    const draftsById = new Map(items.map((item) => [item.id, item]));
+    state.pendingImports = state.pendingImports.map((authoritative) => {
+      const draft = draftsById.get(authoritative.id);
+      return draft ? applyPendingImportDraft(authoritative, draft) : authoritative;
+    });
     await this.persistState();
     return this.getSnapshot();
   }
@@ -420,11 +423,13 @@ export class ApplicationRuntime {
         throw new OperationError(`Pending import ${pendingImport.originalFilename} is missing review data.`);
       }
 
-      const normalized = normalizePendingImport(candidate);
+      // Overlay only the review-editable fields onto the authoritative item; the
+      // working/original paths always come from server-side state below.
+      const merged = applyPendingImportDraft(pendingImport, candidate);
       const timestamps = buildConfirmedTimestamps(
-        normalized.localTimestampText,
-        normalized.timezone,
-        normalized.utcTimestampText,
+        merged.localTimestampText,
+        merged.timezone,
+        merged.utcTimestampText,
       );
       let probed: Awaited<ReturnType<typeof probeAudioProfile>>;
       try {
@@ -484,7 +489,7 @@ export class ApplicationRuntime {
       });
 
       let backupSucceeded = true;
-      if (pendingImport.copyToBackupOnConfirm) {
+      if (merged.copyToBackupOnConfirm) {
         const backupDir = this.runtime.settings!.backupDirectory ?? paths.backupsDir;
         try {
           const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir);
@@ -502,8 +507,8 @@ export class ApplicationRuntime {
         }
       }
 
-      if (pendingImport.deleteOriginalOnConfirm) {
-        if (pendingImport.copyToBackupOnConfirm && !backupSucceeded) {
+      if (merged.deleteOriginalOnConfirm) {
+        if (merged.copyToBackupOnConfirm && !backupSucceeded) {
           await this.runtime.logger.warn(
             "import.delete-original",
             "Skipped deleting original because backup copy failed.",
@@ -1400,7 +1405,7 @@ async function ensureDirectories(paths: AppPaths): Promise<void> {
   await mkdir(paths.workingDir, { recursive: true });
 }
 
-function buildConfirmedTimestamps(
+export function buildConfirmedTimestamps(
   localTimestampText: string,
   timezone: string,
   utcTimestampText: string,
@@ -1441,10 +1446,24 @@ function buildConfirmedTimestamps(
   throw new OperationError("Pending import timestamps are incomplete.");
 }
 
-function normalizePendingImport(item: PendingImportReviewItem): PendingImportReviewItem {
+// The renderer's timestamp-review screen may edit only these fields. Every other
+// field of a pending import — its id, the working/original file paths, filename,
+// source, size, and parse status — is established by the main process at import
+// time and must never be read back from a renderer-supplied payload. Taking the
+// paths from the renderer would let a buggy (or hostile) renderer point the main
+// process's unlink / copy / ffprobe at an arbitrary path. So we keep the
+// authoritative item and overlay only the review-editable fields from the draft.
+export function applyPendingImportDraft(
+  authoritative: PendingImportReviewItem,
+  draft: PendingImportReviewItem,
+): PendingImportReviewItem {
   return {
-    ...item,
-    createdAtUtc: normalizeUtcMs(item.createdAtUtc),
+    ...authoritative,
+    localTimestampText: draft.localTimestampText,
+    timezone: draft.timezone,
+    utcTimestampText: draft.utcTimestampText,
+    deleteOriginalOnConfirm: draft.deleteOriginalOnConfirm,
+    copyToBackupOnConfirm: draft.copyToBackupOnConfirm,
     updatedAtUtc: Date.now(),
   };
 }
@@ -1523,7 +1542,7 @@ function normalizeMarker(value: number | null): number | null {
   return Math.round(value * 10) / 10;
 }
 
-function applyFrontTrimOffset(
+export function applyFrontTrimOffset(
   timestamps: MumblerCard["timestamps"],
   frontTrimOffsetSec: number,
 ): MumblerCard["timestamps"] {

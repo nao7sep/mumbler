@@ -26,7 +26,7 @@ import {
 import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
 import { Menu, MenuItem } from "./Menu";
 import { SettingsModal } from "./SettingsModal";
-import { findMatchingCommand, isTypingTarget } from "./shortcut-utils";
+import { findMatchingCommand, isActivationTarget, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
 import { QueueList, formatBytes, formatDuration, statusModifier } from "./QueueList";
 import { DecisionModal } from "./DecisionModal";
@@ -664,6 +664,12 @@ export function App(): ReactElement {
         isTypingTarget(event.target) ||
         settingsSummary == null
       ) {
+        return;
+      }
+
+      // Space activates a focused button/link natively; let it, rather than
+      // preventDefault-ing it into the global play/pause command.
+      if (event.key === " " && isActivationTarget(event.target)) {
         return;
       }
 

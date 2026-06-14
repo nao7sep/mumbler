@@ -39,6 +39,40 @@ function assertCardTrim(value: unknown): asserts value is CardTrim {
   }
 }
 
+function assertPendingImportDrafts(value: unknown): asserts value is PendingImportReviewItem[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Invalid IPC parameter: import drafts must be an array.");
+  }
+  // Validate only the fields the main process reads from a renderer draft (id +
+  // the review-editable fields). The server-established fields — the file paths
+  // especially — are intentionally ignored downstream, so they are not required
+  // or trusted here.
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) {
+      throw new Error("Invalid IPC parameter: each import draft must be an object.");
+    }
+    const obj = item as Record<string, unknown>;
+    if (typeof obj.id !== "string") {
+      throw new Error("Invalid IPC parameter: import draft id must be a string.");
+    }
+    if (typeof obj.localTimestampText !== "string") {
+      throw new Error("Invalid IPC parameter: localTimestampText must be a string.");
+    }
+    if (typeof obj.timezone !== "string") {
+      throw new Error("Invalid IPC parameter: timezone must be a string.");
+    }
+    if (typeof obj.utcTimestampText !== "string") {
+      throw new Error("Invalid IPC parameter: utcTimestampText must be a string.");
+    }
+    if (typeof obj.deleteOriginalOnConfirm !== "boolean") {
+      throw new Error("Invalid IPC parameter: deleteOriginalOnConfirm must be a boolean.");
+    }
+    if (typeof obj.copyToBackupOnConfirm !== "boolean") {
+      throw new Error("Invalid IPC parameter: copyToBackupOnConfirm must be a boolean.");
+    }
+  }
+}
+
 function assertGenerateTarget(value: unknown): asserts value is GenerateTarget {
   if (
     value !== "transcription" &&
@@ -99,12 +133,18 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
 
   handle(
     APP_SHELL_CHANNELS.updatePendingImportDrafts,
-    (_event, items: PendingImportReviewItem[]) => runtime.updatePendingImportDrafts(items),
+    (_event, items: PendingImportReviewItem[]) => {
+      assertPendingImportDrafts(items);
+      return runtime.updatePendingImportDrafts(items);
+    },
   );
 
   handle(
     APP_SHELL_CHANNELS.confirmPendingImports,
-    (_event, items: PendingImportReviewItem[]) => runtime.confirmPendingImports(items),
+    (_event, items: PendingImportReviewItem[]) => {
+      assertPendingImportDrafts(items);
+      return runtime.confirmPendingImports(items);
+    },
   );
 
   handle(APP_SHELL_CHANNELS.selectCard, (_event, cardId: string | null) => {

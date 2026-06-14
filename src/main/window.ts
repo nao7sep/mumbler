@@ -5,6 +5,22 @@ import { fileURLToPath } from "node:url";
 const WINDOW_BACKGROUND = "#eef0ec";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Schemes the app is willing to hand to the OS via shell.openExternal. Anything
+// else a renderer asks to open (file:, smb:, custom handlers, …) is ignored.
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
+
+function openExternalIfAllowed(rawUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return;
+  }
+  if (ALLOWED_EXTERNAL_PROTOCOLS.has(parsed.protocol)) {
+    void shell.openExternal(rawUrl);
+  }
+}
+
 export function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1480,
@@ -28,8 +44,20 @@ export function createMainWindow(): BrowserWindow {
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    openExternalIfAllowed(url);
     return { action: "deny" };
+  });
+
+  // The renderer is a single-page app that never legitimately navigates the
+  // top-level frame. Block any attempt to replace it with other content (a stray
+  // link, a redirect, injected content); a same-URL reload is left alone so dev
+  // full-reloads still work, and a real external link is opened in the browser.
+  window.webContents.on("will-navigate", (event, url) => {
+    if (url === window.webContents.getURL()) {
+      return;
+    }
+    event.preventDefault();
+    openExternalIfAllowed(url);
   });
 
   window.webContents.on("context-menu", (_event, params) => {

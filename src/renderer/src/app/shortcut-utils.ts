@@ -77,6 +77,25 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return tagName === "input" || tagName === "textarea" || tagName === "select";
 }
 
+// True when the focused element activates on Space (a button, link, or summary).
+// A global single-key shortcut must not preventDefault Space over such a control,
+// or the Space the user pressed to click the button they tabbed to would instead
+// fire the global command (e.g. play/pause).
+export function isActivationTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName.toLowerCase();
+  if (tagName === "button" || tagName === "summary") {
+    return true;
+  }
+  if (tagName === "a" && target.hasAttribute("href")) {
+    return true;
+  }
+  return target.getAttribute("role") === "button";
+}
+
 function parseShortcut(value: string): ParsedShortcut | null {
   const parts = value
     .split("+")

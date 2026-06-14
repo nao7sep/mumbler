@@ -189,13 +189,15 @@ export function TimestampReviewModal({
                       onChange={(event) => {
                         const nextDisplay = event.target.value;
                         const nextMs = parseUtcFromDisplay(nextDisplay);
-                        const nextUtcTimestampText = nextMs !== null ? formatUtcForDisplay(nextMs) : nextDisplay;
                         const localResult = nextMs !== null
                           ? recomputeLocalFromUtc(nextMs, item.timezone)
                           : { localTimestampText: item.localTimestampText, error: "invalid" };
                         onChange({
                           ...item,
-                          utcTimestampText: nextUtcTimestampText,
+                          // Keep the user's raw keystrokes in the field they are
+                          // editing — reformatting it mid-edit would yank the caret.
+                          // Canonicalization happens at confirm (buildConfirmedTimestamps).
+                          utcTimestampText: nextDisplay,
                           localTimestampText:
                             localResult.error === null ? localResult.localTimestampText : item.localTimestampText,
                         });
