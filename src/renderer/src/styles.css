@@ -461,6 +461,9 @@ textarea:focus-visible,
 }
 
 .button--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0.45rem 0.75rem;
   font-size: 1.15rem;
   line-height: 1;
