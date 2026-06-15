@@ -2,6 +2,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $scriptExitCode = 0
 
+# run-built: launch the EXISTING production build without rebuilding, so it
+# starts instantly. This is the daily-use launcher and the one that surfaces
+# production-only failures (strict CSP, file:// paths, packaged layout). It
+# never builds — if you changed source, run rebuild first.
+
 function Set-Utf8Console {
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [Console]::InputEncoding = $utf8NoBom
@@ -46,26 +51,25 @@ $repoDir = Split-Path -Parent $scriptDir
 try {
     Set-Utf8Console
     Require-Command node
-    Require-Command npm
 
     Set-Location $repoDir
 
-    Write-Step "Installing dependencies"
-    Invoke-Native -FilePath "npm" -ArgumentList @("install")
-
-    # npm install skips the Electron binary if the package is already at the locked version.
-    Write-Step "Verifying Electron binary"
-    if (-not (Test-Path "node_modules/electron/path.txt")) {
-        Write-Host "Electron binary missing; downloading..."
-        Invoke-Native -FilePath "node" -ArgumentList @("node_modules/electron/install.js")
+    # No build, no dependency install here: this launcher must start instantly. If
+    # there is no usable build yet, stop and point at rebuild rather than launching
+    # something stale or empty.
+    if (-not ((Test-Path "out/renderer/index.html") -and (Test-Path "out/main") -and (Test-Path "node_modules/.bin/electron-vite.cmd"))) {
+        throw "No production build found (out/ is missing or incomplete, or dependencies are not installed). Run rebuild first."
     }
 
-    Write-Step "Starting Mumbler in development mode"
-    Invoke-Native -FilePath "npm" -ArgumentList @("run", "dev") -AllowedExitCodes @(0, 130, -1073741510)
+    $builtAt = (Get-Item "out/renderer/index.html").LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+    Write-Step "Launching the existing production build (built: $builtAt)"
+    Write-Host "If you changed source since then, run rebuild instead."
+
+    Invoke-Native -FilePath "node_modules/.bin/electron-vite.cmd" -ArgumentList @("preview") -AllowedExitCodes @(0, 130, -1073741510)
 }
 catch {
     Write-Host ""
-    Write-Host "mumbler run failed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "mumbler run-built failed: $($_.Exception.Message)" -ForegroundColor Red
     $scriptExitCode = 1
 }
 finally {

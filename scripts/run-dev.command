@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# run-dev: run the app from source with live reload, in its loosest configuration.
+# For active coding and debugging. The strict, production-faithful launchers are
+# run-built (launch the existing production build without rebuilding) and rebuild
+# (build from clean in release config, then launch).
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -19,7 +24,7 @@ pause_on_failure() {
   local status="$1"
   if [[ "$status" -ne 0 && "$status" -ne 130 ]]; then
     echo
-    echo "mumbler run failed with exit code $status."
+    echo "mumbler run-dev failed with exit code $status."
     read -r -p "Press Enter to close..."
   fi
 }
