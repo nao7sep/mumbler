@@ -1,166 +1,37 @@
 # Mumbler
 
-A desktop app for generating transcription and metadata from audio recordings using Google Gemini AI. Import recordings, trim them, generate transcription, structured transcription, title, and slug metadata, then save audio with JSON and Markdown output files.
+Mumbler is a desktop app for turning audio recordings into transcripts and publishable metadata with Google Gemini. Import recordings, trim silence on a waveform, then generate a transcription, a structured transcription, a title, and a URL slug — saved together as audio plus JSON and Markdown sidecars. It's for podcasters, note-takers, and writers who want clean, structured text out of raw recordings. Built on Electron, React, and TypeScript; transcription runs through your own Gemini API key.
 
 ## Features
 
-- **Waveform editor** — visualize audio with WaveSurfer.js; set front/back trim markers to cut unwanted silence before generation
-- **AI pipeline** — sends audio to Google Gemini, then generates transcription, structured transcription, title, and URL slug as separate dependent steps
-- **Queue** — import multiple files and process transcriptions concurrently (configurable limit); extra cards beyond the limit auto-queue and start as slots free
-- **Cancellation and generation** — cancel stuck AI work or generate any step on demand; generating a step also regenerates the dependent downstream outputs it invalidates
-- **Timestamp parsing** — extracts recording datetime from filenames using configurable regex patterns; when no pattern matches, the import review prompts you to enter the timestamp manually
-- **IME composition support** — Japanese/Chinese/Korean input works correctly in all text fields
-- **Atomic save** — writes audio + JSON + Markdown atomically (temp → rename) with rollback on failure
-- **Optional source backup and deletion** — can copy the original to a backup folder and/or permanently delete it after confirming an import (backup is on by default)
+- **Waveform editor** — set front/back trim markers to cut silence before generation
+- **AI pipeline** — transcription → structured transcription → title → slug, each a dependent step that regenerates downstream outputs when changed
+- **Queue** — import many files and process them concurrently, with a configurable limit
+- **Timestamp parsing** — pull the recording datetime from filenames via configurable regex, prompting when none matches
+- **Atomic save** — writes audio + JSON + Markdown together, with rollback on failure
+- **IME-safe** — Japanese/Chinese/Korean input works in every text field
 
 ## Requirements
 
 - Node.js 20+
-- A [Google Gemini API key](https://aistudio.google.com/app/apikey)
+- A Google Gemini API key (the AI features call Gemini, billed to your key)
+- macOS, Windows, or Linux (Electron desktop app)
 
-## Getting Started
+## Getting started
+
+Double-click the launcher for your platform (`scripts/run-dev.command` on macOS, `scripts/run-dev.ps1` on Windows), or run from source:
 
 ```bash
-git clone https://github.com/nao7sep/mumbler
-cd mumbler
 npm install
 npm run dev
 ```
 
-On first launch, open Settings and enter your Gemini API key. The output directory defaults to `~/.mumbler/output`; configure a custom location in Settings if desired.
-
-The built-in Gemini model list currently offers **Gemini 3.1 Pro (Preview)**, **Gemini 3.5 Flash**, **Gemini 3 Flash (Preview)**, and **Gemini 3.1 Flash Lite**.
-
-## Testing
-
-```bash
-npm test           # run the unit and integration suite once
-npm run test:watch # re-run on change during development
-npm run typecheck  # type-check every environment: main, renderer, and tests
-```
-
-Tests run under [Vitest](https://vitest.dev/) and live under `tests/`, mirroring the `src/` tree.
-
-Type-checking is split by runtime environment so cross-environment mistakes are caught statically: `tsconfig.node.json` (main + preload — Node, no DOM), `tsconfig.web.json` (renderer — DOM, no Node types), and `tsconfig.test.json` (the tests, which use both). `npm run typecheck` runs all three, so a main-process file reaching for a browser global (`document`), or a renderer file reaching for a Node global (`process`), fails the check. Preload is type-checked on the Node side because it imports `electron`; the contextBridge API type lives in `src/shared`, so the renderer never imports preload.
-
-## Usage
-
-1. **Import** — drag audio files onto the window or use the import dialog
-2. **Review** — the import review screen shows filename-parsed timestamps; adjust if needed and confirm. Originals are copied to the backup folder by default; you can also choose to permanently delete them from their source location.
-3. **Trim** — drag the front/back markers on the waveform to cut unwanted sections
-4. **Generate** — click Generate All; the app sends the (trimmed) audio to Gemini and runs transcription, structured transcription, title generation, and slug generation
-5. **Repair if needed** — cancel stuck AI work or use Generate beside any field; generation automatically ensures prerequisites and regenerates dependent later steps when needed
-6. **Save** — save the card to the output directory; produces timestamp-prefixed audio, JSON, and Markdown files
-
-### Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Up` / `Down` | Select previous / next card |
-| `Space` | Play / pause |
-| `Left` / `Right` | Skip backward / forward (configurable interval) |
-| `Left Bracket` | Play first N seconds |
-| `Right Bracket` | Play last N seconds |
-| `F` | Set front trim marker at cursor |
-| `B` | Set back trim marker at cursor |
-| `T` | Generate All |
-| `S` | Save |
-
-### Navigation
-
-The **queue** is a single composite listbox: one `Tab` press enters it (landing on the selected card) and one more leaves it. `Up` / `Down` move the selection — they are global command-layer shortcuts (the same ones above), so they work from anywhere, not just when the list has focus. The queue has no type-ahead by design, because its single-letter keys (`F`, `B`, `T`, `S`) are app commands.
-
-The **app menu** (the ☰ button) opens into arrow navigation: `Up` / `Down` move between items (stopping at the ends), `Home` / `End` jump to the ends, and type-ahead jumps to an item by its label. `Enter` / `Space` activate an item, and `Escape`, `Tab`, or a click outside close the menu and return focus to the button.
-
-## Settings
-
-| Setting | Description |
-|---------|-------------|
-| Output Directory | Where saved files are written (default: `~/.mumbler/output`) |
-| Backup Directory | Where originals are copied when "Copy originals to backup folder" is selected (default: `~/.mumbler/backups`) |
-| Default Timezone | Timezone for recording timestamps |
-| Timestamp Patterns | Regex patterns to parse datetime from filenames |
-| Skip Interval | Seconds jumped by the Left / Right keys |
-| Preview Duration | Seconds of audio played by the Play First / Play Last buttons |
-| Gemini API Key | API key for Google Gemini |
-| Transcription Model | Gemini model used for audio transcription and structured transcription |
-| Metadata Model | Gemini model used for title and slug generation |
-| Concurrent Transcriptions | Max audio transcription jobs processed simultaneously |
-| Structured Prompt | Custom prompt for structured transcription generation |
-| Title Prompt | Custom prompt for title generation |
-| Slug Prompt | Custom prompt for slug generation |
-| Transcription Timeout | Timeout for each audio transcription or structured transcription request |
-| Metadata Generation Timeout | Timeout for each title or slug generation request |
-| Retry Policy | Max retries, delay, and jitter for retryable Gemini/network failures |
-
-By default, **Transcription Model** uses **Gemini 3.1 Pro (Preview)** and **Metadata Model** uses **Gemini 3 Flash (Preview)**. **Gemini 3.5 Flash** is supported, but it is not the default.
-
-## Output Format
-
-Each saved card produces three files in the output directory:
-
-**`<timestamp>-<slug>.<ext>`** — the audio file (original or trimmed; never re-encoded unless stream-copy trim is impossible)
-
-**`<timestamp>-<slug>.json`** — metadata sidecar (abbreviated; `providers` holds the per-step AI run records — provider, model, and generation time):
-
-```json
-{
-  "schemaVersion": 1,
-  "appVersion": "0.1.0",
-  "originalFilename": "...",
-  "importSource": "drag-and-drop",
-  "timestamps": {
-    "confirmedLocal": "2026-04-22 09:44:00",
-    "confirmedUtc": "2026-04-22T00:44:00.000Z",
-    "effectiveLocal": "2026-04-22 09:44:00",
-    "effectiveUtc": "2026-04-22T00:44:00.000Z",
-    "timezone": "Asia/Tokyo",
-    "transcribedAtUtc": "...",
-    "finalizedAtUtc": "..."
-  },
-  "trim": { "frontMarkerSec": null, "backMarkerSec": null },
-  "duration": { "originalSec": 0, "finalSec": 0 },
-  "transcription": {
-    "raw": "...",
-    "structured": "...",
-    "title": "...",
-    "slug": "..."
-  },
-  "providers": { "transcription": { "provider": "gemini", "model": "...", "generatedAtUtc": "..." } },
-  "audio": { "finalCodec": "...", "finalBitrateKbps": null, "finalSampleRateHz": null, "finalChannels": null, "trimDecision": "not-needed" }
-}
-```
-
-**`<timestamp>-<slug>.md`** — Markdown export with YAML front matter and the structured transcription body.
-
-## Data Directory
-
-App data is stored in `~/.mumbler` by default. Override with the `MUMBLER_HOME` environment variable.
-
-```
-~/.mumbler/
-  settings.json     # app settings
-  settings.json.bak # last-known-good copy, refreshed on each successful load
-  state.json        # queue state
-  state.json.bak    # last-known-good copy, refreshed on each successful load
-  working/          # working copies of imported audio
-  output/           # default output folder for saved files (configurable)
-  backups/          # default backup folder for originals (configurable)
-  logs/             # one JSON-Lines log file per launch, named yyyymmdd-hhmmss-utc.log; never pruned
-```
-
-`settings.json` and `state.json` are written atomically (temp file → fsync → rename) and never overwritten while being read. If one is ever unreadable or from a newer version, the app halts on launch with a clear message instead of discarding it; its `.bak` is the recovery copy, and **Reset** preserves both the unreadable file and its `.bak` as `<name>.corrupt-<timestamp>` copies rather than deleting them.
-
-Each launch writes one JSON-Lines log file under `logs/`, named with its UTC session-start timestamp. Logs are never pruned or rotated — an old log is often what's needed to debug a problem that surfaces later. `debug`-level lines are developer-only: they are written only from a dev build, or when `MUMBLER_DEBUG=1` is set, and never in a packaged release.
-
-## Tech Stack
-
-- [Electron](https://www.electronjs.org/) + [electron-vite](https://electron-vite.org/)
-- [React](https://react.dev/) + TypeScript
-- [WaveSurfer.js](https://wavesurfer.xyz/) for waveform rendering
-- [FFmpeg](https://ffmpeg.org/) (via `ffmpeg-static` / `ffprobe-static`) for audio trimming and probing
-- [Google Gemini API](https://ai.google.dev/) (`@google/genai`) for transcription and metadata
+On first launch, open Settings and enter your Gemini API key. Saved files default to `~/.mumbler/output`.
 
 ## License
 
-MIT
+MIT © 2026 Yoshinao Inoguchi
+
+## Contact
+
+Yoshinao Inoguchi — nao7sep@gmail.com
