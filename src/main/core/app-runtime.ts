@@ -1528,7 +1528,18 @@ export function resolveStorageRoot(
     return join(homeDirectory, ".mumbler");
   }
 
-  let value = expandEnvReferences(trimmed);
+  let value = expandEnvReferences(trimmed).trim();
+
+  // An override that is set but expands to nothing — an unset `$VAR`/`%VAR%`,
+  // say — is a misconfiguration. Rejecting it is the "reported startup error,
+  // not a silent fallback" the convention requires, and it avoids silently
+  // collapsing the root onto the bare home directory.
+  if (value.length === 0) {
+    throw new Error(
+      `MUMBLER_HOME is set to "${rawOverride}" but expands to an empty path ` +
+        `(an unset $VAR/%VAR%?). Set it to a usable directory, or unset it to use ~/.mumbler.`,
+    );
+  }
 
   // Expand a leading `~` / `~/` (and `~\` on Windows) to the home directory.
   if (value === "~") {
@@ -1539,15 +1550,8 @@ export function resolveStorageRoot(
 
   // A still-relative value is resolved against the HOME directory, not the
   // working directory, so launch context can never move the storage root.
-  const absolute = isAbsolute(value) ? resolve(value) : resolve(homeDirectory, value);
-
-  if (!isAbsolute(absolute)) {
-    throw new Error(
-      `MUMBLER_HOME could not be resolved to a usable absolute path (from "${rawOverride}").`,
-    );
-  }
-
-  return absolute;
+  // resolve() always returns an absolute path, so no further guard is needed.
+  return isAbsolute(value) ? resolve(value) : resolve(homeDirectory, value);
 }
 
 // Expand `$VAR` / `${VAR}` (POSIX) and `%VAR%` (Windows) references against the
