@@ -177,4 +177,20 @@ describe("resolveStorageRoot", () => {
       else process.env.MUMBLER_TEST_ROOT = previous;
     }
   });
+
+  it("throws when a non-empty override expands to empty via an unset env reference, instead of collapsing to the bare home directory", () => {
+    const previous = process.env.MUMBLER_UNSET_VAR;
+    delete process.env.MUMBLER_UNSET_VAR;
+    try {
+      // A set-but-empty-expanding override (an unset $VAR / ${VAR}) is a
+      // misconfiguration: it must be a reported startup error, never a silent
+      // fallback to <home>/.mumbler. If the resolver collapsed to the bare home
+      // directory instead of throwing, these toThrow() assertions would fail.
+      expect(() => resolveStorageRoot("$MUMBLER_UNSET_VAR", HOME)).toThrow();
+      expect(() => resolveStorageRoot("${MUMBLER_UNSET_VAR}", HOME)).toThrow();
+    } finally {
+      if (previous === undefined) delete process.env.MUMBLER_UNSET_VAR;
+      else process.env.MUMBLER_UNSET_VAR = previous;
+    }
+  });
 });
