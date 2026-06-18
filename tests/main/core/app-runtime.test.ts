@@ -12,9 +12,10 @@ vi.mock("electron", () => ({
   shell: {},
 }));
 
-const { applyPendingImportDraft, buildConfirmedTimestamps, applyFrontTrimOffset } = await import(
-  "@main/core/app-runtime"
-);
+const { applyPendingImportDraft, buildConfirmedTimestamps, applyFrontTrimOffset, resolveStorageRoot } =
+  await import("@main/core/app-runtime");
+
+const { join } = await import("node:path");
 
 function authoritativeItem(): PendingImportReviewItem {
   return {
@@ -130,5 +131,50 @@ describe("applyFrontTrimOffset", () => {
   it("returns the timestamps unchanged when the confirmed local time is unparseable", () => {
     const broken = { ...base, confirmedLocal: "not a timestamp" };
     expect(applyFrontTrimOffset(broken, 5)).toBe(broken);
+  });
+});
+
+// The MUMBLER_HOME storage-root resolution (storage-path-conventions). The home
+// directory is injected so these are pure, working-directory-independent
+// assertions that never touch the real environment or filesystem.
+describe("resolveStorageRoot", () => {
+  const HOME = "/Users/test";
+
+  it("defaults to <home>/.mumbler when the override is unset", () => {
+    expect(resolveStorageRoot(undefined, HOME)).toBe(join(HOME, ".mumbler"));
+  });
+
+  it("defaults to <home>/.mumbler when the override is empty or whitespace-only", () => {
+    expect(resolveStorageRoot("", HOME)).toBe(join(HOME, ".mumbler"));
+    expect(resolveStorageRoot("   ", HOME)).toBe(join(HOME, ".mumbler"));
+  });
+
+  it("relocates the root to a set absolute override", () => {
+    expect(resolveStorageRoot("/data/mumbler-profile", HOME)).toBe("/data/mumbler-profile");
+  });
+
+  it("trims surrounding whitespace before using the override", () => {
+    expect(resolveStorageRoot("  /data/mumbler  ", HOME)).toBe("/data/mumbler");
+  });
+
+  it("expands a leading ~ against the home directory", () => {
+    expect(resolveStorageRoot("~", HOME)).toBe(HOME);
+    expect(resolveStorageRoot("~/elsewhere/mumbler", HOME)).toBe(join(HOME, "elsewhere", "mumbler"));
+  });
+
+  it("absolutizes a relative override against HOME, never the working directory", () => {
+    expect(resolveStorageRoot("profiles/work", HOME)).toBe(join(HOME, "profiles", "work"));
+  });
+
+  it("expands $VAR / ${VAR} environment references in the override", () => {
+    const previous = process.env.MUMBLER_TEST_ROOT;
+    process.env.MUMBLER_TEST_ROOT = "/mnt/disk2";
+    try {
+      expect(resolveStorageRoot("$MUMBLER_TEST_ROOT/mumbler", HOME)).toBe("/mnt/disk2/mumbler");
+      expect(resolveStorageRoot("${MUMBLER_TEST_ROOT}/mumbler", HOME)).toBe("/mnt/disk2/mumbler");
+    } finally {
+      if (previous === undefined) delete process.env.MUMBLER_TEST_ROOT;
+      else process.env.MUMBLER_TEST_ROOT = previous;
+    }
   });
 });

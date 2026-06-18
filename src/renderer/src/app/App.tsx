@@ -1291,6 +1291,7 @@ export function App(): ReactElement {
           draft={settingsModal.settingsDraft}
           isDirty={settingsModal.isSettingsDirty}
           isSaving={settingsModal.isSavingSettings}
+          isSavingApiKey={settingsModal.isSavingApiKey}
           isPickingOutputDirectory={settingsModal.isPickingSettingsOutputDirectory}
           isPickingBackupDirectory={settingsModal.isPickingSettingsBackupDirectory}
           errorMessage={settingsModal.settingsErrorMessage}
@@ -1298,6 +1299,8 @@ export function App(): ReactElement {
           onClose={settingsModal.handleRequestCloseSettings}
           onPickOutputDirectory={() => void settingsModal.handlePickSettingsOutputDirectory()}
           onPickBackupDirectory={() => void settingsModal.handlePickSettingsBackupDirectory()}
+          onSetApiKey={(apiKey) => void settingsModal.handleSetGeminiApiKey(apiKey)}
+          onClearApiKey={() => void settingsModal.handleClearGeminiApiKey()}
           onRestoreDefaultPrompts={() => void settingsModal.handleRestoreDefaultPrompts()}
           onSave={() => void settingsModal.handleSaveSettings()}
         />

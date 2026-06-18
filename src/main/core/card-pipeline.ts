@@ -22,7 +22,6 @@ import {
   isRetryableGeminiError,
   transcribeWithGemini,
 } from "./gemini-adapter";
-import { decodeGeminiApiKey } from "./settings-schema";
 
 export interface CardPipelineContext {
   state: MumblerState;
@@ -30,6 +29,11 @@ export interface CardPipelineContext {
   paths: AppPaths;
   logger: AppLogger;
   signal: AbortSignal;
+  // The resolved Gemini API key for this run. The runtime resolves it
+  // environment-first from the dedicated secrets store before spawning the
+  // pipeline, so the pipeline itself does no secret I/O and the key never flows
+  // through the settings object.
+  apiKey: string;
   persistState: () => Promise<void>;
   // Releases the transcription concurrency slot this run holds, then admits any
   // queued cards into the freed capacity. A no-op when the run never acquired a
@@ -93,7 +97,7 @@ export async function executeCardPipeline(
 
   try {
     throwIfCancelled(ctx.signal);
-    const apiKey = decodeGeminiApiKey(settings.geminiApiKeyObfuscated);
+    const apiKey = ctx.apiKey;
     if (apiKey.length === 0) {
       throw new Error("Gemini API key is not configured.");
     }

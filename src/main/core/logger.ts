@@ -29,8 +29,6 @@ const REDACTED_KEYS = new Set([
   "token",
   "password",
   "secret",
-  "geminiapikeyobfuscated",
-  "geminiapikeyinput",
 ]);
 
 const REDACTION_MARKER = "[redacted]";

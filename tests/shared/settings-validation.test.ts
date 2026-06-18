@@ -19,8 +19,6 @@ function validDraft(): SettingsDraft {
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,
     hasGeminiApiKey: false,
-    geminiApiKeyInput: "",
-    clearGeminiApiKey: false,
     transcriptionModel: "gemini-3-flash",
     metadataModel: "gemini-3-flash",
     concurrencyLimit: 3,

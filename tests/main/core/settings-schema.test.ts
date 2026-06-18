@@ -5,7 +5,6 @@ import {
   applySettingsDraft,
   buildSettingsDraft,
   createDefaultSettings,
-  decodeGeminiApiKey,
   getSystemTimezone,
   summarizeSettings,
 } from "@main/core/settings-schema";
@@ -14,7 +13,7 @@ const OUT = "/home/user/.mumbler/output";
 const BACKUP = "/home/user/.mumbler/backups";
 
 function freshDraft() {
-  return buildSettingsDraft(createDefaultSettings("Asia/Tokyo"), OUT, BACKUP);
+  return buildSettingsDraft(createDefaultSettings("Asia/Tokyo"), OUT, BACKUP, false);
 }
 
 describe("getSystemTimezone", () => {
@@ -26,7 +25,7 @@ describe("getSystemTimezone", () => {
 describe("applySettingsDraft — happy path", () => {
   it("round-trips a freshly built default draft back into equivalent settings", () => {
     const current = createDefaultSettings("Asia/Tokyo");
-    const result = applySettingsDraft(current, buildSettingsDraft(current, OUT, BACKUP));
+    const result = applySettingsDraft(current, buildSettingsDraft(current, OUT, BACKUP, false));
     expect(result).toEqual(current);
   });
 
@@ -93,46 +92,34 @@ describe("applySettingsDraft — validation", () => {
   });
 });
 
-describe("Gemini API key handling", () => {
-  it("decodes an empty obfuscated value to an empty string", () => {
-    expect(decodeGeminiApiKey("")).toBe("");
+describe("Gemini API key is no longer a setting", () => {
+  // The key moved to a dedicated 0600 secrets file resolved environment-first
+  // (see api-keys.test.ts). The settings store/draft must not carry it at all, so
+  // a key can never be persisted into settings.json via the JSON roundtrip.
+  it("does not expose any key field on settings or the draft", () => {
+    const settings = createDefaultSettings("Asia/Tokyo");
+    const draft = buildSettingsDraft(settings, OUT, BACKUP, true);
+
+    expect(settings).not.toHaveProperty("geminiApiKeyObfuscated");
+    expect(draft).not.toHaveProperty("geminiApiKeyInput");
+    expect(draft).not.toHaveProperty("clearGeminiApiKey");
+    // The presence flag is passed in by the caller, not derived from settings.
+    expect(draft.hasGeminiApiKey).toBe(true);
   });
 
-  it("stores a new key obfuscated and decodes it back", () => {
-    const draft = freshDraft();
-    draft.geminiApiKeyInput = "  AIzaSecretKey123  ";
-    const result = applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft);
-    expect(result.geminiApiKeyObfuscated).not.toBe("");
-    expect(result.geminiApiKeyObfuscated).not.toContain("AIzaSecretKey123");
-    expect(decodeGeminiApiKey(result.geminiApiKeyObfuscated)).toBe("AIzaSecretKey123");
+  it("never writes a key field through applySettingsDraft", () => {
+    const result = applySettingsDraft(createDefaultSettings("Asia/Tokyo"), freshDraft());
+    expect(result).not.toHaveProperty("geminiApiKeyObfuscated");
   });
-
-  it("clears the key when requested", () => {
-    const current = createDefaultSettings("Asia/Tokyo");
-    const draft = buildSettingsDraft(current, OUT, BACKUP);
-    draft.geminiApiKeyInput = "AIzaSecretKey123";
-    const withKey = applySettingsDraft(current, draft);
-
-    const clearDraft = buildSettingsDraft(withKey, OUT, BACKUP);
-    clearDraft.clearGeminiApiKey = true;
-    const cleared = applySettingsDraft(withKey, clearDraft);
-    expect(cleared.geminiApiKeyObfuscated).toBe("");
-  });
-
-  it("rejects supplying a new key and clearing at the same time", () => {
-    const draft = freshDraft();
-    draft.geminiApiKeyInput = "newkey";
-    draft.clearGeminiApiKey = true;
-    expect(() => applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft)).toThrow(/clear/i);
-  });
-
 });
 
 describe("summarizeSettings", () => {
-  it("reports key presence as a boolean and surfaces defaults", () => {
-    const summary = summarizeSettings(createDefaultSettings("Asia/Tokyo"), OUT, BACKUP);
-    expect(summary.hasGeminiApiKey).toBe(false);
-    expect(summary.defaultOutputDirectory).toBe(OUT);
-    expect(summary.timestampPatternCount).toBe(1);
+  it("reports key presence from the caller-supplied flag and surfaces defaults", () => {
+    const present = summarizeSettings(createDefaultSettings("Asia/Tokyo"), OUT, BACKUP, true);
+    expect(present.hasGeminiApiKey).toBe(true);
+    const absent = summarizeSettings(createDefaultSettings("Asia/Tokyo"), OUT, BACKUP, false);
+    expect(absent.hasGeminiApiKey).toBe(false);
+    expect(absent.defaultOutputDirectory).toBe(OUT);
+    expect(absent.timestampPatternCount).toBe(1);
   });
 });

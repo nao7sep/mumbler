@@ -1,4 +1,4 @@
-import { access, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { nanoid } from "nanoid";
@@ -15,11 +15,24 @@ export async function readJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
-export async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
+// Atomic JSON write: temp file in the same directory -> fsync -> rename over the
+// target -> fsync the parent dir. When `mode` is given (e.g. 0o600 for a secrets
+// file), it is applied to the temp file *before* the rename, so the target is
+// never momentarily readable beyond that mode — the file appears at its final
+// path already tightened. The mode is ignored on platforms where chmod is a
+// no-op (Windows), matching the secrets convention's POSIX-only permission rule.
+export async function writeJsonFile(
+  filePath: string,
+  value: unknown,
+  mode?: number,
+): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${nanoid(8)}.tmp`;
   try {
     await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    if (mode !== undefined) {
+      await chmod(tempPath, mode);
+    }
     await syncFile(tempPath);
     await rename(tempPath, filePath);
     await syncDirectory(dirname(filePath));

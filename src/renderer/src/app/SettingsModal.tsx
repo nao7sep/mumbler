@@ -99,6 +99,7 @@ export function SettingsModal({
   draft,
   isDirty,
   isSaving,
+  isSavingApiKey,
   isPickingOutputDirectory,
   isPickingBackupDirectory,
   errorMessage,
@@ -106,12 +107,15 @@ export function SettingsModal({
   onClose,
   onPickOutputDirectory,
   onPickBackupDirectory,
+  onSetApiKey,
+  onClearApiKey,
   onRestoreDefaultPrompts,
   onSave,
 }: {
   draft: SettingsDraft;
   isDirty: boolean;
   isSaving: boolean;
+  isSavingApiKey: boolean;
   isPickingOutputDirectory: boolean;
   isPickingBackupDirectory: boolean;
   errorMessage: string | null;
@@ -119,9 +123,15 @@ export function SettingsModal({
   onClose: () => void;
   onPickOutputDirectory: () => void;
   onPickBackupDirectory: () => void;
+  onSetApiKey: (apiKey: string) => void;
+  onClearApiKey: () => void;
   onRestoreDefaultPrompts: () => void;
   onSave: () => void;
 }): ReactElement {
+  // The API key field is self-contained: its value is committed to the dedicated
+  // secrets file the moment "Save key" is pressed, never bundled into the main
+  // Settings Save. The raw key is held only in this local state until then.
+  const [apiKeyInput, setApiKeyInput] = useState("");
   const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
   const numberErrors = useMemo(() => getSettingsNumberErrors(draft), [draft]);
@@ -274,38 +284,44 @@ export function SettingsModal({
             <h4 className="settings-subheading">Gemini</h4>
             <p className="field-hint">Gemini is the only supported AI provider at this time.</p>
             <div className="field-stack">
-              {draft.hasGeminiApiKey && !draft.clearGeminiApiKey ? (
+              {draft.hasGeminiApiKey ? (
                 <div className="api-key-status">
-                  <span className="api-key-status__label">Gemini API key is saved.</span>
+                  <span className="api-key-status__label">A Gemini API key is configured.</span>
                   <button
                     type="button"
                     className="button button--ghost button--compact"
-                    onClick={() => onChange({ ...draft, clearGeminiApiKey: true })}
+                    onClick={() => onClearApiKey()}
+                    disabled={isSavingApiKey}
                   >
                     Remove key
                   </button>
                 </div>
-              ) : draft.clearGeminiApiKey ? (
-                <div className="api-key-status api-key-status--removing">
-                  <span className="api-key-status__label">Key will be removed on save.</span>
-                  <button
-                    type="button"
-                    className="button button--ghost button--compact"
-                    onClick={() => onChange({ ...draft, clearGeminiApiKey: false })}
-                  >
-                    Keep key
-                  </button>
-                </div>
               ) : null}
               <label className="field">
-                <span>{draft.hasGeminiApiKey && !draft.clearGeminiApiKey ? "Replace key" : "Gemini API Key"}</span>
-                <input
-                  type="password"
-                  value={draft.geminiApiKeyInput}
-                  placeholder={draft.hasGeminiApiKey && !draft.clearGeminiApiKey ? "Enter new key to replace" : "Enter Gemini API key"}
-                  onChange={(event) => onChange({ ...draft, geminiApiKeyInput: event.target.value })}
-                />
+                <span>{draft.hasGeminiApiKey ? "Replace key" : "Gemini API Key"}</span>
+                <div className="inline-action-field">
+                  <input
+                    type="password"
+                    value={apiKeyInput}
+                    placeholder={draft.hasGeminiApiKey ? "Enter new key to replace" : "Enter Gemini API key"}
+                    onChange={(event) => setApiKeyInput(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={() => {
+                      onSetApiKey(apiKeyInput);
+                      setApiKeyInput("");
+                    }}
+                    disabled={isSavingApiKey || apiKeyInput.trim().length === 0}
+                  >
+                    {isSavingApiKey ? "Saving…" : "Save key"}
+                  </button>
+                </div>
               </label>
+              <p className="field-hint">
+                Stored in its own secured file, not in settings. A <code>GEMINI_API_KEY</code> environment variable, if set, takes precedence over the saved key.
+              </p>
               <label className="field">
                 <span>Transcription Model</span>
                 <select

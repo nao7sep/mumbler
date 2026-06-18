@@ -70,7 +70,11 @@ function normalizeSettings(
     previewSnippetSeconds:
       asPositiveInteger(raw.previewSnippetSeconds) ?? defaults.previewSnippetSeconds,
     // AI
-    geminiApiKeyObfuscated: asString(raw.geminiApiKeyObfuscated) ?? defaults.geminiApiKeyObfuscated,
+    // raw.geminiApiKeyObfuscated (a legacy key stored in this file before the
+    // secrets-file move) is deliberately NOT carried over: it is dropped here on
+    // load, and never written back, so the next save scrubs it from settings.json.
+    // Pre-release, this needs no migration — a user with a key in the old settings
+    // simply re-enters it once into the dedicated secrets store.
     transcriptionModel: asString(raw.transcriptionModel) ?? defaults.transcriptionModel,
     metadataModel: asString(raw.metadataModel) ?? defaults.metadataModel,
     concurrencyLimit: asPositiveInteger(raw.concurrencyLimit) ?? defaults.concurrencyLimit,
@@ -258,24 +262,6 @@ export function recoverInterruptedCards(
   };
 }
 
-function resolveGeminiApiKeyObfuscated(current: MumblerSettings, draft: SettingsDraft): string {
-  const nextApiKey = draft.geminiApiKeyInput.trim();
-
-  if (draft.clearGeminiApiKey && nextApiKey.length > 0) {
-    throw new OperationError("Enter a new Gemini API key or clear the saved key, not both.");
-  }
-
-  if (draft.clearGeminiApiKey) {
-    return "";
-  }
-
-  if (nextApiKey.length === 0) {
-    return current.geminiApiKeyObfuscated;
-  }
-
-  return encodeGeminiApiKey(nextApiKey);
-}
-
 function parseSettingsEntries(value: string): string[] {
   return value
     .split(/[\n,]/)
@@ -333,10 +319,6 @@ function requireRatio(value: number, label: string): number {
   return value;
 }
 
-function encodeGeminiApiKey(value: string): string {
-  return Buffer.from(value.split("").reverse().join(""), "utf8").toString("base64");
-}
-
 export function getSystemTimezone(): string {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return timezone && timezone.length > 0 && isValidTimezone(timezone) ? timezone : "UTC";
@@ -357,7 +339,6 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,
     // AI
-    geminiApiKeyObfuscated: "",
     transcriptionModel: "gemini-3.1-pro-preview",
     metadataModel: "gemini-3-flash-preview",
     concurrencyLimit: 3,
@@ -416,10 +397,14 @@ export function createEmptyState(): MumblerState {
   };
 }
 
+// hasGeminiApiKey is resolved by the caller (the runtime) from the dedicated
+// secrets store + environment, not derived from settings — the key no longer
+// lives in MumblerSettings. summarizeSettings stays a pure projection.
 export function summarizeSettings(
   settings: MumblerSettings,
   defaultOutputDirectory: string,
   defaultBackupDirectory: string,
+  hasGeminiApiKey: boolean,
 ): SettingsSummary {
   return {
     // Files
@@ -434,7 +419,7 @@ export function summarizeSettings(
     skipIntervalSec: settings.skipIntervalSec,
     previewSnippetSeconds: settings.previewSnippetSeconds,
     // AI
-    hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
+    hasGeminiApiKey,
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
     concurrencyLimit: settings.concurrencyLimit,
@@ -445,6 +430,7 @@ export function buildSettingsDraft(
   settings: MumblerSettings,
   defaultOutputDirectory: string,
   defaultBackupDirectory: string,
+  hasGeminiApiKey: boolean,
 ): SettingsDraft {
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
@@ -459,10 +445,8 @@ export function buildSettingsDraft(
     // Player
     skipIntervalSec: settings.skipIntervalSec,
     previewSnippetSeconds: settings.previewSnippetSeconds,
-    // AI
-    hasGeminiApiKey: decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length > 0,
-    geminiApiKeyInput: "",
-    clearGeminiApiKey: false,
+    // AI (presence only; the key value is never part of the draft)
+    hasGeminiApiKey,
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
     concurrencyLimit: settings.concurrencyLimit,
@@ -543,8 +527,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     // Player
     skipIntervalSec,
     previewSnippetSeconds,
-    // AI
-    geminiApiKeyObfuscated: resolveGeminiApiKeyObfuscated(current, draft),
+    // AI (the Gemini key is set via its own IPC path, not this draft)
     transcriptionModel,
     metadataModel,
     concurrencyLimit,
@@ -566,14 +549,3 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
   };
 }
 
-export function decodeGeminiApiKey(obfuscated: string): string {
-  if (obfuscated.length === 0) {
-    return "";
-  }
-
-  try {
-    return Buffer.from(obfuscated, "base64").toString("utf8").split("").reverse().join("");
-  } catch {
-    return "";
-  }
-}

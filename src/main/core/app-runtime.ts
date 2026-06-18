@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
 import { mkdir, rm, stat } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 import { nanoid } from "nanoid";
@@ -50,7 +50,13 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
-import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, decodeGeminiApiKey, getSystemTimezone, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
+import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, getSystemTimezone, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
+import {
+  clearGeminiApiKey as clearStoredGeminiApiKey,
+  hasGeminiApiKey as hasStoredGeminiApiKey,
+  resolveGeminiApiKey,
+  writeGeminiApiKey as writeStoredGeminiApiKey,
+} from "./api-keys";
 import { type AppLogger, createLogger, serializeError } from "./logger";
 import { OperationError } from "./operation-error";
 import {
@@ -84,6 +90,10 @@ interface AppRuntimeState {
   appWideError: AppSnapshot["appWideError"];
   recoveredInterruptedCards: number;
   shellReadyAtUtc: number;
+  // Cached presence of a resolvable Gemini key (env or stored secrets file), so
+  // the synchronous getSnapshot()/summarizeSettings() can report it without
+  // touching the filesystem. Refreshed at startup and after any set/clear.
+  hasGeminiApiKey: boolean;
 }
 
 // One active (non-detached) pipeline per card: its abort controller plus the
@@ -111,7 +121,44 @@ export class ApplicationRuntime {
 
   static async initialize(): Promise<ApplicationRuntime> {
     const shellReadyAtUtc = Date.now();
-    const paths = getAppPaths();
+
+    // Resolve the storage root first. An unusable MUMBLER_HOME override is a
+    // startup error the convention requires us to report and STOP on, never a
+    // silent fallback to the default — and it happens before any logger or store
+    // exists (those derive from the very paths we could not resolve), so it
+    // surfaces as a paths-less startup diagnostic rather than crashing the
+    // process uncaught.
+    let paths: AppPaths;
+    try {
+      paths = getAppPaths();
+    } catch (error: unknown) {
+      // No usable storage root means no resolved logs directory either, so the
+      // diagnostic logger writes into the *default* root's logs dir; createLogger
+      // never throws on a missing directory (its append degrades to stderr), so
+      // the failure is still recorded somewhere.
+      const fallbackLogsDir = join(homedir(), ".mumbler", "logs");
+      const logger = createLogger(fallbackLogsDir, { debugEnabled: DEBUG_LOGGING_ENABLED });
+      await logger.error("app.startup-failed", "Storage location could not be resolved.", error);
+      return new ApplicationRuntime({
+        paths: null,
+        settings: null,
+        state: null,
+        settingsStore: null,
+        stateStore: null,
+        logger,
+        startupDiagnostic: {
+          title: "Storage Location Could Not Be Resolved",
+          message:
+            error instanceof Error
+              ? error.message
+              : "The MUMBLER_HOME override could not be resolved to a usable storage location.",
+        },
+        appWideError: null,
+        recoveredInterruptedCards: 0,
+        shellReadyAtUtc,
+        hasGeminiApiKey: false,
+      });
+    }
 
     // The session logger is a per-launch singleton: built once here, before any
     // fallible startup step, and never rebuilt for the life of the launch — so a
@@ -139,6 +186,13 @@ export class ApplicationRuntime {
         await settingsStore.save(settings);
       }
 
+      // Resolve whether a Gemini key is available (env-first, then the dedicated
+      // secrets file) once, so the snapshot can report presence without async I/O.
+      const hasGeminiApiKey = await hasStoredGeminiApiKey(
+        paths.apiKeysPath,
+        makeApiKeyWarn(logger),
+      );
+
       const stateLoad = await stateStore.load();
       const recovered = recoverInterruptedCards(stateLoad.value);
       const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
@@ -161,7 +215,7 @@ export class ApplicationRuntime {
         debugLogging: DEBUG_LOGGING_ENABLED,
         // Key effective configuration, secrets redacted: summarizeSettings reports
         // the API key only as a presence boolean, never the value.
-        config: summarizeSettings(settings, paths.outputDir, paths.backupsDir),
+        config: summarizeSettings(settings, paths.outputDir, paths.backupsDir, hasGeminiApiKey),
         cardCount: reconciliation.state.cards.length,
         pendingImportCount: reconciliation.state.pendingImports.length,
         recoveredInterruptedCards: recovered.recoveredInterruptedCards,
@@ -190,6 +244,7 @@ export class ApplicationRuntime {
         appWideError: null,
         recoveredInterruptedCards: recovered.recoveredInterruptedCards,
         shellReadyAtUtc,
+        hasGeminiApiKey,
       });
       await runtime.drainQueuedCards();
       return runtime;
@@ -219,6 +274,7 @@ export class ApplicationRuntime {
         appWideError: null,
         recoveredInterruptedCards: 0,
         shellReadyAtUtc,
+        hasGeminiApiKey: false,
       });
     }
   }
@@ -246,7 +302,14 @@ export class ApplicationRuntime {
       shellReadyAtUtc: this.runtime.shellReadyAtUtc,
       paths,
       settingsSummary:
-        settings && paths ? summarizeSettings(settings, paths.outputDir, paths.backupsDir) : null,
+        settings && paths
+          ? summarizeSettings(
+              settings,
+              paths.outputDir,
+              paths.backupsDir,
+              this.runtime.hasGeminiApiKey,
+            )
+          : null,
       queueSummary:
         state === null
           ? null
@@ -340,6 +403,7 @@ export class ApplicationRuntime {
       this.runtime.settings!,
       this.runtime.paths!.outputDir,
       this.runtime.paths!.backupsDir,
+      this.runtime.hasGeminiApiKey,
     );
   }
 
@@ -717,7 +781,7 @@ export class ApplicationRuntime {
 
     this.assertCardCanStartPipeline(card);
 
-    if (decodeGeminiApiKey(this.runtime.settings!.geminiApiKeyObfuscated).length === 0) {
+    if ((await this.resolveGeminiApiKey()) === null) {
       throw new OperationError("Gemini API key is not configured.");
     }
 
@@ -811,7 +875,7 @@ export class ApplicationRuntime {
 
     this.assertCardCanStartPipeline(card);
 
-    if (decodeGeminiApiKey(settings.geminiApiKeyObfuscated).length === 0) {
+    if ((await this.resolveGeminiApiKey()) === null) {
       throw new OperationError("Gemini API key is not configured.");
     }
 
@@ -858,17 +922,25 @@ export class ApplicationRuntime {
     const controller = new AbortController();
     const run: ActivePipelineRun = { controller, slot };
     this.activeRuns.set(cardId, run);
-    const ctx: CardPipelineContext = {
-      state: this.runtime.state!,
-      settings: this.runtime.settings!,
-      paths: this.runtime.paths!,
-      logger: this.runtime.logger,
-      signal: controller.signal,
-      persistState: () => this.persistState(),
-      releaseTranscriptionSlot: () => this.releaseSlotAndDrain(slot),
-    };
 
-    const pipeline = executeCardPipeline(cardId, startStep, mode, ctx)
+    // Resolve the key just-in-time inside the spawned chain (env-first, then the
+    // secrets file), so a key cleared between enqueue and start is caught here and
+    // surfaces as a normal pipeline "not configured" error on the card. An empty
+    // string is passed when nothing resolves; the pipeline's own guard rejects it.
+    const pipeline = (async () => {
+      const apiKey = (await this.resolveGeminiApiKey()) ?? "";
+      const ctx: CardPipelineContext = {
+        state: this.runtime.state!,
+        settings: this.runtime.settings!,
+        paths: this.runtime.paths!,
+        logger: this.runtime.logger,
+        signal: controller.signal,
+        apiKey,
+        persistState: () => this.persistState(),
+        releaseTranscriptionSlot: () => this.releaseSlotAndDrain(slot),
+      };
+      await executeCardPipeline(cardId, startStep, mode, ctx);
+    })()
       .catch(async (error: unknown) => {
         await this.runtime.logger.error(
           "pipeline.unhandled",
@@ -1005,6 +1077,57 @@ export class ApplicationRuntime {
     await this.tryStartNextQueuedCards();
 
     return this.getSnapshot();
+  }
+
+  // Store a new Gemini API key in the dedicated 0600 secrets file (never the
+  // settings store), refresh the cached presence flag, then admit any queued
+  // cards that were waiting only on a missing key. The raw key never enters the
+  // snapshot or the log — only the resulting presence boolean is reported.
+  async setGeminiApiKey(apiKey: string): Promise<AppSnapshot> {
+    this.ensureReady();
+    const trimmed = apiKey.trim();
+    if (trimmed.length === 0) {
+      throw new OperationError("Enter a Gemini API key.");
+    }
+
+    await writeStoredGeminiApiKey(this.runtime.paths!.apiKeysPath, trimmed, this.apiKeyWarn());
+    await this.refreshHasGeminiApiKey();
+    await this.runtime.logger.info("settings.api-key-set", "Stored Gemini API key.", {
+      hasGeminiApiKey: this.runtime.hasGeminiApiKey,
+    });
+
+    await this.tryStartNextQueuedCards();
+    return this.getSnapshot();
+  }
+
+  // Remove the stored key from the secrets file. An environment-supplied key, if
+  // present, still resolves afterward — so hasGeminiApiKey may remain true.
+  async clearGeminiApiKey(): Promise<AppSnapshot> {
+    this.ensureReady();
+    await clearStoredGeminiApiKey(this.runtime.paths!.apiKeysPath, this.apiKeyWarn());
+    await this.refreshHasGeminiApiKey();
+    await this.runtime.logger.info("settings.api-key-clear", "Cleared stored Gemini API key.", {
+      hasGeminiApiKey: this.runtime.hasGeminiApiKey,
+    });
+    return this.getSnapshot();
+  }
+
+  // Resolve the effective Gemini key, environment-first then the secrets file, or
+  // null when neither is set. Single chokepoint used by the pipeline guards and
+  // by spawnCardPipeline; nothing else reads the secret.
+  private async resolveGeminiApiKey(): Promise<string | null> {
+    return resolveGeminiApiKey(this.runtime.paths!.apiKeysPath, this.apiKeyWarn());
+  }
+
+  private async refreshHasGeminiApiKey(): Promise<void> {
+    this.runtime.hasGeminiApiKey = await hasStoredGeminiApiKey(
+      this.runtime.paths!.apiKeysPath,
+      this.apiKeyWarn(),
+    );
+  }
+
+  private apiKeyWarn(): (message: string, details: Record<string, unknown>) => void {
+    return makeApiKeyWarn(this.runtime.logger);
   }
 
   async drainQueuedCards(): Promise<void> {
@@ -1385,17 +1508,81 @@ export class ApplicationRuntime {
   }
 }
 
+// Resolve the single storage root per the storage-path-conventions, and the
+// reference implementation other TS apps mirror. The root is MUMBLER_HOME when
+// that variable is set and non-empty (trimmed); otherwise the default
+// `<home>/.mumbler`. An override is expanded (a leading `~`/`~/` and `$VAR` env
+// references), then made absolute against the HOME directory — never
+// process.cwd(), so the override can never reintroduce a working-directory
+// dependence. A value that cannot be made into a usable absolute path is a
+// reported startup error, never a silent fallback to the default.
+//
+// Pure and home-injectable so it is unit-testable without touching electron or
+// the real environment.
+export function resolveStorageRoot(
+  rawOverride: string | undefined,
+  homeDirectory: string,
+): string {
+  const trimmed = rawOverride?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return join(homeDirectory, ".mumbler");
+  }
+
+  let value = expandEnvReferences(trimmed);
+
+  // Expand a leading `~` / `~/` (and `~\` on Windows) to the home directory.
+  if (value === "~") {
+    value = homeDirectory;
+  } else if (value.startsWith("~/") || value.startsWith("~\\")) {
+    value = join(homeDirectory, value.slice(2));
+  }
+
+  // A still-relative value is resolved against the HOME directory, not the
+  // working directory, so launch context can never move the storage root.
+  const absolute = isAbsolute(value) ? resolve(value) : resolve(homeDirectory, value);
+
+  if (!isAbsolute(absolute)) {
+    throw new Error(
+      `MUMBLER_HOME could not be resolved to a usable absolute path (from "${rawOverride}").`,
+    );
+  }
+
+  return absolute;
+}
+
+// Expand `$VAR` / `${VAR}` (POSIX) and `%VAR%` (Windows) references against the
+// current environment. An undefined reference expands to empty, matching shell
+// behavior, rather than being left as a literal that would later become a
+// directory name.
+function expandEnvReferences(value: string): string {
+  return value
+    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => process.env[name] ?? "")
+    .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, name: string) => process.env[name] ?? "")
+    .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (_match, name: string) => process.env[name] ?? "");
+}
+
 function getAppPaths(): AppPaths {
-  const homeDir = process.env.MUMBLER_HOME ?? join(homedir(), ".mumbler");
+  const homeDir = resolveStorageRoot(process.env.MUMBLER_HOME, homedir());
 
   return {
     homeDir,
     settingsPath: join(homeDir, "settings.json"),
     statePath: join(homeDir, "state.json"),
+    apiKeysPath: join(homeDir, "api-keys.json"),
     logsDir: join(homeDir, "logs"),
     workingDir: join(homeDir, "working"),
     outputDir: join(homeDir, "output"),
     backupsDir: join(homeDir, "backups"),
+  };
+}
+
+// Adapts the per-launch logger into the warn sink the secrets module calls when
+// it tightens an insecure (group/world-readable) api-keys.json back to 0600.
+function makeApiKeyWarn(
+  logger: AppLogger,
+): (message: string, details: Record<string, unknown>) => void {
+  return (message, details) => {
+    void logger.warn("api-key.insecure-mode", message, details);
   };
 }
 

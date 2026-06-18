@@ -13,6 +13,7 @@ interface UseSettingsModalResult {
   isSettingsDirty: boolean;
   isLoadingSettings: boolean;
   isSavingSettings: boolean;
+  isSavingApiKey: boolean;
   isPickingSettingsOutputDirectory: boolean;
   isPickingSettingsBackupDirectory: boolean;
   settingsErrorMessage: string | null;
@@ -23,6 +24,8 @@ interface UseSettingsModalResult {
   handlePickSettingsOutputDirectory: () => Promise<void>;
   handlePickSettingsBackupDirectory: () => Promise<void>;
   handleSaveSettings: () => Promise<void>;
+  handleSetGeminiApiKey: (apiKey: string) => Promise<void>;
+  handleClearGeminiApiKey: () => Promise<void>;
   handleRestoreDefaultPrompts: () => Promise<void>;
   handleRequestCloseSettings: () => void;
   handleConfirmDiscardSettings: () => void;
@@ -37,6 +40,7 @@ export function useSettingsModal({
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isSavingApiKey, setIsSavingApiKey] = useState(false);
   const [isPickingSettingsOutputDirectory, setIsPickingSettingsOutputDirectory] = useState(false);
   const [isPickingSettingsBackupDirectory, setIsPickingSettingsBackupDirectory] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
@@ -136,6 +140,62 @@ export function useSettingsModal({
     }
   }
 
+  // The Gemini API key is a secret, not a setting: it is committed immediately
+  // through its own IPC to the dedicated 0600 secrets file, never bundled into the
+  // settings-JSON Save. On success we reflect the new presence into both the live
+  // draft and the dirty baseline, so the key action does not leave the form
+  // looking dirty and the password field can clear itself.
+  function applyHasKey(hasGeminiApiKey: boolean): void {
+    setSettingsDraft((current) => (current === null ? current : { ...current, hasGeminiApiKey }));
+    if (initialDraftRef.current !== null) {
+      initialDraftRef.current = { ...initialDraftRef.current, hasGeminiApiKey };
+    }
+  }
+
+  async function handleSetGeminiApiKey(apiKey: string): Promise<void> {
+    const trimmed = apiKey.trim();
+    if (trimmed.length === 0) {
+      return;
+    }
+    setIsSavingApiKey(true);
+    try {
+      const nextSnapshot = await window.mumbler.setGeminiApiKey(trimmed);
+      onSnapshotUpdate(nextSnapshot);
+      applyHasKey(nextSnapshot.settingsSummary?.hasGeminiApiKey ?? true);
+      setSettingsErrorMessage(null);
+      onNotice("Gemini API key saved.");
+    } catch (error: unknown) {
+      setSettingsErrorMessage(
+        error instanceof Error ? error.message : "Failed to save Gemini API key.",
+      );
+    } finally {
+      setIsSavingApiKey(false);
+    }
+  }
+
+  async function handleClearGeminiApiKey(): Promise<void> {
+    setIsSavingApiKey(true);
+    try {
+      const nextSnapshot = await window.mumbler.clearGeminiApiKey();
+      onSnapshotUpdate(nextSnapshot);
+      applyHasKey(nextSnapshot.settingsSummary?.hasGeminiApiKey ?? false);
+      setSettingsErrorMessage(null);
+      // An env-supplied key can still resolve after clearing the stored one, so
+      // the message reflects what actually happened rather than assuming removal.
+      onNotice(
+        nextSnapshot.settingsSummary?.hasGeminiApiKey
+          ? "Stored key removed; an environment key is still in use."
+          : "Gemini API key removed.",
+      );
+    } catch (error: unknown) {
+      setSettingsErrorMessage(
+        error instanceof Error ? error.message : "Failed to remove Gemini API key.",
+      );
+    } finally {
+      setIsSavingApiKey(false);
+    }
+  }
+
   async function handleRestoreDefaultPrompts(): Promise<void> {
     try {
       const defaults = await window.mumbler.getDefaultPrompts();
@@ -188,6 +248,7 @@ export function useSettingsModal({
     isSettingsDirty,
     isLoadingSettings,
     isSavingSettings,
+    isSavingApiKey,
     isPickingSettingsOutputDirectory,
     isPickingSettingsBackupDirectory,
     settingsErrorMessage,
@@ -198,6 +259,8 @@ export function useSettingsModal({
     handlePickSettingsOutputDirectory,
     handlePickSettingsBackupDirectory,
     handleSaveSettings,
+    handleSetGeminiApiKey,
+    handleClearGeminiApiKey,
     handleRestoreDefaultPrompts,
     handleRequestCloseSettings,
     handleConfirmDiscardSettings,

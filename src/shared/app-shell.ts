@@ -22,6 +22,8 @@ export const APP_SHELL_CHANNELS = {
   pickOutputDirectory: "app-shell:pick-output-directory",
   openOutputDirectory: "app-shell:open-output-directory",
   saveSettingsDraft: "app-shell:save-settings-draft",
+  setGeminiApiKey: "app-shell:set-gemini-api-key",
+  clearGeminiApiKey: "app-shell:clear-gemini-api-key",
   chooseOutputDirectory: "app-shell:choose-output-directory",
   saveCard: "app-shell:save-card",
   removeCard: "app-shell:remove-card",
@@ -96,7 +98,9 @@ export interface MumblerSettings {
   skipIntervalSec: number;
   previewSnippetSeconds: number;
   // AI
-  geminiApiKeyObfuscated: string;
+  // NOTE: the Gemini API key is NOT a setting. It is a secret resolved
+  // environment-first and stored in its own 0600 file (api-keys.json), never in
+  // this shared settings store. See src/main/core/api-keys.ts.
   transcriptionModel: string;
   metadataModel: string;
   concurrencyLimit: number;
@@ -226,6 +230,9 @@ export interface AppPaths {
   homeDir: string;
   settingsPath: string;
   statePath: string;
+  // The secrets file. The Gemini API key lives here in its own 0600 file, not in
+  // settingsPath (storage-path-conventions, "Secrets and keys").
+  apiKeysPath: string;
   logsDir: string;
   workingDir: string;
   outputDir: string;
@@ -265,9 +272,11 @@ export interface SettingsDraft {
   skipIntervalSec: number;
   previewSnippetSeconds: number;
   // AI
+  // Presence flag only — whether a Gemini key is currently available (env or
+  // stored). The key value itself is never part of this draft; it is set/cleared
+  // through the dedicated setGeminiApiKey/clearGeminiApiKey IPC, not the settings
+  // JSON roundtrip.
   hasGeminiApiKey: boolean;
-  geminiApiKeyInput: string;
-  clearGeminiApiKey: boolean;
   transcriptionModel: string;
   metadataModel: string;
   concurrencyLimit: number;
@@ -381,6 +390,11 @@ export interface MumblerShellApi {
   pickOutputDirectory(): Promise<string | null>;
   openOutputDirectory(): Promise<void>;
   saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot>;
+  // Set/clear the Gemini API key. These go to the dedicated secrets file
+  // (api-keys.json), separate from the settings JSON, and return a fresh snapshot
+  // so the renderer's hasGeminiApiKey presence flag updates immediately.
+  setGeminiApiKey(apiKey: string): Promise<AppSnapshot>;
+  clearGeminiApiKey(): Promise<AppSnapshot>;
   chooseOutputDirectory(): Promise<AppSnapshot>;
   saveCard(cardId: string, resolution?: SaveConflictResolution): Promise<SaveCardResult>;
   removeCard(cardId: string): Promise<AppSnapshot>;

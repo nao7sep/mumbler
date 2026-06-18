@@ -194,6 +194,13 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     runtime.saveSettingsDraft(draft),
   );
 
+  handle(APP_SHELL_CHANNELS.setGeminiApiKey, (_event, apiKey: string) => {
+    assertString(apiKey, "apiKey");
+    return runtime.setGeminiApiKey(apiKey);
+  });
+
+  handle(APP_SHELL_CHANNELS.clearGeminiApiKey, () => runtime.clearGeminiApiKey());
+
   handle(APP_SHELL_CHANNELS.chooseOutputDirectory, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window === null) {

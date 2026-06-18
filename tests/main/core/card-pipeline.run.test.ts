@@ -67,6 +67,7 @@ function makePaths(): AppPaths {
     homeDir: "/tmp/.mumbler",
     settingsPath: "/tmp/.mumbler/settings.json",
     statePath: "/tmp/.mumbler/state.json",
+    apiKeysPath: "/tmp/.mumbler/api-keys.json",
     logsDir: "/tmp/.mumbler/logs",
     workingDir: "/tmp/.mumbler/working",
     outputDir: "/tmp/.mumbler/output",
@@ -79,18 +80,15 @@ function makeContext(card: MumblerCard, signal: AbortSignal): CardPipelineContex
   state.cards = [card];
   state.selectedCardId = card.id;
   const settings = createDefaultSettings("Asia/Tokyo");
-  // decodeGeminiApiKey is base64 -> reverse, so the obfuscated form is base64 of
-  // the reversed key. A non-empty decode is all the pipeline's key check needs.
-  settings.geminiApiKeyObfuscated = Buffer.from(
-    "test-key".split("").reverse().join(""),
-    "utf8",
-  ).toString("base64");
+  // The key is now resolved by the runtime and passed in via ctx.apiKey; a
+  // non-empty value is all the pipeline's key guard needs.
   return {
     state,
     settings,
     paths: makePaths(),
     logger: makeLogger(),
     signal,
+    apiKey: "test-key",
     persistState: vi.fn().mockResolvedValue(undefined),
     releaseTranscriptionSlot: vi.fn().mockResolvedValue(undefined),
   };
