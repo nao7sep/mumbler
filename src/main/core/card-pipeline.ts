@@ -22,6 +22,7 @@ import {
   isRetryableGeminiError,
   transcribeWithGemini,
 } from "./gemini-adapter";
+import { multiline } from "./text-cleanup";
 
 export interface CardPipelineContext {
   state: MumblerState;
@@ -156,7 +157,14 @@ export async function executeCardPipeline(
             }),
         }, ctx);
 
-        card.transcription.text = transcriptionResult.text;
+        // The transcript is the largest stored body and was previously kept RAW.
+        // Trim per-line trailing whitespace and drop edge blank lines, but keep
+        // interior blank runs — they are deliberate paragraph breaks in speech.
+        card.transcription.text = multiline(transcriptionResult.text, {
+          trimLineEnds: true,
+          dropEdgeBlankLines: true,
+          collapseBlankLines: false,
+        });
         card.ai.transcription = {
           provider: "gemini",
           model: transcriptionResult.modelVersion ?? settings.transcriptionModel,
@@ -203,7 +211,14 @@ export async function executeCardPipeline(
           }),
       }, ctx);
 
-      card.metadata.structured = structuredResult.text.trim();
+      // Structured output is a multi-line Markdown outline. A scalar .trim() here
+      // would eat the first content line's indentation and leave interior trailing
+      // whitespace, so clean it as a multiline body instead.
+      card.metadata.structured = multiline(structuredResult.text, {
+        trimLineEnds: true,
+        dropEdgeBlankLines: true,
+        collapseBlankLines: false,
+      });
       card.ai.structured = {
         provider: "gemini",
         model: structuredResult.modelVersion ?? settings.transcriptionModel,

@@ -14,6 +14,7 @@ import {
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
 import { JsonStore } from "./json-store";
 import { OperationError } from "./operation-error";
+import { multiline } from "./text-cleanup";
 
 const SETTINGS_SCHEMA_VERSION = 1;
 const STATE_SCHEMA_VERSION = 1;
@@ -469,9 +470,14 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
   const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
   const transcriptionModel = draft.transcriptionModel.trim();
   const metadataModel = draft.metadataModel.trim();
-  const structuredPrompt = draft.structuredPrompt.trim();
-  const titlePrompt = draft.titlePrompt.trim();
-  const slugPrompt = draft.slugPrompt.trim();
+  // Prompt templates are multi-line bodies (instructions plus <transcript>/<source>/
+  // <title> blocks). A scalar .trim() eats the first line's indentation and leaves
+  // interior trailing whitespace, so clean them as multiline bodies. They are plain
+  // LLM instructions, not Markdown relying on two-trailing-spaces hard breaks, so the
+  // defaults (trim line ends, drop edge blanks, keep interior blanks) are correct.
+  const structuredPrompt = multiline(draft.structuredPrompt);
+  const titlePrompt = multiline(draft.titlePrompt);
+  const slugPrompt = multiline(draft.slugPrompt);
 
   if (!isValidTimezone(defaultTimezone)) {
     throw new OperationError("Default timezone must be a valid IANA timezone.");
