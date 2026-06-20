@@ -1,8 +1,12 @@
-import { BrowserWindow, Menu, shell } from "electron";
+import { BrowserWindow, Menu, nativeTheme, shell } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const WINDOW_BACKGROUND = "#eef0ec";
+import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from "@shared/layout";
+
+// Matches the renderer `--bg` (#edf4ec in styles.css) so the pre-paint window
+// background does not flash a different color before the page loads.
+const WINDOW_BACKGROUND = "#edf4ec";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Schemes the app is willing to hand to the OS via shell.openExternal. Anything
@@ -55,12 +59,19 @@ function openExternalIfAllowed(rawUrl: string): void {
   }
 }
 
-export function createMainWindow(): BrowserWindow {
-  const window = new BrowserWindow({
+// The BrowserWindow construction options. Exported as a pure helper so the
+// derived minimums and the (deliberate, non-persisted) default size are verified
+// in a unit test without driving a real window — the same pattern the CSP helper
+// above follows. The minimums are imported from the shared layout module, never
+// typed inline, so they can never disagree with the pane minimums.
+export function buildWindowOptions(): Electron.BrowserWindowConstructorOptions {
+  return {
     width: 1480,
     height: 940,
-    minWidth: 1180,
-    minHeight: 760,
+    // Derived — do not hand-edit. Sourced from @shared/layout, which sums the
+    // pane minimums plus the fixed chrome.
+    minWidth: WINDOW_MIN_WIDTH,
+    minHeight: WINDOW_MIN_HEIGHT,
     show: false,
     backgroundColor: WINDOW_BACKGROUND,
     titleBarStyle: "default",
@@ -71,7 +82,16 @@ export function createMainWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: true,
     },
-  });
+  };
+}
+
+export function createMainWindow(): BrowserWindow {
+  // Force the light theme so the host OS paints a light native title bar on this
+  // light app — a dark-mode host would otherwise give it a dark bar that fights
+  // the UI (window-chrome conventions: chrome colors match the app's theme).
+  nativeTheme.themeSource = "light";
+
+  const window = new BrowserWindow(buildWindowOptions());
 
   window.once("ready-to-show", () => {
     window.show();

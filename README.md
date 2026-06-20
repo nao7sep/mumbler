@@ -11,6 +11,10 @@ Mumbler is a desktop app for turning audio recordings into transcripts and publi
 - **Atomic save** — writes audio + JSON + Markdown together, with rollback on failure
 - **IME-safe** — Japanese/Chinese/Korean input works in every text field
 
+## Window and theme
+
+Mumbler is a light-themed app and forces the light theme, so the native title bar stays light even on a dark-mode host. It opens at a fixed default size on every launch and does not remember window size or position. The window minimum is derived from the panes' own minimums plus the fixed chrome (rather than a hand-typed constant), so the queue and detail panes can never be shrunk small enough to clip their content.
+
 ## Requirements
 
 - Node.js 20+

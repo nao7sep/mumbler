@@ -1,15 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
 
-// window.ts imports electron at module load; stub it so the pure hardening
-// helpers can be verified under the node test environment. createMainWindow is
-// never called here, so the stub only needs the named bindings to exist.
+import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from "@shared/layout";
+
+// window.ts imports electron at module load; stub it so the pure helpers can be
+// verified under the node test environment. createMainWindow is exercised here
+// only to assert the forced theme, so the BrowserWindow stub is a no-op
+// constructor and nativeTheme is a writable holder for themeSource.
+const nativeThemeStub = { themeSource: "system" as string };
+
 vi.mock("electron", () => ({
-  BrowserWindow: class {},
+  BrowserWindow: class {
+    on(): void {}
+    once(): void {}
+    loadURL(): void {}
+    loadFile(): void {}
+    webContents = {
+      setWindowOpenHandler(): void {},
+      on(): void {},
+      getURL(): string {
+        return "";
+      },
+      session: { webRequest: { onHeadersReceived(): void {} } },
+    };
+  },
   Menu: { buildFromTemplate: () => ({ popup: () => {} }) },
   shell: { openExternal: vi.fn() },
+  nativeTheme: nativeThemeStub,
 }));
 
-const { isAllowedExternalUrl, withContentSecurityPolicy } = await import("@main/window");
+const { buildWindowOptions, createMainWindow, isAllowedExternalUrl, withContentSecurityPolicy } =
+  await import("@main/window");
 
 describe("isAllowedExternalUrl", () => {
   it("allows only http, https, and mailto", () => {
@@ -51,5 +71,29 @@ describe("withContentSecurityPolicy", () => {
     expect(headers["X-Test"]).toEqual(["1"]);
     expect(headers["Content-Type"]).toEqual(["text/html"]);
     expect(headers["Content-Security-Policy"]).toHaveLength(1);
+  });
+});
+
+describe("buildWindowOptions", () => {
+  it("derives the window minimums from the shared layout (no magic constants)", () => {
+    const options = buildWindowOptions();
+    expect(options.minWidth).toBe(WINDOW_MIN_WIDTH);
+    expect(options.minHeight).toBe(WINDOW_MIN_HEIGHT);
+  });
+
+  it("opens at the designed default size, never below its own minimum", () => {
+    const options = buildWindowOptions();
+    expect(options.width).toBe(1480);
+    expect(options.height).toBe(940);
+    expect(options.width).toBeGreaterThanOrEqual(WINDOW_MIN_WIDTH);
+    expect(options.height).toBeGreaterThanOrEqual(WINDOW_MIN_HEIGHT);
+  });
+});
+
+describe("createMainWindow", () => {
+  it("forces the light theme so a dark host paints a light title bar", () => {
+    nativeThemeStub.themeSource = "system";
+    createMainWindow();
+    expect(nativeThemeStub.themeSource).toBe("light");
   });
 });

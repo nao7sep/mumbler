@@ -42,10 +42,56 @@
   --radius-lg: 8px;
   --radius-md: 6px;
   --radius-sm: 4px;
+
+  /* Pane minimums. Kept in sync with @shared/layout (DETAIL_MIN_WIDTH /
+     QUEUE_MIN_WIDTH), the single source of truth the window minimum derives
+     from. The detail pane uses --detail-min-width as its grid track floor so it
+     can never collapse to zero width. */
+  --queue-width: 400px;
+  --detail-min-width: 640px;
+
+  /* Fixed vertical chrome above the panes: shell padding (20px top + 20px
+     bottom) + the topbar block (padding 28 + ~36 h1 ≈ 64, + 20 margin-bottom =
+     84). Mirrors VERTICAL_CHROME in @shared/layout. The sticky queue pane bounds
+     its own scroll against this instead of a guessed offset. */
+  --vertical-chrome: 124px;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Scroll bars: thin, rounded, themed (window-chrome conventions). color-scheme
+   above sets the native palette but leaves the platform's default bar — thick
+   and square on some platforms — in place, so the bar is styled explicitly.
+   Applied globally (unscoped pseudo-elements) so every overflow container — the
+   queue pane, modals, text areas, lists — matches. The transparent border with
+   background clipped to the padding box turns the thumb into a slim pill inset
+   from the gutter rather than a block filling it edge to edge. */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-tertiary);
+}
+
+/* Firefox / standards path. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 html,
@@ -201,8 +247,16 @@ textarea:focus-visible,
 
 .workspace {
   display: grid;
-  grid-template-columns: 400px minmax(0, 1fr);
+  /* The detail track carries a real minimum (--detail-min-width) so it can never
+     be squeezed below its content; the window minimum (@shared/layout) covers
+     this plus the queue track plus the gap and chrome. */
+  grid-template-columns: var(--queue-width) minmax(var(--detail-min-width), 1fr);
   gap: 20px;
+  /* The grid row stretches its children, so the queue pane fills the row height
+     and the detail pane drives that height with its (tall) stacked content; the
+     page scrolls for the detail column while the queue pane scrolls its own
+     overflow within the viewport (see .queue-pane). */
+  align-items: start;
 }
 
 .workspace--drag-active {
@@ -272,9 +326,15 @@ textarea:focus-visible,
 }
 
 .queue-pane {
-  max-height: calc(100vh - 100px);
+  /* Stay in view while the page scrolls for the (taller) detail column, and
+     scroll the pane's own overflow within the viewport. The max-height is
+     derived from the fixed vertical chrome (--vertical-chrome) — the structural
+     replacement for the old guessed `calc(100vh - 100px)`. Sticky top matches
+     the shell's top padding so the pane pins just below the topbar. */
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - var(--vertical-chrome));
   overflow-y: auto;
-  align-self: start;
 }
 
 .queue-list {
@@ -1355,7 +1415,13 @@ textarea:focus-visible,
   color: var(--text);
 }
 
-@media (max-width: 1100px) {
+/* Single-column collapse. The breakpoint matches WINDOW_MIN_WIDTH
+   (@shared/layout: 48 + 400 + 20 + 640 = 1108) so the two-column workspace
+   reflows to one column exactly at the enforced window minimum rather than at an
+   unrelated guessed width. Because the OS refuses to shrink the window below
+   1108, this engages only in the dev server / browser preview where no native
+   minimum applies; in the packaged window the two-column layout always holds. */
+@media (max-width: 1108px) {
   .workspace {
     grid-template-columns: 1fr;
   }
