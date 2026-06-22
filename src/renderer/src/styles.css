@@ -1187,7 +1187,7 @@ textarea:focus-visible,
 
 .modal-card {
   width: min(960px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
+  max-height: 88vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
