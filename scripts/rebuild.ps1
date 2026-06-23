@@ -2,11 +2,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $scriptExitCode = 0
 
-# rebuild: produce a fresh PRODUCTION build (release configuration) and launch
-# it. Slow — run this after changing source. The build runs the production type
-# checks the release build runs and re-bundles from clean, so type, import, CSP,
-# and packaged-layout errors that run-dev hides surface here. run-built is the
-# fast, no-build launcher for everything after this.
+# rebuild: produce a fresh production build, package it into a real app bundle,
+# and launch it. Slow — run this after changing source. The build runs the
+# production type checks and re-bundles from clean, so type, import, CSP, and
+# packaged-layout errors that run-dev hides surface here; packaging then gives the
+# app its own identity. run-built is the fast, no-build launcher after this.
 
 function Set-Utf8Console {
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -48,6 +48,9 @@ function Invoke-Native {
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoDir = Split-Path -Parent $scriptDir
+$appName = "Mumbler"
+$outDir = "dist"
+$exePath = Join-Path $repoDir "$outDir/win-unpacked/$appName.exe"
 
 try {
     Set-Utf8Console
@@ -68,8 +71,9 @@ try {
 
     # Remove stale output so a build that fails to emit a file can't be masked by
     # a leftover artifact from a previous run.
-    Write-Step "Cleaning previous production build"
+    Write-Step "Cleaning previous build"
     if (Test-Path "out") { Remove-Item -Recurse -Force "out" }
+    if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
 
     # The release build type-checks the shipped sources (main/preload + renderer);
     # the dev server skips this entirely. Tests are checked separately and are not
@@ -81,11 +85,19 @@ try {
     Write-Step "Building production bundle"
     Invoke-Native -FilePath "node_modules/.bin/electron-vite.cmd" -ArgumentList @("build")
 
-    # preview runs the built main against the built renderer over file://, so the
-    # production Content-Security-Policy and packaged-layout paths are exercised
-    # as in a release.
-    Write-Step "Launching the production build"
-    Invoke-Native -FilePath "node_modules/.bin/electron-vite.cmd" -ArgumentList @("preview") -AllowedExitCodes @(0, 130, -1073741510)
+    # Package the built output into a real app bundle — the unpacked app only, no
+    # installer. This is what gives the app its own identity (correct name)
+    # instead of running under the generic Electron runtime.
+    Write-Step "Packaging the app bundle"
+    Invoke-Native -FilePath "node_modules/.bin/electron-builder.cmd" -ArgumentList @("--dir")
+
+    if (-not (Test-Path $exePath)) {
+        throw "Packaging did not produce $appName.exe under $outDir/win-unpacked/."
+    }
+
+    # GUI app: launch non-blocking via Start-Process.
+    Write-Step "Launching the packaged app"
+    Start-Process -FilePath $exePath
 }
 catch {
     Write-Host ""

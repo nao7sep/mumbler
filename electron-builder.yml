@@ -1,0 +1,28 @@
+appId: io.github.nao7sep.mumbler
+productName: Mumbler
+
+directories:
+  output: dist
+  buildResources: build
+
+# Ship the built app bundle (electron-vite's out/). Production dependencies and
+# package.json are included automatically; source and tests are not.
+files:
+  - out/**
+  - package.json
+
+# ffmpeg-static and ffprobe-static ship plain executable binaries that the app
+# runs via execFile, resolving their paths through require()/require.resolve at
+# runtime. An asar archive would trap those binaries — a path inside app.asar is
+# not executable — and the app does not rewrite paths to app.asar.unpacked. So
+# disable asar, leaving node_modules as real files whose resolved paths run.
+asar: false
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+
+win:
+  target:
+    - nsis

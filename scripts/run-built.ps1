@@ -2,10 +2,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $scriptExitCode = 0
 
-# run-built: launch the EXISTING production build without rebuilding, so it
-# starts instantly. This is the daily-use launcher and the one that surfaces
-# production-only failures (strict CSP, file:// paths, packaged layout). It
-# never builds — if you changed source, run rebuild first.
+# run-built: launch the EXISTING packaged app without rebuilding, so it starts
+# instantly. This is the daily-use launcher and the one that surfaces
+# production-only failures (strict CSP, file:// paths, packaged layout). It never
+# builds — if you changed source, run rebuild first.
 
 function Set-Utf8Console {
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -24,48 +24,30 @@ function Write-Step {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
-function Require-Command {
-    param([string]$Name)
-    if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
-        throw "Missing required command: $Name"
-    }
-}
-
-function Invoke-Native {
-    param(
-        [Parameter(Mandatory = $true)][string]$FilePath,
-        [string[]]$ArgumentList = @(),
-        [int[]]$AllowedExitCodes = @(0)
-    )
-
-    & $FilePath @ArgumentList
-    $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
-    if ($AllowedExitCodes -notcontains $exitCode) {
-        throw "Command failed with exit code ${exitCode}: $FilePath $($ArgumentList -join ' ')"
-    }
-}
-
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoDir = Split-Path -Parent $scriptDir
+$appName = "Mumbler"
+$outDir = "dist"
+$exePath = Join-Path $repoDir "$outDir/win-unpacked/$appName.exe"
 
 try {
     Set-Utf8Console
-    Require-Command node
 
     Set-Location $repoDir
 
-    # No build, no dependency install here: this launcher must start instantly. If
-    # there is no usable build yet, stop and point at rebuild rather than launching
-    # something stale or empty.
-    if (-not ((Test-Path "out/renderer/index.html") -and (Test-Path "out/main") -and (Test-Path "node_modules/.bin/electron-vite.cmd"))) {
-        throw "No production build found (out/ is missing or incomplete, or dependencies are not installed). Run rebuild first."
+    # No build here: this launcher must start instantly. If there is no usable
+    # bundle yet, stop and point at rebuild rather than launching something stale
+    # or empty.
+    if (-not (Test-Path $exePath)) {
+        throw "No packaged app found ($outDir/win-unpacked/$appName.exe is missing). Run rebuild first."
     }
 
-    $builtAt = (Get-Item "out/renderer/index.html").LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
-    Write-Step "Launching the existing production build (built: $builtAt)"
+    $builtAt = (Get-Item $exePath).LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+    Write-Step "Launching the existing packaged app (built: $builtAt)"
     Write-Host "If you changed source since then, run rebuild instead."
 
-    Invoke-Native -FilePath "node_modules/.bin/electron-vite.cmd" -ArgumentList @("preview") -AllowedExitCodes @(0, 130, -1073741510)
+    # GUI app: launch non-blocking via Start-Process.
+    Start-Process -FilePath $exePath
 }
 catch {
     Write-Host ""
