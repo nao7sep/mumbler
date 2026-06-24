@@ -18,8 +18,18 @@ files:
 # disable asar, leaving node_modules as real files whose resolved paths run.
 asar: false
 
+# Tahoe "Liquid Glass" icon: the liquid-glass-icon tool deploys build/Assets.car (committed in
+# company/assets) here. macOS 26 reads CFBundleIconName below → this catalog; older macOS reads
+# CFBundleIconFile → build/icon.icns. Building does NOT need Xcode — the Assets.car is prebuilt.
+extraResources:
+  - from: build/Assets.car
+    to: Assets.car
+
 mac:
   category: public.app-category.productivity
+  icon: build/icon.icns
+  extendInfo:
+    CFBundleIconName: broadcast-mic-soundwaves
   target:
     - dmg
 
