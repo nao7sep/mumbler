@@ -17,6 +17,11 @@ export function AboutModal({
       size="narrow"
       onRequestClose={onClose}
       describedById="about-description"
+      footer={
+        <button type="button" className="button button--ghost" onClick={onClose}>
+          Close
+        </button>
+      }
     >
       <div className="modal-card__body about-content">
         <p className="about-title">Mumbler</p>

@@ -88,6 +88,10 @@ export interface PromptTemplates {
 
 export interface MumblerSettings {
   schemaVersion: 1;
+  // Appearance — the UI (chrome) font family. Family only; blank means the built-in default stack
+  // (the renderer's `--font-ui` variable). The read-only transcription/structured/title/slug views
+  // are display surfaces, so they follow this UI font rather than a separate content font.
+  uiFontFamily: string;
   // Files
   outputDirectory: string | null;
   backupDirectory: string | null;
@@ -240,6 +244,8 @@ export interface AppPaths {
 }
 
 export interface SettingsSummary {
+  // Appearance
+  uiFontFamily: string;
   // Files
   outputDirectory: string | null;
   defaultOutputDirectory: string;
@@ -260,6 +266,8 @@ export interface SettingsSummary {
 
 export interface SettingsDraft {
   schemaVersion: 1;
+  // Appearance
+  uiFontFamily: string;
   // Files
   outputDirectory: string;
   defaultOutputDirectory: string;

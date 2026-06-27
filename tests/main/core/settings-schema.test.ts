@@ -39,6 +39,16 @@ describe("applySettingsDraft — happy path", () => {
     expect(result.backupDirectory).toBe("/custom/backups");
     expect(result.timestampPatterns).toEqual(["pat-a", "pat-b"]); // trimmed + de-duplicated
   });
+
+  it("defaults the UI font to blank and round-trips a trimmed custom value", () => {
+    expect(createDefaultSettings("Asia/Tokyo").uiFontFamily).toBe("");
+
+    const draft = freshDraft();
+    draft.uiFontFamily = "  Iosevka, monospace  ";
+    const result = applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft);
+    expect(result.uiFontFamily).toBe("Iosevka, monospace");
+    expect(buildSettingsDraft(result, OUT, BACKUP, false).uiFontFamily).toBe("Iosevka, monospace");
+  });
 });
 
 describe("applySettingsDraft — validation", () => {

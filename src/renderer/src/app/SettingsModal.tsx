@@ -169,6 +169,23 @@ export function SettingsModal({
         <div className="settings-sections">
 
           <section className="settings-section">
+            <h3>Appearance</h3>
+            <div className="field-stack">
+              <label className="field">
+                <span>UI font</span>
+                <input
+                  value={draft.uiFontFamily}
+                  placeholder="Default"
+                  onChange={(event) => onChange({ ...draft, uiFontFamily: event.target.value })}
+                />
+              </label>
+              <p className="field-hint">
+                The app interface font. Comma-separated families; the first one your system has is used. Blank uses the built-in default.
+              </p>
+            </div>
+          </section>
+
+          <section className="settings-section">
             <h3>Files</h3>
             <div className="field-stack">
               <label className="field">

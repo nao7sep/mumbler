@@ -2,6 +2,8 @@ import { useEffect, useState, type Dispatch, type SetStateAction, type DragEvent
 
 import type { AppSnapshot, PendingImportReviewItem } from "@shared/app-shell";
 
+import { parseDroppedPaths, reconcilePendingReviewDrafts } from "./import-rules";
+
 interface UseImportFlowOptions {
   snapshot: AppSnapshot | null;
   onSnapshotUpdate: (snapshot: AppSnapshot) => void;
@@ -36,14 +38,7 @@ export function useImportFlow({
 
   useEffect(() => {
     const snapshotImports = snapshot?.state?.pendingImports ?? [];
-    setPendingReviewDrafts((current) => {
-      const currentIds = current.map((item) => item.id).join("|");
-      const snapshotIds = snapshotImports.map((item) => item.id).join("|");
-      if (currentIds === snapshotIds && current.length > 0) {
-        return current;
-      }
-      return snapshotImports;
-    });
+    setPendingReviewDrafts((current) => reconcilePendingReviewDrafts(current, snapshotImports));
   }, [snapshot?.state?.pendingImports]);
 
   useEffect(() => {
@@ -143,9 +138,9 @@ export function useImportFlow({
     event.preventDefault();
     setIsDragActive(false);
 
-    const paths = Array.from(event.dataTransfer.files)
-      .map((file) => window.mumbler.getPathForFile(file))
-      .filter((value) => value.length > 0);
+    const paths = parseDroppedPaths(event.dataTransfer.files, (file) =>
+      window.mumbler.getPathForFile(file),
+    );
 
     if (paths.length === 0) {
       onError("No valid file paths found in the dropped items.");

@@ -35,7 +35,16 @@ export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactE
   );
 
   return (
-    <ModalShell title="Keyboard Shortcuts" size="narrow" onRequestClose={onClose}>
+    <ModalShell
+      title="Keyboard Shortcuts"
+      size="narrow"
+      onRequestClose={onClose}
+      footer={
+        <button type="button" className="button button--ghost" onClick={onClose}>
+          Close
+        </button>
+      }
+    >
       <div className="modal-card__body">
         <div className="shortcut-groups">
           {groups.map((group) => (

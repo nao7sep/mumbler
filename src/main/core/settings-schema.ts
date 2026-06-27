@@ -57,6 +57,8 @@ function normalizeSettings(
 
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
+    // Appearance — free text; blank resolves to the built-in default stack at apply time.
+    uiFontFamily: asString(raw.uiFontFamily) ?? defaults.uiFontFamily,
     // Files
     outputDirectory: asNullableString(raw.outputDirectory),
     backupDirectory: asNullableString(raw.backupDirectory),
@@ -328,6 +330,8 @@ export function getSystemTimezone(): string {
 export function createDefaultSettings(systemTimezone: string): MumblerSettings {
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
+    // Appearance
+    uiFontFamily: "",
     // Files
     outputDirectory: null,
     backupDirectory: null,
@@ -408,6 +412,8 @@ export function summarizeSettings(
   hasGeminiApiKey: boolean,
 ): SettingsSummary {
   return {
+    // Appearance
+    uiFontFamily: settings.uiFontFamily,
     // Files
     outputDirectory: settings.outputDirectory,
     defaultOutputDirectory,
@@ -435,6 +441,8 @@ export function buildSettingsDraft(
 ): SettingsDraft {
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
+    // Appearance
+    uiFontFamily: settings.uiFontFamily,
     // Files
     outputDirectory: settings.outputDirectory ?? "",
     defaultOutputDirectory,
@@ -524,6 +532,8 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
 
   return {
     ...current,
+    // Appearance — free text; blank means the built-in default stack.
+    uiFontFamily: draft.uiFontFamily.trim(),
     // Files
     outputDirectory: outputDirectory.length === 0 ? null : outputDirectory,
     backupDirectory: backupDirectory.length === 0 ? null : backupDirectory,

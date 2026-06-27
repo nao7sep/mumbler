@@ -18,5 +18,19 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    coverage: {
+      // V8's native coverage; `include` spans all source so the report flags
+      // logic no test reaches, not just a score for what is reached.
+      provider: "v8",
+      reporter: ["text", "html", "lcov"],
+      include: ["src/**/*.{ts,tsx}"],
+      // Excluded as framework wiring with no decision to cover:
+      exclude: [
+        "src/main/index.ts", // Electron main entry / bootstrap
+        "src/preload/**", // contextBridge wiring
+        "src/renderer/src/main.tsx", // React DOM mount
+        "**/*.d.ts",
+      ],
+    },
   },
 });

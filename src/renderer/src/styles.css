@@ -1,8 +1,13 @@
 :root {
   color-scheme: light;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+  /* UI (chrome) font. The Settings "UI font" field overrides this variable at runtime with a
+     verbatim, engine-resolved family string; blank reverts to this default. Family only — no UI
+     font-size knob. The read-only transcription/structured/title/slug views follow this font (they
+     are display surfaces, not an editing content surface). */
+  --font-ui:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
+  font-family: var(--font-ui);
   line-height: 1.5;
   font-weight: 400;
   background: #edf4ec;

@@ -12,7 +12,6 @@ import type {
   MumblerCard,
   PendingImportReviewItem,
   SaveCardResult,
-  TrimDecision,
 } from "@shared/app-shell";
 import { GEMINI_MODELS } from "@shared/app-shell";
 import {
@@ -30,135 +29,28 @@ import { SettingsModal } from "./SettingsModal";
 import { findMatchingCommand, isActivationTarget, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
 import { QueueList, formatBytes, formatDuration, statusModifier } from "./QueueList";
-import { DecisionModal } from "./DecisionModal";
+import {
+  AppWideErrorModal,
+  DiscardReviewModal,
+  DiscardSettingsModal,
+  GenerateConfirmModal,
+  RemoveRecordingModal,
+  SaveConflictModal,
+} from "./DecisionModals";
 import { AboutModal } from "./AboutModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
 import { useSettingsModal } from "./useSettingsModal";
 import { formatCardStatusMessage, formatStepName, isCardBusy } from "./card-status";
-
-function formatOptionalSeconds(value: number | null): string {
-  if (value === null) {
-    return "—";
-  }
-
-  return `${value.toFixed(3)}s`;
-}
-
-function describeTrimDecision(decision: TrimDecision | null): string {
-  if (decision === null) {
-    return "Not analyzed.";
-  }
-
-  if (decision.kind === "not-needed") {
-    return "No markers set.";
-  }
-
-  if (decision.kind === "stream-copy") {
-    return "Stream copy eligible.";
-  }
-
-  return "Re-encode required.";
-}
-
-function getGenerateDisabledReason(params: {
-  selectedCard: MumblerCard | null;
-  hasGeminiKey: boolean;
-}): string | null {
-  if (params.selectedCard === null) {
-    return null;
-  }
-
-  if (!params.hasGeminiKey) {
-    return "Gemini API key not configured.";
-  }
-
-  return null;
-}
-
-function getSaveDisabledReason(params: {
-  selectedCard: MumblerCard | null;
-  selectedCardIsBusy: boolean;
-}): string | null {
-  if (params.selectedCard === null) {
-    return null;
-  }
-
-  if (params.selectedCard.status !== "Ready to Save") {
-    return "Not ready to save.";
-  }
-
-  if (params.selectedCardIsBusy) {
-    return formatCardStatusMessage(params.selectedCard);
-  }
-
-  return null;
-}
-
-function getRemoveConfirmBody(card: MumblerCard): string {
-  const hasAiWork =
-    (card.transcription.text ?? "").trim().length > 0 ||
-    (card.metadata.structured ?? "").trim().length > 0 ||
-    (card.metadata.title ?? "").trim().length > 0 ||
-    (card.metadata.slug ?? "").trim().length > 0;
-
-  if (hasAiWork) {
-    return "This recording has been processed by AI. Removing it will permanently discard the transcription and generated metadata. Working audio will be permanently deleted.";
-  }
-
-  const hasTrimWork =
-    card.trim.frontMarkerSec !== null || card.trim.backMarkerSec !== null;
-
-  if (hasTrimWork) {
-    return "You've set trim markers on this recording. Removing it will discard that work. Working audio will be permanently deleted.";
-  }
-
-  return "Working audio will be permanently deleted. Saved output is not affected.";
-}
-
-const resultLabels: Record<GenerateTarget, string> = {
-  transcription: "Transcription",
-  structured: "Structured transcription",
-  title: "Title",
-  slug: "Slug",
-};
-
-function getResultValue(card: MumblerCard, target: GenerateTarget): string | null {
-  switch (target) {
-    case "transcription":
-      return card.transcription.text;
-    case "structured":
-      return card.metadata.structured;
-    case "title":
-      return card.metadata.title;
-    case "slug":
-      return card.metadata.slug;
-  }
-}
-
-function getInvalidatedGenerateTargets(target: GenerateTarget): GenerateTarget[] {
-  switch (target) {
-    case "transcription":
-      return ["transcription", "structured", "title", "slug"];
-    case "structured":
-      return ["structured", "title", "slug"];
-    case "title":
-      return ["title", "slug"];
-    case "slug":
-      return ["slug"];
-  }
-}
-
-function getGenerateConfirmBody(card: MumblerCard, target: GenerateTarget): string | null {
-  const invalidated = getInvalidatedGenerateTargets(target)
-    .filter((entry) => (getResultValue(card, entry) ?? "").trim().length > 0)
-    .map((entry) => resultLabels[entry]);
-  if (invalidated.length === 0) {
-    return null;
-  }
-  const labelText = invalidated.join(", ");
-  return `Generating ${resultLabels[target].toLowerCase()} will replace existing data for: ${labelText}.`;
-}
+import {
+  describeTrimDecision,
+  formatOptionalSeconds,
+  getGenerateConfirmBody,
+  getGenerateDisabledReason,
+  getRemoveConfirmBody,
+  getSaveDisabledReason,
+  resultLabels,
+} from "./generate-rules";
 
 async function copyTextToClipboard(value: string): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -241,6 +133,17 @@ export function App(): ReactElement {
     onError: (msg) => { if (msg !== null) addPersistent(msg, "error"); },
     onNotice: addToast,
   });
+
+  // Apply the configured UI font by overriding the `--font-ui` CSS variable on :root; blank reverts
+  // to the styles.css default. The string is handed to CSS verbatim (engine-resolved) per the
+  // app-chrome-conventions; the read-only transcription views follow it as display surfaces.
+  const uiFontFamily = snapshot?.settingsSummary?.uiFontFamily ?? "";
+  useEffect(() => {
+    const family = uiFontFamily.trim();
+    const root = document.documentElement;
+    if (family) root.style.setProperty("--font-ui", family);
+    else root.style.removeProperty("--font-ui");
+  }, [uiFontFamily]);
 
   useEffect(() => {
     if (importFlow.pendingReviewDrafts.length === 0) {
@@ -1307,21 +1210,9 @@ export function App(): ReactElement {
       ) : null}
 
       {settingsModal.showDiscardConfirm ? (
-        <DecisionModal
-          title="Discard Changes?"
-          body="You have unsaved changes. Discard them and close settings?"
-          actions={[
-            {
-              label: "Keep Editing",
-              onClick: settingsModal.handleCancelDiscardSettings,
-            },
-            {
-              label: "Discard",
-              variant: "danger",
-              onClick: settingsModal.handleConfirmDiscardSettings,
-            },
-          ]}
-          onRequestClose={settingsModal.handleCancelDiscardSettings}
+        <DiscardSettingsModal
+          onKeepEditing={settingsModal.handleCancelDiscardSettings}
+          onDiscard={settingsModal.handleConfirmDiscardSettings}
         />
       ) : null}
 
@@ -1386,115 +1277,48 @@ export function App(): ReactElement {
       ) : null}
 
       {showReviewDiscardConfirm ? (
-        <DecisionModal
-          title="Discard Changes?"
-          body="You have unsaved timestamp edits. Discard them and cancel the import?"
-          actions={[
-            {
-              label: "Keep Editing",
-              onClick: handleCancelDiscardReview,
-            },
-            {
-              label: "Discard",
-              variant: "danger",
-              onClick: handleConfirmDiscardReview,
-            },
-          ]}
-          onRequestClose={handleCancelDiscardReview}
+        <DiscardReviewModal
+          onKeepEditing={handleCancelDiscardReview}
+          onDiscard={handleConfirmDiscardReview}
         />
       ) : null}
 
       {pendingSaveConflict ? (
-        <DecisionModal
-          title="File Exists"
-          body={`One or more output files already exist: ${pendingSaveConflict.result.audioPath}, ${pendingSaveConflict.result.jsonPath}, ${pendingSaveConflict.result.markdownPath}.`}
-          actions={[
-            {
-              label: "Cancel",
-              onClick: () => {
-                setPendingSaveConflict(null);
-              },
-            },
-            {
-              label: "Overwrite",
-              variant: "danger",
-              onClick: () => {
-                void handleSaveCard(pendingSaveConflict.cardId, "overwrite");
-              },
-            },
-            {
-              label: "Add Suffix",
-              variant: "primary",
-              onClick: () => {
-                void handleSaveCard(pendingSaveConflict.cardId, "suffix");
-              },
-            },
-          ]}
-          onRequestClose={() => setPendingSaveConflict(null)}
+        <SaveConflictModal
+          audioPath={pendingSaveConflict.result.audioPath}
+          jsonPath={pendingSaveConflict.result.jsonPath}
+          markdownPath={pendingSaveConflict.result.markdownPath}
+          onCancel={() => setPendingSaveConflict(null)}
+          onOverwrite={() => void handleSaveCard(pendingSaveConflict.cardId, "overwrite")}
+          onAddSuffix={() => void handleSaveCard(pendingSaveConflict.cardId, "suffix")}
         />
       ) : null}
 
       {pendingGenerate ? (
-        <DecisionModal
-          title={`Generate ${resultLabels[pendingGenerate.target]}?`}
+        <GenerateConfirmModal
+          targetLabel={resultLabels[pendingGenerate.target]}
           body={pendingGenerate.body}
-          actions={[
-            {
-              label: "Cancel",
-              onClick: () => {
-                setPendingGenerate(null);
-              },
-            },
-            {
-              label: "Generate",
-              variant: "danger",
-              onClick: handleConfirmGenerate,
-            },
-          ]}
-          onRequestClose={() => setPendingGenerate(null)}
+          onCancel={() => setPendingGenerate(null)}
+          onGenerate={handleConfirmGenerate}
         />
       ) : null}
 
       {snapshot?.appWideError ? (
-        <DecisionModal
+        <AppWideErrorModal
           title={snapshot.appWideError.title}
-          body={snapshot.appWideError.message}
-          actions={[
-            {
-              label: "Dismiss",
-              variant: "primary",
-              onClick: () => {
-                void handleDismissAppWideError();
-              },
-            },
-          ]}
-          onRequestClose={() => void handleDismissAppWideError()}
+          message={snapshot.appWideError.message}
+          onDismiss={() => void handleDismissAppWideError()}
         />
       ) : null}
 
       {pendingRemoveCardId ? (
-        <DecisionModal
-          title="Remove Recording?"
+        <RemoveRecordingModal
           body={getRemoveConfirmBody(
             snapshot?.state?.cards.find((c) => c.id === pendingRemoveCardId) ??
               ({ trim: {}, transcription: {}, metadata: {} } as unknown as MumblerCard),
           )}
-          actions={[
-            {
-              label: "Cancel",
-              onClick: () => {
-                setPendingRemoveCardId(null);
-              },
-            },
-            {
-              label: "Remove",
-              variant: "danger",
-              onClick: () => {
-                void confirmRemoveCard(pendingRemoveCardId);
-              },
-            },
-          ]}
-          onRequestClose={() => setPendingRemoveCardId(null)}
+          onCancel={() => setPendingRemoveCardId(null)}
+          onRemove={() => void confirmRemoveCard(pendingRemoveCardId)}
         />
       ) : null}
 

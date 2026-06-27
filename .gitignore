@@ -8,3 +8,6 @@ out
 
 # OS files
 .DS_Store
+
+# Coverage reports (generated)
+coverage/

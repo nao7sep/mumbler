@@ -10,6 +10,7 @@ import {
 function validDraft(): SettingsDraft {
   return {
     schemaVersion: 1,
+    uiFontFamily: "",
     outputDirectory: "",
     defaultOutputDirectory: "/out",
     backupDirectory: "",
