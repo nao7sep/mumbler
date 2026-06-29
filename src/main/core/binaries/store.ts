@@ -9,11 +9,15 @@ import { TOOL_NAMES } from "./registry";
 // installed that the user has since deleted.
 export interface PersistedToolFacts {
   installedVersion: string | null;
+  // SHA-256 of the installed executable, recorded at install so Verify can
+  // re-hash the on-disk file and detect post-install corruption (→ Faulted).
+  installedSha256: string | null;
   desiredVersion: string | null;
   lastCheckedAtUtc: number | null;
   // Non-null iff the last currency check failed (→ check-failed).
   lastCheckError: string | null;
-  // Display message for the last fault or failed operation.
+  // Display message for a fault (set only alongside faulted=true). Operation
+  // failures are transient and never persisted (managed-dependency-status I6).
   lastError: string | null;
   // Present-but-unusable: a failed integrity verify or unparseable version (→ faulted).
   faulted: boolean;
@@ -29,6 +33,7 @@ const SCHEMA_VERSION = 1;
 function emptyFacts(): PersistedToolFacts {
   return {
     installedVersion: null,
+    installedSha256: null,
     desiredVersion: null,
     lastCheckedAtUtc: null,
     lastCheckError: null,
@@ -56,6 +61,7 @@ function normalizeFacts(raw: unknown): PersistedToolFacts {
   const record = raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
     installedVersion: asString(record.installedVersion),
+    installedSha256: asString(record.installedSha256),
     desiredVersion: asString(record.desiredVersion),
     lastCheckedAtUtc: asNumber(record.lastCheckedAtUtc),
     lastCheckError: asString(record.lastCheckError),

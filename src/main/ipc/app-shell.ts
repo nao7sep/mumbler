@@ -243,11 +243,6 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     return runtime.provisionTool(name);
   });
 
-  handle(APP_SHELL_CHANNELS.updateTool, (_event, name: ToolName) => {
-    assertToolName(name);
-    return runtime.updateTool(name);
-  });
-
   handle(APP_SHELL_CHANNELS.verifyTool, (_event, name: ToolName) => {
     assertToolName(name);
     return runtime.verifyTool(name);

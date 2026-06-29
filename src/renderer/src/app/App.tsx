@@ -283,22 +283,30 @@ export function App(): ReactElement {
   }, []);
 
   const dependencies = snapshot?.dependencies ?? null;
+  const checkToolUpdates = snapshot?.settingsSummary?.checkToolUpdates ?? false;
 
-  // Blocking-on-required-Absent: open the Audio Tools surface once when a required
-  // tool is missing, so the user resolves it before exercising a feature that
-  // needs it. Open once — re-opening on every refresh would fight the user closing it.
+  // Recommended launch behaviour (managed-dependency-status convention): when
+  // check-on-launch is on, surface the Audio Tools modal once if anything needs
+  // attention — missing, outdated, faulted, or an auto-download already running.
+  // With it off, nothing surfaces here; a missing required tool is caught lazily
+  // at first use (its operation errors and points here). Open once, so a refresh
+  // can't reopen it against the user who just closed it.
   useEffect(() => {
-    if (dependencies === null) {
+    if (dependencies === null || !checkToolUpdates) {
       return;
     }
-    const missingRequired = dependencies.some(
-      (dep) => dep.required && dep.lifecycle === "absent",
+    const needsAttention = dependencies.some(
+      (dep) =>
+        dep.lifecycle === "absent" ||
+        dep.lifecycle === "faulted" ||
+        dep.currency === "stale" ||
+        dep.transient.kind !== "idle",
     );
-    if (missingRequired && !autoOpenedAudioToolsRef.current) {
+    if (needsAttention && !autoOpenedAudioToolsRef.current) {
       autoOpenedAudioToolsRef.current = true;
       setShowAudioTools(true);
     }
-  }, [dependencies]);
+  }, [dependencies, checkToolUpdates]);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -537,16 +545,15 @@ export function App(): ReactElement {
       });
   }
 
-  function handleProvisionTool(name: ToolName): void {
+  // Reinstall = (re)download and (re)install regardless of what's present; the
+  // provision path always re-acquires the latest.
+  function handleReinstallTool(name: ToolName): void {
     applyToolSnapshot(window.mumbler.provisionTool(name), "Failed to install audio tool.");
   }
 
-  function handleUpdateTool(name: ToolName): void {
-    applyToolSnapshot(window.mumbler.updateTool(name), "Failed to update audio tool.");
-  }
-
+  // Verify = re-hash the installed file against its recorded checksum; never downloads.
   function handleVerifyTool(name: ToolName): void {
-    applyToolSnapshot(window.mumbler.verifyTool(name), "Failed to reinstall audio tool.");
+    applyToolSnapshot(window.mumbler.verifyTool(name), "Failed to verify audio tool.");
   }
 
   function handleCheckTools(): void {
@@ -1431,11 +1438,10 @@ export function App(): ReactElement {
         <AudioToolsModal
           dependencies={snapshot.dependencies}
           checkToolUpdates={snapshot.settingsSummary?.checkToolUpdates ?? true}
-          autoDownloadTools={snapshot.settingsSummary?.autoDownloadTools ?? true}
+          autoDownloadTools={snapshot.settingsSummary?.autoDownloadTools ?? false}
           isChecking={isCheckingTools}
-          onProvision={handleProvisionTool}
-          onUpdate={handleUpdateTool}
           onVerify={handleVerifyTool}
+          onReinstall={handleReinstallTool}
           onCheck={handleCheckTools}
           onSaveGates={handleSaveToolGates}
           onClose={() => setShowAudioTools(false)}

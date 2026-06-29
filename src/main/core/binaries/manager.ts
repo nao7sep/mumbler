@@ -17,7 +17,14 @@ import type { JsonStore } from "../json-store";
 import { OperationError } from "../operation-error";
 import { extractFileFromZip } from "./archive";
 import { downloadToFile, fetchText } from "./http";
-import { parseSha256Sidecar, verifySha256 } from "./integrity";
+import { parseSha256Sidecar, sha256OfFile, verifySha256 } from "./integrity";
+import {
+  afterCheckFailure,
+  afterCheckSuccess,
+  afterInstall,
+  afterVerifyFail,
+  afterVerifyPass,
+} from "./transitions";
 import {
   TOOL_DOWNLOAD_MAX_BYTES,
   TOOL_NAMES,
@@ -95,6 +102,7 @@ export class ToolManager {
       lastCheckedAtUtc: persisted.lastCheckedAtUtc,
       lastCheckError: persisted.lastCheckError,
       lastError: persisted.lastError,
+      hasInstalledChecksum: persisted.installedSha256 !== null,
     };
   }
 
@@ -143,6 +151,7 @@ export class ToolManager {
       const stamp = Date.now();
       const partial = join(this.deps.downloadsDir, `${name}-${stamp}.partial`);
       const staging = join(this.deps.binDir, `.${toolFileName(name, this.deps.platform)}.staging-${stamp}`);
+      let installedSha256 = "";
 
       try {
         await downloadToFile({
@@ -164,6 +173,9 @@ export class ToolManager {
             await execFileAsync("xattr", ["-d", "com.apple.quarantine", staging]).catch(() => undefined);
           }
         }
+        // Record the installed executable's own hash before publishing, so a later
+        // Verify can re-hash the on-disk file and detect post-install corruption.
+        installedSha256 = await sha256OfFile(staging);
         // Publish with a single rename so the final path is only ever the complete,
         // executable binary — never mid-extract.
         await rename(staging, this.toolPath(name));
@@ -173,15 +185,7 @@ export class ToolManager {
       }
 
       this.present.set(name, true);
-      await this.mutate(name, (facts) => ({
-        ...facts,
-        installedVersion: resolved.version,
-        desiredVersion: resolved.version,
-        lastCheckedAtUtc: Date.now(),
-        lastCheckError: null,
-        lastError: null,
-        faulted: false,
-      }));
+      await this.mutate(name, (facts) => afterInstall(facts, resolved.version, installedSha256, Date.now()));
       await this.deps.logger.info("tools.installed", "Installed audio tool.", {
         tool: name,
         version: resolved.version,
@@ -190,10 +194,10 @@ export class ToolManager {
       this.setTransient(name, { kind: "idle" });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      // The existing install (if any) is untouched — we only ever rename a fully
-      // verified staging file into place — so record the message without faulting
-      // a still-good installed copy.
-      await this.mutate(name, (facts) => ({ ...facts, lastError: message }));
+      // A failed install is transient (managed-dependency-status conventions, I6):
+      // the existing install, if any, is untouched — we only ever rename a fully
+      // verified staging file into place — so the error lives in the transient
+      // overlay, never the persisted facts. setTransient notifies the renderer.
       await this.deps.logger.warn("tools.install-failed", "Audio tool install failed.", {
         tool: name,
         operation,
@@ -216,12 +220,7 @@ export class ToolManager {
     try {
       const resolved = await resolveLatest(this.deps.platform, this.deps.arch);
       for (const name of TOOL_NAMES) {
-        await this.mutate(name, (facts) => ({
-          ...facts,
-          desiredVersion: resolved.version,
-          lastCheckedAtUtc: now,
-          lastCheckError: null,
-        }));
+        await this.mutate(name, (facts) => afterCheckSuccess(facts, resolved.version, now));
       }
       await this.deps.logger.info("tools.checked", "Checked audio tool updates.", {
         latest: resolved.version,
@@ -229,11 +228,7 @@ export class ToolManager {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       for (const name of TOOL_NAMES) {
-        await this.mutate(name, (facts) => ({
-          ...facts,
-          lastCheckedAtUtc: now,
-          lastCheckError: message,
-        }));
+        await this.mutate(name, (facts) => afterCheckFailure(facts, message, now));
       }
       await this.deps.logger.warn("tools.check-failed", "Audio tool update check failed.", {
         error: message,
@@ -242,6 +237,52 @@ export class ToolManager {
       for (const name of TOOL_NAMES) {
         this.setTransient(name, { kind: "idle" });
       }
+    }
+  }
+
+  // Verify: re-hash the installed file against the checksum recorded at install
+  // and fault it on mismatch (the sole entry into Faulted). It never downloads —
+  // a missing tool, or one with no recorded hash, has nothing to verify and is
+  // handled by Reinstall instead (the button is disabled there; this guard is the
+  // defensive backstop). Re-verifying a faulted tool is allowed: if its file was
+  // restored out of band the re-hash clears the fault.
+  async verifyTool(name: ToolName): Promise<void> {
+    const expected = this.deps.value.tools[name].installedSha256;
+    if (!(this.present.get(name) ?? false) || expected === null) {
+      throw new OperationError(`${name} is not installed; nothing to verify. Use Reinstall.`);
+    }
+
+    if (this.busy.has(name)) {
+      throw new OperationError(`${name} is already being processed.`);
+    }
+    this.busy.add(name);
+    this.setTransient(name, { kind: "running", operation: "verify", percent: null });
+    try {
+      const path = this.toolPath(name);
+      let actual: string;
+      try {
+        actual = await sha256OfFile(path);
+      } catch {
+        // The file vanished or became unreadable mid-verify — reconcile presence
+        // (it becomes Absent if gone) rather than faulting a file that isn't there.
+        this.present.set(name, await this.fileExists(path));
+        this.setTransient(name, { kind: "idle" });
+        return;
+      }
+      if (actual === expected) {
+        await this.mutate(name, (facts) => afterVerifyPass(facts));
+        await this.deps.logger.info("tools.verified", "Audio tool integrity verified.", { tool: name });
+      } else {
+        const message = `installed file failed integrity (expected ${expected.slice(0, 12)}…, got ${actual.slice(0, 12)}…)`;
+        await this.mutate(name, (facts) => afterVerifyFail(facts, message));
+        await this.deps.logger.warn("tools.verify-failed", "Audio tool integrity check failed.", {
+          tool: name,
+          error: message,
+        });
+      }
+      this.setTransient(name, { kind: "idle" });
+    } finally {
+      this.busy.delete(name);
     }
   }
 

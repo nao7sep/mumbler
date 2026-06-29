@@ -1426,33 +1426,6 @@ textarea:focus-visible,
    unrelated guessed width. Because the OS refuses to shrink the window below
    1108, this engages only in the dev server / browser preview where no native
    minimum applies; in the packaged window the two-column layout always holds. */
-@media (max-width: 1108px) {
-  .workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .detail-grid,
-  .detail-row,
-  .control-row,
-  .inline-action-field,
-  .nudge-grid,
-  .action-grid,
-  .result-grid,
-  .result-secondary,
-  .trim-analysis-grid,
-  .settings-number-grid,
-  .storage-grid,
-  .trim-editor-grid,
-  .review-row__fields {
-    grid-template-columns: 1fr;
-  }
-
-  .modal-card__header,
-  .modal-toolbar {
-    flex-direction: column;
-  }
-}
-
 .notification-strip {
   flex-shrink: 0;
   display: flex;
@@ -1656,15 +1629,13 @@ textarea:focus-visible,
 .tools-gates {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle);
+  gap: 10px;
+  margin-top: 20px;
 }
-.field--checkbox {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
+.tools-table__actions {
+  display: inline-flex;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 /* Roll-up indicator in the top bar; coloured by the worst current role. */

@@ -5,7 +5,6 @@ import type {
   ToolFacts,
   ToolLifecycle,
   ToolName,
-  ToolOperationKind,
   ToolTransient,
 } from "@shared/app-shell";
 
@@ -74,29 +73,6 @@ function baseRole(lifecycle: ToolLifecycle, currency: ToolCurrency | null): Stat
   }
 }
 
-// The operation a row offers for a given state.
-function operationOf(
-  lifecycle: ToolLifecycle,
-  currency: ToolCurrency | null,
-): ToolOperationKind | null {
-  if (lifecycle === "absent") {
-    return "provision";
-  }
-  if (lifecycle === "faulted") {
-    return "verify";
-  }
-  switch (currency) {
-    case "stale":
-      return "update";
-    case "unchecked":
-    case "check-failed":
-      return "check";
-    default:
-      // current: re-verify / reinstall is the only thing left to offer.
-      return "verify";
-  }
-}
-
 // Render = role(persisted), overridden by the transient when an operation is
 // running (informational, with progress) or just failed (error). The persisted
 // state underneath is unchanged.
@@ -124,7 +100,10 @@ export function deriveStatus(
     lifecycle,
     currency,
     role: applyTransient(baseRole(lifecycle, currency), transient),
-    operation: operationOf(lifecycle, currency),
+    // Verify is meaningful only for an installed file that has a recorded checksum
+    // to re-hash against (so absent → false, and a present-but-no-checksum copy →
+    // false; the surface disables Verify accordingly).
+    canVerify: facts.present && facts.hasInstalledChecksum,
     installedVersion: facts.installedVersion,
     desiredVersion: facts.desiredVersion,
     lastCheckedAtUtc: facts.lastCheckedAtUtc,

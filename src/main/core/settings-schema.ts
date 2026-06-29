@@ -98,12 +98,15 @@ function normalizeSettings(
         asPositiveInteger(timeouts?.transcriptionMs) ?? defaults.timeouts.transcriptionMs,
       metadataMs: asPositiveInteger(timeouts?.metadataMs) ?? defaults.timeouts.metadataMs,
     },
-    // Managed audio-tool gates. Missing → default (on); not migration scaffolding,
-    // just defaulting an absent key so an existing 0.1.0 config keeps loading.
-    checkToolUpdates:
-      typeof raw.checkToolUpdates === "boolean" ? raw.checkToolUpdates : defaults.checkToolUpdates,
+    // Managed audio-tool gates. Missing key → default. Auto-download implies the
+    // update check (you can't auto-install what you don't look for), so the
+    // invariant is enforced here on load too — a hand-edited config with
+    // auto-download on and check off still resolves to check on.
     autoDownloadTools:
       typeof raw.autoDownloadTools === "boolean" ? raw.autoDownloadTools : defaults.autoDownloadTools,
+    checkToolUpdates:
+      (typeof raw.autoDownloadTools === "boolean" ? raw.autoDownloadTools : defaults.autoDownloadTools) ||
+      (typeof raw.checkToolUpdates === "boolean" ? raw.checkToolUpdates : defaults.checkToolUpdates),
   };
 }
 
@@ -371,10 +374,12 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
       transcriptionMs: 30 * 60 * 1000,
       metadataMs: 5 * 60 * 1000,
     },
-    // Managed audio tools default to checking for updates and auto-fetching a
-    // missing required tool; the manual operations stay available either way.
+    // Managed audio tools default to a non-blocking update check on launch, but
+    // NOT to auto-downloading on first run — an unprompted ~55 MB fetch is a
+    // surprise. Missing required tools instead open the Audio Tools surface for
+    // the user to install; auto-download is opt-in there.
     checkToolUpdates: true,
-    autoDownloadTools: true,
+    autoDownloadTools: false,
   };
 }
 

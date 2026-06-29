@@ -77,8 +77,6 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelPendingImports) as Promise<AppSnapshot>,
   provisionTool: (name: ToolName) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.provisionTool, name) as Promise<AppSnapshot>,
-  updateTool: (name: ToolName) =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.updateTool, name) as Promise<AppSnapshot>,
   verifyTool: (name: ToolName) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.verifyTool, name) as Promise<AppSnapshot>,
   checkTools: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.checkTools) as Promise<AppSnapshot>,

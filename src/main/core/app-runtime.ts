@@ -373,13 +373,8 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  async updateTool(name: ToolName): Promise<AppSnapshot> {
-    await this.ensureToolManager().installTool(name, "update");
-    return this.getSnapshot();
-  }
-
   async verifyTool(name: ToolName): Promise<AppSnapshot> {
-    await this.ensureToolManager().installTool(name, "verify");
+    await this.ensureToolManager().verifyTool(name);
     return this.getSnapshot();
   }
 
@@ -393,14 +388,16 @@ export class ApplicationRuntime {
     autoDownloadTools: boolean,
   ): Promise<AppSnapshot> {
     this.ensureReady();
+    // Auto-download implies the update check — enabling it forces the check on.
+    const effectiveCheck = autoDownloadTools ? true : checkToolUpdates;
     this.runtime.settings = {
       ...this.runtime.settings!,
-      checkToolUpdates,
+      checkToolUpdates: effectiveCheck,
       autoDownloadTools,
     };
     await this.persistSettings();
     await this.runtime.logger.info("settings.tool-gates", "Updated audio tool settings.", {
-      checkToolUpdates,
+      checkToolUpdates: effectiveCheck,
       autoDownloadTools,
     });
     return this.getSnapshot();

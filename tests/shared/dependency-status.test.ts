@@ -14,13 +14,15 @@ function facts(overrides: Partial<ToolFacts> = {}): ToolFacts {
     lastCheckedAtUtc: null,
     lastCheckError: null,
     lastError: null,
+    hasInstalledChecksum: false,
     ...overrides,
   };
 }
 
 // A healthy, provisioned baseline; per-test overrides drive the currency sub-state.
+// A normal install records the checksum, so the baseline has one.
 function provisioned(overrides: Partial<ToolFacts> = {}): ToolFacts {
-  return facts({ present: true, installedVersion: "8.1.1", ...overrides });
+  return facts({ present: true, installedVersion: "8.1.1", hasInstalledChecksum: true, ...overrides });
 }
 
 function derive(f: ToolFacts, t: ToolTransient = idle): DependencyStatus {
@@ -48,7 +50,7 @@ describe("I1 — derivation is pure and total", () => {
     const transients: ToolTransient[] = [
       idle,
       { kind: "running", operation: "provision", percent: 40 },
-      { kind: "failed", operation: "update", error: "boom" },
+      { kind: "failed", operation: "verify", error: "boom" },
     ];
     for (const f of cases) {
       for (const t of transients) {
@@ -115,7 +117,6 @@ describe("I6 — a failed operation is transient over persisted state", () => {
     const status = derive(facts(), { kind: "failed", operation: "provision", error: "network down" });
     expect(status.lifecycle).toBe("absent"); // persisted state unchanged
     expect(status.role).toBe("error"); // transient overlay
-    expect(status.operation).toBe("provision");
   });
 
   it("a running operation overlays informational regardless of base role", () => {
@@ -143,37 +144,55 @@ describe("I7 — roll-up is the worst role", () => {
   });
 });
 
-// The state → role → operation mapping the convention tables.
-describe("state mapping", () => {
-  it("absent → warning, provision", () => {
+// The state → role mapping the convention tables.
+describe("state → role mapping", () => {
+  it("absent → warning", () => {
     const s = derive(facts());
     expect(s.lifecycle).toBe("absent");
     expect(s.role).toBe("warning");
-    expect(s.operation).toBe("provision");
   });
 
-  it("provisioned · unchecked → informational, check", () => {
+  it("provisioned · unchecked → informational", () => {
     const s = derive(provisioned());
     expect(s.currency).toBe("unchecked");
     expect(s.role).toBe("informational");
-    expect(s.operation).toBe("check");
   });
 
-  it("provisioned · stale → warning, update", () => {
+  it("provisioned · stale → warning", () => {
     const s = derive(provisioned({ lastCheckedAtUtc: 5, desiredVersion: "8.2" }));
     expect(s.currency).toBe("stale");
     expect(s.role).toBe("warning");
-    expect(s.operation).toBe("update");
   });
 
-  it("provisioned · current → none, verify", () => {
+  it("provisioned · current → none", () => {
     const s = derive(provisioned({ lastCheckedAtUtc: 5, desiredVersion: "8.1.1" }));
     expect(s.role).toBe("none");
-    expect(s.operation).toBe("verify");
   });
 
-  it("faulted → error, verify (repair)", () => {
+  it("faulted → error", () => {
     const s = derive(facts({ present: true, faulted: true }));
-    expect(s.operation).toBe("verify");
+    expect(s.lifecycle).toBe("faulted");
+    expect(s.role).toBe("error");
+  });
+});
+
+// canVerify: Verify is meaningful only for an installed file with a recorded checksum.
+describe("canVerify", () => {
+  it("is false when absent (nothing installed)", () => {
+    expect(derive(facts()).canVerify).toBe(false);
+  });
+
+  it("is true for a provisioned tool with a recorded checksum", () => {
+    expect(derive(provisioned()).canVerify).toBe(true);
+  });
+
+  it("is false for a provisioned tool with no recorded checksum", () => {
+    const s = derive(facts({ present: true, installedVersion: "8.1.1", hasInstalledChecksum: false }));
+    expect(s.canVerify).toBe(false);
+  });
+
+  it("is true for a faulted tool with a recorded checksum (re-verify is allowed)", () => {
+    const s = derive(facts({ present: true, faulted: true, hasInstalledChecksum: true }));
+    expect(s.canVerify).toBe(true);
   });
 });

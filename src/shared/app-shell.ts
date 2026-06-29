@@ -32,7 +32,6 @@ export const APP_SHELL_CHANNELS = {
   resetState: "app-shell:reset-state",
   cancelPendingImports: "app-shell:cancel-pending-imports",
   provisionTool: "app-shell:provision-tool",
-  updateTool: "app-shell:update-tool",
   verifyTool: "app-shell:verify-tool",
   checkTools: "app-shell:check-tools",
   saveToolSettings: "app-shell:save-tool-settings",
@@ -374,8 +373,10 @@ export type ToolCurrency = "unchecked" | "current" | "stale" | "check-failed";
 // a concrete colour/icon.
 export type StatusRole = "none" | "informational" | "warning" | "error";
 
-// The single operation a row offers.
-export type ToolOperationKind = "provision" | "check" | "update" | "verify";
+// The kind of operation in flight, used to label the transient status. (Reinstall
+// re-acquires via the provision path, and Update folds into it, so neither needs a
+// distinct kind here.)
+export type ToolOperationKind = "provision" | "check" | "verify";
 
 // Persisted, honest per-tool facts — the single source of truth status derives
 // from. installedVersion and desiredVersion are stored already normalized, so they
@@ -392,8 +393,13 @@ export interface ToolFacts {
   // Non-null iff the last currency check failed — the signal that distinguishes
   // check-failed from a clean check. Separate from lastError below.
   lastCheckError: string | null;
-  // Display message for the last fault or failed operation (provision/verify).
+  // Display message for a fault (set only with faulted). Operation failures are
+  // transient, not persisted here.
   lastError: string | null;
+  // Whether an install checksum was recorded for the installed file. Verify needs
+  // one to re-hash against; without it there is nothing to inspect. (Derived from
+  // the persisted checksum's presence — the raw hash stays in the manager.)
+  hasInstalledChecksum: boolean;
 }
 
 // Transient, non-persisted status of an in-flight or just-failed operation. It
@@ -412,7 +418,9 @@ export interface DependencyStatus {
   lifecycle: ToolLifecycle;
   currency: ToolCurrency | null;
   role: StatusRole;
-  operation: ToolOperationKind | null;
+  // Whether Verify is meaningful: there is an installed file with a recorded
+  // checksum to re-hash against. The surface disables Verify when false.
+  canVerify: boolean;
   installedVersion: string | null;
   desiredVersion: string | null;
   lastCheckedAtUtc: number | null;
@@ -504,7 +512,6 @@ export interface MumblerShellApi {
   // Managed audio-tool operations. Each returns a fresh snapshot so the surface
   // reflects the new state; live progress arrives via onDependenciesUpdated.
   provisionTool(name: ToolName): Promise<AppSnapshot>;
-  updateTool(name: ToolName): Promise<AppSnapshot>;
   verifyTool(name: ToolName): Promise<AppSnapshot>;
   checkTools(): Promise<AppSnapshot>;
   saveToolSettings(checkToolUpdates: boolean, autoDownloadTools: boolean): Promise<AppSnapshot>;

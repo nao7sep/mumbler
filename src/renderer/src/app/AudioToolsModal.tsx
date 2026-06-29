@@ -6,25 +6,25 @@ import { ModalShell } from "./modal/ModalShell";
 
 // The management surface for mumbler's audio tools (ffmpeg/ffprobe), per the
 // managed-dependency-status-conventions: one named, dismissible surface listing
-// every tool with its state, version facts, the offered operation, live progress,
-// and per-tool error — rendered through the semantic role each row derives, with
-// the concrete colour left to the theme.
+// every tool with its state, version facts, live progress, and per-tool error.
+// Each row offers two explicit actions — Verify (re-hash the installed file
+// against the recorded checksum; never downloads) and Install/Reinstall
+// ((re)download and (re)install regardless of what's there) — plus a single
+// set-wide "Check for updates". Status is shown through the semantic role each row
+// derives; the theme owns the concrete colour.
 
 export interface AudioToolsModalProps {
   dependencies: DependencyStatus[];
   checkToolUpdates: boolean;
   autoDownloadTools: boolean;
   isChecking: boolean;
-  onProvision: (name: ToolName) => void;
-  onUpdate: (name: ToolName) => void;
   onVerify: (name: ToolName) => void;
+  onReinstall: (name: ToolName) => void;
   onCheck: () => void;
   onSaveGates: (checkToolUpdates: boolean, autoDownloadTools: boolean) => void;
   onClose: () => void;
 }
 
-// Map the semantic role to a theme class — the convention assigns the role; the
-// theme owns the colour.
 const ROLE_CLASS: Record<StatusRole, string> = {
   none: "tools-role--ok",
   informational: "tools-role--info",
@@ -47,19 +47,15 @@ function statusLabel(status: DependencyStatus): string {
   }
 }
 
-function actionLabel(operation: DependencyStatus["operation"]): string {
-  switch (operation) {
-    case "provision":
-      return "Install";
-    case "update":
-      return "Update";
-    case "verify":
-      return "Reinstall";
-    case "check":
-      return "Check";
-    default:
-      return "Reinstall";
-  }
+// The acquire action is one operation (re-acquire the latest), but its label is
+// context-aware per the managed-dependency-status convention so it reads right for
+// the state: Install when absent, Repair when faulted, Update when a newer version
+// is known, Reinstall otherwise.
+function acquireLabel(status: DependencyStatus): string {
+  if (status.lifecycle === "absent") return "Install";
+  if (status.lifecycle === "faulted") return "Repair";
+  if (status.currency === "stale") return "Update";
+  return "Reinstall";
 }
 
 function relativeTime(utcMs: number): string {
@@ -84,32 +80,12 @@ export function AudioToolsModal({
   checkToolUpdates,
   autoDownloadTools,
   isChecking,
-  onProvision,
-  onUpdate,
   onVerify,
+  onReinstall,
   onCheck,
   onSaveGates,
   onClose,
 }: AudioToolsModalProps): ReactElement {
-  function runOperation(status: DependencyStatus): void {
-    switch (status.operation) {
-      case "provision":
-        onProvision(status.name);
-        return;
-      case "update":
-        onUpdate(status.name);
-        return;
-      case "verify":
-        onVerify(status.name);
-        return;
-      case "check":
-        onCheck();
-        return;
-      default:
-        return;
-    }
-  }
-
   return (
     <ModalShell
       title="Audio Tools"
@@ -146,12 +122,13 @@ export function AudioToolsModal({
               <th>Status</th>
               <th>Installed</th>
               <th>Latest</th>
-              <th aria-label="Action" />
+              <th aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
             {dependencies.map((status) => {
               const running = status.transient.kind === "running";
+              const needsAttention = status.role === "warning" || status.role === "error";
               return (
                 <tr key={status.name}>
                   <td className="tools-table__name">{status.name}</td>
@@ -168,17 +145,25 @@ export function AudioToolsModal({
                           : "working…"}
                       </span>
                     ) : (
-                      <button
-                        type="button"
-                        className={
-                          status.role === "warning" || status.role === "error"
-                            ? "button button--primary button--compact"
-                            : "button button--ghost button--compact"
-                        }
-                        onClick={() => runOperation(status)}
-                      >
-                        {actionLabel(status.operation)}
-                      </button>
+                      <span className="tools-table__actions">
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact"
+                          onClick={() => onVerify(status.name)}
+                          disabled={!status.canVerify}
+                          title="Compare the installed file against its recorded checksum"
+                        >
+                          Verify
+                        </button>
+                        <button
+                          type="button"
+                          className={`button button--compact ${needsAttention ? "button--primary" : "button--ghost"}`}
+                          onClick={() => onReinstall(status.name)}
+                          title="Download and install a fresh copy"
+                        >
+                          {acquireLabel(status)}
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -200,21 +185,25 @@ export function AudioToolsModal({
           })}
 
         <div className="tools-gates">
-          <label className="field field--checkbox">
+          <label className="checkbox-field">
             <input
               type="checkbox"
-              checked={checkToolUpdates}
+              checked={checkToolUpdates || autoDownloadTools}
+              disabled={autoDownloadTools}
               onChange={(event) => onSaveGates(event.target.checked, autoDownloadTools)}
             />
-            <span>Check for tool updates on launch</span>
+            <span>
+              Check for tool updates on launch
+              {autoDownloadTools ? " (required while auto-download is on)" : ""}
+            </span>
           </label>
-          <label className="field field--checkbox">
+          <label className="checkbox-field">
             <input
               type="checkbox"
               checked={autoDownloadTools}
               onChange={(event) => onSaveGates(checkToolUpdates, event.target.checked)}
             />
-            <span>Download missing required tools automatically</span>
+            <span>Download missing required tools automatically (shown in this window)</span>
           </label>
         </div>
       </div>
