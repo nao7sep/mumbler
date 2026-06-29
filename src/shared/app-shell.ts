@@ -31,11 +31,17 @@ export const APP_SHELL_CHANNELS = {
   dismissAppWideError: "app-shell:dismiss-app-wide-error",
   resetState: "app-shell:reset-state",
   cancelPendingImports: "app-shell:cancel-pending-imports",
+  provisionTool: "app-shell:provision-tool",
+  updateTool: "app-shell:update-tool",
+  verifyTool: "app-shell:verify-tool",
+  checkTools: "app-shell:check-tools",
+  saveToolSettings: "app-shell:save-tool-settings",
 } as const;
 
 export const APP_SHELL_EVENTS = {
   appWideErrorUpdated: "app-shell:event-app-wide-error-updated",
   pipelineProgressUpdated: "app-shell:event-pipeline-progress-updated",
+  dependenciesUpdated: "app-shell:event-dependencies-updated",
 } as const;
 
 export type CardStatus =
@@ -111,6 +117,13 @@ export interface MumblerSettings {
   prompts: PromptTemplates;
   retryPolicy: RetryPolicy;
   timeouts: OperationTimeouts;
+  // Managed audio tools (ffmpeg/ffprobe), per the managed-dependency-status and
+  // version-and-update conventions. These gate only the *automatic* behaviour;
+  // the manual operations in the Audio Tools surface are always available.
+  // checkToolUpdates: run the (cached, staleness-gated) currency check on launch.
+  // autoDownloadTools: auto-fetch a missing required tool when the surface opens.
+  checkToolUpdates: boolean;
+  autoDownloadTools: boolean;
 }
 
 export type ImportSource = "file-picker" | "drag-and-drop";
@@ -241,6 +254,10 @@ export interface AppPaths {
   workingDir: string;
   outputDir: string;
   backupsDir: string;
+  // Managed audio tools: the installed executables live in binDir; their persisted
+  // facts in dependenciesPath. Per the storage-path-conventions, under the app root.
+  binDir: string;
+  dependenciesPath: string;
 }
 
 export interface SettingsSummary {
@@ -262,6 +279,10 @@ export interface SettingsSummary {
   transcriptionModel: string;
   metadataModel: string;
   concurrencyLimit: number;
+  // Managed audio-tool gates, surfaced so the Audio Tools modal can show and edit
+  // them without the full settings-draft roundtrip.
+  checkToolUpdates: boolean;
+  autoDownloadTools: boolean;
 }
 
 export interface SettingsDraft {
@@ -333,6 +354,72 @@ export type Platform =
   | "cygwin"
   | "netbsd";
 
+// ── Managed dependencies (the audio tools: ffmpeg / ffprobe) ──────────────────
+// State, surfacing, and operations for the tools mumbler provisions at runtime,
+// per the managed-dependency-status-conventions. Both tools are required to
+// function. The "unmanaged" (user-supplied) lifecycle is deliberately not modeled
+// — mumbler owns its bin directory and never adopts a hand-placed binary.
+
+export type ToolName = "ffmpeg" | "ffprobe";
+
+// Primary lifecycle. Currency is a sub-state of "provisioned" only — the model is
+// nested, so an impossible combination (an absent tool that is "stale") cannot be
+// expressed.
+export type ToolLifecycle = "absent" | "provisioned" | "faulted";
+
+// Currency sub-state, meaningful only while provisioned.
+export type ToolCurrency = "unchecked" | "current" | "stale" | "check-failed";
+
+// Semantic status role — the meaning, not the colour. The theme maps each role to
+// a concrete colour/icon.
+export type StatusRole = "none" | "informational" | "warning" | "error";
+
+// The single operation a row offers.
+export type ToolOperationKind = "provision" | "check" | "update" | "verify";
+
+// Persisted, honest per-tool facts — the single source of truth status derives
+// from. installedVersion and desiredVersion are stored already normalized, so they
+// compare by string equality.
+export interface ToolFacts {
+  present: boolean;
+  // True when present but unusable/untrustworthy: a failed integrity verify, an
+  // unreadable file, or an unparseable installed version. The sole route to the
+  // Faulted lifecycle, so a fault is always a recorded fact, never inferred.
+  faulted: boolean;
+  installedVersion: string | null;
+  desiredVersion: string | null;
+  lastCheckedAtUtc: number | null;
+  // Non-null iff the last currency check failed — the signal that distinguishes
+  // check-failed from a clean check. Separate from lastError below.
+  lastCheckError: string | null;
+  // Display message for the last fault or failed operation (provision/verify).
+  lastError: string | null;
+}
+
+// Transient, non-persisted status of an in-flight or just-failed operation. It
+// overlays the persisted state at render and never becomes a lifecycle state — a
+// failed Provision leaves the tool Absent with lastError set, not "install-failed".
+export type ToolTransient =
+  | { kind: "idle" }
+  | { kind: "running"; operation: ToolOperationKind; percent: number | null }
+  | { kind: "failed"; operation: ToolOperationKind; error: string };
+
+// The derived row the surface renders — the output of deriveStatus(). Rendering
+// reads this and nothing else (no filesystem probe, no --version call).
+export interface DependencyStatus {
+  name: ToolName;
+  required: boolean;
+  lifecycle: ToolLifecycle;
+  currency: ToolCurrency | null;
+  role: StatusRole;
+  operation: ToolOperationKind | null;
+  installedVersion: string | null;
+  desiredVersion: string | null;
+  lastCheckedAtUtc: number | null;
+  error: string | null;
+  transient: ToolTransient;
+}
+
 export interface AppSnapshot {
   appName: string;
   appVersion: string;
@@ -346,6 +433,10 @@ export interface AppSnapshot {
   startupDiagnostic: StartupDiagnostic | null;
   appWideError: StartupDiagnostic | null;
   state: MumblerState | null;
+  // Derived status of each managed audio tool, computed in main via deriveStatus
+  // from persisted facts + transient operation status. The renderer reads these
+  // directly (never probes). Null until the runtime is ready.
+  dependencies: DependencyStatus[] | null;
 }
 
 export interface FailedImport {
@@ -410,7 +501,15 @@ export interface MumblerShellApi {
   dismissAppWideError(): Promise<AppSnapshot>;
   resetState(): Promise<AppSnapshot>;
   cancelPendingImports(): Promise<AppSnapshot>;
+  // Managed audio-tool operations. Each returns a fresh snapshot so the surface
+  // reflects the new state; live progress arrives via onDependenciesUpdated.
+  provisionTool(name: ToolName): Promise<AppSnapshot>;
+  updateTool(name: ToolName): Promise<AppSnapshot>;
+  verifyTool(name: ToolName): Promise<AppSnapshot>;
+  checkTools(): Promise<AppSnapshot>;
+  saveToolSettings(checkToolUpdates: boolean, autoDownloadTools: boolean): Promise<AppSnapshot>;
   getPathForFile(file: File): string;
   onAppWideErrorChanged(listener: () => void): () => void;
   onPipelineProgressUpdated(listener: () => void): () => void;
+  onDependenciesUpdated(listener: () => void): () => void;
 }

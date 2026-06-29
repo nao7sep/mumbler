@@ -96,6 +96,14 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  runtime.onDependenciesChanged(() => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(APP_SHELL_EVENTS.dependenciesUpdated);
+      }
+    }
+  });
+
   process.on("uncaughtException", (error) => {
     void runtime.reportMainProcessError("uncaughtException", error).then(() => {
       broadcastAppWideError();

@@ -11,12 +11,10 @@ files:
   - out/**
   - package.json
 
-# ffmpeg-static and ffprobe-static ship plain executable binaries that the app
-# runs via execFile, resolving their paths through require()/require.resolve at
-# runtime. An asar archive would trap those binaries — a path inside app.asar is
-# not executable — and the app does not rewrite paths to app.asar.unpacked. So
-# disable asar, leaving node_modules as real files whose resolved paths run.
-asar: false
+# asar stays at its default (enabled): mumbler bundles no executable native
+# binaries. ffmpeg and ffprobe are managed downloads fetched at runtime into the
+# app data dir (~/.mumbler/bin), never packaged, so there is nothing that an asar
+# archive would trap.
 
 # Tahoe "Liquid Glass" icon: the liquid-glass-icon tool deploys build/Assets.car (committed in
 # company/assets) here. macOS 26 reads CFBundleIconName below → this catalog; older macOS reads

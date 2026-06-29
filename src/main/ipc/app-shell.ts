@@ -8,6 +8,7 @@ import {
   type RendererErrorReport,
   type SaveConflictResolution,
   type SettingsDraft,
+  type ToolName,
 } from "@shared/app-shell";
 
 import type { ApplicationRuntime } from "../core/app-runtime";
@@ -81,6 +82,12 @@ function assertGenerateTarget(value: unknown): asserts value is GenerateTarget {
     value !== "slug"
   ) {
     throw new Error("Invalid IPC parameter: target must be a card processing step.");
+  }
+}
+
+function assertToolName(value: unknown): asserts value is ToolName {
+  if (value !== "ffmpeg" && value !== "ffprobe") {
+    throw new Error("Invalid IPC parameter: tool must be ffmpeg or ffprobe.");
   }
 }
 
@@ -230,4 +237,31 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
   handle(APP_SHELL_CHANNELS.dismissAppWideError, () => runtime.dismissAppWideError());
   handle(APP_SHELL_CHANNELS.resetState, () => runtime.resetState());
   handle(APP_SHELL_CHANNELS.cancelPendingImports, () => runtime.cancelPendingImports());
+
+  handle(APP_SHELL_CHANNELS.provisionTool, (_event, name: ToolName) => {
+    assertToolName(name);
+    return runtime.provisionTool(name);
+  });
+
+  handle(APP_SHELL_CHANNELS.updateTool, (_event, name: ToolName) => {
+    assertToolName(name);
+    return runtime.updateTool(name);
+  });
+
+  handle(APP_SHELL_CHANNELS.verifyTool, (_event, name: ToolName) => {
+    assertToolName(name);
+    return runtime.verifyTool(name);
+  });
+
+  handle(APP_SHELL_CHANNELS.checkTools, () => runtime.checkTools());
+
+  handle(
+    APP_SHELL_CHANNELS.saveToolSettings,
+    (_event, checkToolUpdates: boolean, autoDownloadTools: boolean) => {
+      if (typeof checkToolUpdates !== "boolean" || typeof autoDownloadTools !== "boolean") {
+        throw new Error("Invalid IPC parameter: tool settings must be booleans.");
+      }
+      return runtime.saveToolSettings(checkToolUpdates, autoDownloadTools);
+    },
+  );
 }

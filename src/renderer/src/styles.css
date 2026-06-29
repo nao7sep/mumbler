@@ -1597,3 +1597,83 @@ textarea:focus-visible,
     transform: translateY(0);
   }
 }
+
+/* ── Audio Tools (managed dependency status surface) ─────────────────────────
+   Semantic status roles map to theme colours here, per the
+   managed-dependency-status-conventions: informational = neutral/processing,
+   warning = attention, error = something wrong. The role-to-colour mapping lives
+   only in these classes; the components name roles, never colours. */
+.tools-role--ok {
+  color: var(--success);
+}
+.tools-role--info {
+  color: var(--processing);
+}
+.tools-role--warning {
+  color: var(--warning);
+}
+.tools-role--error {
+  color: var(--danger);
+}
+
+.tools-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 8px;
+}
+
+.tools-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.tools-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.tools-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+.tools-table__name {
+  font-weight: 600;
+}
+.tools-table__action {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.tools-error {
+  margin-top: 12px;
+}
+
+.tools-gates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.field--checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Roll-up indicator in the top bar; coloured by the worst current role. */
+.tools-chip--informational {
+  color: var(--processing);
+}
+.tools-chip--warning {
+  color: var(--warning);
+}
+.tools-chip--error {
+  color: var(--danger);
+}

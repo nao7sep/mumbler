@@ -98,6 +98,12 @@ function normalizeSettings(
         asPositiveInteger(timeouts?.transcriptionMs) ?? defaults.timeouts.transcriptionMs,
       metadataMs: asPositiveInteger(timeouts?.metadataMs) ?? defaults.timeouts.metadataMs,
     },
+    // Managed audio-tool gates. Missing → default (on); not migration scaffolding,
+    // just defaulting an absent key so an existing 0.1.0 config keeps loading.
+    checkToolUpdates:
+      typeof raw.checkToolUpdates === "boolean" ? raw.checkToolUpdates : defaults.checkToolUpdates,
+    autoDownloadTools:
+      typeof raw.autoDownloadTools === "boolean" ? raw.autoDownloadTools : defaults.autoDownloadTools,
   };
 }
 
@@ -365,6 +371,10 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
       transcriptionMs: 30 * 60 * 1000,
       metadataMs: 5 * 60 * 1000,
     },
+    // Managed audio tools default to checking for updates and auto-fetching a
+    // missing required tool; the manual operations stay available either way.
+    checkToolUpdates: true,
+    autoDownloadTools: true,
   };
 }
 
@@ -430,6 +440,8 @@ export function summarizeSettings(
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
     concurrencyLimit: settings.concurrencyLimit,
+    checkToolUpdates: settings.checkToolUpdates,
+    autoDownloadTools: settings.autoDownloadTools,
   };
 }
 

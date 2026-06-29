@@ -12,8 +12,10 @@ import type {
   MumblerCard,
   PendingImportReviewItem,
   SaveCardResult,
+  ToolName,
 } from "@shared/app-shell";
 import { GEMINI_MODELS } from "@shared/app-shell";
+import { rollUpRole } from "@shared/dependency-status";
 import {
   formatUtcForDisplay,
   getLocalTimestampError,
@@ -38,6 +40,7 @@ import {
   SaveConflictModal,
 } from "./DecisionModals";
 import { AboutModal } from "./AboutModal";
+import { AudioToolsModal } from "./AudioToolsModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
 import { useSettingsModal } from "./useSettingsModal";
@@ -117,6 +120,9 @@ export function App(): ReactElement {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [showAudioTools, setShowAudioTools] = useState(false);
+  const [isCheckingTools, setIsCheckingTools] = useState(false);
+  const autoOpenedAudioToolsRef = useRef(false);
   const [showReviewDiscardConfirm, setShowReviewDiscardConfirm] = useState(false);
   const initialReviewDraftsRef = useRef<PendingImportReviewItem[] | null>(null);
   const waveformEditorRef = useRef<WaveformEditorHandle | null>(null);
@@ -263,6 +269,38 @@ export function App(): ReactElement {
   }, []);
 
   useEffect(() => {
+    return window.mumbler.onDependenciesUpdated(() => {
+      void window.mumbler
+        .getSnapshot()
+        .then((nextSnapshot) => setSnapshot(nextSnapshot))
+        .catch((error: unknown) => {
+          addPersistent(
+            error instanceof Error ? error.message : "Failed to refresh audio tools state.",
+            "error",
+          );
+        });
+    });
+  }, []);
+
+  const dependencies = snapshot?.dependencies ?? null;
+
+  // Blocking-on-required-Absent: open the Audio Tools surface once when a required
+  // tool is missing, so the user resolves it before exercising a feature that
+  // needs it. Open once — re-opening on every refresh would fight the user closing it.
+  useEffect(() => {
+    if (dependencies === null) {
+      return;
+    }
+    const missingRequired = dependencies.some(
+      (dep) => dep.required && dep.lifecycle === "absent",
+    );
+    if (missingRequired && !autoOpenedAudioToolsRef.current) {
+      autoOpenedAudioToolsRef.current = true;
+      setShowAudioTools(true);
+    }
+  }, [dependencies]);
+
+  useEffect(() => {
     snapshotRef.current = snapshot;
   }, [snapshot]);
 
@@ -332,6 +370,7 @@ export function App(): ReactElement {
     pendingGenerate !== null ||
     showAbout ||
     showShortcutsHelp ||
+    showAudioTools ||
     snapshot?.startupDiagnostic != null ||
     snapshot?.appWideError != null;
   async function handleCardSelect(cardId: string): Promise<void> {
@@ -486,6 +525,48 @@ export function App(): ReactElement {
     }
   }
 
+  // Audio-tool operations. The main process records per-tool progress/errors in
+  // the snapshot (live, via onDependenciesUpdated), so these just apply the
+  // returned snapshot; a thrown failure (e.g. an operation already in flight)
+  // surfaces as a persistent notice.
+  function applyToolSnapshot(promise: Promise<AppSnapshot>, failMessage: string): void {
+    void promise
+      .then((nextSnapshot) => setSnapshot(nextSnapshot))
+      .catch((error: unknown) => {
+        addPersistent(error instanceof Error ? error.message : failMessage, "error");
+      });
+  }
+
+  function handleProvisionTool(name: ToolName): void {
+    applyToolSnapshot(window.mumbler.provisionTool(name), "Failed to install audio tool.");
+  }
+
+  function handleUpdateTool(name: ToolName): void {
+    applyToolSnapshot(window.mumbler.updateTool(name), "Failed to update audio tool.");
+  }
+
+  function handleVerifyTool(name: ToolName): void {
+    applyToolSnapshot(window.mumbler.verifyTool(name), "Failed to reinstall audio tool.");
+  }
+
+  function handleCheckTools(): void {
+    setIsCheckingTools(true);
+    void window.mumbler
+      .checkTools()
+      .then((nextSnapshot) => setSnapshot(nextSnapshot))
+      .catch((error: unknown) => {
+        addPersistent(error instanceof Error ? error.message : "Failed to check audio tools.", "error");
+      })
+      .finally(() => setIsCheckingTools(false));
+  }
+
+  function handleSaveToolGates(checkToolUpdates: boolean, autoDownloadTools: boolean): void {
+    applyToolSnapshot(
+      window.mumbler.saveToolSettings(checkToolUpdates, autoDownloadTools),
+      "Failed to save audio tool settings.",
+    );
+  }
+
   async function handleShortcutCommand(commandId: string): Promise<void> {
     if (selectedCard === null) {
       return;
@@ -638,6 +719,15 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
+          {dependencies && rollUpRole(dependencies) !== "none" ? (
+            <button
+              type="button"
+              className={`button button--ghost button--compact tools-chip tools-chip--${rollUpRole(dependencies)}`}
+              onClick={() => setShowAudioTools(true)}
+            >
+              Audio Tools
+            </button>
+          ) : null}
           <div className="app-menu-anchor">
             <Menu
               open={isMenuOpen}
@@ -676,6 +766,13 @@ export function App(): ReactElement {
                 onSelect={() => void settingsModal.handleOpenSettings()}
               >
                 Settings
+              </MenuItem>
+              <MenuItem
+                className="app-menu-item"
+                disabled={snapshot === null || snapshot.dependencies === null}
+                onSelect={() => setShowAudioTools(true)}
+              >
+                Audio Tools
               </MenuItem>
               <MenuItem
                 className="app-menu-item"
@@ -1328,6 +1425,21 @@ export function App(): ReactElement {
 
       {showShortcutsHelp ? (
         <ShortcutsHelpModal onClose={() => setShowShortcutsHelp(false)} />
+      ) : null}
+
+      {showAudioTools && snapshot?.dependencies ? (
+        <AudioToolsModal
+          dependencies={snapshot.dependencies}
+          checkToolUpdates={snapshot.settingsSummary?.checkToolUpdates ?? true}
+          autoDownloadTools={snapshot.settingsSummary?.autoDownloadTools ?? true}
+          isChecking={isCheckingTools}
+          onProvision={handleProvisionTool}
+          onUpdate={handleUpdateTool}
+          onVerify={handleVerifyTool}
+          onCheck={handleCheckTools}
+          onSaveGates={handleSaveToolGates}
+          onClose={() => setShowAudioTools(false)}
+        />
       ) : null}
 
       {notifications.filter(n => n.kind === "toast").length > 0 && (

@@ -14,6 +14,7 @@ import {
   type SaveCardResult,
   type SaveConflictResolution,
   type SettingsDraft,
+  type ToolName,
 } from "@shared/app-shell";
 
 const api: MumblerShellApi = {
@@ -74,6 +75,19 @@ const api: MumblerShellApi = {
   resetState: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.resetState) as Promise<AppSnapshot>,
   cancelPendingImports: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelPendingImports) as Promise<AppSnapshot>,
+  provisionTool: (name: ToolName) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.provisionTool, name) as Promise<AppSnapshot>,
+  updateTool: (name: ToolName) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.updateTool, name) as Promise<AppSnapshot>,
+  verifyTool: (name: ToolName) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.verifyTool, name) as Promise<AppSnapshot>,
+  checkTools: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.checkTools) as Promise<AppSnapshot>,
+  saveToolSettings: (checkToolUpdates: boolean, autoDownloadTools: boolean) =>
+    ipcRenderer.invoke(
+      APP_SHELL_CHANNELS.saveToolSettings,
+      checkToolUpdates,
+      autoDownloadTools,
+    ) as Promise<AppSnapshot>,
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   onAppWideErrorChanged: (listener: () => void) => {
     const wrapped = () => {
@@ -91,6 +105,15 @@ const api: MumblerShellApi = {
     ipcRenderer.on(APP_SHELL_EVENTS.pipelineProgressUpdated, wrapped);
     return () => {
       ipcRenderer.removeListener(APP_SHELL_EVENTS.pipelineProgressUpdated, wrapped);
+    };
+  },
+  onDependenciesUpdated: (listener: () => void) => {
+    const wrapped = () => {
+      listener();
+    };
+    ipcRenderer.on(APP_SHELL_EVENTS.dependenciesUpdated, wrapped);
+    return () => {
+      ipcRenderer.removeListener(APP_SHELL_EVENTS.dependenciesUpdated, wrapped);
     };
   },
 };

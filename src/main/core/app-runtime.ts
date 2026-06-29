@@ -21,14 +21,17 @@ import {
   type SaveCardResult,
   type SaveConflictResolution,
   type SettingsDraft,
+  type ToolName,
 } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
 import {
   analyzeTrimDecision,
-  assertFfmpegToolingPresent,
+  configureToolResolver,
   prepareAudioForTranscription,
   probeAudioProfile,
 } from "./audio-tools";
+import { ToolManager } from "./binaries/manager";
+import { createDependenciesStore } from "./binaries/store";
 import {
   formatUtcForDisplay,
   formatUtcMarker,
@@ -74,6 +77,10 @@ import {
 // never reaches an end-user's disk.
 const DEBUG_LOGGING_ENABLED = !app.isPackaged || process.env.MUMBLER_DEBUG === "1";
 
+// A managed audio-tool currency check is skipped if a successful one ran within
+// this window — keeps the startup check off the network on most launches.
+const TOOL_CHECK_STALE_MS = 24 * 60 * 60 * 1000;
+
 interface AppRuntimeState {
   paths: AppPaths | null;
   settings: MumblerSettings | null;
@@ -85,6 +92,8 @@ interface AppRuntimeState {
   appWideError: AppSnapshot["appWideError"];
   recoveredInterruptedCards: number;
   shellReadyAtUtc: number;
+  // The managed audio-tool (ffmpeg/ffprobe) controller; null on a failed startup.
+  toolManager: ToolManager | null;
   // Cached presence of a resolvable Gemini key (env or stored secrets file), so
   // the synchronous getSnapshot()/summarizeSettings() can report it without
   // touching the filesystem. Refreshed at startup and after any set/clear.
@@ -109,6 +118,7 @@ export class ApplicationRuntime {
   private shuttingDown = false;
   private shutdownPromise: Promise<void> | null = null;
   private onPipelineProgressCallback: (() => void) | null = null;
+  private onDependenciesChangedCallback: (() => void) | null = null;
 
   private constructor(runtime: AppRuntimeState) {
     this.runtime = runtime;
@@ -151,6 +161,7 @@ export class ApplicationRuntime {
         appWideError: null,
         recoveredInterruptedCards: 0,
         shellReadyAtUtc,
+        toolManager: null,
         hasGeminiApiKey: false,
       });
     }
@@ -170,7 +181,6 @@ export class ApplicationRuntime {
 
     try {
       await ensureDirectories(paths);
-      assertFfmpegToolingPresent();
 
       const settingsLoad = await settingsStore.load();
       const settings = settingsLoad.value;
@@ -241,9 +251,38 @@ export class ApplicationRuntime {
         appWideError: null,
         recoveredInterruptedCards: recovered.recoveredInterruptedCards,
         shellReadyAtUtc,
+        toolManager: null,
         hasGeminiApiKey,
       });
+
+      // Managed audio tools (ffmpeg/ffprobe). The store holds their persisted
+      // facts; the manager reconciles on-disk presence, drives the operations, and
+      // notifies the runtime to re-emit the snapshot as state changes. The tool
+      // resolver is wired so audio-tools can find the managed binaries; a missing
+      // tool surfaces through the Audio Tools surface, never a hard startup failure.
+      const dependenciesStore = createDependenciesStore(paths.dependenciesPath);
+      const dependenciesLoad = await dependenciesStore.load();
+      if (dependenciesLoad.origin === "created") {
+        await dependenciesStore.save(dependenciesLoad.value);
+      }
+      const toolManager = new ToolManager({
+        binDir: paths.binDir,
+        downloadsDir: join(paths.workingDir, "tool-downloads"),
+        platform: process.platform,
+        arch: process.arch,
+        value: dependenciesLoad.value,
+        store: dependenciesStore,
+        logger,
+        notify: () => runtime.emitDependenciesChanged(),
+      });
+      await toolManager.reconcile();
+      runtime.attachToolManager(toolManager);
+      configureToolResolver((name) => toolManager.resolveToolPath(name));
+
       await runtime.drainQueuedCards();
+      // Tool maintenance (auto-download missing required tools, staleness-gated
+      // currency check) runs in the background so it never blocks the shell.
+      void runtime.startToolMaintenance();
       return runtime;
     } catch (error: unknown) {
       // Record the startup failure in the session log before surfacing it as a
@@ -271,6 +310,7 @@ export class ApplicationRuntime {
         appWideError: null,
         recoveredInterruptedCards: 0,
         shellReadyAtUtc,
+        toolManager: null,
         hasGeminiApiKey: false,
       });
     }
@@ -278,6 +318,92 @@ export class ApplicationRuntime {
 
   onPipelineProgress(callback: () => void): void {
     this.onPipelineProgressCallback = callback;
+  }
+
+  onDependenciesChanged(callback: () => void): void {
+    this.onDependenciesChangedCallback = callback;
+  }
+
+  // Called by the ToolManager whenever dependency state changes (an operation's
+  // progress, completion, or failure) so the renderer re-pulls the snapshot.
+  emitDependenciesChanged(): void {
+    this.onDependenciesChangedCallback?.();
+  }
+
+  // Attach the managed-tool controller built during initialize().
+  attachToolManager(manager: ToolManager): void {
+    this.runtime.toolManager = manager;
+  }
+
+  // Background startup maintenance: auto-fetch missing required tools (gated by
+  // autoDownloadTools), then a staleness-gated currency check (gated by
+  // checkToolUpdates). Both record their own outcomes and never throw, so a
+  // failure here never disturbs the shell.
+  async startToolMaintenance(): Promise<void> {
+    const manager = this.runtime.toolManager;
+    const settings = this.runtime.settings;
+    if (manager === null || settings === null) {
+      return;
+    }
+    try {
+      if (settings.autoDownloadTools) {
+        for (const name of manager.missingRequired()) {
+          await manager.installTool(name, "provision");
+        }
+      }
+      if (settings.checkToolUpdates && manager.checkIsStale(TOOL_CHECK_STALE_MS)) {
+        await manager.checkTools();
+      }
+    } catch (error: unknown) {
+      await this.runtime.logger.warn("tools.maintenance", "Background tool maintenance failed.", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private ensureToolManager(): ToolManager {
+    if (this.runtime.toolManager === null) {
+      throw new OperationError("Audio tools are unavailable.");
+    }
+    return this.runtime.toolManager;
+  }
+
+  async provisionTool(name: ToolName): Promise<AppSnapshot> {
+    await this.ensureToolManager().installTool(name, "provision");
+    return this.getSnapshot();
+  }
+
+  async updateTool(name: ToolName): Promise<AppSnapshot> {
+    await this.ensureToolManager().installTool(name, "update");
+    return this.getSnapshot();
+  }
+
+  async verifyTool(name: ToolName): Promise<AppSnapshot> {
+    await this.ensureToolManager().installTool(name, "verify");
+    return this.getSnapshot();
+  }
+
+  async checkTools(): Promise<AppSnapshot> {
+    await this.ensureToolManager().checkTools();
+    return this.getSnapshot();
+  }
+
+  async saveToolSettings(
+    checkToolUpdates: boolean,
+    autoDownloadTools: boolean,
+  ): Promise<AppSnapshot> {
+    this.ensureReady();
+    this.runtime.settings = {
+      ...this.runtime.settings!,
+      checkToolUpdates,
+      autoDownloadTools,
+    };
+    await this.persistSettings();
+    await this.runtime.logger.info("settings.tool-gates", "Updated audio tool settings.", {
+      checkToolUpdates,
+      autoDownloadTools,
+    });
+    return this.getSnapshot();
   }
 
   // The per-launch session logger. Exposed so the IPC boundary and the asset
@@ -320,6 +446,7 @@ export class ApplicationRuntime {
       startupDiagnostic: this.runtime.startupDiagnostic,
       appWideError: this.runtime.appWideError,
       state,
+      dependencies: this.runtime.toolManager?.listStatuses() ?? null,
     };
   }
 
@@ -1576,6 +1703,8 @@ function getAppPaths(): AppPaths {
     workingDir: join(homeDir, "working"),
     outputDir: join(homeDir, "output"),
     backupsDir: join(homeDir, "backups"),
+    binDir: join(homeDir, "bin"),
+    dependenciesPath: join(homeDir, "dependencies.json"),
   };
 }
 
@@ -1593,6 +1722,7 @@ async function ensureDirectories(paths: AppPaths): Promise<void> {
   await mkdir(paths.homeDir, { recursive: true });
   await mkdir(paths.logsDir, { recursive: true });
   await mkdir(paths.workingDir, { recursive: true });
+  await mkdir(paths.binDir, { recursive: true });
 }
 
 export function buildConfirmedTimestamps(

@@ -1,18 +1,25 @@
 import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { arch, platform } from "node:os";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { nanoid } from "nanoid";
 
-import type { AudioProfile, CardTrim, TrimDecision } from "@shared/app-shell";
+import type { AudioProfile, CardTrim, TrimDecision, ToolName } from "@shared/app-shell";
 import { type AppLogger } from "./logger";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TRIM_TOLERANCE_SEC = 3;
-const require = createRequire(import.meta.url);
+
+// ffmpeg/ffprobe are managed dependencies resolved through the ToolManager (see
+// core/binaries), not npm wrappers. The runtime injects the resolver once the
+// manager is built; resolving a tool that is missing or faulted throws a
+// user-facing error pointing at the Audio Tools surface.
+let toolPathResolver: ((name: ToolName) => string) | null = null;
+
+export function configureToolResolver(resolve: (name: ToolName) => string): void {
+  toolPathResolver = resolve;
+}
 
 interface PacketBoundary {
   startSec: number;
@@ -250,30 +257,19 @@ export function inferAudioMimeType(filePath: string): string {
   }
 }
 
-function resolveFfprobePath(): string {
-  const required = require("ffprobe-static") as { path?: string };
-  if (required?.path) {
-    return required.path;
+function resolveToolPath(name: ToolName): string {
+  if (toolPathResolver === null) {
+    throw new Error("Audio tool resolver is not configured.");
   }
+  return toolPathResolver(name);
+}
 
-  const packagePath = require.resolve("ffprobe-static/package.json");
-  const binaryPath = join(
-    dirname(packagePath),
-    "bin",
-    platform(),
-    arch(),
-    platform() === "win32" ? "ffprobe.exe" : "ffprobe",
-  );
-  return binaryPath;
+function resolveFfprobePath(): string {
+  return resolveToolPath("ffprobe");
 }
 
 function resolveFfmpegPath(): string {
-  const required = require("ffmpeg-static") as string | null;
-  if (!required) {
-    throw new Error("ffmpeg-static did not provide a binary path.");
-  }
-
-  return required;
+  return resolveToolPath("ffmpeg");
 }
 
 async function runFfmpegTrim(params: {
@@ -506,7 +502,3 @@ function roundSeconds(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
-export function assertFfmpegToolingPresent(): void {
-  resolveFfmpegPath();
-  resolveFfprobePath();
-}
