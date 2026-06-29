@@ -51,12 +51,7 @@ import {
 } from "./file-output";
 
 import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, getSystemTimezone, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
-import {
-  clearGeminiApiKey as clearStoredGeminiApiKey,
-  hasGeminiApiKey as hasStoredGeminiApiKey,
-  resolveGeminiApiKey,
-  writeGeminiApiKey as writeStoredGeminiApiKey,
-} from "./api-keys";
+import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
 import { type AppLogger, createLogger, serializeError } from "./logger";
 import { OperationError } from "./operation-error";
 import {
@@ -188,8 +183,10 @@ export class ApplicationRuntime {
 
       // Resolve whether a Gemini key is available (env-first, then the dedicated
       // secrets file) once, so the snapshot can report presence without async I/O.
-      const hasGeminiApiKey = await hasStoredGeminiApiKey(
+      const hasGeminiApiKey = await hasApiKey(
         paths.apiKeysPath,
+        ["gemini"],
+        undefined,
         makeApiKeyWarn(logger),
       );
 
@@ -1090,7 +1087,7 @@ export class ApplicationRuntime {
       throw new OperationError("Enter a Gemini API key.");
     }
 
-    await writeStoredGeminiApiKey(this.runtime.paths!.apiKeysPath, trimmed, this.apiKeyWarn());
+    await writeApiKey(this.runtime.paths!.apiKeysPath, ["gemini"], trimmed, this.apiKeyWarn());
     await this.refreshHasGeminiApiKey();
     await this.runtime.logger.info("settings.api-key-set", "Stored Gemini API key.", {
       hasGeminiApiKey: this.runtime.hasGeminiApiKey,
@@ -1104,7 +1101,7 @@ export class ApplicationRuntime {
   // present, still resolves afterward — so hasGeminiApiKey may remain true.
   async clearGeminiApiKey(): Promise<AppSnapshot> {
     this.ensureReady();
-    await clearStoredGeminiApiKey(this.runtime.paths!.apiKeysPath, this.apiKeyWarn());
+    await clearApiKey(this.runtime.paths!.apiKeysPath, ["gemini"], this.apiKeyWarn());
     await this.refreshHasGeminiApiKey();
     await this.runtime.logger.info("settings.api-key-clear", "Cleared stored Gemini API key.", {
       hasGeminiApiKey: this.runtime.hasGeminiApiKey,
@@ -1116,12 +1113,14 @@ export class ApplicationRuntime {
   // null when neither is set. Single chokepoint used by the pipeline guards and
   // by spawnCardPipeline; nothing else reads the secret.
   private async resolveGeminiApiKey(): Promise<string | null> {
-    return resolveGeminiApiKey(this.runtime.paths!.apiKeysPath, this.apiKeyWarn());
+    return resolveApiKey(this.runtime.paths!.apiKeysPath, ["gemini"], undefined, this.apiKeyWarn());
   }
 
   private async refreshHasGeminiApiKey(): Promise<void> {
-    this.runtime.hasGeminiApiKey = await hasStoredGeminiApiKey(
+    this.runtime.hasGeminiApiKey = await hasApiKey(
       this.runtime.paths!.apiKeysPath,
+      ["gemini"],
+      undefined,
       this.apiKeyWarn(),
     );
   }
