@@ -12,6 +12,7 @@ import type {
   MumblerCard,
   PendingImportReviewItem,
   SaveCardResult,
+  StatusRole,
   ToolName,
 } from "@shared/app-shell";
 import { GEMINI_MODELS } from "@shared/app-shell";
@@ -84,6 +85,37 @@ interface AppNotification {
   variant: "info" | "error";
 }
 
+// The topbar dependency roll-up (managed-runtime-dependencies-conventions): a
+// single status message at the worst role present that opens the Audio Tools
+// surface. It is deliberately a tinted status pill, not a plain button — a missing
+// or outdated tool needs to read as a condition that wants attention.
+function toolsChipMessage(role: StatusRole): string {
+  return role === "informational" ? "Audio tools: updates unchecked" : "Audio tools need attention";
+}
+
+function ToolsChipIcon({ role }: { role: StatusRole }): ReactElement {
+  // A warning triangle for warning/error, an info circle for the benign
+  // not-yet-checked case. Inherits the chip's role colour via currentColor.
+  if (role === "informational") {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11.5v4.5" />
+        <path d="M12 8h.01" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3.5 2.5 20.5h19L12 3.5Z" />
+      <path d="M12 10v4" />
+      <path d="M12 17.5h.01" />
+    </svg>
+  );
+}
+
 export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -122,6 +154,7 @@ export function App(): ReactElement {
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showAudioTools, setShowAudioTools] = useState(false);
   const [isCheckingTools, setIsCheckingTools] = useState(false);
+  const [toolCheckNotice, setToolCheckNotice] = useState<string | null>(null);
   const autoOpenedAudioToolsRef = useRef(false);
   const [showReviewDiscardConfirm, setShowReviewDiscardConfirm] = useState(false);
   const initialReviewDraftsRef = useRef<PendingImportReviewItem[] | null>(null);
@@ -283,30 +316,34 @@ export function App(): ReactElement {
   }, []);
 
   const dependencies = snapshot?.dependencies ?? null;
-  const checkToolUpdates = snapshot?.settingsSummary?.checkToolUpdates ?? false;
 
-  // Recommended launch behaviour (managed-dependency-status convention): when
-  // check-on-launch is on, surface the Audio Tools modal once if anything needs
-  // attention — missing, outdated, faulted, or an auto-download already running.
-  // With it off, nothing surfaces here; a missing required tool is caught lazily
-  // at first use (its operation errors and points here). Open once, so a refresh
-  // can't reopen it against the user who just closed it.
+  // Blocking-first-run (managed-runtime-dependencies-conventions): a required tool
+  // that is missing opens the Audio Tools modal once as an instruction — regardless
+  // of the launch-check toggle, since the app cannot trim or probe without it. An
+  // available update is NOT a reason to interrupt; it surfaces only via the status
+  // chip. Open once, so a refresh can't reopen it against the user who just closed.
   useEffect(() => {
-    if (dependencies === null || !checkToolUpdates) {
+    if (dependencies === null) {
       return;
     }
-    const needsAttention = dependencies.some(
-      (dep) =>
-        dep.lifecycle === "absent" ||
-        dep.lifecycle === "faulted" ||
-        dep.currency === "stale" ||
-        dep.transient.kind !== "idle",
+    const requiredMissing = dependencies.some(
+      (dep) => dep.required && dep.state === "not-installed",
     );
-    if (needsAttention && !autoOpenedAudioToolsRef.current) {
+    if (requiredMissing && !autoOpenedAudioToolsRef.current) {
       autoOpenedAudioToolsRef.current = true;
       setShowAudioTools(true);
     }
-  }, [dependencies, checkToolUpdates]);
+  }, [dependencies]);
+
+  // The failed-check notice is a temporary FYI: clear it after a few seconds so it
+  // doesn't linger as if it were a persisted state.
+  useEffect(() => {
+    if (toolCheckNotice === null) {
+      return;
+    }
+    const timer = setTimeout(() => setToolCheckNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [toolCheckNotice]);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -545,31 +582,33 @@ export function App(): ReactElement {
       });
   }
 
-  // Reinstall = (re)download and (re)install regardless of what's present; the
-  // provision path always re-acquires the latest.
-  function handleReinstallTool(name: ToolName): void {
+  // The single acquire action: Install when missing, Update when a newer version
+  // is known — the same provision path, which always fetches and verifies the
+  // latest build.
+  function handleProvisionTool(name: ToolName): void {
     applyToolSnapshot(window.mumbler.provisionTool(name), "Failed to install audio tool.");
   }
 
-  // Verify = re-hash the installed file against its recorded checksum; never downloads.
-  function handleVerifyTool(name: ToolName): void {
-    applyToolSnapshot(window.mumbler.verifyTool(name), "Failed to verify audio tool.");
-  }
-
+  // An explicit check that fails writes nothing to the facts (the convention's
+  // honest-state rule), so its only surface is this transient, auto-clearing
+  // notice in the modal toolbar.
   function handleCheckTools(): void {
     setIsCheckingTools(true);
+    setToolCheckNotice(null);
     void window.mumbler
       .checkTools()
       .then((nextSnapshot) => setSnapshot(nextSnapshot))
       .catch((error: unknown) => {
-        addPersistent(error instanceof Error ? error.message : "Failed to check audio tools.", "error");
+        setToolCheckNotice(
+          `Couldn't check for updates: ${error instanceof Error ? error.message : "the check failed"}.`,
+        );
       })
       .finally(() => setIsCheckingTools(false));
   }
 
-  function handleSaveToolGates(checkToolUpdates: boolean, autoDownloadTools: boolean): void {
+  function handleToggleCheckUpdates(checkUpdatesAtLaunch: boolean): void {
     applyToolSnapshot(
-      window.mumbler.saveToolSettings(checkToolUpdates, autoDownloadTools),
+      window.mumbler.saveToolSettings(checkUpdatesAtLaunch),
       "Failed to save audio tool settings.",
     );
   }
@@ -729,10 +768,12 @@ export function App(): ReactElement {
           {dependencies && rollUpRole(dependencies) !== "none" ? (
             <button
               type="button"
-              className={`button button--ghost button--compact tools-chip tools-chip--${rollUpRole(dependencies)}`}
+              className={`tools-chip tools-chip--${rollUpRole(dependencies)}`}
               onClick={() => setShowAudioTools(true)}
+              title="Open Audio Tools"
             >
-              Audio Tools
+              <ToolsChipIcon role={rollUpRole(dependencies)} />
+              {toolsChipMessage(rollUpRole(dependencies))}
             </button>
           ) : null}
           <div className="app-menu-anchor">
@@ -1437,13 +1478,12 @@ export function App(): ReactElement {
       {showAudioTools && snapshot?.dependencies ? (
         <AudioToolsModal
           dependencies={snapshot.dependencies}
-          checkToolUpdates={snapshot.settingsSummary?.checkToolUpdates ?? true}
-          autoDownloadTools={snapshot.settingsSummary?.autoDownloadTools ?? false}
+          checkUpdatesAtLaunch={snapshot.settingsSummary?.checkUpdatesAtLaunch ?? true}
           isChecking={isCheckingTools}
-          onVerify={handleVerifyTool}
-          onReinstall={handleReinstallTool}
+          checkNotice={toolCheckNotice}
+          onProvision={handleProvisionTool}
           onCheck={handleCheckTools}
-          onSaveGates={handleSaveToolGates}
+          onToggleCheckUpdates={handleToggleCheckUpdates}
           onClose={() => setShowAudioTools(false)}
         />
       ) : null}

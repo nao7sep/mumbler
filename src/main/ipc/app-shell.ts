@@ -243,20 +243,12 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     return runtime.provisionTool(name);
   });
 
-  handle(APP_SHELL_CHANNELS.verifyTool, (_event, name: ToolName) => {
-    assertToolName(name);
-    return runtime.verifyTool(name);
-  });
-
   handle(APP_SHELL_CHANNELS.checkTools, () => runtime.checkTools());
 
-  handle(
-    APP_SHELL_CHANNELS.saveToolSettings,
-    (_event, checkToolUpdates: boolean, autoDownloadTools: boolean) => {
-      if (typeof checkToolUpdates !== "boolean" || typeof autoDownloadTools !== "boolean") {
-        throw new Error("Invalid IPC parameter: tool settings must be booleans.");
-      }
-      return runtime.saveToolSettings(checkToolUpdates, autoDownloadTools);
-    },
-  );
+  handle(APP_SHELL_CHANNELS.saveToolSettings, (_event, checkUpdatesAtLaunch: boolean) => {
+    if (typeof checkUpdatesAtLaunch !== "boolean") {
+      throw new Error("Invalid IPC parameter: checkUpdatesAtLaunch must be a boolean.");
+    }
+    return runtime.saveToolSettings(checkUpdatesAtLaunch);
+  });
 }

@@ -13,8 +13,8 @@ const DEFAULT_TRIM_TOLERANCE_SEC = 3;
 
 // ffmpeg/ffprobe are managed dependencies resolved through the ToolManager (see
 // core/binaries), not npm wrappers. The runtime injects the resolver once the
-// manager is built; resolving a tool that is missing or faulted throws a
-// user-facing error pointing at the Audio Tools surface.
+// manager is built; resolving a tool that is not installed throws a user-facing
+// error pointing at the Audio Tools surface.
 let toolPathResolver: ((name: ToolName) => string) | null = null;
 
 export function configureToolResolver(resolve: (name: ToolName) => string): void {

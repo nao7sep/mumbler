@@ -33,7 +33,7 @@ export interface ResolvedTools {
 
 // A managed dependency's runtime version strings carry vendor noise — martin-riedl
 // appends `-https://www.martin-riedl.de`, some tools prefix `v`. Normalize before
-// storing/comparing so currency never reports a phantom update.
+// storing/comparing so the update check never reports a phantom update.
 export function normalizeToolVersion(raw: string): string {
   let value = raw.trim();
   value = value.replace(/-https?:\/\/\S+$/i, "");
@@ -48,7 +48,7 @@ export function martinMacArch(arch: string): string {
     return "arm64";
   }
   throw new Error(
-    `mumbler ships native Apple Silicon only; unsupported macOS architecture "${arch}". ` +
+    `Mumbler ships native Apple Silicon only; unsupported macOS architecture "${arch}". ` +
       `Install ffmpeg/ffprobe yourself and place them on PATH, or run on Apple Silicon.`,
   );
 }
@@ -95,7 +95,7 @@ interface GithubRelease {
 
 async function resolveBtbNWindows(arch: string): Promise<ResolvedTools> {
   if (arch !== "x64") {
-    throw new Error(`mumbler ships Windows x64 only; unsupported Windows architecture "${arch}".`);
+    throw new Error(`Mumbler ships Windows x64 only; unsupported Windows architecture "${arch}".`);
   }
   // BtbN publishes a rolling `latest` release; one GPL zip carries both .exe's.
   const raw = await fetchText("https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest", {

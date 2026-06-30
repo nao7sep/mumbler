@@ -1,6 +1,4 @@
-import { copyFile } from "node:fs/promises";
-
-import { fileExists, formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
+import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 
 // Thrown when a persisted file exists but cannot be safely loaded — malformed
 // JSON, or an on-disk schema version newer than this build understands. The
@@ -10,12 +8,8 @@ export class CorruptStateError extends Error {
   constructor(
     readonly filePath: string,
     readonly reason: string,
-    readonly backupPath: string | null,
   ) {
-    super(
-      `Could not load ${filePath}: ${reason}.` +
-        (backupPath ? ` A last-known-good copy is at ${backupPath}.` : ""),
-    );
+    super(`Could not load ${filePath}: ${reason}.`);
     this.name = "CorruptStateError";
   }
 }
@@ -48,10 +42,16 @@ export interface LoadResult<T> {
 
 // Owns the full safe lifecycle of ONE canonical JSON file:
 //   - load(): never destructive — missing → defaults, corrupt → throws (file
-//     left untouched), valid → returns and refreshes the .bak last-good copy.
+//     left untouched), valid → returns.
 //   - save(): serialized (no overlapping writes) + atomic (temp + fsync +
 //     rename + dir fsync, via writeJsonFile).
 //   - flush(): await all queued writes — used by graceful shutdown.
+//
+// There is no `.bak` last-good copy: save() is atomic (temp + rename), so a write
+// can never tear the canonical file into a state that would need one. A logically
+// bad file (hand-edited, or newer schema) is left untouched for the user to repair
+// or delete, and Reset (preserveExistingFiles) sets it aside before writing
+// defaults so the original is always recoverable.
 export class JsonStore<T> {
   private queue: Promise<void> = Promise.resolve();
 
@@ -61,17 +61,13 @@ export class JsonStore<T> {
     return this.options.path;
   }
 
-  get backupPath(): string {
-    return `${this.options.path}.bak`;
-  }
-
   async load(): Promise<LoadResult<T>> {
     let raw: unknown;
     try {
       raw = await readJsonFile<unknown>(this.options.path);
     } catch (error) {
       // Present but unreadable/unparseable. Leave it in place; the caller halts.
-      throw new CorruptStateError(this.options.path, formatError(error), await this.existingBackup());
+      throw new CorruptStateError(this.options.path, formatError(error));
     }
 
     if (raw === null) {
@@ -82,11 +78,7 @@ export class JsonStore<T> {
     // Treat it as corruption rather than silently resetting to defaults, so the
     // user is alerted instead of losing whatever the file was meant to hold.
     if (typeof raw !== "object" || Array.isArray(raw)) {
-      throw new CorruptStateError(
-        this.options.path,
-        "file does not contain a JSON object",
-        await this.existingBackup(),
-      );
+      throw new CorruptStateError(this.options.path, "file does not contain a JSON object");
     }
 
     const record = raw as Record<string, unknown>;
@@ -96,16 +88,10 @@ export class JsonStore<T> {
       throw new CorruptStateError(
         this.options.path,
         `on-disk schema version ${onDiskVersion} is newer than this build supports (${this.options.schemaVersion})`,
-        await this.existingBackup(),
       );
     }
 
-    const value = this.options.validate(record);
-    // Refresh the last-known-good copy from the file we just validated. This is
-    // the previous session's good state; if the canonical file later becomes
-    // unreadable, it is the manual-recovery source named in CorruptStateError.
-    await this.refreshBackup();
-    return { value, origin: "loaded" };
+    return { value: this.options.validate(record), origin: "loaded" };
   }
 
   async save(value: T): Promise<void> {
@@ -129,36 +115,15 @@ export class JsonStore<T> {
     await this.queue.catch(() => undefined);
   }
 
-  // Sets aside every file this store owns — the canonical file AND its .bak
-  // last-known-good copy — to timestamped ".corrupt-<stamp>" names, returning the
-  // paths actually moved. The store is the only thing that knows it maintains a
-  // .bak, so it must be the one to rescue it: this is the explicit-recovery
-  // (Reset) escape hatch. Without it, the next successful load() refreshes .bak
-  // from freshly-written defaults and silently erases the user's last readable
-  // copy.
+  // Sets the canonical file aside to a timestamped ".corrupt-<stamp>" name,
+  // returning the path it moved to (or [] if there was nothing to move). This is
+  // the explicit-recovery (Reset) escape hatch: the user's original data is
+  // preserved before defaults are written over it.
   //
   // Call before save(): it does not go through the write queue, and is meant to
   // run on a fresh store with no writes in flight (as Reset does).
   async preserveExistingFiles(): Promise<string[]> {
-    const preserved: string[] = [];
-    for (const filePath of [this.options.path, this.backupPath]) {
-      const movedTo = await preserveAside(filePath);
-      if (movedTo !== null) {
-        preserved.push(movedTo);
-      }
-    }
-    return preserved;
-  }
-
-  private async existingBackup(): Promise<string | null> {
-    return (await fileExists(this.backupPath)) ? this.backupPath : null;
-  }
-
-  private async refreshBackup(): Promise<void> {
-    try {
-      await copyFile(this.options.path, this.backupPath);
-    } catch {
-      // Best-effort: a missing backup never blocks loading.
-    }
+    const movedTo = await preserveAside(this.options.path);
+    return movedTo !== null ? [movedTo] : [];
   }
 }

@@ -1589,6 +1589,15 @@ textarea:focus-visible,
   color: var(--danger);
 }
 
+/* The modal intro spans the full modal-body width, aligned with the tools table
+   below it — unlike the shared .panel__note, whose 48ch readability cap is meant
+   for narrow side panels and would wrap this to three cramped lines here. */
+.tools-intro {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
 .tools-toolbar {
   display: flex;
   align-items: center;
@@ -1639,12 +1648,37 @@ textarea:focus-visible,
 }
 
 /* Roll-up indicator in the top bar; coloured by the worst current role. */
+/* The topbar dependency roll-up reads as a status message, not a button: a
+   tinted pill (role-coloured, leading icon) that happens to be clickable. No
+   button border or ghost-button chrome — that was what made it look like a
+   regular action. */
+.tools-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0.2rem 0.55rem 0.2rem 0.45rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.tools-chip svg {
+  display: block;
+}
+.tools-chip:not(:disabled):hover {
+  filter: brightness(0.96);
+}
 .tools-chip--informational {
+  background: var(--processing-subtle);
   color: var(--processing);
 }
 .tools-chip--warning {
+  background: var(--warning-subtle);
   color: var(--warning);
 }
 .tools-chip--error {
+  background: var(--danger-subtle);
   color: var(--danger);
 }

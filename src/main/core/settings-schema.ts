@@ -98,15 +98,13 @@ function normalizeSettings(
         asPositiveInteger(timeouts?.transcriptionMs) ?? defaults.timeouts.transcriptionMs,
       metadataMs: asPositiveInteger(timeouts?.metadataMs) ?? defaults.timeouts.metadataMs,
     },
-    // Managed audio-tool gates. Missing key → default. Auto-download implies the
-    // update check (you can't auto-install what you don't look for), so the
-    // invariant is enforced here on load too — a hand-edited config with
-    // auto-download on and check off still resolves to check on.
-    autoDownloadTools:
-      typeof raw.autoDownloadTools === "boolean" ? raw.autoDownloadTools : defaults.autoDownloadTools,
-    checkToolUpdates:
-      (typeof raw.autoDownloadTools === "boolean" ? raw.autoDownloadTools : defaults.autoDownloadTools) ||
-      (typeof raw.checkToolUpdates === "boolean" ? raw.checkToolUpdates : defaults.checkToolUpdates),
+    // The one managed-audio-tool toggle: check for updates at launch. Missing key
+    // → default. Nothing auto-downloads or auto-installs, so there is no second
+    // gate and no invariant between them.
+    checkUpdatesAtLaunch:
+      typeof raw.checkUpdatesAtLaunch === "boolean"
+        ? raw.checkUpdatesAtLaunch
+        : defaults.checkUpdatesAtLaunch,
   };
 }
 
@@ -374,18 +372,16 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
       transcriptionMs: 30 * 60 * 1000,
       metadataMs: 5 * 60 * 1000,
     },
-    // Managed audio tools default to a non-blocking update check on launch, but
-    // NOT to auto-downloading on first run — an unprompted ~55 MB fetch is a
-    // surprise. Missing required tools instead open the Audio Tools surface for
-    // the user to install; auto-download is opt-in there.
-    checkToolUpdates: true,
-    autoDownloadTools: false,
+    // Managed audio tools default to a non-blocking update check on launch.
+    // Nothing auto-downloads: a missing required tool opens the Audio Tools
+    // surface for the user to install it.
+    checkUpdatesAtLaunch: true,
   };
 }
 
 // Stores for the two canonical files. Each owns serialized atomic writes and
 // non-destructive loading (missing → defaults, malformed or newer-than-supported
-// → CorruptStateError with the file left untouched), plus a .bak last-good copy.
+// → CorruptStateError with the file left untouched).
 // Startup recovery (recoverInterruptedCards) and filesystem reconciliation are
 // applied by the caller after load, keeping the store a pure persistence layer.
 export function createSettingsStore(path: string): JsonStore<MumblerSettings> {
@@ -445,8 +441,7 @@ export function summarizeSettings(
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
     concurrencyLimit: settings.concurrencyLimit,
-    checkToolUpdates: settings.checkToolUpdates,
-    autoDownloadTools: settings.autoDownloadTools,
+    checkUpdatesAtLaunch: settings.checkUpdatesAtLaunch,
   };
 }
 

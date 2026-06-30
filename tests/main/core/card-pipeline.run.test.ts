@@ -74,6 +74,7 @@ function makePaths(): AppPaths {
     backupsDir: "/tmp/.mumbler/backups",
     binDir: "/tmp/.mumbler/bin",
     dependenciesPath: "/tmp/.mumbler/dependencies.json",
+    tempDir: "/tmp/.mumbler/temp",
   };
 }
 

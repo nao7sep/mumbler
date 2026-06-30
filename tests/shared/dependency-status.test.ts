@@ -8,25 +8,20 @@ const idle: ToolTransient = { kind: "idle" };
 function facts(overrides: Partial<ToolFacts> = {}): ToolFacts {
   return {
     present: false,
-    faulted: false,
     installedVersion: null,
     desiredVersion: null,
     lastCheckedAtUtc: null,
-    lastCheckError: null,
-    lastError: null,
-    hasInstalledChecksum: false,
     ...overrides,
   };
 }
 
-// A healthy, provisioned baseline; per-test overrides drive the currency sub-state.
-// A normal install records the checksum, so the baseline has one.
-function provisioned(overrides: Partial<ToolFacts> = {}): ToolFacts {
-  return facts({ present: true, installedVersion: "8.1.1", hasInstalledChecksum: true, ...overrides });
+// A healthy installed baseline; per-test overrides drive the version/check facts.
+function installed(overrides: Partial<ToolFacts> = {}): ToolFacts {
+  return facts({ present: true, installedVersion: "8.1.1", ...overrides });
 }
 
-function derive(f: ToolFacts, t: ToolTransient = idle): DependencyStatus {
-  return deriveStatus("ffmpeg", true, f, t);
+function derive(f: ToolFacts, t: ToolTransient = idle, required = true): DependencyStatus {
+  return deriveStatus("ffmpeg", required, f, t);
 }
 
 // I1 — Render is pure. Enforced by construction: deriveStatus imports no I/O and
@@ -34,23 +29,22 @@ function derive(f: ToolFacts, t: ToolTransient = idle): DependencyStatus {
 // across the state space, so a renderer can call it freely.
 describe("I1 — derivation is pure and total", () => {
   it("is deterministic for identical inputs", () => {
-    const f = provisioned({ lastCheckedAtUtc: 1, desiredVersion: "8.1.1" });
+    const f = installed({ lastCheckedAtUtc: 1, desiredVersion: "8.1.1" });
     expect(derive(f)).toEqual(derive(f));
   });
 
-  it("never throws across lifecycles and transients", () => {
+  it("never throws across states and transients", () => {
     const cases: ToolFacts[] = [
       facts(),
-      facts({ present: true, faulted: true, lastError: "bad" }),
-      provisioned(),
-      provisioned({ lastCheckedAtUtc: 1, desiredVersion: "8.1.1" }),
-      provisioned({ lastCheckedAtUtc: 1, desiredVersion: "8.2" }),
-      provisioned({ lastCheckedAtUtc: 1, lastCheckError: "offline" }),
+      installed(),
+      installed({ lastCheckedAtUtc: 1, desiredVersion: "8.1.1" }),
+      installed({ lastCheckedAtUtc: 1, desiredVersion: "8.2" }),
     ];
     const transients: ToolTransient[] = [
       idle,
       { kind: "running", operation: "provision", percent: 40 },
-      { kind: "failed", operation: "verify", error: "boom" },
+      { kind: "running", operation: "check", percent: null },
+      { kind: "failed", operation: "provision", error: "boom" },
     ];
     for (const f of cases) {
       for (const t of transients) {
@@ -60,62 +54,66 @@ describe("I1 — derivation is pure and total", () => {
   });
 });
 
-// I2 — Currency is nested: null unless the lifecycle is provisioned.
-describe("I2 — currency is a sub-state of provisioned only", () => {
-  it("is null when absent", () => {
-    expect(derive(facts()).currency).toBeNull();
-  });
-
-  it("is null when faulted", () => {
-    expect(derive(facts({ present: true, faulted: true })).currency).toBeNull();
-  });
-
-  it("is set when provisioned", () => {
-    expect(derive(provisioned()).currency).toBe("unchecked");
+// I2 — Presence is scanned, not stored: "Not installed" derives from present=false
+// regardless of any version facts that may linger.
+describe("I2/I4 — missing is always known", () => {
+  it("is not-installed when absent, even with stale version facts present", () => {
+    const s = derive(facts({ installedVersion: "8.1.1", desiredVersion: "8.2", lastCheckedAtUtc: 5 }));
+    expect(s.state).toBe("not-installed");
   });
 });
 
-// I3 — A failed check is honest: check-failed, never current, version facts intact.
-describe("I3 — a failed check never yields current", () => {
-  it("is check-failed even when a version diff exists", () => {
-    const status = derive(
-      provisioned({ lastCheckedAtUtc: 5, desiredVersion: "8.2", lastCheckError: "rate limited" }),
-    );
-    expect(status.currency).toBe("check-failed");
-    expect(status.role).toBe("error");
-    // The version facts are passed through untouched, not collapsed to current.
-    expect(status.installedVersion).toBe("8.1.1");
-    expect(status.desiredVersion).toBe("8.2");
+// I3 — A failed check is honest: it persists nothing, so lastCheckedAtUtc stays
+// null and a present tool reads installed-unchecked, never up-to-date.
+describe("I3 — honest state: no successful check ⇒ not up-to-date", () => {
+  it("present with no check is installed-unchecked", () => {
+    const s = derive(installed());
+    expect(s.state).toBe("installed-unchecked");
+    expect(s.role).toBe("informational");
+  });
+
+  it("present with a successful matching check is up-to-date", () => {
+    const s = derive(installed({ lastCheckedAtUtc: 5, desiredVersion: "8.1.1" }));
+    expect(s.state).toBe("up-to-date");
+    expect(s.role).toBe("none");
+  });
+
+  it("present with a newer latest is update-available", () => {
+    const s = derive(installed({ lastCheckedAtUtc: 5, desiredVersion: "8.2" }));
+    expect(s.state).toBe("update-available");
+    expect(s.role).toBe("warning");
   });
 });
 
-// I4 — Fault is recorded, not inferred: faulted only via the recorded flag.
-describe("I4 — a failed integrity yields faulted, never provisioned", () => {
-  it("is faulted even when versions would otherwise read current", () => {
-    const status = derive(
-      facts({ present: true, faulted: true, installedVersion: "8.1.1", desiredVersion: "8.1.1", lastCheckedAtUtc: 5, lastError: "sha mismatch" }),
-    );
-    expect(status.lifecycle).toBe("faulted");
-    expect(status.currency).toBeNull();
-    expect(status.role).toBe("error");
-    expect(status.error).toBe("sha mismatch");
+// The state → role mapping the convention tables, including the optional-absent
+// nuance (informational, not a warning).
+describe("state → role mapping", () => {
+  it("required-absent → warning", () => {
+    expect(derive(facts(), idle, true).role).toBe("warning");
+  });
+
+  it("optional-absent → informational", () => {
+    expect(derive(facts(), idle, false).role).toBe("informational");
+  });
+
+  it("installed-unchecked → informational", () => {
+    expect(derive(installed()).role).toBe("informational");
+  });
+
+  it("update-available → warning", () => {
+    expect(derive(installed({ lastCheckedAtUtc: 5, desiredVersion: "8.2" })).role).toBe("warning");
+  });
+
+  it("up-to-date → none", () => {
+    expect(derive(installed({ lastCheckedAtUtc: 5, desiredVersion: "8.1.1" })).role).toBe("none");
   });
 });
 
-// I5 — One role; provisioned + current is quiet.
-describe("I5 — exactly one role; current is quiet", () => {
-  it("provisioned + current yields role none", () => {
-    const status = derive(provisioned({ lastCheckedAtUtc: 5, desiredVersion: "8.1.1" }));
-    expect(status.currency).toBe("current");
-    expect(status.role).toBe("none");
-  });
-});
-
-// I6 — Operations are transient: a failed operation never persists as a lifecycle.
-describe("I6 — a failed operation is transient over persisted state", () => {
-  it("a failed provision leaves the tool absent, shown as error via the overlay", () => {
+// I5 — Operations are transient: a failed operation never persists as a state.
+describe("I5 — a failed operation is transient over persisted state", () => {
+  it("a failed provision leaves the tool not-installed, shown as error via the overlay", () => {
     const status = derive(facts(), { kind: "failed", operation: "provision", error: "network down" });
-    expect(status.lifecycle).toBe("absent"); // persisted state unchanged
+    expect(status.state).toBe("not-installed"); // persisted state unchanged
     expect(status.role).toBe("error"); // transient overlay
   });
 
@@ -125,10 +123,9 @@ describe("I6 — a failed operation is transient over persisted state", () => {
   });
 });
 
-// I7 — Roll-up is the worst role by precedence error > warning > informational > none.
-describe("I7 — roll-up is the worst role", () => {
-  const row = (role: DependencyStatus["role"]): DependencyStatus =>
-    ({ ...derive(facts()), role });
+// I6 — Roll-up is the worst role by precedence error > warning > informational > none.
+describe("I6 — roll-up is the worst role", () => {
+  const row = (role: DependencyStatus["role"]): DependencyStatus => ({ ...derive(facts()), role });
 
   it("picks error over warning and informational", () => {
     expect(rollUpRole([row("none"), row("warning"), row("error"), row("informational")])).toBe("error");
@@ -141,58 +138,5 @@ describe("I7 — roll-up is the worst role", () => {
   it("is none for an all-quiet or empty set", () => {
     expect(rollUpRole([row("none"), row("none")])).toBe("none");
     expect(rollUpRole([])).toBe("none");
-  });
-});
-
-// The state → role mapping the convention tables.
-describe("state → role mapping", () => {
-  it("absent → warning", () => {
-    const s = derive(facts());
-    expect(s.lifecycle).toBe("absent");
-    expect(s.role).toBe("warning");
-  });
-
-  it("provisioned · unchecked → informational", () => {
-    const s = derive(provisioned());
-    expect(s.currency).toBe("unchecked");
-    expect(s.role).toBe("informational");
-  });
-
-  it("provisioned · stale → warning", () => {
-    const s = derive(provisioned({ lastCheckedAtUtc: 5, desiredVersion: "8.2" }));
-    expect(s.currency).toBe("stale");
-    expect(s.role).toBe("warning");
-  });
-
-  it("provisioned · current → none", () => {
-    const s = derive(provisioned({ lastCheckedAtUtc: 5, desiredVersion: "8.1.1" }));
-    expect(s.role).toBe("none");
-  });
-
-  it("faulted → error", () => {
-    const s = derive(facts({ present: true, faulted: true }));
-    expect(s.lifecycle).toBe("faulted");
-    expect(s.role).toBe("error");
-  });
-});
-
-// canVerify: Verify is meaningful only for an installed file with a recorded checksum.
-describe("canVerify", () => {
-  it("is false when absent (nothing installed)", () => {
-    expect(derive(facts()).canVerify).toBe(false);
-  });
-
-  it("is true for a provisioned tool with a recorded checksum", () => {
-    expect(derive(provisioned()).canVerify).toBe(true);
-  });
-
-  it("is false for a provisioned tool with no recorded checksum", () => {
-    const s = derive(facts({ present: true, installedVersion: "8.1.1", hasInstalledChecksum: false }));
-    expect(s.canVerify).toBe(false);
-  });
-
-  it("is true for a faulted tool with a recorded checksum (re-verify is allowed)", () => {
-    const s = derive(facts({ present: true, faulted: true, hasInstalledChecksum: true }));
-    expect(s.canVerify).toBe(true);
   });
 });

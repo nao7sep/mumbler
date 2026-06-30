@@ -190,6 +190,18 @@ describe("settings store", () => {
     expect(value.concurrencyLimit).toBeGreaterThan(0);
     expect(value.skipIntervalSec).toBeGreaterThan(0);
   });
+
+  it("defaults the launch update check on when absent, and preserves an explicit off", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 1 }), "utf8");
+    expect((await createSettingsStore(settingsPath()).load()).value.checkUpdatesAtLaunch).toBe(true);
+
+    await writeFile(
+      settingsPath(),
+      JSON.stringify({ schemaVersion: 1, checkUpdatesAtLaunch: false }),
+      "utf8",
+    );
+    expect((await createSettingsStore(settingsPath()).load()).value.checkUpdatesAtLaunch).toBe(false);
+  });
 });
 
 describe("recoverInterruptedCards", () => {

@@ -54,13 +54,6 @@ describe("JsonStore.load", () => {
     expect(result.value).toEqual({ schemaVersion: 1, value: "hi" });
   });
 
-  it("refreshes the .bak last-good copy from a valid file", async () => {
-    const store = makeStore();
-    await writeFile(store.path, JSON.stringify({ schemaVersion: 1, value: "good" }), "utf8");
-    await store.load();
-    expect(await read(store.backupPath)).toEqual({ schemaVersion: 1, value: "good" });
-  });
-
   it("throws CorruptStateError on malformed JSON and leaves the file untouched", async () => {
     const store = makeStore();
     await writeFile(store.path, "{ not valid json", "utf8");
@@ -77,13 +70,11 @@ describe("JsonStore.load", () => {
     expect(await readFile(store.path, "utf8")).toBe(newer);
   });
 
-  it("keeps the last-good .bak when the canonical file later goes corrupt", async () => {
+  it("writes no sidecar file: a successful load leaves only the canonical file", async () => {
     const store = makeStore();
     await writeFile(store.path, JSON.stringify({ schemaVersion: 1, value: "good" }), "utf8");
-    await store.load(); // refreshes .bak = good
-    await writeFile(store.path, "corrupt", "utf8");
-    await expect(store.load()).rejects.toBeInstanceOf(CorruptStateError);
-    expect(await read(store.backupPath)).toEqual({ schemaVersion: 1, value: "good" });
+    await store.load();
+    expect((await readdir(dir)).sort()).toEqual(["doc.json"]);
   });
 });
 
@@ -154,67 +145,42 @@ describe("JsonStore.load — structural edge cases", () => {
 });
 
 describe("JsonStore.preserveExistingFiles", () => {
-  it("returns no paths and throws nothing when neither file exists", async () => {
+  it("returns no paths and throws nothing when the file does not exist", async () => {
     const store = makeStore();
     await expect(store.preserveExistingFiles()).resolves.toEqual([]);
   });
 
-  it("moves both the canonical file and its .bak aside, preserving their contents", async () => {
+  it("moves the canonical file aside, preserving its contents under a .corrupt name", async () => {
     const store = makeStore();
     await writeFile(store.path, JSON.stringify({ schemaVersion: 1, value: "canonical" }), "utf8");
-    await writeFile(store.backupPath, JSON.stringify({ schemaVersion: 1, value: "lastgood" }), "utf8");
-
-    const preserved = await store.preserveExistingFiles();
-
-    // Both originals are gone from their canonical/backup slots...
-    expect(preserved).toHaveLength(2);
-    await expect(readFile(store.path, "utf8")).rejects.toThrow();
-    await expect(readFile(store.backupPath, "utf8")).rejects.toThrow();
-    // ...and their contents survive verbatim in the preserved copies.
-    const contents = await Promise.all(preserved.map((p) => read(p)));
-    expect(contents).toContainEqual({ schemaVersion: 1, value: "canonical" });
-    expect(contents).toContainEqual({ schemaVersion: 1, value: "lastgood" });
-    // Preserved names follow the ".corrupt-<stamp>" convention.
-    for (const p of preserved) {
-      expect(p).toMatch(/\.corrupt-\d{8}-\d{6}-utc$/);
-    }
-  });
-
-  it("preserves whichever file exists when only one is present", async () => {
-    const store = makeStore();
-    await writeFile(store.backupPath, JSON.stringify({ schemaVersion: 1, value: "lastgood" }), "utf8");
 
     const preserved = await store.preserveExistingFiles();
 
     expect(preserved).toHaveLength(1);
-    expect(await read(preserved[0]!)).toEqual({ schemaVersion: 1, value: "lastgood" });
+    await expect(readFile(store.path, "utf8")).rejects.toThrow();
+    expect(await read(preserved[0]!)).toEqual({ schemaVersion: 1, value: "canonical" });
+    expect(preserved[0]!).toMatch(/\.corrupt-\d{8}-\d{6}-utc$/);
   });
 
   it("the Reset sequence does not erase the user's last readable copy", async () => {
-    // Regression for the data-loss window: a valid load mints a .bak, then Reset
-    // sets everything aside and writes defaults. A later load must rebuild .bak
-    // from the defaults WITHOUT destroying the original data, which has to remain
-    // recoverable from the preserved files.
+    // Reset sets the original aside and writes defaults. The original data must
+    // stay recoverable from the preserved copy, and nothing else should leak.
     const store = makeStore();
     await writeFile(store.path, JSON.stringify({ schemaVersion: 1, value: "real" }), "utf8");
-    await store.load(); // mints .bak = { value: "real" }
+    await store.load();
 
     const preserved = await store.preserveExistingFiles();
     await store.save({ schemaVersion: 1, value: "default" });
-    await store.load(); // refreshes .bak from the freshly-written defaults
 
-    // The live files are now defaults...
+    // The live file is now defaults...
     expect(await read(store.path)).toEqual({ schemaVersion: 1, value: "default" });
-    expect(await read(store.backupPath)).toEqual({ schemaVersion: 1, value: "default" });
-    // ...but the original "real" data is still recoverable from a preserved copy.
-    const contents = await Promise.all(preserved.map((p) => read(p)));
-    expect(contents).toContainEqual({ schemaVersion: 1, value: "real" });
+    // ...but the original "real" data is still recoverable from the preserved copy.
+    expect(await read(preserved[0]!)).toEqual({ schemaVersion: 1, value: "real" });
 
-    // And nothing leaked into unexpected files: exactly the canonical, the .bak,
-    // and the preserved copies remain in the directory.
+    // And nothing leaked: exactly the canonical and the preserved copy remain.
     const remaining = await readdir(dir);
     expect(remaining.sort()).toEqual(
-      ["doc.json", "doc.json.bak", ...preserved.map((p) => p.slice(dir.length + 1))].sort(),
+      ["doc.json", ...preserved.map((p) => p.slice(dir.length + 1))].sort(),
     );
   });
 });

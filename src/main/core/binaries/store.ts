@@ -4,23 +4,16 @@ import { JsonStore } from "../json-store";
 import { TOOL_NAMES } from "./registry";
 
 // Persisted per-tool facts — the honest single source of truth the status is
-// derived from (managed-dependency-status-conventions). `present` is NOT persisted:
-// it is reconciled from disk at startup, so the file can never claim a tool is
-// installed that the user has since deleted.
+// derived from (managed-runtime-dependencies-conventions). Only what cannot be
+// re-derived is stored: the installed version, the last-known latest, and the
+// last *successful* check time. `present` is NOT persisted — it is scanned from
+// disk at startup, so the file can never claim a tool the user has since deleted.
+// No integrity flag, fault flag, or check-error is kept: a failed check writes
+// nothing, and a damaged file fails when used and is fixed by installing again.
 export interface PersistedToolFacts {
   installedVersion: string | null;
-  // SHA-256 of the installed executable, recorded at install so Verify can
-  // re-hash the on-disk file and detect post-install corruption (→ Faulted).
-  installedSha256: string | null;
   desiredVersion: string | null;
   lastCheckedAtUtc: number | null;
-  // Non-null iff the last currency check failed (→ check-failed).
-  lastCheckError: string | null;
-  // Display message for a fault (set only alongside faulted=true). Operation
-  // failures are transient and never persisted (managed-dependency-status I6).
-  lastError: string | null;
-  // Present-but-unusable: a failed integrity verify or unparseable version (→ faulted).
-  faulted: boolean;
 }
 
 export interface DependenciesValue {
@@ -33,12 +26,8 @@ const SCHEMA_VERSION = 1;
 function emptyFacts(): PersistedToolFacts {
   return {
     installedVersion: null,
-    installedSha256: null,
     desiredVersion: null,
     lastCheckedAtUtc: null,
-    lastCheckError: null,
-    lastError: null,
-    faulted: false,
   };
 }
 
@@ -59,14 +48,12 @@ function asNumber(value: unknown): number | null {
 
 function normalizeFacts(raw: unknown): PersistedToolFacts {
   const record = raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  // Any legacy fields from the old model (installedSha256, faulted, lastError,
+  // lastCheckError) are simply not read here, so they drop on the next save.
   return {
     installedVersion: asString(record.installedVersion),
-    installedSha256: asString(record.installedSha256),
     desiredVersion: asString(record.desiredVersion),
     lastCheckedAtUtc: asNumber(record.lastCheckedAtUtc),
-    lastCheckError: asString(record.lastCheckError),
-    lastError: asString(record.lastError),
-    faulted: record.faulted === true,
   };
 }
 

@@ -77,7 +77,7 @@ import {
 // never reaches an end-user's disk.
 const DEBUG_LOGGING_ENABLED = !app.isPackaged || process.env.MUMBLER_DEBUG === "1";
 
-// A managed audio-tool currency check is skipped if a successful one ran within
+// A managed audio-tool update check is skipped if a successful one ran within
 // this window — keeps the startup check off the network on most launches.
 const TOOL_CHECK_STALE_MS = 24 * 60 * 60 * 1000;
 
@@ -267,7 +267,7 @@ export class ApplicationRuntime {
       }
       const toolManager = new ToolManager({
         binDir: paths.binDir,
-        downloadsDir: join(paths.workingDir, "tool-downloads"),
+        tempDir: paths.tempDir,
         platform: process.platform,
         arch: process.arch,
         value: dependenciesLoad.value,
@@ -280,8 +280,9 @@ export class ApplicationRuntime {
       configureToolResolver((name) => toolManager.resolveToolPath(name));
 
       await runtime.drainQueuedCards();
-      // Tool maintenance (auto-download missing required tools, staleness-gated
-      // currency check) runs in the background so it never blocks the shell.
+      // The staleness-gated launch update check runs in the background so it never
+      // blocks the shell. Nothing auto-downloads — a missing required tool is
+      // surfaced by the renderer opening the Audio Tools modal.
       void runtime.startToolMaintenance();
       return runtime;
     } catch (error: unknown) {
@@ -335,29 +336,24 @@ export class ApplicationRuntime {
     this.runtime.toolManager = manager;
   }
 
-  // Background startup maintenance: auto-fetch missing required tools (gated by
-  // autoDownloadTools), then a staleness-gated currency check (gated by
-  // checkToolUpdates). Both record their own outcomes and never throw, so a
-  // failure here never disturbs the shell.
+  // Background startup maintenance: a staleness-gated latest-version check, gated
+  // by the one toggle (checkUpdatesAtLaunch). It records its own outcome and a
+  // failure here never disturbs the shell (a failed check writes nothing). Nothing
+  // is auto-downloaded — a missing required tool is the renderer's concern.
   async startToolMaintenance(): Promise<void> {
     const manager = this.runtime.toolManager;
     const settings = this.runtime.settings;
     if (manager === null || settings === null) {
       return;
     }
-    try {
-      if (settings.autoDownloadTools) {
-        for (const name of manager.missingRequired()) {
-          await manager.installTool(name, "provision");
-        }
-      }
-      if (settings.checkToolUpdates && manager.checkIsStale(TOOL_CHECK_STALE_MS)) {
+    if (settings.checkUpdatesAtLaunch && manager.checkIsStale(TOOL_CHECK_STALE_MS)) {
+      try {
         await manager.checkTools();
+      } catch (error: unknown) {
+        await this.runtime.logger.warn("tools.maintenance", "Background tool update check failed.", {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-    } catch (error: unknown) {
-      await this.runtime.logger.warn("tools.maintenance", "Background tool maintenance failed.", {
-        error: error instanceof Error ? error.message : String(error),
-      });
     }
   }
 
@@ -369,12 +365,7 @@ export class ApplicationRuntime {
   }
 
   async provisionTool(name: ToolName): Promise<AppSnapshot> {
-    await this.ensureToolManager().installTool(name, "provision");
-    return this.getSnapshot();
-  }
-
-  async verifyTool(name: ToolName): Promise<AppSnapshot> {
-    await this.ensureToolManager().verifyTool(name);
+    await this.ensureToolManager().installTool(name);
     return this.getSnapshot();
   }
 
@@ -383,22 +374,15 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  async saveToolSettings(
-    checkToolUpdates: boolean,
-    autoDownloadTools: boolean,
-  ): Promise<AppSnapshot> {
+  async saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot> {
     this.ensureReady();
-    // Auto-download implies the update check — enabling it forces the check on.
-    const effectiveCheck = autoDownloadTools ? true : checkToolUpdates;
     this.runtime.settings = {
       ...this.runtime.settings!,
-      checkToolUpdates: effectiveCheck,
-      autoDownloadTools,
+      checkUpdatesAtLaunch,
     };
     await this.persistSettings();
     await this.runtime.logger.info("settings.tool-gates", "Updated audio tool settings.", {
-      checkToolUpdates: effectiveCheck,
-      autoDownloadTools,
+      checkUpdatesAtLaunch,
     });
     return this.getSnapshot();
   }
@@ -481,8 +465,8 @@ export class ApplicationRuntime {
     try {
       await ensureDirectories(paths);
       // Reset is the explicit escape hatch from a corrupt-data halt, so it must
-      // never silently destroy prior data — set each store's existing files
-      // (canonical + its .bak recovery copy) aside before writing defaults.
+      // never silently destroy prior data — set each store's existing canonical
+      // file aside before writing defaults.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
       const preservedStateFiles = await stateStore.preserveExistingFiles();
       await settingsStore.save(settings);
@@ -1702,6 +1686,7 @@ function getAppPaths(): AppPaths {
     backupsDir: join(homeDir, "backups"),
     binDir: join(homeDir, "bin"),
     dependenciesPath: join(homeDir, "dependencies.json"),
+    tempDir: join(homeDir, "temp"),
   };
 }
 
@@ -1720,6 +1705,10 @@ async function ensureDirectories(paths: AppPaths): Promise<void> {
   await mkdir(paths.logsDir, { recursive: true });
   await mkdir(paths.workingDir, { recursive: true });
   await mkdir(paths.binDir, { recursive: true });
+  // temp/ is disposable download staging: clear it on launch so a download
+  // interrupted by a crash leaves no stale partial behind, then recreate it.
+  await rm(paths.tempDir, { recursive: true, force: true });
+  await mkdir(paths.tempDir, { recursive: true });
 }
 
 export function buildConfirmedTimestamps(

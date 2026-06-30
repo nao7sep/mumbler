@@ -1,27 +1,30 @@
 import type { ReactElement } from "react";
 
-import type { DependencyStatus, StatusRole, ToolName } from "@shared/app-shell";
+import type { DependencyState, DependencyStatus, StatusRole, ToolName } from "@shared/app-shell";
 
 import { ModalShell } from "./modal/ModalShell";
 
 // The management surface for mumbler's audio tools (ffmpeg/ffprobe), per the
-// managed-dependency-status-conventions: one named, dismissible surface listing
+// managed-runtime-dependencies-conventions: one named, dismissible surface listing
 // every tool with its state, version facts, live progress, and per-tool error.
-// Each row offers two explicit actions — Verify (re-hash the installed file
-// against the recorded checksum; never downloads) and Install/Reinstall
-// ((re)download and (re)install regardless of what's there) — plus a single
-// set-wide "Check for updates". Status is shown through the semantic role each row
-// derives; the theme owns the concrete colour.
+// Each row offers a single context-aware action — Install when missing, Update
+// when a newer version is known, nothing when up to date — over the one acquire
+// operation (download the latest, verify once). A set-wide "Check for updates"
+// resolves the latest version. The single toggle ("check at launch") lives here,
+// not in Settings. Status is shown through the semantic role each row derives; the
+// theme owns the concrete colour.
 
 export interface AudioToolsModalProps {
   dependencies: DependencyStatus[];
-  checkToolUpdates: boolean;
-  autoDownloadTools: boolean;
+  checkUpdatesAtLaunch: boolean;
   isChecking: boolean;
-  onVerify: (name: ToolName) => void;
-  onReinstall: (name: ToolName) => void;
+  // A transient, non-persisted notice when an explicit check just failed (offline,
+  // rate-limited). The convention writes nothing to the facts on a failed check, so
+  // this is the only surface it gets — and it auto-clears.
+  checkNotice: string | null;
+  onProvision: (name: ToolName) => void;
   onCheck: () => void;
-  onSaveGates: (checkToolUpdates: boolean, autoDownloadTools: boolean) => void;
+  onToggleCheckUpdates: (value: boolean) => void;
   onClose: () => void;
 }
 
@@ -32,30 +35,20 @@ const ROLE_CLASS: Record<StatusRole, string> = {
   error: "tools-role--error",
 };
 
-function statusLabel(status: DependencyStatus): string {
-  if (status.lifecycle === "absent") return "Not installed";
-  if (status.lifecycle === "faulted") return "Needs repair";
-  switch (status.currency) {
-    case "current":
-      return "Up to date";
-    case "stale":
-      return "Update available";
-    case "check-failed":
-      return "Update check failed";
-    default:
-      return "Installed (not checked)";
-  }
-}
+const STATUS_LABEL: Record<DependencyState, string> = {
+  "not-installed": "Not installed",
+  "update-available": "Update available",
+  "up-to-date": "Up to date",
+  "installed-unchecked": "Installed (not checked)",
+};
 
-// The acquire action is one operation (re-acquire the latest), but its label is
-// context-aware per the managed-dependency-status convention so it reads right for
-// the state: Install when absent, Repair when faulted, Update when a newer version
-// is known, Reinstall otherwise.
-function acquireLabel(status: DependencyStatus): string {
-  if (status.lifecycle === "absent") return "Install";
-  if (status.lifecycle === "faulted") return "Repair";
-  if (status.currency === "stale") return "Update";
-  return "Reinstall";
+// The one per-row action: Install when missing, Update when a newer version is
+// known. Up-to-date and installed-unchecked offer no row action — the only move
+// there is the set-wide Check.
+function acquireLabel(state: DependencyState): string | null {
+  if (state === "not-installed") return "Install";
+  if (state === "update-available") return "Update";
+  return null;
 }
 
 function relativeTime(utcMs: number): string {
@@ -77,13 +70,12 @@ function lastCheckedHint(dependencies: DependencyStatus[], isChecking: boolean):
 
 export function AudioToolsModal({
   dependencies,
-  checkToolUpdates,
-  autoDownloadTools,
+  checkUpdatesAtLaunch,
   isChecking,
-  onVerify,
-  onReinstall,
+  checkNotice,
+  onProvision,
   onCheck,
-  onSaveGates,
+  onToggleCheckUpdates,
   onClose,
 }: AudioToolsModalProps): ReactElement {
   return (
@@ -98,8 +90,8 @@ export function AudioToolsModal({
       }
     >
       <div className="modal-card__body">
-        <p id="audio-tools-description" className="panel__note">
-          mumbler uses ffmpeg and ffprobe to read and trim audio. They are downloaded as native
+        <p id="audio-tools-description" className="tools-intro">
+          Mumbler uses ffmpeg and ffprobe to read and trim audio. They are downloaded as native
           builds, verified by checksum, and kept in your app data folder. Both are required.
         </p>
 
@@ -115,6 +107,10 @@ export function AudioToolsModal({
           </button>
         </div>
 
+        {checkNotice !== null && (
+          <p className="banner banner--warning tools-error">{checkNotice}</p>
+        )}
+
         <table className="tools-table">
           <thead>
             <tr>
@@ -129,11 +125,12 @@ export function AudioToolsModal({
             {dependencies.map((status) => {
               const running = status.transient.kind === "running";
               const needsAttention = status.role === "warning" || status.role === "error";
+              const action = acquireLabel(status.state);
               return (
                 <tr key={status.name}>
                   <td className="tools-table__name">{status.name}</td>
                   <td>
-                    <span className={ROLE_CLASS[status.role]}>{statusLabel(status)}</span>
+                    <span className={ROLE_CLASS[status.role]}>{STATUS_LABEL[status.state]}</span>
                   </td>
                   <td>{status.installedVersion ?? "—"}</td>
                   <td>{status.desiredVersion ?? (isChecking ? "…" : "unknown")}</td>
@@ -144,26 +141,15 @@ export function AudioToolsModal({
                           ? `${status.transient.percent}%`
                           : "working…"}
                       </span>
-                    ) : (
-                      <span className="tools-table__actions">
-                        <button
-                          type="button"
-                          className="button button--ghost button--compact"
-                          onClick={() => onVerify(status.name)}
-                          disabled={!status.canVerify}
-                          title="Compare the installed file against its recorded checksum"
-                        >
-                          Verify
-                        </button>
-                        <button
-                          type="button"
-                          className={`button button--compact ${needsAttention ? "button--primary" : "button--ghost"}`}
-                          onClick={() => onReinstall(status.name)}
-                          title="Download and install a fresh copy"
-                        >
-                          {acquireLabel(status)}
-                        </button>
-                      </span>
+                    ) : action === null ? null : (
+                      <button
+                        type="button"
+                        className={`button button--compact ${needsAttention ? "button--primary" : "button--ghost"}`}
+                        onClick={() => onProvision(status.name)}
+                        title="Download and install the latest build"
+                      >
+                        {action}
+                      </button>
                     )}
                   </td>
                 </tr>
@@ -173,10 +159,9 @@ export function AudioToolsModal({
         </table>
 
         {dependencies
-          .filter((status) => status.error !== null || status.transient.kind === "failed")
+          .filter((status) => status.transient.kind === "failed")
           .map((status) => {
-            const message =
-              status.transient.kind === "failed" ? status.transient.error : status.error;
+            const message = status.transient.kind === "failed" ? status.transient.error : null;
             return message === null ? null : (
               <p key={status.name} className="banner banner--error tools-error">
                 {status.name}: {message}
@@ -188,22 +173,10 @@ export function AudioToolsModal({
           <label className="checkbox-field">
             <input
               type="checkbox"
-              checked={checkToolUpdates || autoDownloadTools}
-              disabled={autoDownloadTools}
-              onChange={(event) => onSaveGates(event.target.checked, autoDownloadTools)}
+              checked={checkUpdatesAtLaunch}
+              onChange={(event) => onToggleCheckUpdates(event.target.checked)}
             />
-            <span>
-              Check for tool updates on launch
-              {autoDownloadTools ? " (required while auto-download is on)" : ""}
-            </span>
-          </label>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={autoDownloadTools}
-              onChange={(event) => onSaveGates(checkToolUpdates, event.target.checked)}
-            />
-            <span>Download missing required tools automatically (shown in this window)</span>
+            <span>Check for tool updates on launch</span>
           </label>
         </div>
       </div>
