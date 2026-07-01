@@ -98,7 +98,7 @@ describe("Menu", () => {
   it("moves focus with Down/Up (stopping at the ends) and Home/End", async () => {
     await mountMenu({ a: vi.fn(), b: vi.fn(), c: vi.fn() });
     await click(trigger());
-    items()[0].focus();
+    await flushOpenFocus(); // settle the open-focus rAF so it can't clobber arrow navigation
     await key(items()[0], "ArrowDown");
     expect(document.activeElement).toBe(items()[1]);
     await key(items()[1], "End");
@@ -143,6 +143,7 @@ describe("Menu", () => {
     const onSelect = { a: vi.fn(), b: vi.fn(), c: vi.fn() };
     await mountMenu(onSelect);
     await click(trigger());
+    await flushOpenFocus(); // settle the open-focus rAF so it can't re-focus item 0
     items()[1].focus();
     await key(items()[1], "Enter");
     expect(onSelect.b).toHaveBeenCalledOnce();
@@ -152,7 +153,7 @@ describe("Menu", () => {
   it("type-ahead jumps to the next item whose label starts with the key", async () => {
     await mountMenu({ a: vi.fn(), b: vi.fn(), c: vi.fn() });
     await click(trigger());
-    items()[0].focus();
+    await flushOpenFocus(); // settle the open-focus rAF first, or it can re-focus item 0 and clobber the type-ahead jump (flaked in CI)
     await key(items()[0], "c");
     expect(document.activeElement).toBe(items()[2]); // "Cherry"
   });
@@ -160,7 +161,7 @@ describe("Menu", () => {
   it("ignores type-ahead while an IME composition is in progress", async () => {
     await mountMenu({ a: vi.fn(), b: vi.fn(), c: vi.fn() });
     await click(trigger());
-    items()[0].focus();
+    await flushOpenFocus(); // settle the open-focus rAF so it can't clobber focus below
     // With isComposing the printable key belongs to the IME and must NOT move focus.
     await key(items()[0], "c", { isComposing: true });
     expect(document.activeElement).toBe(items()[0]);

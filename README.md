@@ -18,6 +18,13 @@ Mumbler is a desktop app for turning audio recordings into transcripts and publi
 - macOS (Apple Silicon) or Windows (x64) — Electron desktop app
 - **ffmpeg and ffprobe**, used to read and trim audio. Mumbler fetches them as native builds (macOS arm64 from ffmpeg.martin-riedl.de, Windows x64 from BtbN), verifies each against the vendor's published SHA-256, and keeps them in `~/.mumbler/bin`. Nothing downloads silently: on first run the **Audio Tools** window opens so you can install them, and you install or update from there at any time. One toggle in that window controls whether Mumbler checks for newer builds at launch. An internet connection is needed for the download. On Linux, install ffmpeg/ffprobe yourself and put them on `PATH`.
 
+## Download
+
+Prebuilt installers and portable builds for macOS (Apple Silicon) and Windows are on the [Releases](https://github.com/nao7sep/mumbler/releases) page. These builds are **unsigned**, so the OS warns the first time you open one:
+
+- **macOS** — right-click the app and choose **Open** (or run `xattr -dr com.apple.quarantine /Applications/Mumbler.app`).
+- **Windows** — on the SmartScreen prompt, click **More info → Run anyway**.
+
 ## Getting started
 
 Double-click the launcher for your platform (`scripts/run-dev.command` on macOS, `scripts/run-dev.ps1` on Windows), or run from source:

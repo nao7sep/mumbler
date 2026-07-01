@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { nanoid } from "nanoid";
@@ -80,16 +80,32 @@ export async function syncFile(filePath: string): Promise<void> {
   }
 }
 
+// Picks a path in `directory` whose basename does not collide with any existing
+// entry *case-insensitively* — because macOS/Windows are case-insensitive,
+// "File.wav" and "file.wav" would clobber each other in the same directory. The
+// human-readable name is preserved; only the collision test folds case. The
+// directory is read once and its names casefolded, then the disambiguation
+// suffix is advanced until the candidate no longer collides.
 export async function uniquePathInDirectory(directory: string, filename: string): Promise<string> {
   const extension = extname(filename);
   const stem = filename.slice(0, filename.length - extension.length);
-  let candidate = join(directory, filename);
 
-  while (await fileExists(candidate)) {
-    candidate = join(directory, `${stem}-${nanoid(8)}${extension}`);
+  let existing: Set<string>;
+  try {
+    existing = new Set((await readdir(directory)).map((name) => name.toLowerCase()));
+  } catch (error: unknown) {
+    if (!isMissingFileError(error)) {
+      throw error;
+    }
+    existing = new Set();
   }
 
-  return candidate;
+  let name = filename;
+  while (existing.has(name.toLowerCase())) {
+    name = `${stem}-${nanoid(8)}${extension}`;
+  }
+
+  return join(directory, name);
 }
 
 export function isMissingFileError(error: unknown): boolean {
