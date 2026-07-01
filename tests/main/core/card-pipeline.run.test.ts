@@ -67,6 +67,7 @@ function makePaths(): AppPaths {
     homeDir: "/tmp/.mumbler",
     settingsPath: "/tmp/.mumbler/settings.json",
     statePath: "/tmp/.mumbler/state.json",
+    layoutPath: "/tmp/.mumbler/layout.json",
     apiKeysPath: "/tmp/.mumbler/api-keys.json",
     logsDir: "/tmp/.mumbler/logs",
     workingDir: "/tmp/.mumbler/working",

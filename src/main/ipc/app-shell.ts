@@ -251,4 +251,11 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     }
     return runtime.saveToolSettings(checkUpdatesAtLaunch);
   });
+
+  handle(APP_SHELL_CHANNELS.saveLayout, (_event, queueWidth: number) => {
+    if (typeof queueWidth !== "number" || !Number.isFinite(queueWidth)) {
+      throw new Error("Invalid IPC parameter: queueWidth must be a finite number.");
+    }
+    return runtime.saveLayout(queueWidth);
+  });
 }

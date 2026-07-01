@@ -34,6 +34,7 @@ export const APP_SHELL_CHANNELS = {
   provisionTool: "app-shell:provision-tool",
   checkTools: "app-shell:check-tools",
   saveToolSettings: "app-shell:save-tool-settings",
+  saveLayout: "app-shell:save-layout",
 } as const;
 
 export const APP_SHELL_EVENTS = {
@@ -243,6 +244,10 @@ export interface AppPaths {
   homeDir: string;
   settingsPath: string;
   statePath: string;
+  // Disposable pane geometry (the draggable queue-pane width). Its own file, apart
+  // from settingsPath/statePath, so it self-heals on corruption instead of halting
+  // launch (see MumblerLayout below).
+  layoutPath: string;
   // The secrets file. The Gemini API key lives here in its own 0600 file, not in
   // settingsPath (storage-path-conventions, "Secrets and keys").
   apiKeysPath: string;
@@ -416,6 +421,18 @@ export interface DependencyStatus {
   transient: ToolTransient;
 }
 
+// Disposable window/view geometry — the pane sizes the user drags. Persisted in
+// its own layout.json (never settings.json, which the user edits, nor state.json,
+// which holds precious card data): losing a pane width costs the user nothing, so
+// unlike those stores a corrupt layout file self-heals to defaults instead of
+// halting launch. queueWidth is the user's dragged INTENT in CSS pixels, bounded
+// by QUEUE_WIDTH (@shared/layout); the renderer re-clamps it to the live window
+// for display (clampSplitter) and persists it only on a splitter drag.
+export interface MumblerLayout {
+  schemaVersion: number;
+  queueWidth: number;
+}
+
 export interface AppSnapshot {
   appName: string;
   appVersion: string;
@@ -429,6 +446,9 @@ export interface AppSnapshot {
   startupDiagnostic: StartupDiagnostic | null;
   appWideError: StartupDiagnostic | null;
   state: MumblerState | null;
+  // Disposable pane geometry (the draggable queue-pane width). Null until the
+  // runtime is ready, like the other snapshot slices.
+  layout: MumblerLayout | null;
   // Derived status of each managed audio tool, computed in main via deriveStatus
   // from persisted facts + transient operation status. The renderer reads these
   // directly (never probes). Null until the runtime is ready.
@@ -504,6 +524,10 @@ export interface MumblerShellApi {
   provisionTool(name: ToolName): Promise<AppSnapshot>;
   checkTools(): Promise<AppSnapshot>;
   saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot>;
+  // Persist the queue (left) pane's dragged width intent to layout.json and return
+  // a fresh snapshot. Called only on a splitter drag-commit; a window resize
+  // re-derives the displayed width in the renderer and persists nothing.
+  saveLayout(queueWidth: number): Promise<AppSnapshot>;
   getPathForFile(file: File): string;
   onAppWideErrorChanged(listener: () => void): () => void;
   onPipelineProgressUpdated(listener: () => void): () => void;

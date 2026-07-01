@@ -252,11 +252,17 @@ textarea:focus-visible,
 
 .workspace {
   display: grid;
-  /* The detail track carries a real minimum (--detail-min-width) so it can never
-     be squeezed below its content; the window minimum (@shared/layout) covers
-     this plus the queue track plus the gap and chrome. */
+  /* The queue track is the user-adjustable pane: --queue-width is set inline from
+     the drag-clamped displayed width (App.tsx), falling back to the :root default
+     before the renderer mounts. The detail track carries a real minimum
+     (--detail-min-width) so it can never be squeezed below its content; the window
+     minimum (@shared/layout) covers the queue min plus the detail min plus the gap
+     and chrome. */
   grid-template-columns: var(--queue-width) minmax(var(--detail-min-width), 1fr);
   gap: 20px;
+  /* Positioning context for the absolutely-placed splitter, which sits in the gap
+     between the two tracks (below). */
+  position: relative;
   /* The grid row stretches its children, so the queue pane fills the row height
      and the detail pane drives that height with its (tall) stacked content; the
      page scrolls for the detail column while the queue pane scrolls its own
@@ -268,6 +274,37 @@ textarea:focus-visible,
   outline: 2px dashed var(--accent);
   outline-offset: 8px;
   border-radius: var(--radius-lg);
+}
+
+/* The queue/detail resize handle. Taken out of the grid flow (absolute) so it does
+   not consume a track, and positioned to overlay the 20px gap that begins exactly
+   at --queue-width. Full-height hit target with a slim centred grip that brightens
+   on hover; the pointer gesture lives in PaneSplitter. */
+.workspace-splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--queue-width);
+  width: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.workspace-splitter__grip {
+  width: 2px;
+  height: 2.5rem;
+  max-height: 40%;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.12s ease;
+}
+
+.workspace-splitter:hover .workspace-splitter__grip {
+  background: var(--accent);
 }
 
 .panel,
@@ -1420,12 +1457,6 @@ textarea:focus-visible,
   color: var(--text);
 }
 
-/* Single-column collapse. The breakpoint matches WINDOW_MIN_WIDTH
-   (@shared/layout: 48 + 400 + 20 + 640 = 1108) so the two-column workspace
-   reflows to one column exactly at the enforced window minimum rather than at an
-   unrelated guessed width. Because the OS refuses to shrink the window below
-   1108, this engages only in the dev server / browser preview where no native
-   minimum applies; in the packaged window the two-column layout always holds. */
 .notification-strip {
   flex-shrink: 0;
   display: flex;

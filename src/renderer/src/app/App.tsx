@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactElement,
 } from "react";
 
@@ -16,6 +17,7 @@ import type {
   ToolName,
 } from "@shared/app-shell";
 import { GEMINI_MODELS } from "@shared/app-shell";
+import { DETAIL_MIN_WIDTH, QUEUE_WIDTH, WORKSPACE_GAP } from "@shared/layout";
 import { rollUpRole } from "@shared/dependency-status";
 import {
   formatUtcForDisplay,
@@ -32,6 +34,8 @@ import { SettingsModal } from "./SettingsModal";
 import { findMatchingCommand, isActivationTarget, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
 import { QueueList, formatBytes, formatDuration, statusModifier } from "./QueueList";
+import { PaneSplitter } from "./PaneSplitter";
+import { usePaneSize } from "./usePaneSize";
 import {
   AppWideErrorModal,
   DiscardReviewModal,
@@ -183,6 +187,45 @@ export function App(): ReactElement {
     if (family) root.style.setProperty("--font-ui", family);
     else root.style.removeProperty("--font-ui");
   }, [uiFontFamily]);
+
+  // The queue (left) pane width. The persisted layout.queueWidth is the drag-set
+  // INTENT; the DISPLAYED width is that intent clamped to the live workspace, so it
+  // narrows toward the pane min when the window shrinks and returns to the intent
+  // when it grows (display-only, never persisted). During an active drag the local
+  // override follows the cursor without a per-move IPC round-trip; it is released
+  // once the committed width lands back in a fresh snapshot. The far-side reserve
+  // is the detail-pane minimum plus the workspace gap — the same sum the window
+  // minimum and the splitter clamp use.
+  const [queueDragWidth, setQueueDragWidth] = useState<number | null>(null);
+  const queueWidthIntent = snapshot?.layout?.queueWidth ?? QUEUE_WIDTH.default;
+  const { containerRef: workspaceRef, displayed: queueWidth } = usePaneSize<HTMLElement>(
+    queueDragWidth ?? queueWidthIntent,
+    false,
+    { siblingMin: DETAIL_MIN_WIDTH + WORKSPACE_GAP, min: QUEUE_WIDTH.min, max: QUEUE_WIDTH.max },
+  );
+
+  const handleQueueSplitterCommit = useCallback(
+    (nextWidth: number): void => {
+      // Persist the dragged intent, then release the local override only once the
+      // fresh snapshot (carrying the saved width) is in — so the pane never flickers
+      // back to the pre-drag width between commit and snapshot.
+      void window.mumbler
+        .saveLayout(nextWidth)
+        .then((next) => {
+          snapshotRef.current = next;
+          setSnapshot(next);
+          setQueueDragWidth(null);
+        })
+        .catch((error: unknown) => {
+          setQueueDragWidth(null);
+          addPersistent(
+            error instanceof Error ? error.message : "Failed to save the pane width.",
+            "error",
+          );
+        });
+    },
+    [addPersistent],
+  );
 
   useEffect(() => {
     if (importFlow.pendingReviewDrafts.length === 0) {
@@ -857,7 +900,9 @@ export function App(): ReactElement {
       )}
 
       <main
+        ref={workspaceRef}
         className={`workspace${importFlow.isDragActive ? " workspace--drag-active" : ""}`}
+        style={{ "--queue-width": `${queueWidth}px` } as CSSProperties}
         onDragOver={importFlow.onDragOver}
         onDragLeave={importFlow.onDragLeave}
         onDrop={importFlow.onDrop}
@@ -913,6 +958,19 @@ export function App(): ReactElement {
             </section>
           )}
         </aside>
+
+        <PaneSplitter
+          // Start the drag from the displayed width; the handle reports the new
+          // INTENT (bounded by the pane's own min/max), which we hold locally while
+          // dragging and persist on commit. The displayed width re-derives from that
+          // intent against the live workspace, so a drag that overshoots the room is
+          // held back visually while the intent is kept for when the window grows.
+          width={queueWidth}
+          min={QUEUE_WIDTH.min}
+          max={QUEUE_WIDTH.max}
+          onResize={setQueueDragWidth}
+          onCommit={handleQueueSplitterCommit}
+        />
 
         <section className="detail-pane panel">
           <div className="panel__header">

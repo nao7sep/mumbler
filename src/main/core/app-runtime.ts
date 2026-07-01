@@ -14,6 +14,7 @@ import {
   type ImportOperationResult,
   type ImportSource,
   type MumblerCard,
+  type MumblerLayout,
   type MumblerSettings,
   type MumblerState,
   type PendingImportReviewItem,
@@ -54,6 +55,7 @@ import {
 } from "./file-output";
 
 import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, getSystemTimezone, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
+import { clampQueueWidth, createDefaultLayout, createLayoutStore } from "./layout-store";
 import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
 import { type AppLogger, createLogger, serializeError } from "./logger";
 import { OperationError } from "./operation-error";
@@ -85,8 +87,12 @@ interface AppRuntimeState {
   paths: AppPaths | null;
   settings: MumblerSettings | null;
   state: MumblerState | null;
+  // Disposable pane geometry (the draggable queue-pane width). Loaded leniently:
+  // a corrupt layout file self-heals to defaults rather than failing startup.
+  layout: MumblerLayout | null;
   settingsStore: JsonStore<MumblerSettings> | null;
   stateStore: JsonStore<MumblerState> | null;
+  layoutStore: JsonStore<MumblerLayout> | null;
   logger: AppLogger;
   startupDiagnostic: AppSnapshot["startupDiagnostic"];
   appWideError: AppSnapshot["appWideError"];
@@ -148,8 +154,10 @@ export class ApplicationRuntime {
         paths: null,
         settings: null,
         state: null,
+        layout: null,
         settingsStore: null,
         stateStore: null,
+        layoutStore: null,
         logger,
         startupDiagnostic: {
           title: "Storage Location Could Not Be Resolved",
@@ -216,6 +224,26 @@ export class ApplicationRuntime {
         await stateStore.save(reconciliation.state);
       }
 
+      // Pane geometry (disposable). Unlike settings/state, a corrupt or too-new
+      // layout.json must NOT halt launch — losing a pane width costs the user
+      // nothing — so its load self-heals to defaults and overwrites the bad file.
+      const layoutStore = createLayoutStore(paths.layoutPath);
+      let layout: MumblerLayout;
+      try {
+        const layoutLoad = await layoutStore.load();
+        layout = layoutLoad.value;
+        if (layoutLoad.origin === "created") {
+          await layoutStore.save(layout);
+        }
+      } catch (error: unknown) {
+        layout = createDefaultLayout();
+        await layoutStore.save(layout);
+        await logger.warn("app.layout-recovered", "Layout file was unreadable; reset to defaults.", {
+          layoutPath: paths.layoutPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
       await logger.info("app.startup", "Application runtime initialized.", {
         appVersion: app.getVersion(),
         isPackaged: app.isPackaged,
@@ -244,8 +272,10 @@ export class ApplicationRuntime {
         paths,
         settings,
         state: reconciliation.state,
+        layout,
         settingsStore,
         stateStore,
+        layoutStore,
         logger,
         startupDiagnostic: null,
         appWideError: null,
@@ -295,8 +325,10 @@ export class ApplicationRuntime {
         paths,
         settings: null,
         state: null,
+        layout: null,
         settingsStore: null,
         stateStore: null,
+        layoutStore: null,
         logger,
         startupDiagnostic: {
           title:
@@ -396,7 +428,7 @@ export class ApplicationRuntime {
   }
 
   getSnapshot(): AppSnapshot {
-    const { paths, settings, state } = this.runtime;
+    const { paths, settings, state, layout } = this.runtime;
 
     return {
       appName: app.getName(),
@@ -427,8 +459,29 @@ export class ApplicationRuntime {
       startupDiagnostic: this.runtime.startupDiagnostic,
       appWideError: this.runtime.appWideError,
       state,
+      layout,
       dependencies: this.runtime.toolManager?.listStatuses() ?? null,
     };
+  }
+
+  // Persist the queue (left) pane's dragged width intent to layout.json. Called
+  // only on a splitter drag-commit; the value is clamped to the queue-pane bounds
+  // before it is stored. A window resize re-derives the displayed width in the
+  // renderer and never reaches this path.
+  async saveLayout(queueWidth: number): Promise<AppSnapshot> {
+    this.ensureReady();
+    const next: MumblerLayout = {
+      ...(this.runtime.layout ?? createDefaultLayout()),
+      queueWidth: clampQueueWidth(queueWidth),
+    };
+    this.runtime.layout = next;
+    await this.runtime.layoutStore?.save(next);
+    // A drag-commit is a low-value, potentially-repeated gesture, so it is traced
+    // at debug (developer-only) rather than info, like card selection.
+    await this.runtime.logger.debug("layout.save", "Persisted queue pane width.", {
+      queueWidth: next.queueWidth,
+    });
+    return this.getSnapshot();
   }
 
   async reportRendererError(report: RendererErrorReport): Promise<AppSnapshot> {
@@ -459,8 +512,10 @@ export class ApplicationRuntime {
     const paths = this.runtime.paths ?? getAppPaths();
     const settingsStore = createSettingsStore(paths.settingsPath);
     const stateStore = createStateStore(paths.statePath);
+    const layoutStore = createLayoutStore(paths.layoutPath);
     const settings = createDefaultSettings(getSystemTimezone());
     const state = createEmptyState();
+    const layout = createDefaultLayout();
 
     try {
       await ensureDirectories(paths);
@@ -469,7 +524,9 @@ export class ApplicationRuntime {
       // file aside before writing defaults.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
       const preservedStateFiles = await stateStore.preserveExistingFiles();
+      const preservedLayoutFiles = await layoutStore.preserveExistingFiles();
       await settingsStore.save(settings);
+      await layoutStore.save(layout);
       // Reuse the per-launch session logger rather than building a new one, so a
       // reset keeps writing to the same file as the rest of the launch.
       const logger = this.runtime.logger;
@@ -479,6 +536,7 @@ export class ApplicationRuntime {
         workingDir: paths.workingDir,
         preservedSettingsFiles,
         preservedStateFiles,
+        preservedLayoutFiles,
         deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
         retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
       });
@@ -486,8 +544,10 @@ export class ApplicationRuntime {
       this.runtime.paths = paths;
       this.runtime.settings = settings;
       this.runtime.state = reconciliation.state;
+      this.runtime.layout = layout;
       this.runtime.settingsStore = settingsStore;
       this.runtime.stateStore = stateStore;
+      this.runtime.layoutStore = layoutStore;
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
       this.runtime.recoveredInterruptedCards = 0;
@@ -1258,6 +1318,7 @@ export class ApplicationRuntime {
       await Promise.allSettled([...this.activePipelines]);
       await this.runtime.stateStore?.flush();
       await this.runtime.settingsStore?.flush();
+      await this.runtime.layoutStore?.flush();
       await this.runtime.logger.info("app.shutdown", "Graceful shutdown complete.", {
         reason: "before-quit",
         cardCount: this.runtime.state?.cards.length ?? 0,
@@ -1679,6 +1740,7 @@ function getAppPaths(): AppPaths {
     homeDir,
     settingsPath: join(homeDir, "settings.json"),
     statePath: join(homeDir, "state.json"),
+    layoutPath: join(homeDir, "layout.json"),
     apiKeysPath: join(homeDir, "api-keys.json"),
     logsDir: join(homeDir, "logs"),
     workingDir: join(homeDir, "working"),

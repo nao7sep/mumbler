@@ -83,6 +83,8 @@ const api: MumblerShellApi = {
       APP_SHELL_CHANNELS.saveToolSettings,
       checkUpdatesAtLaunch,
     ) as Promise<AppSnapshot>,
+  saveLayout: (queueWidth: number) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.saveLayout, queueWidth) as Promise<AppSnapshot>,
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   onAppWideErrorChanged: (listener: () => void) => {
     const wrapped = () => {

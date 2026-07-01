@@ -17,10 +17,26 @@ export const SHELL_PADDING_X = 48;
 // The `.workspace` grid gap between the queue and detail panes.
 export const WORKSPACE_GAP = 20;
 
-// Queue pane: fixed first grid track (`grid-template-columns: 400px …`). This is
-// its real minimum — the smallest width at which a queue row's filename, status,
-// and metadata stay readable.
-export const QUEUE_MIN_WIDTH = 400;
+// Queue (left) pane bounds. It is the fixed, user-adjustable pane in the two-pane
+// workspace (the detail pane is the fill). The user drags a splitter to set its
+// width; the drag is clamped to these bounds and the result persisted as the
+// "intent" in layout.json (see @shared/app-shell MumblerLayout), while the
+// DISPLAYED width is that intent re-clamped to the live window on every resize
+// (clampSplitter below) — so a wide pane narrows toward its min when the window
+// shrinks and returns to the intent when it grows.
+//
+//   min     — smallest width at which a queue row's filename, status, and metadata
+//             stay readable. Mirrors the historical fixed 400px track and feeds
+//             the window minimum below.
+//   default — opening width on first run (kept at the old fixed width, so the
+//             initial layout is unchanged).
+//   max     — the widest the list may take; beyond this it only steals space from
+//             the detail pane for no benefit.
+export const QUEUE_WIDTH = { min: 400, default: 400, max: 720 } as const;
+
+// The queue pane's real minimum, sourced from QUEUE_WIDTH so the window-minimum
+// derivation below and the splitter clamp can never disagree.
+export const QUEUE_MIN_WIDTH = QUEUE_WIDTH.min;
 
 // Detail pane: real minimum width. The detail stack's most demanding row is the
 // three-column Timestamps / Audio / Options grid (`.detail-row`); below roughly
@@ -55,3 +71,24 @@ export const WINDOW_MIN_WIDTH =
 // Derived — do not hand-edit. The minimum height is the detail stack's minimum
 // plus the fixed vertical chrome (shell padding + topbar block).
 export const WINDOW_MIN_HEIGHT = VERTICAL_CHROME + DETAIL_MIN_HEIGHT;
+
+// Clamp an adjustable pane's desired size to what the live window allows, holding
+// every sibling its minimum. `desired` is the drag/intent size; `available` is the
+// live extent of the container the panes share (here the workspace's content-box
+// width); `siblingMin` is the sum of minimums on the far side (the detail-pane
+// minimum plus the workspace gap); `min`/`max` are the dragged pane's own bounds.
+// Used to derive the DISPLAYED width from the persisted intent on every resize —
+// never to change what is persisted (app-chrome-conventions: re-clamp on resize,
+// persist only on a drag).
+export function clampSplitter(
+  desired: number,
+  opts: { available: number; siblingMin: number; min: number; max: number },
+): number {
+  const { available, siblingMin, min, max } = opts;
+  // The most this pane may take and still leave every sibling its minimum.
+  const room = available - siblingMin;
+  // Never let the room ceiling fall below the pane's own min (a too-small window
+  // is held by WINDOW_MIN_* / the schema floor; the pane still reports its min).
+  const ceiling = Math.max(min, Math.min(max, room));
+  return Math.max(min, Math.min(ceiling, Math.round(desired)));
+}
