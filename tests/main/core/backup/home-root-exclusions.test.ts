@@ -26,6 +26,8 @@ describe("isExcludedFile", () => {
     ".DS_Store",
     "sub/.DS_Store",
     "Thumbs.db",
+    "desktop.ini",
+    "Desktop.ini", // OS-noise floor, matched case-insensitively
   ])("excludes %s", (relativePath) => {
     expect(isExcludedFile(relativePath)).toBe(true);
   });
