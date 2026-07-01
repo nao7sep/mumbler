@@ -6,7 +6,7 @@ import type { ReadableStream as WebReadableStream } from "node:stream/web";
 // Minimal HTTPS download/resolve helpers for the managed audio tools. Every URL
 // is https-only (refused up front), every transfer is bounded by a byte cap and
 // an idle watchdog, and the body streams to disk so a ~27 MB archive never sits
-// in memory. The version-and-update-conventions' https-only transport rule.
+// in memory. The managed-runtime-dependencies-conventions' https-only transport rule.
 
 function assertHttps(url: string): void {
   let scheme = "";

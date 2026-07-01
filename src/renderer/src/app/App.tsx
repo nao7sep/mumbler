@@ -316,6 +316,7 @@ export function App(): ReactElement {
   }, []);
 
   const dependencies = snapshot?.dependencies ?? null;
+  const toolsRollUp = dependencies ? rollUpRole(dependencies) : "none";
 
   // Blocking-first-run (managed-runtime-dependencies-conventions): a required tool
   // that is missing opens the Audio Tools modal once as an instruction — regardless
@@ -765,15 +766,15 @@ export function App(): ReactElement {
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          {dependencies && rollUpRole(dependencies) !== "none" ? (
+          {toolsRollUp !== "none" ? (
             <button
               type="button"
-              className={`tools-chip tools-chip--${rollUpRole(dependencies)}`}
+              className={`tools-chip tools-chip--${toolsRollUp}`}
               onClick={() => setShowAudioTools(true)}
               title="Open Audio Tools"
             >
-              <ToolsChipIcon role={rollUpRole(dependencies)} />
-              {toolsChipMessage(rollUpRole(dependencies))}
+              <ToolsChipIcon role={toolsRollUp} />
+              {toolsChipMessage(toolsRollUp)}
             </button>
           ) : null}
           <div className="app-menu-anchor">

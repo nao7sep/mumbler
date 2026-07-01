@@ -6,7 +6,7 @@ import { fetchText, resolveRedirectLocation } from "./http";
 // as native arm64 builds from martin-riedl.de on macOS and from BtbN on Windows,
 // each verified against the vendor's published SHA-256. Both sources are
 // single-/community-maintainer (a deliberate Tier-3 acceptance under the
-// native-binary-and-model-delivery-conventions' warn-and-escalate rule; a
+// managed-runtime-dependencies-conventions' warn-and-escalate rule; a
 // fleet-owned re-host is the named future escalation). The npm `ffmpeg-static`/
 // `ffprobe-static` wrappers are not used — they freeze years behind upstream and
 // ship an x86_64 ffprobe that fails the arm64/lipo gate.

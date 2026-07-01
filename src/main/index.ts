@@ -123,34 +123,52 @@ async function bootstrap(): Promise<void> {
   });
 }
 
-app.whenReady().then(bootstrap).catch((error: unknown) => {
-  console.error("[mumbler] Bootstrap failed:", error instanceof Error ? error.stack : String(error));
-});
+// Single-instance lock: a second launch must not run a parallel main process. It
+// would clear the shared ~/.mumbler/temp staging out from under a download the
+// first instance has in flight, and two processes would race the JSON stores. The
+// second instance hands focus to the first and quits instead.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const [existing] = BrowserWindow.getAllWindows();
+    if (existing) {
+      if (existing.isMinimized()) {
+        existing.restore();
+      }
+      existing.focus();
+    }
+  });
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
+  app.whenReady().then(bootstrap).catch((error: unknown) => {
+    console.error("[mumbler] Bootstrap failed:", error instanceof Error ? error.stack : String(error));
+  });
 
-// Graceful shutdown: hold the quit once, flush pending state + abort in-flight
-// pipelines via the runtime, then exit deterministically with app.exit(0). A
-// second quit during shutdown falls through (force-quit escape hatch).
-app.on("before-quit", (event) => {
-  if (shuttingDown) {
-    return;
-  }
-  shuttingDown = true;
-  event.preventDefault();
-  const runtime = runtimeForShutdown;
-  if (runtime === null) {
-    app.exit(0);
-    return;
-  }
-  runtime
-    .shutdown()
-    .catch((error: unknown) => {
-      console.error("[mumbler] Shutdown error:", error instanceof Error ? error.stack : String(error));
-    })
-    .finally(() => app.exit(0));
-});
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
+  });
+
+  // Graceful shutdown: hold the quit once, flush pending state + abort in-flight
+  // pipelines via the runtime, then exit deterministically with app.exit(0). A
+  // second quit during shutdown falls through (force-quit escape hatch).
+  app.on("before-quit", (event) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    event.preventDefault();
+    const runtime = runtimeForShutdown;
+    if (runtime === null) {
+      app.exit(0);
+      return;
+    }
+    runtime
+      .shutdown()
+      .catch((error: unknown) => {
+        console.error("[mumbler] Shutdown error:", error instanceof Error ? error.stack : String(error));
+      })
+      .finally(() => app.exit(0));
+  });
+}

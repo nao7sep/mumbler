@@ -1573,7 +1573,7 @@ textarea:focus-visible,
 
 /* ── Audio Tools (managed dependency status surface) ─────────────────────────
    Semantic status roles map to theme colours here, per the
-   managed-dependency-status-conventions: informational = neutral/processing,
+   managed-runtime-dependencies-conventions: informational = neutral/processing,
    warning = attention, error = something wrong. The role-to-colour mapping lives
    only in these classes; the components name roles, never colours. */
 .tools-role--ok {

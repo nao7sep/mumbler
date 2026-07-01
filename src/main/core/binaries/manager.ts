@@ -3,12 +3,15 @@ import { access, chmod, constants, mkdir, rename, rm, stat } from "node:fs/promi
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { nanoid } from "nanoid";
+
 import type { DependencyStatus, ToolFacts, ToolName, ToolTransient } from "@shared/app-shell";
 import { deriveStatus } from "@shared/dependency-status";
 
 import type { AppLogger } from "../logger";
 import type { JsonStore } from "../json-store";
 import { OperationError } from "../operation-error";
+import { assertArm64Slice } from "./arch";
 import { extractFileFromZip } from "./archive";
 import { downloadToFile, fetchText } from "./http";
 import { parseSha256Sidecar, verifySha256 } from "./integrity";
@@ -127,17 +130,19 @@ export class ToolManager {
 
       await mkdir(this.deps.tempDir, { recursive: true });
       await mkdir(this.deps.binDir, { recursive: true });
-      const stamp = Date.now();
-      // The archive lands in temp/ (deletable, holds nothing precious); the
-      // extracted binary stages inside binDir so the publish is a same-filesystem
-      // rename — never a cross-volume copy.
-      const partial = join(this.deps.tempDir, `${name}-${stamp}.partial`);
-      const staging = join(this.deps.binDir, `.${toolFileName(name, this.deps.platform)}.staging-${stamp}`);
+      // Both the downloaded archive and the extracted binary stage in temp/ under
+      // unique (nanoid) names — temp/ holds everything disposable, so bin/ only
+      // ever contains published binaries. temp/ and bin/ share the data root (one
+      // filesystem), so the publish stays a true atomic rename, not a cross-volume
+      // copy.
+      const token = nanoid();
+      const archivePath = join(this.deps.tempDir, `${name}.${token}.zip`);
+      const stagedExe = join(this.deps.tempDir, `${name}.${token}`);
 
       try {
         await downloadToFile({
           url: spec.downloadUrl,
-          destPath: partial,
+          destPath: archivePath,
           maxBytes: TOOL_DOWNLOAD_MAX_BYTES,
           onProgress: (received, total) => {
             const percent = total > 0 ? Math.floor((received / total) * 100) : null;
@@ -146,20 +151,26 @@ export class ToolManager {
         });
         // Integrity gate: verify the downloaded archive before it becomes
         // executable. A mismatch throws and aborts the install.
-        await verifySha256(partial, expected);
-        await extractFileFromZip(partial, spec.innerName, staging);
+        await verifySha256(archivePath, expected);
+        await extractFileFromZip(archivePath, spec.innerName, stagedExe);
+        if (this.deps.platform === "darwin") {
+          // Architecture gate: reject an x86_64-only build before it is published,
+          // so a wrong-arch download fails clean here rather than at exec time on
+          // Apple Silicon (no Rosetta).
+          await assertArm64Slice(stagedExe);
+        }
         if (this.deps.platform !== "win32") {
-          await chmod(staging, 0o755);
+          await chmod(stagedExe, 0o755);
           if (this.deps.platform === "darwin") {
-            await execFileAsync("xattr", ["-d", "com.apple.quarantine", staging]).catch(() => undefined);
+            await execFileAsync("xattr", ["-d", "com.apple.quarantine", stagedExe]).catch(() => undefined);
           }
         }
         // Publish with a single rename so the final path is only ever the complete,
         // executable binary — never mid-extract.
-        await rename(staging, this.toolPath(name));
+        await rename(stagedExe, this.toolPath(name));
       } finally {
-        await rm(partial, { force: true }).catch(() => undefined);
-        await rm(staging, { force: true }).catch(() => undefined);
+        await rm(archivePath, { force: true }).catch(() => undefined);
+        await rm(stagedExe, { force: true }).catch(() => undefined);
       }
 
       this.present.set(name, true);
@@ -191,7 +202,12 @@ export class ToolManager {
   // successful knowledge), logs the failure, and rethrows so an explicit Check can
   // show a transient "couldn't check" notice. It never blocks and never persists.
   async checkTools(): Promise<void> {
-    for (const name of TOOL_NAMES) {
+    // Never disturb a tool that is mid-install: its provision transient and
+    // progress must survive a concurrent check. Only the tools idle at the start
+    // get the running:check overlay; their facts are still recorded for all (a
+    // successful install overwrites its own facts anyway).
+    const overlaid = TOOL_NAMES.filter((name) => !this.busy.has(name));
+    for (const name of overlaid) {
       this.setTransient(name, { kind: "running", operation: "check", percent: null });
     }
     try {
@@ -210,8 +226,12 @@ export class ToolManager {
       });
       throw error instanceof Error ? error : new Error(message);
     } finally {
-      for (const name of TOOL_NAMES) {
-        this.setTransient(name, { kind: "idle" });
+      // Clear only the overlays we set, and only if an install has not since
+      // claimed the tool (which now owns its transient).
+      for (const name of overlaid) {
+        if (!this.busy.has(name)) {
+          this.setTransient(name, { kind: "idle" });
+        }
       }
     }
   }

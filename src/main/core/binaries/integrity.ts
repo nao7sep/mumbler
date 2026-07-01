@@ -5,7 +5,7 @@ import { createReadStream } from "node:fs";
 // published per-asset checksum, fetched alongside the download (martin-riedl's
 // `.zip.sha256` sidecar on macOS, BtbN's combined `checksums.sha256` on Windows)
 // and verified at acquisition, before the bytes are made executable — the
-// native-binary-and-model-delivery-conventions' integrity gate.
+// managed-runtime-dependencies-conventions' integrity gate.
 
 // Stream the file through the hash so a ~27 MB archive never sits in memory.
 export async function sha256OfFile(filePath: string): Promise<string> {
