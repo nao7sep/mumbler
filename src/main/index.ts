@@ -4,6 +4,7 @@ import { extname } from "node:path";
 
 import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { ApplicationRuntime } from "./core/app-runtime";
+import { runBackupInBackground } from "./core/backup/backup-service";
 import { registerAppShellIpc } from "./ipc/app-shell";
 import { createMainWindow } from "./window";
 
@@ -79,6 +80,15 @@ async function bootstrap(): Promise<void> {
 
   registerAppShellIpc(runtime);
   createMainWindow();
+
+  // Fire-and-forget the just-in-case data backup on the event loop, after the
+  // window is created and config has been materialized during initialize(). It
+  // is best-effort and silent — it never blocks startup, shows an error, or
+  // throws out of here — and does nothing when the storage root was unresolvable.
+  const backupPaths = runtime.currentPaths();
+  if (backupPaths !== null) {
+    runBackupInBackground(backupPaths, runtime.currentLogger());
+  }
 
   const broadcastAppWideError = (): void => {
     for (const window of BrowserWindow.getAllWindows()) {

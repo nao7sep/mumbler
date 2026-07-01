@@ -426,6 +426,14 @@ export class ApplicationRuntime {
     return this.runtime.logger;
   }
 
+  // The resolved storage paths, or null when the storage root could not be
+  // resolved (a rejected MUMBLER_HOME override). Exposed so the startup edge can
+  // fire the just-in-case data backup after the window is up, without reaching
+  // into the snapshot; the backup simply does not run when paths are null.
+  currentPaths(): AppPaths | null {
+    return this.runtime.paths;
+  }
+
   getSnapshot(): AppSnapshot {
     const { paths, settings, state, layout } = this.runtime;
 
