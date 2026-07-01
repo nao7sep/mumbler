@@ -12,8 +12,13 @@ vi.mock("electron", () => ({
   shell: {},
 }));
 
-const { applyPendingImportDraft, buildConfirmedTimestamps, applyFrontTrimOffset, resolveStorageRoot } =
-  await import("@main/core/app-runtime");
+const {
+  applyPendingImportDraft,
+  buildConfirmedTimestamps,
+  applyFrontTrimOffset,
+  resolveStorageRoot,
+  getAppPaths,
+} = await import("@main/core/app-runtime");
 
 const { join } = await import("node:path");
 
@@ -191,6 +196,52 @@ describe("resolveStorageRoot", () => {
     } finally {
       if (previous === undefined) delete process.env.MUMBLER_UNSET_VAR;
       else process.env.MUMBLER_UNSET_VAR = previous;
+    }
+  });
+});
+
+describe("getAppPaths standard layout", () => {
+  // getAppPaths is the single source of truth for every stored-file name under the
+  // storage root. These assertions pin the filename mapping so a rename of any
+  // store cannot silently drift: durable user settings live in config.json, and
+  // that file stays distinct from the volatile state.json and layout.json stores.
+  const ROOT = "/data/mumbler-paths-test";
+
+  function withRoot<T>(run: () => T): T {
+    const previous = process.env.MUMBLER_HOME;
+    process.env.MUMBLER_HOME = ROOT;
+    try {
+      return run();
+    } finally {
+      if (previous === undefined) delete process.env.MUMBLER_HOME;
+      else process.env.MUMBLER_HOME = previous;
+    }
+  }
+
+  it("resolves durable settings to config.json under the storage root", () => {
+    const paths = withRoot(() => getAppPaths());
+    expect(paths.homeDir).toBe(ROOT);
+    expect(paths.settingsPath).toBe(join(ROOT, "config.json"));
+  });
+
+  it("keeps config.json separate from the state, layout, and secrets stores", () => {
+    const paths = withRoot(() => getAppPaths());
+    expect(paths.statePath).toBe(join(ROOT, "state.json"));
+    expect(paths.layoutPath).toBe(join(ROOT, "layout.json"));
+    expect(paths.apiKeysPath).toBe(join(ROOT, "api-keys.json"));
+
+    // Distinct roles, distinct files: durable settings must never collide with the
+    // volatile state, the self-healing layout, or the 0600 secrets file.
+    const distinct = new Set([
+      paths.settingsPath,
+      paths.statePath,
+      paths.layoutPath,
+      paths.apiKeysPath,
+    ]);
+    expect(distinct.size).toBe(4);
+    // The old name is fully retired — nothing resolves to settings.json.
+    for (const p of distinct) {
+      expect(p.endsWith("settings.json")).toBe(false);
     }
   });
 });

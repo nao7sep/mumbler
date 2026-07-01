@@ -26,7 +26,7 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "mumbler-secrets-"));
   process.env.MUMBLER_HOME = home;
   apiKeysPath = join(home, "api-keys.json");
-  settingsPath = join(home, "settings.json");
+  settingsPath = join(home, "config.json");
   clearGeminiEnv();
 });
 

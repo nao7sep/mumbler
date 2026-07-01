@@ -27,7 +27,7 @@ function statePath(): string {
 }
 
 function settingsPath(): string {
-  return join(dir, "settings.json");
+  return join(dir, "config.json");
 }
 
 function card(overrides: Partial<MumblerCard> = {}): MumblerCard {

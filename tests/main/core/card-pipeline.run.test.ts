@@ -65,7 +65,7 @@ function makeLogger(): AppLogger {
 function makePaths(): AppPaths {
   return {
     homeDir: "/tmp/.mumbler",
-    settingsPath: "/tmp/.mumbler/settings.json",
+    settingsPath: "/tmp/.mumbler/config.json",
     statePath: "/tmp/.mumbler/state.json",
     layoutPath: "/tmp/.mumbler/layout.json",
     apiKeysPath: "/tmp/.mumbler/api-keys.json",

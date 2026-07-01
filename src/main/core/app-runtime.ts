@@ -1733,12 +1733,12 @@ function expandEnvReferences(value: string): string {
     .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (_match, name: string) => process.env[name] ?? "");
 }
 
-function getAppPaths(): AppPaths {
+export function getAppPaths(): AppPaths {
   const homeDir = resolveStorageRoot(process.env.MUMBLER_HOME, homedir());
 
   return {
     homeDir,
-    settingsPath: join(homeDir, "settings.json"),
+    settingsPath: join(homeDir, "config.json"),
     statePath: join(homeDir, "state.json"),
     layoutPath: join(homeDir, "layout.json"),
     apiKeysPath: join(homeDir, "api-keys.json"),

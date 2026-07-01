@@ -105,7 +105,7 @@ describe("applySettingsDraft — validation", () => {
 describe("Gemini API key is no longer a setting", () => {
   // The key moved to a dedicated 0600 secrets file resolved environment-first
   // (see api-keys.test.ts). The settings store/draft must not carry it at all, so
-  // a key can never be persisted into settings.json via the JSON roundtrip.
+  // a key can never be persisted into config.json via the JSON roundtrip.
   it("does not expose any key field on settings or the draft", () => {
     const settings = createDefaultSettings("Asia/Tokyo");
     const draft = buildSettingsDraft(settings, OUT, BACKUP, true);

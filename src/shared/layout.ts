@@ -25,14 +25,15 @@ export const WORKSPACE_GAP = 20;
 // (clampSplitter below) — so a wide pane narrows toward its min when the window
 // shrinks and returns to the intent when it grows.
 //
-//   min     — smallest width at which a queue row's filename, status, and metadata
-//             stay readable. Mirrors the historical fixed 400px track and feeds
+//   min     — smallest width at which a queue row still reads. A row is a plain
+//             vertical stack (filename, timestamp · duration, status) with no
+//             internal columns, so it tolerates a fairly narrow pane; this feeds
 //             the window minimum below.
-//   default — opening width on first run (kept at the old fixed width, so the
-//             initial layout is unchanged).
+//   default — opening width on first run (the historical fixed 400px track, so the
+//             initial layout is unchanged; the user can now drag narrower).
 //   max     — the widest the list may take; beyond this it only steals space from
 //             the detail pane for no benefit.
-export const QUEUE_WIDTH = { min: 400, default: 400, max: 720 } as const;
+export const QUEUE_WIDTH = { min: 280, default: 400, max: 720 } as const;
 
 // The queue pane's real minimum, sourced from QUEUE_WIDTH so the window-minimum
 // derivation below and the splitter clamp can never disagree.

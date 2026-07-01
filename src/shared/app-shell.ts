@@ -422,7 +422,7 @@ export interface DependencyStatus {
 }
 
 // Disposable window/view geometry — the pane sizes the user drags. Persisted in
-// its own layout.json (never settings.json, which the user edits, nor state.json,
+// its own layout.json (never config.json, which the user edits, nor state.json,
 // which holds precious card data): losing a pane width costs the user nothing, so
 // unlike those stores a corrupt layout file self-heals to defaults instead of
 // halting launch. queueWidth is the user's dragged INTENT in CSS pixels, bounded

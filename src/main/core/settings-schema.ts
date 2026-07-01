@@ -75,7 +75,7 @@ function normalizeSettings(
     // AI
     // raw.geminiApiKeyObfuscated (a legacy key stored in this file before the
     // secrets-file move) is deliberately NOT carried over: it is dropped here on
-    // load, and never written back, so the next save scrubs it from settings.json.
+    // load, and never written back, so the next save scrubs it from config.json.
     // Pre-release, this needs no migration — a user with a key in the old settings
     // simply re-enters it once into the dedicated secrets store.
     transcriptionModel: asString(raw.transcriptionModel) ?? defaults.transcriptionModel,
