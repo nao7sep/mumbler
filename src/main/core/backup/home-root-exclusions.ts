@@ -19,12 +19,14 @@ import { normalize } from "./archive-paths.js";
 
 const EXCLUDED_DIRS = ["working", "output", "bin", "temp", "backups", "logs"];
 const EXCLUDED_FILES = ["layout.json"];
-const EXCLUDED_BASENAMES = [".ds_store", "thumbs.db"];
+// OS/file-manager metadata that appears under the root just from browsing it (the fleet floor); compared
+// against the lowercased base name, so `Desktop.ini`/`thumbs.db` etc. all match.
+const EXCLUDED_BASENAMES = [".ds_store", "thumbs.db", "desktop.ini"];
 
 /** True when a home-root file must not be backed up. */
 export function isExcludedFile(relativePath: string): boolean {
   const path = normalize(relativePath);
-  if (path.endsWith(".tmp")) return true;
+  if (path.toLowerCase().endsWith(".tmp")) return true;
   if (EXCLUDED_FILES.includes(path)) return true;
   const basename = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
   if (EXCLUDED_BASENAMES.includes(basename)) return true;
