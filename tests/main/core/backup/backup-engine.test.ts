@@ -1,8 +1,7 @@
 // End-to-end backup runs over a throwaway home root: a first run captures the managed durable files at
-// their mirror paths (and excludes layout.json / the working tree); an unchanged run writes nothing; an
-// edit captures only what changed; a corrupt index resets to a full backup; a case-collision is skipped
-// without failing the run. The backups directory is owner-only (0700) so a secret it may contain is not
-// downgraded.
+// their mirror paths (and excludes layout.json, the secret api-keys.json, and the working tree); an
+// unchanged run writes nothing; an edit captures only what changed; a corrupt index resets to a full
+// backup; a case-collision is skipped without failing the run.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
@@ -56,7 +55,7 @@ function seedHome(): void {
 }
 
 describe("runBackup", () => {
-  it("captures managed files and excludes layout.json and the working tree", async () => {
+  it("captures managed files and excludes layout.json, api-keys.json, and the working tree", async () => {
     seedHome();
 
     const report = await runBackup(locations, RUN1);
@@ -66,16 +65,11 @@ describe("runBackup", () => {
     expect(report.archiveFileName).toBe("backup-20260701-000000-utc.zip");
 
     const entries = await zipEntries(backupsPath(report.archiveFileName!));
-    expect(entries).toEqual(
-      ["api-keys.json", "config.json", "dependencies.json", "state.json"].sort(),
-    );
+    expect(entries).toEqual(["config.json", "dependencies.json", "state.json"].sort());
     expect(entries).toContain("state.json"); // the card queue IS backed up
     expect(entries).not.toContain("layout.json"); // volatile UI state is NOT
+    expect(entries).not.toContain("api-keys.json"); // the secret is NOT
     expect(entries.some((e) => e.startsWith("working/"))).toBe(false);
-
-    if (process.platform !== "win32") {
-      expect(fs.statSync(locations.backupsDir).mode & 0o777).toBe(0o700);
-    }
   });
 
   it("writes nothing on a second run with no changes", async () => {
@@ -112,7 +106,7 @@ describe("runBackup", () => {
     const report = await runBackup(locations, RUN2);
 
     expect(report.indexWasReset).toBe(true);
-    expect(report.filesArchived).toBe(4); // config + state + api-keys + dependencies
+    expect(report.filesArchived).toBe(3); // config + state + dependencies (api-keys excluded)
   });
 
   it.skipIf(process.platform === "win32")(
@@ -130,8 +124,8 @@ describe("runBackup", () => {
         expect(report.fatal).toBeUndefined();
         expect(report.nothingChanged).toBe(false);
         expect(report.skips.some((skip) => skip.path === locked)).toBe(true);
-        // The four readable managed files are still captured despite the dead subdirectory.
-        expect(report.filesArchived).toBe(4);
+        // The three readable managed files are still captured despite the dead subdirectory.
+        expect(report.filesArchived).toBe(3);
       } finally {
         fs.chmodSync(locked, 0o700); // restore so afterEach can clean up
       }

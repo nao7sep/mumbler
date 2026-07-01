@@ -3,12 +3,13 @@
  * except the entries here. Pure, so the "did we pick the right files?" decision is unit-testable.
  *
  * Backed up (managed durable data): `config.json`, `state.json` (the card queue — user work in progress),
- * `api-keys.json` (secrets are backed up too — see the data-backup conventions), and `dependencies.json`.
+ * and `dependencies.json`.
  *
  * Excluded:
  *  - App-specific: `working/` and `output/` (working audio and finished exports the app re-creates or
  *    already handed to the user), `bin/` and `temp/` (re-fetchable managed audio tools and disposable
- *    download staging), and `layout.json` (volatile pane geometry — near-worthless to capture).
+ *    download staging), `layout.json` (volatile pane geometry — near-worthless to capture), and
+ *    `api-keys.json` (secrets are excluded — see the data-backup conventions).
  *  - Always-exclude (shared across the fleet): `backups/` (the feature's own output — capturing it would
  *    recurse), `logs/` (recreatable), `*.tmp` (atomic-write temporaries), and the OS metadata sidecars
  *    `.DS_Store` / `Thumbs.db`.
@@ -18,7 +19,7 @@
 import { normalize } from "./archive-paths.js";
 
 const EXCLUDED_DIRS = ["working", "output", "bin", "temp", "backups", "logs"];
-const EXCLUDED_FILES = ["layout.json"];
+const EXCLUDED_FILES = ["layout.json", "api-keys.json"];
 // OS/file-manager metadata that appears under the root just from browsing it (the fleet floor); compared
 // against the lowercased base name, so `Desktop.ini`/`thumbs.db` etc. all match.
 const EXCLUDED_BASENAMES = [".ds_store", "thumbs.db", "desktop.ini"];

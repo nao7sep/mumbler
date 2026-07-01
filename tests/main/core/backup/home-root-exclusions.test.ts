@@ -1,12 +1,12 @@
-// The home-root exclude list: managed durable data (config.json, state.json, api-keys.json,
-// dependencies.json — including the secret) is kept; the working/output/bin/temp/backups/logs subtrees,
-// volatile layout.json, atomic-write temporaries, and OS metadata sidecars are dropped.
+// The home-root exclude list: managed durable data (config.json, state.json, dependencies.json) is kept;
+// the secret api-keys.json, the working/output/bin/temp/backups/logs subtrees, volatile layout.json,
+// atomic-write temporaries, and OS metadata sidecars are dropped.
 
 import { describe, it, expect } from "vitest";
 import { isExcludedFile, isExcludedDir } from "@main/core/backup/home-root-exclusions.js";
 
 describe("isExcludedFile", () => {
-  it.each(["config.json", "state.json", "api-keys.json", "dependencies.json"])(
+  it.each(["config.json", "state.json", "dependencies.json"])(
     "includes managed file %s",
     (relativePath) => {
       expect(isExcludedFile(relativePath)).toBe(false);
@@ -15,6 +15,7 @@ describe("isExcludedFile", () => {
 
   it.each([
     "layout.json",
+    "api-keys.json", // the secret is excluded
     "working/rec.m4a",
     "output/2026-export.md",
     "bin/ffmpeg",
