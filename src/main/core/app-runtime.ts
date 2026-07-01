@@ -213,10 +213,11 @@ export class ApplicationRuntime {
       const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
 
       // Persist startup fix-ups (interrupted-card recovery, working-file
-      // reconciliation) or a freshly created file — but never rewrite an
-      // unchanged, already-good state just because we read it.
+      // reconciliation) only. state.json is volatile UI state and is NOT
+      // materialized on first run (storage-path conventions) — a freshly created
+      // file is left unwritten until there is real state to record; an unchanged,
+      // already-good state is never rewritten either.
       const stateChanged =
-        stateLoad.origin === "created" ||
         recovered.recoveredInterruptedCards > 0 ||
         reconciliation.droppedPendingImports > 0 ||
         reconciliation.missingWorkingCards > 0;
@@ -224,17 +225,15 @@ export class ApplicationRuntime {
         await stateStore.save(reconciliation.state);
       }
 
-      // Pane geometry (disposable). Unlike settings/state, a corrupt or too-new
-      // layout.json must NOT halt launch — losing a pane width costs the user
-      // nothing — so its load self-heals to defaults and overwrites the bad file.
+      // Pane geometry (disposable, volatile). Like state.json it is NOT materialized
+      // on first run — a missing layout loads defaults in memory and is written only
+      // once the user actually changes it. A corrupt or too-new layout.json must NOT
+      // halt launch — losing a pane width costs the user nothing — so its load
+      // self-heals to defaults and overwrites the bad file.
       const layoutStore = createLayoutStore(paths.layoutPath);
       let layout: MumblerLayout;
       try {
-        const layoutLoad = await layoutStore.load();
-        layout = layoutLoad.value;
-        if (layoutLoad.origin === "created") {
-          await layoutStore.save(layout);
-        }
+        layout = (await layoutStore.load()).value;
       } catch (error: unknown) {
         layout = createDefaultLayout();
         await layoutStore.save(layout);
