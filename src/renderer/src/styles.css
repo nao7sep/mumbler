@@ -1060,6 +1060,11 @@ textarea:focus-visible,
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: linear-gradient(180deg, var(--field-bg) 0%, var(--surface-muted) 100%);
+  /* WaveSurfer sets no cursor on the drag-to-seek waveform, so it would fall back
+     to the plain arrow. Set the hand here; `cursor` inherits through WaveSurfer's
+     shadow DOM to the seek area, while its inline `ew-resize` trim-handle cursors
+     still win over inheritance. */
+  cursor: pointer;
 }
 
 .waveform-canvas wave {
