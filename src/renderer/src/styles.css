@@ -121,11 +121,20 @@ textarea {
   font: inherit;
 }
 
+/* Every button shows the hand (the webview clickable idiom); disabled resets to
+   the arrow below. */
+button {
+  cursor: pointer;
+}
+
 button:disabled,
 input:disabled,
 select:disabled,
 textarea:disabled {
   opacity: 0.5;
+  /* A disabled control shows the plain arrow, never the hand — a dead button
+     must not invite a click. Overrides the pointer on clickables like .tools-chip. */
+  cursor: default;
 }
 
 .queue-row {
