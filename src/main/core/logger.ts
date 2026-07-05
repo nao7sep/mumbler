@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { formatUtcMarker } from "@shared/timestamps";
+import { formatUtcMarkerMs } from "@shared/timestamps";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -91,10 +91,11 @@ export function serializeError(error: unknown, depth = 0): unknown {
 }
 
 export function createLogger(logsDir: string, options: LoggerOptions): AppLogger {
-  // One file per launch, named with the full UTC session-start timestamp (see
+  // One file per launch, named with the full UTC session-start timestamp, to
+  // millisecond precision so two launches in the same second never collide (see
   // timestamp-conventions). The stamp is captured once here — not per write — so
   // every line of a session lands in the same file.
-  const filePath = join(logsDir, `${formatUtcMarker(new Date())}.log`);
+  const filePath = join(logsDir, `${formatUtcMarkerMs(new Date())}.log`);
 
   // Serialize appends through a promise chain so concurrent log calls (e.g. from
   // parallel pipelines) can never interleave a partial line. Every line is

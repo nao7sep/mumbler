@@ -115,7 +115,7 @@ export class JsonStore<T> {
     await this.queue.catch(() => undefined);
   }
 
-  // Sets the canonical file aside to a timestamped ".corrupt-<stamp>" name,
+  // Sets the canonical file aside to a quarantined "<stem>-<stamp>.invalid" name,
   // returning the path it moved to (or [] if there was nothing to move). This is
   // the explicit-recovery (Reset) escape hatch: the user's original data is
   // preserved before defaults are written over it.

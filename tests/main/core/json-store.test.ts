@@ -150,7 +150,7 @@ describe("JsonStore.preserveExistingFiles", () => {
     await expect(store.preserveExistingFiles()).resolves.toEqual([]);
   });
 
-  it("moves the canonical file aside, preserving its contents under a .corrupt name", async () => {
+  it("moves the canonical file aside, preserving its contents under a quarantined .invalid name", async () => {
     const store = makeStore();
     await writeFile(store.path, JSON.stringify({ schemaVersion: 1, value: "canonical" }), "utf8");
 
@@ -159,7 +159,7 @@ describe("JsonStore.preserveExistingFiles", () => {
     expect(preserved).toHaveLength(1);
     await expect(readFile(store.path, "utf8")).rejects.toThrow();
     expect(await read(preserved[0]!)).toEqual({ schemaVersion: 1, value: "canonical" });
-    expect(preserved[0]!).toMatch(/\.corrupt-\d{8}-\d{6}-utc$/);
+    expect(preserved[0]!).toMatch(/doc-\d{8}-\d{6}-\d{3}-utc\.invalid$/);
   });
 
   it("the Reset sequence does not erase the user's last readable copy", async () => {

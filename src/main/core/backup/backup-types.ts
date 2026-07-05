@@ -8,7 +8,8 @@
 
 /** One captured file state, as stored in `backups/index.json`. */
 export interface BackupIndexEntry {
-  /** The capturing run's UTC file stamp (`yyyymmdd-hhmmss-utc`); also the stem of that run's archive,
+  /** The capturing run's UTC file stamp (`yyyymmdd-hhmmss-fff-utc`; older entries may still carry the
+   *  whole-second `yyyymmdd-hhmmss-utc` form and remain valid as-is); also the stem of that run's archive,
    *  so the zip holding this entry is `backup-<archivedAt>.zip` — derived, never stored. */
   archivedAt: string;
   /** The file's full entry path within the zip, e.g. `state.json`. */

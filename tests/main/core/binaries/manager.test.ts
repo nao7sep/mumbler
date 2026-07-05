@@ -1,6 +1,6 @@
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -158,6 +158,28 @@ describe("installTool", () => {
 
     expect(await readdir(binDir)).toEqual(["ffmpeg"]);
     expect(await readdir(tempDir)).toEqual([]); // archive + staged extract both cleaned
+  });
+
+  it("stages the archive and extracted binary under hyphen-joined, single-extension names", async () => {
+    const manager = await makeManager();
+    let archiveName = "";
+    let stagedName = "";
+    vi.mocked(downloadToFile).mockImplementationOnce(async (opts) => {
+      archiveName = basename(opts.destPath);
+      await writeFile(opts.destPath, "zip-bytes");
+      opts.onProgress?.(50, 100);
+    });
+    vi.mocked(extractFileFromZip).mockImplementationOnce(async (_zip, _inner, dest) => {
+      stagedName = basename(dest);
+      await writeFile(dest, "binary-bytes");
+    });
+
+    await manager.installTool("ffmpeg");
+
+    // House grammar: hyphen-joined discriminator, one final role extension — never
+    // the dot-joined `name.token.ext` anti-pattern.
+    expect(archiveName).toMatch(/^ffmpeg-[\w-]+\.zip$/);
+    expect(stagedName).toMatch(/^ffmpeg-[\w-]+\.tmp$/);
   });
 
   it("aborts on a checksum mismatch: nothing published, temp/ left clean (I5)", async () => {

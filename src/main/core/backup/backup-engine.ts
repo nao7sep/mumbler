@@ -7,8 +7,9 @@
 import { createWriteStream, promises as fs } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
+import { nanoid } from "nanoid";
 import yazl from "yazl";
-import { formatUtcMarker } from "@shared/timestamps";
+import { formatUtcMarkerMs } from "@shared/timestamps";
 import { writeJsonFile } from "../file-io.js";
 import { collectRoots } from "./backup-collector.js";
 import { selectChanged } from "./backup-plan.js";
@@ -41,17 +42,15 @@ async function runCore(locations: BackupLocations, now: Date): Promise<BackupRep
     return { nothingChanged: true, filesArchived: 0, skips, indexWasReset };
   }
 
-  const archivedAt = formatUtcMarker(now);
-  const archiveFileName = `backup-${archivedAt}.zip`;
-  const archived = await writeArchive(locations.backupsDir, archiveFileName, changed, skips);
-  if (archived.length === 0) {
+  const written = await writeArchive(locations.backupsDir, now, changed, skips);
+  if (written === null) {
     // Every changed file vanished before it could be archived; nothing was written, nothing is recorded.
     return { nothingChanged: true, filesArchived: 0, skips, indexWasReset };
   }
 
-  for (const item of archived) {
+  for (const item of written.archived) {
     index.entries.push({
-      archivedAt,
+      archivedAt: written.archivedAt,
       archivePath: item.archivePath,
       sizeBytes: item.sizeBytes,
       lastWriteUtc: toIsoSeconds(item.mtimeMs),
@@ -60,7 +59,13 @@ async function runCore(locations: BackupLocations, now: Date): Promise<BackupRep
   // Index second: the archive is already in place, so a crash here just re-captures next run.
   await writeJsonFile(locations.indexPath, index);
 
-  return { nothingChanged: false, archiveFileName, filesArchived: archived.length, skips, indexWasReset };
+  return {
+    nothingChanged: false,
+    archiveFileName: written.archiveFileName,
+    filesArchived: written.archived.length,
+    skips,
+    indexWasReset,
+  };
 }
 
 async function loadIndex(indexPath: string): Promise<{ index: BackupIndex; indexWasReset: boolean }> {
@@ -88,17 +93,21 @@ async function loadIndex(indexPath: string): Promise<{ index: BackupIndex; index
   }
 }
 
-/** Streams the changed files to a temp zip and renames it into place, returning the files that were
- *  actually archived (a file that vanished since collection is skipped, not recorded). */
+/** Streams the changed files to a temp zip, then claims a free `backup-<archivedAt>.zip` name — advancing
+ *  the millisecond stamp (the no-clobber rule from the data-backup conventions) when `now`'s stamp is
+ *  already taken, e.g. by a second run landing in the same millisecond — and renames the temp file into
+ *  place under that name. Returns the files actually archived (a file that vanished since collection is
+ *  skipped, not recorded) together with the winning stamp and archive name, so the caller records index
+ *  entries under the same stamp the zip actually landed at. Returns `null` when every changed file vanished
+ *  before archiving, in which case nothing is written. */
 async function writeArchive(
   backupsDir: string,
-  archiveFileName: string,
+  now: Date,
   changed: readonly BackupCandidate[],
   skips: BackupSkip[],
-): Promise<BackupCandidate[]> {
+): Promise<{ archived: BackupCandidate[]; archivedAt: string; archiveFileName: string } | null> {
   const dir = await ensureBackupsDir(backupsDir);
-  const finalPath = path.join(dir, archiveFileName);
-  const tempPath = path.join(dir, `.${process.pid}-${archiveFileName}.tmp`);
+  const tempPath = path.join(dir, `backup-${formatUtcMarkerMs(now)}-${nanoid(8)}.tmp`);
 
   const zip = new yazl.ZipFile();
   const archived: BackupCandidate[] = [];
@@ -111,18 +120,39 @@ async function writeArchive(
     archived.push(item);
   }
   if (archived.length === 0) {
-    return archived;
+    return null;
   }
 
   zip.end();
   try {
     await pipeline(zip.outputStream, createWriteStream(tempPath));
-    await fs.rename(tempPath, finalPath);
+    const claimed = await claimArchiveName(dir, now);
+    await fs.rename(tempPath, claimed.finalPath);
+    return { archived, archivedAt: claimed.archivedAt, archiveFileName: claimed.archiveFileName };
   } catch (err) {
     await tryDelete(tempPath);
     throw err;
   }
-  return archived;
+}
+
+/** Finds the first `backup-<archivedAt>.zip` name that does not yet exist, starting at `now` and advancing
+ *  one millisecond at a time (each candidate re-formatted via {@link formatUtcMarkerMs}) until the name is
+ *  free. This is the no-clobber create the data-backup conventions call for: a run whose stamp collides
+ *  with an existing archive lands on the next free millisecond instead of overwriting it. */
+async function claimArchiveName(
+  dir: string,
+  now: Date,
+): Promise<{ archivedAt: string; archiveFileName: string; finalPath: string }> {
+  let candidateMs = now.getTime();
+  for (;;) {
+    const archivedAt = formatUtcMarkerMs(new Date(candidateMs));
+    const archiveFileName = `backup-${archivedAt}.zip`;
+    const finalPath = path.join(dir, archiveFileName);
+    if (!(await exists(finalPath))) {
+      return { archivedAt, archiveFileName, finalPath };
+    }
+    candidateMs += 1;
+  }
 }
 
 async function ensureBackupsDir(backupsDir: string): Promise<string> {

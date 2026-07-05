@@ -136,8 +136,8 @@ export class ToolManager {
       // filesystem), so the publish stays a true atomic rename, not a cross-volume
       // copy.
       const token = nanoid();
-      const archivePath = join(this.deps.tempDir, `${name}.${token}.zip`);
-      const stagedExe = join(this.deps.tempDir, `${name}.${token}`);
+      const archivePath = join(this.deps.tempDir, `${name}-${token}.zip`);
+      const stagedExe = join(this.deps.tempDir, `${name}-${token}.tmp`);
 
       try {
         await downloadToFile({

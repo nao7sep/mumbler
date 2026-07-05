@@ -159,7 +159,7 @@ describe("API key secrets store", () => {
     // The unreadable file is preserved aside (timestamped), not left in place to be
     // re-flagged on every read, and not deleted silently.
     const entries = await readdir(home);
-    expect(entries.some((e) => e.startsWith("api-keys.json.corrupt-"))).toBe(true);
+    expect(entries.some((e) => /^api-keys-\d{8}-\d{6}-\d{3}-utc\.invalid$/.test(e))).toBe(true);
     expect(entries).not.toContain("api-keys.json");
   });
 });

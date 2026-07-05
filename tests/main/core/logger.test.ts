@@ -30,14 +30,14 @@ async function readLines(): Promise<Record<string, unknown>[]> {
 }
 
 describe("createLogger", () => {
-  it("writes to one per-launch yyyymmdd-hhmmss-utc.log file with ISO timestamps", async () => {
+  it("writes to one per-launch yyyymmdd-hhmmss-fff-utc.log file with ISO timestamps", async () => {
     const logger = createLogger(dir, { debugEnabled: true });
     await logger.info("startup", "hello");
     await logger.warn("startup", "careful");
 
     const files = await logFiles();
     expect(files).toHaveLength(1);
-    expect(files[0]).toMatch(/^\d{8}-\d{6}-utc\.log$/);
+    expect(files[0]).toMatch(/^\d{8}-\d{6}-\d{3}-utc\.log$/);
 
     const lines = await readLines();
     expect(lines).toHaveLength(2);

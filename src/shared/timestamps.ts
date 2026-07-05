@@ -182,6 +182,23 @@ export function formatUtcMarker(date: Date): string {
     .padStart(2, "0")}-utc`;
 }
 
+// Millisecond-precision sibling of formatUtcMarker: `yyyymmdd-hhmmss-fff-utc`. Used
+// wherever a filename stamp must stay unique across events that can land in the
+// same second (a session-log start, a backup archive); formatUtcMarker's
+// whole-second form stays the one used where that extra segment isn't needed
+// (e.g. the exported card filename).
+export function formatUtcMarkerMs(date: Date): string {
+  return (
+    date
+      .toISOString()
+      .slice(0, 23)
+      .replaceAll("-", "")
+      .replaceAll(":", "")
+      .replace(".", "-")
+      .replace("T", "-") + "-utc"
+  );
+}
+
 export function normalizeUtcMs(value: unknown, fallback: number = Date.now()): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {

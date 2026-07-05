@@ -11,7 +11,9 @@
  *    download staging), `layout.json` (volatile pane geometry — near-worthless to capture), and
  *    `api-keys.json` (secrets are excluded — see the data-backup conventions).
  *  - Always-exclude (shared across the fleet): `backups/` (the feature's own output — capturing it would
- *    recurse), `logs/` (recreatable), `*.tmp` (atomic-write temporaries), and the OS metadata sidecars
+ *    recurse), `logs/` (recreatable), `*.tmp` (atomic-write temporaries), `*.invalid`
+ *    (quarantined-corrupt files set aside by `preserveAside` — including a quarantined corrupt
+ *    `api-keys.json`, which stays a secret even once broken), and the OS metadata sidecars
  *    `.DS_Store` / `Thumbs.db`.
  *
  * Paths are the forward-slash relative path under the root.
@@ -28,6 +30,7 @@ const EXCLUDED_BASENAMES = [".ds_store", "thumbs.db", "desktop.ini"];
 export function isExcludedFile(relativePath: string): boolean {
   const path = normalize(relativePath);
   if (path.toLowerCase().endsWith(".tmp")) return true;
+  if (path.toLowerCase().endsWith(".invalid")) return true;
   if (EXCLUDED_FILES.includes(path)) return true;
   const basename = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
   if (EXCLUDED_BASENAMES.includes(basename)) return true;

@@ -1,6 +1,6 @@
 import { app } from "electron";
 import { copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { nanoid } from "nanoid";
 
 import type { MumblerCard } from "@shared/app-shell";
@@ -49,10 +49,14 @@ export async function finalizeOutputsAtomically(params: {
 }): Promise<void> {
   await mkdir(dirname(params.targets.audioPath), { recursive: true });
 
-  const token = nanoid(8);
+  // Audio/json/markdown targets share one stem (see buildUniqueSuffixedTargets), so each temp/backup
+  // path draws its own nanoid rather than a token shared across the three — otherwise they would collide
+  // on the same derived name.
+  const stemOf = (targetPath: string): string => basename(targetPath, extname(targetPath));
   const tempPathFor = (targetPath: string): string =>
-    join(dirname(targetPath), `.${basename(targetPath)}.${token}.tmp`);
-  const backupPathFor = (targetPath: string): string => `${targetPath}.${token}.bak`;
+    join(dirname(targetPath), `${stemOf(targetPath)}-${nanoid(8)}.tmp`);
+  const backupPathFor = (targetPath: string): string =>
+    join(dirname(targetPath), `${stemOf(targetPath)}-${nanoid(8)}.bak`);
 
   const audioTempPath = tempPathFor(params.targets.audioPath);
   const jsonTempPath = tempPathFor(params.targets.jsonPath);

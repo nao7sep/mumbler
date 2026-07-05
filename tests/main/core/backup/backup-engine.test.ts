@@ -62,7 +62,7 @@ describe("runBackup", () => {
 
     expect(report.fatal).toBeUndefined();
     expect(report.nothingChanged).toBe(false);
-    expect(report.archiveFileName).toBe("backup-20260701-000000-utc.zip");
+    expect(report.archiveFileName).toBe("backup-20260701-000000-000-utc.zip");
 
     const entries = await zipEntries(backupsPath(report.archiveFileName!));
     expect(entries).toEqual(["config.json", "dependencies.json", "state.json"].sort());
@@ -70,6 +70,30 @@ describe("runBackup", () => {
     expect(entries).not.toContain("layout.json"); // volatile UI state is NOT
     expect(entries).not.toContain("api-keys.json"); // the secret is NOT
     expect(entries.some((e) => e.startsWith("working/"))).toBe(false);
+  });
+
+  it("advances past a colliding archive name instead of clobbering it (no-clobber create)", async () => {
+    seedHome();
+    fs.mkdirSync(locations.backupsDir, { recursive: true });
+    // Pre-create the archive name this run would otherwise claim, simulating a prior run (or a second
+    // instance) that already stamped this exact millisecond.
+    fs.writeFileSync(backupsPath("backup-20260701-000000-000-utc.zip"), "collision");
+
+    const report = await runBackup(locations, RUN1);
+
+    expect(report.fatal).toBeUndefined();
+    expect(report.nothingChanged).toBe(false);
+    expect(report.archiveFileName).toBe("backup-20260701-000000-001-utc.zip");
+    expect(fs.existsSync(backupsPath("backup-20260701-000000-001-utc.zip"))).toBe(true);
+    // The pre-existing archive at the original stamp is left untouched, never overwritten.
+    expect(fs.readFileSync(backupsPath("backup-20260701-000000-000-utc.zip"), "utf-8")).toBe("collision");
+
+    const index = JSON.parse(fs.readFileSync(locations.indexPath, "utf-8")) as {
+      entries: { archivedAt: string }[];
+    };
+    expect(index.entries.length).toBeGreaterThan(0);
+    // The index carries the advanced stamp, so the zip name stays derivable from archivedAt.
+    expect(index.entries.every((entry) => entry.archivedAt === "20260701-000000-001-utc")).toBe(true);
   });
 
   it("writes nothing on a second run with no changes", async () => {
@@ -80,7 +104,7 @@ describe("runBackup", () => {
 
     expect(report.nothingChanged).toBe(true);
     expect(report.filesArchived).toBe(0);
-    expect(fs.existsSync(backupsPath("backup-20260701-010000-utc.zip"))).toBe(false);
+    expect(fs.existsSync(backupsPath("backup-20260701-010000-000-utc.zip"))).toBe(false);
   });
 
   it("captures only the changed file after an edit", async () => {
@@ -93,7 +117,7 @@ describe("runBackup", () => {
     const report = await runBackup(locations, RUN2);
 
     expect(report.filesArchived).toBe(1);
-    const entries = await zipEntries(backupsPath("backup-20260701-010000-utc.zip"));
+    const entries = await zipEntries(backupsPath("backup-20260701-010000-000-utc.zip"));
     expect(entries).toEqual(["state.json"]);
   });
 
