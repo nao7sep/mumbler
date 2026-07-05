@@ -54,6 +54,26 @@ describe("API key secrets store", () => {
     expect(fileStat.mode & 0o777).toBe(0o600);
   });
 
+  it("re-tightens a key file that is widened again on a second access in the same session", async () => {
+    if (process.platform === "win32") {
+      return; // POSIX-only permission model.
+    }
+    await writeApiKey(apiKeysPath, ["gemini"], "stored-key");
+    const warn = vi.fn();
+
+    // First access: widen, then read. Tightened back to 0600 regardless of
+    // whether the once-per-session warning has already fired in an earlier test.
+    await chmod(apiKeysPath, 0o644);
+    expect(await resolveApiKey(apiKeysPath, ["gemini"], undefined, warn)).toBe("stored-key");
+    expect((await stat(apiKeysPath)).mode & 0o777).toBe(0o600);
+
+    // Second access, widened again: the tightening itself must never be gated
+    // behind the warning having already been emitted once this session.
+    await chmod(apiKeysPath, 0o644);
+    expect(await resolveApiKey(apiKeysPath, ["gemini"], undefined, warn)).toBe("stored-key");
+    expect((await stat(apiKeysPath)).mode & 0o777).toBe(0o600);
+  });
+
   it("prefers the environment value over the stored value and never persists it", async () => {
     await writeApiKey(apiKeysPath, ["gemini"], "stored-key");
     process.env[GEMINI] = "  env-key  ";
@@ -108,6 +128,29 @@ describe("API key secrets store", () => {
   it("treats an untagged stored value as plaintext (a hand-pasted key)", async () => {
     await writeFile(apiKeysPath, JSON.stringify({ keys: { gemini: "sk-plain-pasted" } }), "utf8");
     expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("sk-plain-pasted");
+  });
+
+  it("round-trips a validly encoded obf: value", async () => {
+    await writeApiKey(apiKeysPath, ["gemini"], "AIzaValidRoundTripKey123");
+    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("AIzaValidRoundTripKey123");
+  });
+
+  it("treats a malformed obf: value as absent and warns naming the key id, rather than decoding it to garbage", async () => {
+    // Node's base64 decoder silently drops characters outside the alphabet
+    // instead of rejecting them; "!" and the wrong length both make this payload
+    // non-canonical base64, so it must never reach a provider as a "decoded" key.
+    await writeFile(
+      apiKeysPath,
+      JSON.stringify({ keys: { gemini: "obf:not-valid-base64!!" } }),
+      "utf8",
+    );
+
+    const warn = vi.fn();
+    expect(await resolveApiKey(apiKeysPath, ["gemini"], undefined, warn)).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("gemini"),
+      expect.objectContaining({ keyId: "gemini" }),
+    );
   });
 
   it("matches stored key ids case-insensitively", async () => {

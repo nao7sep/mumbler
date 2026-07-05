@@ -23,10 +23,14 @@ import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-
  *     value is never written back.
  *   - The stored value is `obf:` + base64 of the reversed UTF-8 bytes; an
  *     untagged value is treated as plaintext. This is NOT encryption — the 0600
- *     mode is the real protection.
+ *     mode is the real protection. A marked value that fails canonical base64
+ *     validation is never decoded (Node's decoder would otherwise silently drop
+ *     invalid characters); it is treated as absent and warned about, naming the
+ *     key id, rather than handed to a provider as garbage.
  *   - On read: a group/world-readable file is warned about once and tightened to
- *     0600 (POSIX only); a corrupt/unreadable file is moved aside to a
- *     timestamped neighbour, warned, and treated as empty rather than throwing.
+ *     0600 every time it is found that way (POSIX only); a corrupt/unreadable
+ *     file is moved aside to a timestamped neighbour, warned, and treated as
+ *     empty rather than throwing.
  */
 
 const MARKER = "obf:";
@@ -76,30 +80,47 @@ function encodeApiKey(plain: string): string {
   return MARKER + Buffer.from(Buffer.from(plain, "utf8")).reverse().toString("base64");
 }
 
-// Convention: an untagged value is plaintext, used as-is; a tagged value is the
-// reversed-UTF-8-bytes form. Never throws — the caller's trim/non-empty check
-// drops anything that does not decode to a usable key.
-function decodeApiKey(stored: string): string {
+// Canonical base64 (RFC 4648, standard alphabet, correct padding) — anything
+// else is a payload Node's lenient `Buffer.from(_, "base64")` would silently
+// mangle (dropping unrecognized characters) rather than reject.
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function isCanonicalBase64(payload: string): boolean {
+  return payload.length % 4 === 0 && BASE64_RE.test(payload);
+}
+
+// Convention: an untagged value is plaintext, used as-is; a tagged value must be
+// canonical base64 behind the marker. Never throws: a marked payload that fails
+// canonical validation returns `null` rather than silently decoding to garbage
+// (Node drops invalid characters instead of rejecting them), and the caller
+// treats `null` as absent and warns, naming the key id.
+function decodeApiKey(stored: string): string | null {
   if (!stored.startsWith(MARKER)) return stored;
-  return Buffer.from(Buffer.from(stored.slice(MARKER.length), "base64")).reverse().toString("utf8");
+  const payload = stored.slice(MARKER.length);
+  if (!isCanonicalBase64(payload)) return null;
+  return Buffer.from(payload, "base64").reverse().toString("utf8");
 }
 
 // --- file read/write ---------------------------------------------------------
 
 // Warn at most once per process about an insecure mode, so a key read on every
-// pipeline run does not spam the log. The tightening itself is never suppressed.
+// pipeline run does not spam the log. The tightening itself is never suppressed:
+// it runs on every access that finds the file group/world-readable, regardless
+// of whether the warning has already fired this session.
 let modeWarned = false;
 
 async function warnIfInsecureMode(filePath: string, warn: WarnFn): Promise<void> {
-  if (!ENFORCE_FILE_MODE || modeWarned) return;
+  if (!ENFORCE_FILE_MODE) return;
   try {
     const fileStat = await stat(filePath);
     if ((fileStat.mode & 0o077) !== 0) {
-      modeWarned = true;
-      warn("API key file is readable beyond the owner; tightening to 0600.", {
-        path: filePath,
-        mode: (fileStat.mode & 0o777).toString(8).padStart(3, "0"),
-      });
+      if (!modeWarned) {
+        modeWarned = true;
+        warn("API key file is readable beyond the owner; tightening to 0600.", {
+          path: filePath,
+          mode: (fileStat.mode & 0o777).toString(8).padStart(3, "0"),
+        });
+      }
       await chmod(filePath, SECRETS_FILE_MODE).catch(() => undefined);
     }
   } catch {
@@ -176,7 +197,18 @@ export async function resolveApiKey(
   for (const level of levels) {
     const stored = all.keys[keyId(level)];
     if (typeof stored === "string") {
-      const key = decodeApiKey(stored).trim();
+      const decoded = decodeApiKey(stored);
+      if (decoded === null) {
+        // A malformed obf: payload never reaches the caller (Node's base64
+        // decoder would otherwise silently drop invalid characters and hand
+        // back garbage). Treat this candidate as absent and warn, then keep
+        // walking the fallback chain exactly as if it were unset.
+        warn(`API key "${keyId(level)}" is stored with a malformed obf: value; treating as absent.`, {
+          keyId: keyId(level),
+        });
+        continue;
+      }
+      const key = decoded.trim();
       if (key) return key;
     }
   }

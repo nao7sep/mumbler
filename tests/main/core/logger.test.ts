@@ -133,6 +133,40 @@ describe("createLogger", () => {
       stderr.mockRestore();
     }
   });
+
+  it("claims the session file with an exclusive create; a same-millisecond clash degrades that session to the console instead of interleaving", async () => {
+    // Freeze the clock so two separately constructed loggers stamp the exact
+    // same yyyymmdd-hhmmss-fff-utc filename, reproducing the same-millisecond
+    // clash the timestamp-conventions call out.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+    try {
+      const first = createLogger(dir, { debugEnabled: true });
+      const second = createLogger(dir, { debugEnabled: true });
+
+      await first.info("startup", "first session");
+
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      try {
+        // The second session's exclusive create collides with the first's file;
+        // it must degrade to the console rather than append into that file.
+        await expect(second.info("startup", "second session")).resolves.toBeUndefined();
+        expect(stderr).toHaveBeenCalled();
+      } finally {
+        stderr.mockRestore();
+      }
+
+      // Only one session file exists, and it holds only the first session's line.
+      const files = await logFiles();
+      expect(files).toHaveLength(1);
+      const lines = await readLines();
+      expect(lines).toHaveLength(1);
+      expect(lines[0].message).toBe("first session");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("redactSecrets", () => {
@@ -151,10 +185,28 @@ describe("redactSecrets", () => {
     });
   });
 
-  it("guards against cycles without throwing", () => {
+  it("guards against a genuine cycle without throwing, replacing the back-edge with the circular marker", () => {
     const cyclic: Record<string, unknown> = { a: 1 };
     cyclic.self = cyclic;
-    expect(() => redactSecrets(cyclic)).not.toThrow();
+    let result: unknown;
+    expect(() => {
+      result = redactSecrets(cyclic);
+    }).not.toThrow();
+    expect(result).toEqual({ a: 1, self: "[circular]" });
+  });
+
+  it("keeps a shared-but-acyclic sub-object intact at every position it appears, not just the marker", () => {
+    // The same reference reachable twice through two different paths is NOT a
+    // cycle (it never appears among its own ancestors), so it must be redacted
+    // in full in both positions rather than collapsed to "[circular]" on its
+    // second occurrence.
+    const shared = { keepMe: "value", nested: { alsoKeep: 1 } };
+    const input = { first: shared, second: shared };
+
+    const result = redactSecrets(input) as Record<string, unknown>;
+    const expected = { keepMe: "value", nested: { alsoKeep: 1 } };
+    expect(result.first).toEqual(expected);
+    expect(result.second).toEqual(expected);
   });
 });
 

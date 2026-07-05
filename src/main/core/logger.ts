@@ -34,6 +34,10 @@ const REDACTED_KEYS = new Set([
 const REDACTION_MARKER = "[redacted]";
 const MAX_ERROR_CAUSE_DEPTH = 8;
 
+function isFileExistsError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "EEXIST";
+}
+
 // The mandatory non-destructive redaction backstop. It is a pure, total,
 // type-preserving function over the structured log object (before serialization):
 //   - replaces only the VALUE of an exact, case-insensitive denied-key match with
@@ -50,8 +54,15 @@ export function redactSecrets(value: unknown, seen: WeakSet<object> = new WeakSe
     if (seen.has(value)) {
       return "[circular]";
     }
+    // Track only the current descent path: add before recursing, remove on
+    // unwind. A shared-but-acyclic object (the same reference reachable twice,
+    // but never through itself) is then redacted in full at every position it
+    // appears; only a true cycle — the object reappearing among its own
+    // ancestors — ever hits the guard above.
     seen.add(value);
-    return value.map((item) => redactSecrets(item, seen));
+    const result = value.map((item) => redactSecrets(item, seen));
+    seen.delete(value);
+    return result;
   }
 
   if (value !== null && typeof value === "object") {
@@ -59,13 +70,15 @@ export function redactSecrets(value: unknown, seen: WeakSet<object> = new WeakSe
       return "[circular]";
     }
     seen.add(value);
-    return Object.fromEntries(
+    const result = Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, fieldValue]) =>
         REDACTED_KEYS.has(key.toLowerCase())
           ? [key, REDACTION_MARKER]
           : [key, redactSecrets(fieldValue, seen)],
       ),
     );
+    seen.delete(value);
+    return result;
   }
 
   return value;
@@ -104,14 +117,45 @@ export function createLogger(logsDir: string, options: LoggerOptions): AppLogger
   // warn/error/debug get the "flush now" the conventions ask for for free.
   let tail: Promise<void> = Promise.resolve();
 
+  // The session file is claimed with an exclusive create (`flag: "wx"`) on the
+  // very first line only; every later line then uses a plain append. A
+  // same-millisecond clash with another launch's file (see timestamp-conventions)
+  // makes that first create fail with EEXIST — and this session must never fall
+  // through to a plain append in that case, which would silently interleave its
+  // lines into the other launch's file. Instead the whole session degrades to
+  // the console fallback below, exactly as if the file could not be opened at all.
+  let fileClaimed = false;
+  let sessionDegraded = false;
+
+  const attemptWrite = (line: string): Promise<void> => {
+    if (sessionDegraded) {
+      return Promise.reject(new Error(`log file claimed by another session: ${filePath}`));
+    }
+    if (!fileClaimed) {
+      return writeFile(filePath, line, { encoding: "utf8", flag: "wx" }).then(
+        () => {
+          fileClaimed = true;
+        },
+        (error: unknown) => {
+          if (isFileExistsError(error)) {
+            sessionDegraded = true;
+          }
+          throw error;
+        },
+      );
+    }
+    return writeFile(filePath, line, { encoding: "utf8", flag: "a" });
+  };
+
   const append = (line: string): Promise<void> => {
-    const writeOnce = (): Promise<void> => writeFile(filePath, line, { encoding: "utf8", flag: "a" });
+    const writeOnce = (): Promise<void> => attemptWrite(line);
     tail = tail.then(writeOnce, writeOnce).then(
       () => undefined,
       (error: unknown) => {
-        // File logging failed (disk full, permissions). Degrade to stderr,
-        // best-effort and dependency-free; never crash and never silently
-        // swallow the failure — surface it somewhere, even if only the console.
+        // File logging failed (disk full, permissions, or a same-millisecond
+        // session clash). Degrade to stderr, best-effort and dependency-free;
+        // never crash and never silently swallow the failure — surface it
+        // somewhere, even if only the console.
         try {
           process.stderr.write(
             `[mumbler:log] failed to write log line: ${error instanceof Error ? error.message : String(error)}\n${line}`,
