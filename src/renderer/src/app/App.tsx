@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import {
   useCallback,
   useEffect,
@@ -126,7 +127,7 @@ export function App(): ReactElement {
   const snapshotRef = useRef<AppSnapshot | null>(null);
 
   const addToast = useCallback((message: string, variant: AppNotification["variant"] = "info") => {
-    const id = `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const id = nanoid();
     setNotifications(prev => [...prev, { id, message, kind: "toast", variant }]);
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
@@ -134,7 +135,7 @@ export function App(): ReactElement {
   }, []);
 
   const addPersistent = useCallback((message: string, variant: AppNotification["variant"] = "info") => {
-    const id = `p-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const id = nanoid();
     setNotifications(prev => [...prev, { id, message, kind: "persistent", variant }]);
   }, []);
 
