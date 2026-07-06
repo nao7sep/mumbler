@@ -165,7 +165,15 @@ async function readAll(filePath: string, warn: WarnFn): Promise<ApiKeysFile> {
 }
 
 async function writeAll(filePath: string, data: ApiKeysFile): Promise<void> {
-  await writeJsonFile(filePath, data, ENFORCE_FILE_MODE ? SECRETS_FILE_MODE : undefined);
+  // not recorded: api-keys.json is a secret and is never written into the backup store (data-backup
+  // conventions). A history that held a credential would become sensitive-at-rest in its entirety; keeping
+  // secrets out is what keeps backups.sqlite3 no more sensitive than ordinary user text. `record: false` is
+  // the explicit opt-out — NOT gated on `mode`, because on Windows the mode is undefined yet the file is
+  // still the secret. The live secret keeps its own 0600 protection here; that is where a secret is guarded.
+  await writeJsonFile(filePath, data, {
+    mode: ENFORCE_FILE_MODE ? SECRETS_FILE_MODE : undefined,
+    record: false,
+  });
 }
 
 function envValue(segments: string[]): string | null {

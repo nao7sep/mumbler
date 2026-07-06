@@ -4,7 +4,6 @@ import { extname } from "node:path";
 
 import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { ApplicationRuntime } from "./core/app-runtime";
-import { runBackupInBackground } from "./core/backup/backup-service";
 import { registerAppShellIpc } from "./ipc/app-shell";
 import { createMainWindow } from "./window";
 
@@ -81,14 +80,10 @@ async function bootstrap(): Promise<void> {
   registerAppShellIpc(runtime);
   createMainWindow();
 
-  // Fire-and-forget the just-in-case data backup on the event loop, after the
-  // window is created and config has been materialized during initialize(). It
-  // is best-effort and silent — it never blocks startup, shows an error, or
-  // throws out of here — and does nothing when the storage root was unresolvable.
-  const backupPaths = runtime.currentPaths();
-  if (backupPaths !== null) {
-    runBackupInBackground(backupPaths, runtime.currentLogger());
-  }
+  // The data backup is now write-through (data-backup conventions): every managed
+  // text save records itself into ~/.mumbler/backups.sqlite3 the instant its atomic
+  // rename lands (see backupStore + writeJsonFile's record hook). There is no
+  // startup scan to fire here — the retired ZIP engine's launch pass is gone.
 
   const broadcastAppWideError = (): void => {
     for (const window of BrowserWindow.getAllWindows()) {

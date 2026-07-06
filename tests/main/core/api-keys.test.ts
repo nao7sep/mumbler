@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { apiKeyEnvVar, clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "@main/core/api-keys";
+import { closeBackupStore } from "@main/core/backupStore";
 
 // The secrets store is isolated by pointing MUMBLER_HOME at a throwaway directory
 // (storage-path-conventions: tests relocate the root via the env override) and
@@ -112,6 +113,17 @@ describe("API key secrets store", () => {
 
     // The settings store is a separate file and is never touched by key writes.
     await expect(readFile(settingsPath, "utf8")).rejects.toThrow();
+  });
+
+  it("never records the secret into the backup store (record:false on the choke point)", async () => {
+    // MUMBLER_HOME is `home` here, so the store — if it recorded — would create home/backups.sqlite3.
+    await writeApiKey(apiKeysPath, ["gemini"], "AIzaSecretKey123");
+    await writeApiKey(apiKeysPath, ["gemini"], "AIzaSecretKey999"); // a second, changed write
+    closeBackupStore();
+
+    // The secret write path opts out of recording, so NO backup store file exists — the credential never
+    // lands in a history that would otherwise become sensitive-at-rest (data-backup conventions).
+    expect(await readdir(home)).not.toContain("backups.sqlite3");
   });
 
   it("clears the stored key while leaving any env key in effect", async () => {

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
 import { mkdir, rm, stat } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, extname, join } from "node:path";
 import { homedir } from "node:os";
 
 import { nanoid } from "nanoid";
@@ -41,8 +41,10 @@ import {
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
+import { setBackupStoreWarn } from "./backupStore";
 import { formatError } from "./file-io";
 import { CorruptStateError, type JsonStore } from "./json-store";
+import { resolveStorageRoot } from "./storage-root";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, selectExistingCardId } from "./working-files";
 import {
   buildMarkdownContent,
@@ -183,6 +185,12 @@ export class ApplicationRuntime {
     // without throwing if the directory is missing — so the logger is on hand to
     // record a startup failure on the very path that could not create it.
     const logger = createLogger(paths.logsDir, { debugEnabled: DEBUG_LOGGING_ENABLED });
+
+    // Point the write-through backup store's single failure log at this launch's session log. The store
+    // logs only failures (a record failure or a store that could not be opened), never a line per save.
+    setBackupStoreWarn((message, details) => {
+      void logger.warn("backup.record", message, details);
+    });
 
     const settingsStore = createSettingsStore(paths.settingsPath);
     const stateStore = createStateStore(paths.statePath);
@@ -424,14 +432,6 @@ export class ApplicationRuntime {
   // the whole launch — never null, never swapped.
   currentLogger(): AppLogger {
     return this.runtime.logger;
-  }
-
-  // The resolved storage paths, or null when the storage root could not be
-  // resolved (a rejected MUMBLER_HOME override). Exposed so the startup edge can
-  // fire the just-in-case data backup after the window is up, without reaching
-  // into the snapshot; the backup simply does not run when paths are null.
-  currentPaths(): AppPaths | null {
-    return this.runtime.paths;
   }
 
   getSnapshot(): AppSnapshot {
@@ -1683,62 +1683,11 @@ export class ApplicationRuntime {
   }
 }
 
-// Resolve the single storage root per the storage-path-conventions, and the
-// reference implementation other TS apps mirror. The root is MUMBLER_HOME when
-// that variable is set and non-empty (trimmed); otherwise the default
-// `<home>/.mumbler`. An override is expanded (a leading `~`/`~/` and `$VAR` env
-// references), then made absolute against the HOME directory — never
-// process.cwd(), so the override can never reintroduce a working-directory
-// dependence. A value that cannot be made into a usable absolute path is a
-// reported startup error, never a silent fallback to the default.
-//
-// Pure and home-injectable so it is unit-testable without touching electron or
-// the real environment.
-export function resolveStorageRoot(
-  rawOverride: string | undefined,
-  homeDirectory: string,
-): string {
-  const trimmed = rawOverride?.trim() ?? "";
-  if (trimmed.length === 0) {
-    return join(homeDirectory, ".mumbler");
-  }
-
-  let value = expandEnvReferences(trimmed).trim();
-
-  // An override that is set but expands to nothing — an unset `$VAR`/`%VAR%`,
-  // say — is a misconfiguration. Rejecting it is the "reported startup error,
-  // not a silent fallback" the convention requires, and it avoids silently
-  // collapsing the root onto the bare home directory.
-  if (value.length === 0) {
-    throw new Error(
-      `MUMBLER_HOME is set to "${rawOverride}" but expands to an empty path ` +
-        `(an unset $VAR/%VAR%?). Set it to a usable directory, or unset it to use ~/.mumbler.`,
-    );
-  }
-
-  // Expand a leading `~` / `~/` (and `~\` on Windows) to the home directory.
-  if (value === "~") {
-    value = homeDirectory;
-  } else if (value.startsWith("~/") || value.startsWith("~\\")) {
-    value = join(homeDirectory, value.slice(2));
-  }
-
-  // A still-relative value is resolved against the HOME directory, not the
-  // working directory, so launch context can never move the storage root.
-  // resolve() always returns an absolute path, so no further guard is needed.
-  return isAbsolute(value) ? resolve(value) : resolve(homeDirectory, value);
-}
-
-// Expand `$VAR` / `${VAR}` (POSIX) and `%VAR%` (Windows) references against the
-// current environment. An undefined reference expands to empty, matching shell
-// behavior, rather than being left as a literal that would later become a
-// directory name.
-function expandEnvReferences(value: string): string {
-  return value
-    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => process.env[name] ?? "")
-    .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, name: string) => process.env[name] ?? "")
-    .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (_match, name: string) => process.env[name] ?? "");
-}
+// The single storage-root resolver lives in its own electron-free module (storage-root.ts) so the pure Node
+// backup store can resolve the root the same way without importing electron. Re-exported here so the
+// existing callers and tests that reach it through app-runtime keep working (it is imported at the top for
+// getAppPaths' own use).
+export { resolveStorageRoot };
 
 export function getAppPaths(): AppPaths {
   const homeDir = resolveStorageRoot(process.env.MUMBLER_HOME, homedir());

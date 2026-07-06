@@ -4,6 +4,24 @@ import { basename, dirname, extname, join } from "node:path";
 import { nanoid } from "nanoid";
 
 import { formatUtcMarkerMs } from "@shared/timestamps";
+import { record } from "./backupStore";
+
+/**
+ * Options for {@link writeJsonFile}, the single managed-text atomic-write choke point.
+ *
+ * `mode` tightens the file's permissions (0o600 for the secrets file), applied to the temp file before the
+ * rename so the target is never momentarily more permissive.
+ *
+ * `record` (default true) is the data-backup hook: after the rename lands, the exact bytes just written are
+ * appended to `~/.mumbler/backups.sqlite3`. It is `true` by default because every managed text file the app
+ * writes is recorded by default (data-backup conventions), and the one caller that must NOT record — the
+ * secrets file (api-keys.json) — sets it `false` explicitly. Gating on `mode` instead would be wrong: on
+ * Windows the secrets write passes no mode, so a mode-based gate would silently back up the secret there.
+ */
+export interface WriteJsonOptions {
+  mode?: number;
+  record?: boolean;
+}
 
 export async function readJsonFile<T>(filePath: string): Promise<T | null> {
   try {
@@ -17,24 +35,31 @@ export async function readJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
-// Atomic JSON write: temp file in the same directory -> fsync -> rename over the
-// target -> fsync the parent dir. When `mode` is given (e.g. 0o600 for a secrets
-// file), it is applied to the temp file *before* the rename, so the target is
-// never momentarily readable beyond that mode — the file appears at its final
-// path already tightened. The mode is ignored on platforms where chmod is a
-// no-op (Windows), matching the secrets convention's POSIX-only permission rule.
+// The single managed-text atomic-write choke point. Atomic JSON write: temp file in the same directory ->
+// fsync -> rename over the target -> fsync the parent dir. When `mode` is given (e.g. 0o600 for a secrets
+// file), it is applied to the temp file *before* the rename, so the target is never momentarily readable
+// beyond that mode — the file appears at its final path already tightened. The mode is ignored on platforms
+// where chmod is a no-op (Windows), matching the secrets convention's POSIX-only permission rule.
+//
+// The data-backup record fires strictly AFTER the rename lands (data-backup conventions). Recording before
+// the rename would risk a "backup of a save that never happened": if the rename then failed, the history
+// would hold a version that never reached disk. So: rename lands, *then* record the exact bytes just written
+// — the same buffer already in hand, never a re-read of the file. The record is best-effort and silent; it
+// never throws back into this write and never affects the save's success (see backupStore). Every managed
+// text file records by default; the secrets file opts out with `record: false`.
 export async function writeJsonFile(
   filePath: string,
   value: unknown,
-  mode?: number,
+  options: WriteJsonOptions = {},
 ): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
   const stem = basename(filePath, extname(filePath));
   const tempPath = join(dirname(filePath), `${stem}-${nanoid(8)}.tmp`);
+  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
   try {
-    await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-    if (mode !== undefined) {
-      await chmod(tempPath, mode);
+    await writeFile(tempPath, bytes);
+    if (options.mode !== undefined) {
+      await chmod(tempPath, options.mode);
     }
     await syncFile(tempPath);
     await rename(tempPath, filePath);
@@ -45,6 +70,12 @@ export async function writeJsonFile(
     // deliberately not surfaced on top of it.
     await rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
+  }
+  // After the rename: the file is exactly where it belongs, so record the bytes we just wrote. Best-effort —
+  // record() catches, logs once, and swallows every failure, so a backup problem can never break the save
+  // that already succeeded above. Excluded when record === false (the secrets file).
+  if (options.record !== false) {
+    record(filePath, bytes);
   }
 }
 
