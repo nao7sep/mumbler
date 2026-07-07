@@ -1,0 +1,13 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+dist-electron
+out
+
+# OS files
+.DS_Store
+
+# Coverage reports (generated)
+coverage/

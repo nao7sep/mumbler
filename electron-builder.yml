@@ -1,0 +1,50 @@
+appId: io.github.nao7sep.mumbler
+productName: Mumbler
+
+directories:
+  output: dist
+  buildResources: build
+
+# Ship the built app bundle (electron-vite's out/). Production dependencies and
+# package.json are included automatically; source and tests are not.
+files:
+  - out/**
+  - package.json
+
+# asar stays at its default (enabled): mumbler bundles no executable native
+# binaries. ffmpeg and ffprobe are managed downloads fetched at runtime into the
+# app data dir (~/.mumbler/bin), never packaged, so there is nothing that an asar
+# archive would trap.
+
+# Tahoe "Liquid Glass" icon: the liquid-glass-icon tool deploys build/Assets.car (committed in
+# company/assets) here. macOS 26 reads CFBundleIconName below → this catalog; older macOS reads
+# CFBundleIconFile → build/icon.icns. Building does NOT need Xcode — the Assets.car is prebuilt.
+extraResources:
+  - from: build/Assets.car
+    to: Assets.car
+
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  extendInfo:
+    CFBundleIconName: broadcast-mic-soundwaves
+  # Pin arm64 explicitly so the macOS artifact's architecture is deterministic,
+  # not inherited from whatever the build host/runner happens to be.
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+    - zip
+
+# Clean, predictable installer filename (electron-builder's default is
+# "Mumbler Setup 0.1.0.exe", with a space). Portable zips keep their defaults.
+nsis:
+  artifactName: ${productName}-${version}-setup.${ext}

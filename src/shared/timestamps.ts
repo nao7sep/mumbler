@@ -1,0 +1,341 @@
+import type { TimestampParseStatus } from "./app-shell";
+
+interface TimestampParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+const LOCAL_TIMESTAMP_PATTERN =
+  /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2}) (?<hour>\d{2}):(?<minute>\d{2}):(?<second>\d{2})$/;
+const UTC_MARKER_PATTERN =
+  /^(?<year>\d{4})(?<month>\d{2})(?<day>\d{2})-(?<hour>\d{2})(?<minute>\d{2})(?<second>\d{2})-utc$/;
+
+export function getSupportedTimezones(): string[] {
+  const intlWithSupportedValues = Intl as typeof Intl & {
+    supportedValuesOf?: (key: string) => string[];
+  };
+
+  const supported = intlWithSupportedValues.supportedValuesOf?.("timeZone") ?? [];
+  // Some platforms omit "UTC" from supportedValuesOf even though it is a usable
+  // zone; ensure it is always offerable (and matches the system fallback).
+  return supported.includes("UTC") ? supported : ["UTC", ...supported];
+}
+
+// Validity is decided by whether Intl can actually use the zone — the same
+// operation every conversion below performs — rather than by membership in the
+// dropdown list, which omits "UTC" and valid aliases such as "US/Eastern".
+export function isValidTimezone(timezone: string): boolean {
+  if (typeof timezone !== "string" || timezone.length === 0) {
+    return false;
+  }
+
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function parseTimestampFromFilename(
+  filenameStem: string,
+  patterns: string[],
+): { localTimestampText: string; parseStatus: TimestampParseStatus } {
+  for (const pattern of patterns) {
+    try {
+      const match = new RegExp(pattern).exec(filenameStem);
+      if (!match?.groups) {
+        continue;
+      }
+
+      const parts = groupsToTimestampParts(match.groups);
+      if (parts === null) {
+        continue;
+      }
+
+      return {
+        localTimestampText: formatLocalTimestamp(parts),
+        parseStatus: "parsed",
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    localTimestampText: "",
+    parseStatus: "manual-required",
+  };
+}
+
+export function recomputeUtcFromLocal(
+  localTimestampText: string,
+  timezone: string,
+): { utcMs: number | null; error: string | null } {
+  const localParts = parseLocalTimestamp(localTimestampText);
+  if (localParts === null) {
+    return { utcMs: null, error: "Enter local time as YYYY-MM-DD HH:MM:SS." };
+  }
+
+  if (!isValidTimezone(timezone)) {
+    return { utcMs: null, error: "Enter a valid IANA timezone." };
+  }
+
+  const utcDate = zonedLocalToUtcDate(localParts, timezone);
+  if (utcDate === null) {
+    return { utcMs: null, error: "Could not convert local time to UTC." };
+  }
+
+  return { utcMs: utcDate.getTime(), error: null };
+}
+
+export function recomputeLocalFromUtc(
+  utcInput: string | number,
+  timezone: string,
+): { localTimestampText: string; error: string | null } {
+  let utcDate: Date | null;
+  if (typeof utcInput === "number") {
+    utcDate = new Date(utcInput);
+  } else {
+    const ms = parseUtcFromDisplay(utcInput);
+    utcDate = ms !== null ? new Date(ms) : null;
+  }
+
+  if (utcDate === null) {
+    return { localTimestampText: "", error: "Enter UTC as YYYY-MM-DD HH:MM:SS." };
+  }
+
+  if (!isValidTimezone(timezone)) {
+    return { localTimestampText: "", error: "Enter a valid IANA timezone." };
+  }
+
+  return {
+    localTimestampText: formatLocalTimestamp(getZonedParts(utcDate, timezone)),
+    error: null,
+  };
+}
+
+export function getLocalTimestampError(localTimestampText: string): string | null {
+  return parseLocalTimestamp(localTimestampText) === null
+    ? "Enter local time as YYYY-MM-DD HH:MM:SS."
+    : null;
+}
+
+export function getUtcTimestampError(utcTimestampText: string): string | null {
+  return parseUtcFromDisplay(utcTimestampText) === null
+    ? "Enter UTC as YYYY-MM-DD HH:MM:SS."
+    : null;
+}
+
+// The canonical serialized form for internal/stored/exported UTC instants:
+// ISO 8601 extended, always exactly 3 fractional digits, Z suffix
+// (e.g. 2026-04-22T00:44:00.000Z). toISOString() emits precisely this; an
+// earlier hand-rolled variant dropped the fraction at .000, which violated the
+// "exactly 3 digits" rule, so this is now the single canonical writer used by
+// both the state store and the file-output sidecar/front matter.
+export function formatUtcIsoCompact(utcMs: number): string {
+  return new Date(utcMs).toISOString();
+}
+
+export function formatUtcForDisplay(utcMs: number): string {
+  const date = new Date(utcMs);
+  return formatLocalTimestamp({
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+    hour: date.getUTCHours(),
+    minute: date.getUTCMinutes(),
+    second: date.getUTCSeconds(),
+  });
+}
+
+export function parseUtcFromDisplay(display: string): number | null {
+  const parts = parseLocalTimestamp(display);
+  if (parts === null) return null;
+  const ms = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+export function formatLocalTimestamp(parts: TimestampParts): string {
+  return `${parts.year.toString().padStart(4, "0")}-${parts.month
+    .toString()
+    .padStart(2, "0")}-${parts.day.toString().padStart(2, "0")} ${parts.hour
+    .toString()
+    .padStart(2, "0")}:${parts.minute.toString().padStart(2, "0")}:${parts.second
+    .toString()
+    .padStart(2, "0")}`;
+}
+
+export function formatUtcMarker(date: Date): string {
+  return `${date.getUTCFullYear().toString().padStart(4, "0")}${(date.getUTCMonth() + 1)
+    .toString()
+    .padStart(2, "0")}${date.getUTCDate().toString().padStart(2, "0")}-${date
+    .getUTCHours()
+    .toString()
+    .padStart(2, "0")}${date.getUTCMinutes().toString().padStart(2, "0")}${date
+    .getUTCSeconds()
+    .toString()
+    .padStart(2, "0")}-utc`;
+}
+
+// Millisecond-precision sibling of formatUtcMarker: `yyyymmdd-hhmmss-fff-utc`. Used
+// wherever a filename stamp must stay unique across events that can land in the
+// same second (a session-log start, a backup archive); formatUtcMarker's
+// whole-second form stays the one used where that extra segment isn't needed
+// (e.g. the exported card filename).
+export function formatUtcMarkerMs(date: Date): string {
+  return (
+    date
+      .toISOString()
+      .slice(0, 23)
+      .replaceAll("-", "")
+      .replaceAll(":", "")
+      .replace(".", "-")
+      .replace("T", "-") + "-utc"
+  );
+}
+
+export function normalizeUtcMs(value: unknown, fallback: number = Date.now()): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const fromDisplay = parseUtcFromDisplay(value);
+    if (fromDisplay !== null) return fromDisplay;
+    const markerDate = parseUtcMarker(value.toLowerCase());
+    if (markerDate !== null) return markerDate.getTime();
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return d.getTime();
+  }
+  return fallback;
+}
+
+function parseLocalTimestamp(value: string): TimestampParts | null {
+  const match = LOCAL_TIMESTAMP_PATTERN.exec(value);
+  if (!match?.groups) {
+    return null;
+  }
+  return groupsToTimestampParts(match.groups);
+}
+
+function parseUtcMarker(value: string): Date | null {
+  const match = UTC_MARKER_PATTERN.exec(value);
+  if (!match?.groups) {
+    return null;
+  }
+
+  const parts = groupsToTimestampParts(match.groups);
+  if (parts === null) {
+    return null;
+  }
+
+  return new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second),
+  );
+}
+
+function groupsToTimestampParts(groups: Record<string, string>): TimestampParts | null {
+  let year: number;
+  const yearStr = groups.year;
+  if (yearStr === undefined) return null;
+  const yearNum = Number(yearStr);
+  if (!Number.isInteger(yearNum) || Number.isNaN(yearNum)) return null;
+  if (yearStr.length === 2) {
+    year = yearNum < 70 ? 2000 + yearNum : 1900 + yearNum;
+  } else {
+    year = yearNum;
+  }
+  const month = Number(groups.month);
+  const day = Number(groups.day);
+  const hour = Number(groups.hour);
+  const minute = Number(groups.minute);
+  const secondRaw = groups.second !== undefined ? Number(groups.second) : 0;
+  const second = Number.isInteger(secondRaw) && !Number.isNaN(secondRaw) ? secondRaw : 0;
+
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute)
+  ) {
+    return null;
+  }
+
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59 ||
+    second < 0 ||
+    second > 59
+  ) {
+    return null;
+  }
+
+  return { year, month, day, hour, minute, second };
+}
+
+function zonedLocalToUtcDate(parts: TimestampParts, timezone: string): Date | null {
+  let candidateMs = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+  );
+
+  for (let index = 0; index < 6; index += 1) {
+    const zonedParts = getZonedParts(new Date(candidateMs), timezone);
+    const deltaMs =
+      Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) -
+      Date.UTC(
+        zonedParts.year,
+        zonedParts.month - 1,
+        zonedParts.day,
+        zonedParts.hour,
+        zonedParts.minute,
+        zonedParts.second,
+      );
+
+    if (deltaMs === 0) {
+      return new Date(candidateMs);
+    }
+
+    candidateMs += deltaMs;
+  }
+
+  return null;
+}
+
+function getZonedParts(date: Date, timezone: string): TimestampParts {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+
+  const parts = formatter.formatToParts(date);
+  const lookup = new Map(parts.map((part) => [part.type, part.value]));
+
+  return {
+    year: Number(lookup.get("year")),
+    month: Number(lookup.get("month")),
+    day: Number(lookup.get("day")),
+    hour: Number(lookup.get("hour")),
+    minute: Number(lookup.get("minute")),
+    second: Number(lookup.get("second")),
+  };
+}

@@ -1,0 +1,49 @@
+{
+  "name": "mumbler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop audio transcription app",
+  "author": {
+    "name": "Yoshinao Inoguchi",
+    "email": "nao7sep@gmail.com",
+    "url": "https://github.com/nao7sep"
+  },
+  "license": "MIT",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "dist": "npm run build && electron-builder --publish never",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web && npm run typecheck:test",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@google/genai": "^2.10.0",
+    "nanoid": "^5.1.16",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "unzipper": "^0.12.5",
+    "wavesurfer.js": "^7.12.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/unzipper": "^0.10.11",
+    "@vitejs/plugin-react": "^5.2.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.9"
+  }
+}
