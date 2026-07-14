@@ -1410,6 +1410,9 @@ export function App(): ReactElement {
           onClearApiKey={() => void settingsModal.handleClearGeminiApiKey()}
           onRestoreDefaultPrompts={() => void settingsModal.handleRestoreDefaultPrompts()}
           onRestoreDefaultModels={() => void settingsModal.handleRestoreDefaultModels()}
+          onRestoreDefaultTimestampPatterns={() =>
+            void settingsModal.handleRestoreDefaultTimestampPatterns()
+          }
           onSave={() => void settingsModal.handleSaveSettings()}
         />
       ) : null}

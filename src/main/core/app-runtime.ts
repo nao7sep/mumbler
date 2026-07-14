@@ -593,6 +593,10 @@ export class ApplicationRuntime {
     };
   }
 
+  getDefaultTimestampPatterns(): string[] {
+    return createDefaultSettings(getSystemTimezone()).timestampPatterns;
+  }
+
   async openImportDialog(window: BrowserWindow): Promise<ImportOperationResult> {
     this.ensureReady();
 

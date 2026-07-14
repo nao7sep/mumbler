@@ -28,6 +28,7 @@ interface UseSettingsModalResult {
   handleClearGeminiApiKey: () => Promise<void>;
   handleRestoreDefaultPrompts: () => Promise<void>;
   handleRestoreDefaultModels: () => Promise<void>;
+  handleRestoreDefaultTimestampPatterns: () => Promise<void>;
   handleRequestCloseSettings: () => void;
   handleConfirmDiscardSettings: () => void;
   handleCancelDiscardSettings: () => void;
@@ -243,6 +244,29 @@ export function useSettingsModal({
     }
   }
 
+  // Reset-to-latest for the owned timestamp-pattern list (config-seeding-conventions'
+  // restore-defaults): pulls the current built-in patterns into the draft, replacing
+  // the user's list wholesale. The button that calls this warns first and is framed
+  // as getting the latest, not undoing.
+  async function handleRestoreDefaultTimestampPatterns(): Promise<void> {
+    try {
+      const defaults = await window.mumbler.getDefaultTimestampPatterns();
+      setSettingsDraft((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              timestampPatternsText: defaults.join("\n"),
+            },
+      );
+      setSettingsErrorMessage(null);
+    } catch (error: unknown) {
+      setSettingsErrorMessage(
+        error instanceof Error ? error.message : "Failed to load default timestamp patterns.",
+      );
+    }
+  }
+
   function handleCloseSettings(): void {
     setSettingsDraft(null);
     setSettingsErrorMessage(null);
@@ -289,6 +313,7 @@ export function useSettingsModal({
     handleClearGeminiApiKey,
     handleRestoreDefaultPrompts,
     handleRestoreDefaultModels,
+    handleRestoreDefaultTimestampPatterns,
     handleRequestCloseSettings,
     handleConfirmDiscardSettings,
     handleCancelDiscardSettings,

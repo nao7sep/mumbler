@@ -111,6 +111,7 @@ export function SettingsModal({
   onClearApiKey,
   onRestoreDefaultPrompts,
   onRestoreDefaultModels,
+  onRestoreDefaultTimestampPatterns,
   onSave,
 }: {
   draft: SettingsDraft;
@@ -128,6 +129,7 @@ export function SettingsModal({
   onClearApiKey: () => void;
   onRestoreDefaultPrompts: () => void;
   onRestoreDefaultModels: () => void;
+  onRestoreDefaultTimestampPatterns: () => void;
   onSave: () => void;
 }): ReactElement {
   // The API key field is self-contained: its value is committed to the dedicated
@@ -262,6 +264,17 @@ export function SettingsModal({
                   onChange={(entries) => onChange({ ...draft, timestampPatternsText: entriesToText(entries) })}
                   placeholder="Add regex pattern..."
                 />
+              </div>
+              <div>
+                <button
+                  type="button"
+                  className="button button--danger"
+                  onClick={onRestoreDefaultTimestampPatterns}
+                  disabled={isSaving}
+                >
+                  Reset to latest defaults
+                </button>
+                <p className="field-hint">Replaces the list with the latest built-in timestamp patterns. Save to persist; close without saving to keep your current patterns.</p>
               </div>
             </div>
           </section>
