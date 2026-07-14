@@ -27,6 +27,7 @@ interface UseSettingsModalResult {
   handleSetGeminiApiKey: (apiKey: string) => Promise<void>;
   handleClearGeminiApiKey: () => Promise<void>;
   handleRestoreDefaultPrompts: () => Promise<void>;
+  handleRestoreDefaultModels: () => Promise<void>;
   handleRequestCloseSettings: () => void;
   handleConfirmDiscardSettings: () => void;
   handleCancelDiscardSettings: () => void;
@@ -217,6 +218,31 @@ export function useSettingsModal({
     }
   }
 
+  // Reset-to-latest for the owned Gemini model list (config-seeding-conventions'
+  // restore-defaults): pulls the current built-in models and default selections
+  // into the draft, replacing the user's list and selections wholesale. The button
+  // that calls this warns first and is framed as getting the latest, not undoing.
+  async function handleRestoreDefaultModels(): Promise<void> {
+    try {
+      const defaults = await window.mumbler.getDefaultModels();
+      setSettingsDraft((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              geminiModelsText: defaults.models.join("\n"),
+              transcriptionModel: defaults.transcriptionModel,
+              metadataModel: defaults.metadataModel,
+            },
+      );
+      setSettingsErrorMessage(null);
+    } catch (error: unknown) {
+      setSettingsErrorMessage(
+        error instanceof Error ? error.message : "Failed to load default models.",
+      );
+    }
+  }
+
   function handleCloseSettings(): void {
     setSettingsDraft(null);
     setSettingsErrorMessage(null);
@@ -262,6 +288,7 @@ export function useSettingsModal({
     handleSetGeminiApiKey,
     handleClearGeminiApiKey,
     handleRestoreDefaultPrompts,
+    handleRestoreDefaultModels,
     handleRequestCloseSettings,
     handleConfirmDiscardSettings,
     handleCancelDiscardSettings,

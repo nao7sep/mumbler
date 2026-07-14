@@ -1,14 +1,21 @@
-export const GEMINI_MODELS = [
-  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (Preview)" },
-  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
-  { id: "gemini-3-flash-preview", label: "Gemini 3 Flash (Preview)" },
-  { id: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash Lite" },
-] as const;
+// Built-in default Gemini model suggestions, seeded into the user-owned, editable
+// model list (MumblerSettings.geminiModels) at first run. A small, editable starter
+// set — the user can add/remove entries and type any id; a wrong or unsupported id
+// surfaces at call time (the validity boundary), not from this list. Google's
+// `-preview` suffix is branding, not a reason to exclude a model. Ordered
+// pro → flash → flash → lite.
+export const DEFAULT_GEMINI_MODELS: string[] = [
+  "gemini-3.1-pro-preview",
+  "gemini-3.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-3.1-flash-lite",
+];
 
 export const APP_SHELL_CHANNELS = {
   getSnapshot: "app-shell:get-snapshot",
   getSettingsDraft: "app-shell:get-settings-draft",
   getDefaultPrompts: "app-shell:get-default-prompts",
+  getDefaultModels: "app-shell:get-default-models",
   openImportDialog: "app-shell:open-import-dialog",
   importDroppedPaths: "app-shell:import-dropped-paths",
   updatePendingImportDrafts: "app-shell:update-pending-import-drafts",
@@ -91,6 +98,14 @@ export interface PromptTemplates {
   slug: string;
 }
 
+// The built-in AI defaults the "Reset to latest defaults" actions restore to: the
+// current Gemini model suggestion list and the default model selections.
+export interface DefaultModels {
+  models: string[];
+  transcriptionModel: string;
+  metadataModel: string;
+}
+
 export interface MumblerSettings {
   schemaVersion: 1;
   // Appearance — the UI (chrome) font family. Family only; blank means the built-in default stack
@@ -110,6 +125,13 @@ export interface MumblerSettings {
   // NOTE: the Gemini API key is NOT a setting. It is a secret resolved
   // environment-first and stored in its own 0600 file (api-keys.json), never in
   // this shared settings store. See src/main/core/api-keys.ts.
+  //
+  // The user-owned, editable Gemini model suggestion list (config-seeding-conventions'
+  // Shape 1): seeded from DEFAULT_GEMINI_MODELS at first run, then the user's to
+  // add to, remove from, or edit. transcriptionModel/metadataModel are by-value
+  // selections into it; a value outside the list is allowed (free-text) and is
+  // validated at call time by the adapter, not here.
+  geminiModels: string[];
   transcriptionModel: string;
   metadataModel: string;
   concurrencyLimit: number;
@@ -281,6 +303,7 @@ export interface SettingsSummary {
   previewSnippetSeconds: number;
   // AI
   hasGeminiApiKey: boolean;
+  geminiModels: string[];
   transcriptionModel: string;
   metadataModel: string;
   concurrencyLimit: number;
@@ -310,6 +333,9 @@ export interface SettingsDraft {
   // through the dedicated setGeminiApiKey/clearGeminiApiKey IPC, not the settings
   // JSON roundtrip.
   hasGeminiApiKey: boolean;
+  // The owned Gemini model list as editable text (one id per line) — the same idiom
+  // as timestampPatternsText; parsed and deduped back into geminiModels on save.
+  geminiModelsText: string;
   transcriptionModel: string;
   metadataModel: string;
   concurrencyLimit: number;
@@ -492,6 +518,7 @@ export interface MumblerShellApi {
   getSnapshot(): Promise<AppSnapshot>;
   getSettingsDraft(): Promise<SettingsDraft>;
   getDefaultPrompts(): Promise<PromptTemplates>;
+  getDefaultModels(): Promise<DefaultModels>;
   openImportDialog(): Promise<ImportOperationResult>;
   importDroppedPaths(paths: string[]): Promise<ImportOperationResult>;
   updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot>;

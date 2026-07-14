@@ -12,6 +12,7 @@ import {
   normalizeUtcMs,
 } from "@shared/timestamps";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
+import { DEFAULT_GEMINI_MODELS } from "@shared/app-shell";
 import { JsonStore } from "./json-store";
 import { OperationError } from "./operation-error";
 import { multiline } from "./text-cleanup";
@@ -47,6 +48,21 @@ function asRatio(value: unknown): number | null {
   return typeof value === "number" && value >= 0 && value <= 1 ? value : null;
 }
 
+// The owned Gemini model list: use the stored array when present and non-empty
+// (trimmed + de-duplicated); otherwise fall back to the current built-in defaults.
+// A key absent from an older config resolves to the default, per the
+// config-seeding-conventions' built-in fallback.
+function normalizeGeminiModels(value: unknown, fallback: string[]): string[] {
+  const parsed = asStringArray(value);
+  if (parsed === null) {
+    return fallback;
+  }
+  const cleaned = deduplicateStrings(
+    parsed.map((entry) => entry.trim()).filter((entry) => entry.length > 0),
+  );
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
 function normalizeSettings(
   raw: Record<string, unknown>,
   defaults: MumblerSettings,
@@ -78,6 +94,7 @@ function normalizeSettings(
     // load, and never written back, so the next save scrubs it from config.json.
     // Pre-release, this needs no migration — a user with a key in the old settings
     // simply re-enters it once into the dedicated secrets store.
+    geminiModels: normalizeGeminiModels(raw.geminiModels, defaults.geminiModels),
     transcriptionModel: asString(raw.transcriptionModel) ?? defaults.transcriptionModel,
     metadataModel: asString(raw.metadataModel) ?? defaults.metadataModel,
     concurrencyLimit: asPositiveInteger(raw.concurrencyLimit) ?? defaults.concurrencyLimit,
@@ -350,9 +367,12 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
     // Player
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,
-    // AI
-    transcriptionModel: "gemini-3.1-pro-preview",
-    metadataModel: "gemini-3-flash-preview",
+    // AI — the suggestion list is seeded from DEFAULT_GEMINI_MODELS and is then the
+    // user's to edit; the two selections are by-value pointers into it. A wrong id
+    // surfaces at call time, not here.
+    geminiModels: [...DEFAULT_GEMINI_MODELS],
+    transcriptionModel: "gemini-3.5-flash",
+    metadataModel: "gemini-3.5-flash",
     concurrencyLimit: 3,
     prompts: {
       structured:
@@ -438,6 +458,7 @@ export function summarizeSettings(
     previewSnippetSeconds: settings.previewSnippetSeconds,
     // AI
     hasGeminiApiKey,
+    geminiModels: settings.geminiModels,
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
     concurrencyLimit: settings.concurrencyLimit,
@@ -468,6 +489,7 @@ export function buildSettingsDraft(
     previewSnippetSeconds: settings.previewSnippetSeconds,
     // AI (presence only; the key value is never part of the draft)
     hasGeminiApiKey,
+    geminiModelsText: settings.geminiModels.join("\n"),
     transcriptionModel: settings.transcriptionModel,
     metadataModel: settings.metadataModel,
     concurrencyLimit: settings.concurrencyLimit,
@@ -488,6 +510,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
   const backupDirectory = draft.backupDirectory.trim();
   const defaultTimezone = draft.defaultTimezone.trim();
   const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
+  const geminiModels = deduplicateStrings(parseSettingsEntries(draft.geminiModelsText));
   const transcriptionModel = draft.transcriptionModel.trim();
   const metadataModel = draft.metadataModel.trim();
   // Prompt templates are multi-line bodies (instructions plus <transcript>/<source>/
@@ -505,6 +528,10 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
 
   if (timestampPatterns.length === 0) {
     throw new OperationError("Add at least one timestamp regex pattern.");
+  }
+
+  if (geminiModels.length === 0) {
+    throw new OperationError("Add at least one Gemini model.");
   }
 
   if (transcriptionModel.length === 0) {
@@ -556,6 +583,7 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     skipIntervalSec,
     previewSnippetSeconds,
     // AI (the Gemini key is set via its own IPC path, not this draft)
+    geminiModels,
     transcriptionModel,
     metadataModel,
     concurrencyLimit,

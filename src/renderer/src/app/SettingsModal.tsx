@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ReactElement } from "react";
 
-import { GEMINI_MODELS, type SettingsDraft } from "@shared/app-shell";
+import { type SettingsDraft } from "@shared/app-shell";
 import { getSettingsNumberErrors } from "@shared/settings-validation";
 import { getSupportedTimezones } from "@shared/timestamps";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
@@ -110,6 +110,7 @@ export function SettingsModal({
   onSetApiKey,
   onClearApiKey,
   onRestoreDefaultPrompts,
+  onRestoreDefaultModels,
   onSave,
 }: {
   draft: SettingsDraft;
@@ -126,6 +127,7 @@ export function SettingsModal({
   onSetApiKey: (apiKey: string) => void;
   onClearApiKey: () => void;
   onRestoreDefaultPrompts: () => void;
+  onRestoreDefaultModels: () => void;
   onSave: () => void;
 }): ReactElement {
   // The API key field is self-contained: its value is committed to the dedicated
@@ -133,6 +135,7 @@ export function SettingsModal({
   // Settings Save. The raw key is held only in this local state until then.
   const [apiKeyInput, setApiKeyInput] = useState("");
   const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
+  const geminiModelEntries = useMemo(() => parseEntries(draft.geminiModelsText), [draft.geminiModelsText]);
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
   const numberErrors = useMemo(() => getSettingsNumberErrors(draft), [draft]);
   const canSave = isDirty && numberErrors.length === 0 && !isSaving;
@@ -339,16 +342,37 @@ export function SettingsModal({
               <p className="field-hint">
                 Stored in its own secured file, not in settings. A <code>GEMINI_API_KEY</code> environment variable, if set, takes precedence over the saved key.
               </p>
+              <div className="field">
+                <span>Gemini Models</span>
+                <p className="field-hint">Your model list — add any Gemini model id here, remove ones you don't use. The two selectors below pick from this list; to use a new model, add it here first. An invalid or retired id is reported when a job runs, not here.</p>
+                <EditableList
+                  monospace
+                  entries={geminiModelEntries}
+                  onChange={(entries) => onChange({ ...draft, geminiModelsText: entriesToText(entries) })}
+                  placeholder="Add model id, e.g. gemini-3.5-flash"
+                />
+              </div>
+              <div>
+                <button
+                  type="button"
+                  className="button button--danger"
+                  onClick={onRestoreDefaultModels}
+                  disabled={isSaving}
+                >
+                  Reset to latest defaults
+                </button>
+                <p className="field-hint">Replaces the list and both selections below with the latest built-in models (including any added in updates). Save to persist; close without saving to keep your current models.</p>
+              </div>
               <label className="field">
                 <span>Transcription Model</span>
                 <select
                   value={draft.transcriptionModel}
                   onChange={(event) => onChange({ ...draft, transcriptionModel: event.target.value })}
                 >
-                  {GEMINI_MODELS.map((m) => (
-                    <option key={m.id} value={m.id}>{m.label}</option>
+                  {geminiModelEntries.map((id) => (
+                    <option key={id} value={id}>{id}</option>
                   ))}
-                  {!GEMINI_MODELS.some((m) => m.id === draft.transcriptionModel) && (
+                  {draft.transcriptionModel && !geminiModelEntries.includes(draft.transcriptionModel) && (
                     <option value={draft.transcriptionModel}>{draft.transcriptionModel}</option>
                   )}
                 </select>
@@ -360,10 +384,10 @@ export function SettingsModal({
                   value={draft.metadataModel}
                   onChange={(event) => onChange({ ...draft, metadataModel: event.target.value })}
                 >
-                  {GEMINI_MODELS.map((m) => (
-                    <option key={m.id} value={m.id}>{m.label}</option>
+                  {geminiModelEntries.map((id) => (
+                    <option key={id} value={id}>{id}</option>
                   ))}
-                  {!GEMINI_MODELS.some((m) => m.id === draft.metadataModel) && (
+                  {draft.metadataModel && !geminiModelEntries.includes(draft.metadataModel) && (
                     <option value={draft.metadataModel}>{draft.metadataModel}</option>
                   )}
                 </select>
@@ -419,9 +443,9 @@ export function SettingsModal({
                   onClick={onRestoreDefaultPrompts}
                   disabled={isSaving}
                 >
-                  Restore Default Prompts
+                  Reset to latest defaults
                 </button>
-                <p className="field-hint">Replaces all three prompts above with the app defaults. Save to persist.</p>
+                <p className="field-hint">Replaces all three prompts above with the latest built-in defaults. Save to persist; close without saving to keep your edits.</p>
               </div>
             </div>
 

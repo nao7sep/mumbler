@@ -17,7 +17,6 @@ import type {
   StatusRole,
   ToolName,
 } from "@shared/app-shell";
-import { GEMINI_MODELS } from "@shared/app-shell";
 import { DETAIL_MIN_WIDTH, QUEUE_WIDTH, WORKSPACE_GAP } from "@shared/layout";
 import { rollUpRole } from "@shared/dependency-status";
 import {
@@ -1072,11 +1071,11 @@ export function App(): ReactElement {
                         disabled={selectedCardIsBusy}
                         onChange={(event) => void handleDetailModelChange("transcriptionModel", event.target.value)}
                       >
-                        {GEMINI_MODELS.map((m) => (
-                          <option key={m.id} value={m.id}>{m.label}</option>
+                        {(snapshot?.settingsSummary?.geminiModels ?? []).map((id) => (
+                          <option key={id} value={id}>{id}</option>
                         ))}
                         {snapshot?.settingsSummary?.transcriptionModel &&
-                          !GEMINI_MODELS.some((m) => m.id === snapshot.settingsSummary?.transcriptionModel) && (
+                          !(snapshot?.settingsSummary?.geminiModels ?? []).includes(snapshot.settingsSummary.transcriptionModel) && (
                           <option value={snapshot.settingsSummary.transcriptionModel}>
                             {snapshot.settingsSummary.transcriptionModel}
                           </option>
@@ -1090,11 +1089,11 @@ export function App(): ReactElement {
                         disabled={selectedCardIsBusy}
                         onChange={(event) => void handleDetailModelChange("metadataModel", event.target.value)}
                       >
-                        {GEMINI_MODELS.map((m) => (
-                          <option key={m.id} value={m.id}>{m.label}</option>
+                        {(snapshot?.settingsSummary?.geminiModels ?? []).map((id) => (
+                          <option key={id} value={id}>{id}</option>
                         ))}
                         {snapshot?.settingsSummary?.metadataModel &&
-                          !GEMINI_MODELS.some((m) => m.id === snapshot.settingsSummary?.metadataModel) && (
+                          !(snapshot?.settingsSummary?.geminiModels ?? []).includes(snapshot.settingsSummary.metadataModel) && (
                           <option value={snapshot.settingsSummary.metadataModel}>
                             {snapshot.settingsSummary.metadataModel}
                           </option>
@@ -1410,6 +1409,7 @@ export function App(): ReactElement {
           onSetApiKey={(apiKey) => void settingsModal.handleSetGeminiApiKey(apiKey)}
           onClearApiKey={() => void settingsModal.handleClearGeminiApiKey()}
           onRestoreDefaultPrompts={() => void settingsModal.handleRestoreDefaultPrompts()}
+          onRestoreDefaultModels={() => void settingsModal.handleRestoreDefaultModels()}
           onSave={() => void settingsModal.handleSaveSettings()}
         />
       ) : null}

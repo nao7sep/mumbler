@@ -102,6 +102,37 @@ describe("applySettingsDraft — validation", () => {
   });
 });
 
+describe("Gemini model list (config-seeding: owned, editable, current defaults)", () => {
+  it("seeds defaults whose selections are members of the built-in list", () => {
+    const settings = createDefaultSettings("Asia/Tokyo");
+    expect(settings.transcriptionModel).toBe("gemini-3.5-flash");
+    expect(settings.geminiModels).toContain(settings.transcriptionModel);
+    expect(settings.geminiModels).toContain(settings.metadataModel);
+    expect(settings.geminiModels.length).toBeGreaterThan(0);
+  });
+
+  it("round-trips the owned model list through the draft, trimming and de-duplicating", () => {
+    const draft = freshDraft();
+    draft.geminiModelsText = "  gemini-3.5-flash \n gemini-2.5-pro \n gemini-3.5-flash ";
+    const result = applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft);
+    expect(result.geminiModels).toEqual(["gemini-3.5-flash", "gemini-2.5-pro"]); // trimmed + de-duplicated
+  });
+
+  it("preserves an out-of-list selection — an orphaned pick after a list edit is kept, not snapped or rejected", () => {
+    const draft = freshDraft();
+    draft.geminiModelsText = "gemini-3.5-flash";
+    draft.transcriptionModel = "gemini-2.5-pro"; // no longer in the list; the store keeps it (the UI shows it as a fallback option)
+    const result = applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft);
+    expect(result.transcriptionModel).toBe("gemini-2.5-pro");
+  });
+
+  it("rejects an empty model list", () => {
+    const draft = freshDraft();
+    draft.geminiModelsText = "   \n  ";
+    expect(() => applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft)).toThrow(/Gemini model/i);
+  });
+});
+
 describe("Gemini API key is no longer a setting", () => {
   // The key moved to a dedicated 0600 secrets file resolved environment-first
   // (see api-keys.test.ts). The settings store/draft must not carry it at all, so
@@ -131,5 +162,6 @@ describe("summarizeSettings", () => {
     expect(absent.hasGeminiApiKey).toBe(false);
     expect(absent.defaultOutputDirectory).toBe(OUT);
     expect(absent.timestampPatternCount).toBe(1);
+    expect(absent.geminiModels).toEqual(createDefaultSettings("Asia/Tokyo").geminiModels);
   });
 });

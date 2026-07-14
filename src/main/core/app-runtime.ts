@@ -15,6 +15,7 @@ import {
   type ImportSource,
   type MumblerCard,
   type MumblerLayout,
+  type DefaultModels,
   type MumblerSettings,
   type MumblerState,
   type PendingImportReviewItem,
@@ -581,6 +582,15 @@ export class ApplicationRuntime {
 
   getDefaultPrompts(): MumblerSettings["prompts"] {
     return createDefaultSettings(getSystemTimezone()).prompts;
+  }
+
+  getDefaultModels(): DefaultModels {
+    const defaults = createDefaultSettings(getSystemTimezone());
+    return {
+      models: defaults.geminiModels,
+      transcriptionModel: defaults.transcriptionModel,
+      metadataModel: defaults.metadataModel,
+    };
   }
 
   async openImportDialog(window: BrowserWindow): Promise<ImportOperationResult> {

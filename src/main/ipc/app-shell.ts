@@ -123,6 +123,7 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
   handle(APP_SHELL_CHANNELS.getSnapshot, () => runtime.getSnapshot());
   handle(APP_SHELL_CHANNELS.getSettingsDraft, () => runtime.getSettingsDraft());
   handle(APP_SHELL_CHANNELS.getDefaultPrompts, () => runtime.getDefaultPrompts());
+  handle(APP_SHELL_CHANNELS.getDefaultModels, () => runtime.getDefaultModels());
 
   handle(APP_SHELL_CHANNELS.openImportDialog, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
