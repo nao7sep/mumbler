@@ -28,7 +28,6 @@ interface UseSettingsModalResult {
   handleClearGeminiApiKey: () => Promise<void>;
   handleRestoreDefaultPrompts: () => Promise<void>;
   handleRestoreDefaultModels: () => Promise<void>;
-  handleRestoreDefaultTimestampPatterns: () => Promise<void>;
   handleRequestCloseSettings: () => void;
   handleConfirmDiscardSettings: () => void;
   handleCancelDiscardSettings: () => void;
@@ -219,10 +218,10 @@ export function useSettingsModal({
     }
   }
 
-  // Reset-to-latest for the owned Gemini model list (config-seeding-conventions'
-  // restore-defaults): pulls the current built-in models and default selections
-  // into the draft, replacing the user's list and selections wholesale. The button
-  // that calls this warns first and is framed as getting the latest, not undoing.
+  // Reset for the owned Gemini model list (config-seeding-conventions' reset
+  // control): pulls the current built-in models and default selections into the
+  // draft, replacing the user's list and selections wholesale. It only touches the
+  // draft — Save persists, closing without saving keeps the user's models.
   async function handleRestoreDefaultModels(): Promise<void> {
     try {
       const defaults = await window.mumbler.getDefaultModels();
@@ -240,29 +239,6 @@ export function useSettingsModal({
     } catch (error: unknown) {
       setSettingsErrorMessage(
         error instanceof Error ? error.message : "Failed to load default models.",
-      );
-    }
-  }
-
-  // Reset-to-latest for the owned timestamp-pattern list (config-seeding-conventions'
-  // restore-defaults): pulls the current built-in patterns into the draft, replacing
-  // the user's list wholesale. The button that calls this warns first and is framed
-  // as getting the latest, not undoing.
-  async function handleRestoreDefaultTimestampPatterns(): Promise<void> {
-    try {
-      const defaults = await window.mumbler.getDefaultTimestampPatterns();
-      setSettingsDraft((current) =>
-        current === null
-          ? current
-          : {
-              ...current,
-              timestampPatternsText: defaults.join("\n"),
-            },
-      );
-      setSettingsErrorMessage(null);
-    } catch (error: unknown) {
-      setSettingsErrorMessage(
-        error instanceof Error ? error.message : "Failed to load default timestamp patterns.",
       );
     }
   }
@@ -313,7 +289,6 @@ export function useSettingsModal({
     handleClearGeminiApiKey,
     handleRestoreDefaultPrompts,
     handleRestoreDefaultModels,
-    handleRestoreDefaultTimestampPatterns,
     handleRequestCloseSettings,
     handleConfirmDiscardSettings,
     handleCancelDiscardSettings,

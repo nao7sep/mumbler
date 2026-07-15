@@ -16,7 +16,6 @@ export const APP_SHELL_CHANNELS = {
   getSettingsDraft: "app-shell:get-settings-draft",
   getDefaultPrompts: "app-shell:get-default-prompts",
   getDefaultModels: "app-shell:get-default-models",
-  getDefaultTimestampPatterns: "app-shell:get-default-timestamp-patterns",
   openImportDialog: "app-shell:open-import-dialog",
   importDroppedPaths: "app-shell:import-dropped-paths",
   updatePendingImportDrafts: "app-shell:update-pending-import-drafts",
@@ -99,8 +98,8 @@ export interface PromptTemplates {
   slug: string;
 }
 
-// The built-in AI defaults the "Reset to latest defaults" actions restore to: the
-// current Gemini model suggestion list and the default model selections.
+// The built-in AI defaults the "Reset models" action restores to: the current
+// Gemini model suggestion list and the default model selections.
 export interface DefaultModels {
   models: string[];
   transcriptionModel: string;
@@ -520,7 +519,6 @@ export interface MumblerShellApi {
   getSettingsDraft(): Promise<SettingsDraft>;
   getDefaultPrompts(): Promise<PromptTemplates>;
   getDefaultModels(): Promise<DefaultModels>;
-  getDefaultTimestampPatterns(): Promise<string[]>;
   openImportDialog(): Promise<ImportOperationResult>;
   importDroppedPaths(paths: string[]): Promise<ImportOperationResult>;
   updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot>;

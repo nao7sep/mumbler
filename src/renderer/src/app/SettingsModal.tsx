@@ -19,13 +19,11 @@ function EditableList({
   onChange,
   placeholder,
   monospace = false,
-  disabledEntries = [],
 }: {
   entries: string[];
   onChange: (entries: string[]) => void;
   placeholder: string;
   monospace?: boolean;
-  disabledEntries?: string[];
 }): ReactElement {
   const [newValue, setNewValue] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -58,8 +56,6 @@ function EditableList({
               type="button"
               className="button button--ghost button--compact"
               onClick={() => handleRemove(index)}
-              disabled={disabledEntries.includes(entry)}
-              title={disabledEntries.includes(entry) ? "Cannot remove the default language" : undefined}
             >
               Remove
             </button>
@@ -111,7 +107,6 @@ export function SettingsModal({
   onClearApiKey,
   onRestoreDefaultPrompts,
   onRestoreDefaultModels,
-  onRestoreDefaultTimestampPatterns,
   onSave,
 }: {
   draft: SettingsDraft;
@@ -129,7 +124,6 @@ export function SettingsModal({
   onClearApiKey: () => void;
   onRestoreDefaultPrompts: () => void;
   onRestoreDefaultModels: () => void;
-  onRestoreDefaultTimestampPatterns: () => void;
   onSave: () => void;
 }): ReactElement {
   // The API key field is self-contained: its value is committed to the dedicated
@@ -265,17 +259,6 @@ export function SettingsModal({
                   placeholder="Add regex pattern..."
                 />
               </div>
-              <div>
-                <button
-                  type="button"
-                  className="button button--danger"
-                  onClick={onRestoreDefaultTimestampPatterns}
-                  disabled={isSaving}
-                >
-                  Reset to latest defaults
-                </button>
-                <p className="field-hint">Replaces the list with the latest built-in timestamp patterns. Save to persist; close without saving to keep your current patterns.</p>
-              </div>
             </div>
           </section>
 
@@ -372,9 +355,8 @@ export function SettingsModal({
                   onClick={onRestoreDefaultModels}
                   disabled={isSaving}
                 >
-                  Reset to latest defaults
+                  Reset models
                 </button>
-                <p className="field-hint">Replaces the list and both selections below with the latest built-in models (including any added in updates). Save to persist; close without saving to keep your current models.</p>
               </div>
               <label className="field">
                 <span>Transcription Model</span>
@@ -456,9 +438,8 @@ export function SettingsModal({
                   onClick={onRestoreDefaultPrompts}
                   disabled={isSaving}
                 >
-                  Reset to latest defaults
+                  Reset prompts
                 </button>
-                <p className="field-hint">Replaces all three prompts above with the latest built-in defaults. Save to persist; close without saving to keep your edits.</p>
               </div>
             </div>
 
