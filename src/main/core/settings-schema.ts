@@ -371,6 +371,9 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
     // user's to edit; the two selections are by-value pointers into it. A wrong id
     // surfaces at call time, not here.
     geminiModels: [...DEFAULT_GEMINI_MODELS],
+    // Both default to flash, not to the pro that leads the list: best quality by
+    // default, and flash currently benchmarks above 3.1-pro-preview (see
+    // DEFAULT_GEMINI_MODELS). Transcription moves to 3.5 pro when it ships.
     transcriptionModel: "gemini-3.5-flash",
     metadataModel: "gemini-3.5-flash",
     concurrencyLimit: 3,

@@ -7,6 +7,29 @@ import { type AppLogger } from "./logger";
 const INLINE_REQUEST_LIMIT_BYTES = 20 * 1024 * 1024;
 const INLINE_AUDIO_SAFETY_LIMIT_BYTES = 18 * 1024 * 1024;
 
+/**
+ * Dynamic thinking — the model decides how much to reason. Stated rather than left
+ * to the provider's default, because the default is not one behaviour: measured
+ * across the seeded list, gemini-3.5-flash / 3.1-pro-preview / 3-flash-preview all
+ * think unasked while gemini-3.1-flash-lite does not. Silence shipped four
+ * behaviours nobody chose; this ships one.
+ *
+ * Transcription itself is barely affected — it is dictation, not reasoning, and the
+ * models agree: on dynamic, flash-lite spends 0 thinking tokens transcribing but 734
+ * on an arithmetic question. So this is not "make transcription think", it is "stop
+ * letting the provider decide per model". The value is consistency; the cost is a
+ * few hundred tokens on the models that opt in.
+ *
+ * `-1` and not `0`: dynamic is accepted by every callable model tested (the seeded
+ * four plus 2.5-flash/2.5-pro/flash-latest/pro-latest), so it stays safe for the
+ * free-text ids this editable list invites. Disabling is NOT portable —
+ * gemini-3.1-pro-preview rejects it outright ("Budget 0 is invalid. This model only
+ * works in thinking mode"). That is why there is no thinking toggle: offering one
+ * would require knowing each model's limits, i.e. a closed list, and the model
+ * choice already IS the speed/quality choice.
+ */
+const THINKING_CONFIG = { thinkingBudget: -1 } as const;
+
 export interface GeminiAudioTranscriptionParams {
   apiKey: string;
   filePath: string;
@@ -81,6 +104,7 @@ export async function transcribeWithGemini(
         ],
         config: {
           abortSignal: abortState.signal,
+          thinkingConfig: THINKING_CONFIG,
         },
       });
     } else {
@@ -118,6 +142,7 @@ export async function transcribeWithGemini(
         ],
         config: {
           abortSignal: abortState.signal,
+          thinkingConfig: THINKING_CONFIG,
         },
       });
     }
@@ -168,6 +193,7 @@ export async function generateTextWithGemini(
       ],
       config: {
         abortSignal: abortState.signal,
+        thinkingConfig: THINKING_CONFIG,
       },
     });
 

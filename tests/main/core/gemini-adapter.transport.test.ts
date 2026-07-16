@@ -49,6 +49,64 @@ beforeEach(() => {
   readFile.mockResolvedValue("YmFzZTY0");
 });
 
+// Thinking is STATED, never left to the provider. The default is not one behaviour:
+// measured live, gemini-3.5-flash / 3.1-pro-preview / 3-flash-preview all think
+// unasked, while gemini-3.1-flash-lite does not and answers worse for it — so
+// silence shipped four behaviours nobody picked. `-1` (dynamic) is the one setting
+// every callable Gemini model accepts; `0` is NOT portable (3.1-pro-preview rejects
+// it: "Budget 0 is invalid. This model only works in thinking mode"), which is why
+// this is a constant and not a user toggle.
+//
+// Every generateContent path is pinned separately: they are three distinct call
+// sites, and adding a fourth without the config is exactly the regression this
+// catches. The upload is asserted NOT to carry it — it is a file transfer.
+describe("thinking is stated on every model call", () => {
+  const DYNAMIC = { thinkingBudget: -1 };
+
+  it("states dynamic thinking on the inline transcription call", async () => {
+    stat.mockResolvedValue({ size: SAFE - 1 });
+    generateContent.mockResolvedValue({ text: "hi", modelVersion: "v1", usageMetadata: null });
+
+    await transcribeWithGemini(baseParams());
+
+    expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(DYNAMIC);
+  });
+
+  it("states dynamic thinking on the Files-API transcription call", async () => {
+    stat.mockResolvedValue({ size: SAFE + 1 });
+    upload.mockResolvedValue({ name: "files/abc", uri: "gs://u", mimeType: "audio/mp4" });
+    generateContent.mockResolvedValue({ text: "done", modelVersion: "v1", usageMetadata: null });
+
+    await transcribeWithGemini(baseParams());
+
+    expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(DYNAMIC);
+    // The upload is a file transfer, not a generation — it must not carry one.
+    expect(upload.mock.calls[0]?.[0].config).not.toHaveProperty("thinkingConfig");
+  });
+
+  it("states dynamic thinking on the text-generation call", async () => {
+    generateContent.mockResolvedValue({ text: "out", modelVersion: "v1", usageMetadata: null });
+
+    await generateTextWithGemini({
+      apiKey: "test-key",
+      prompt: "hi",
+      model: "gemini-test",
+      timeoutMs: 60_000,
+    });
+
+    expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(DYNAMIC);
+  });
+
+  it("never disables thinking — 3.1-pro-preview rejects budget 0 outright", async () => {
+    stat.mockResolvedValue({ size: SAFE - 1 });
+    generateContent.mockResolvedValue({ text: "hi", modelVersion: "v1", usageMetadata: null });
+
+    await transcribeWithGemini(baseParams());
+
+    expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig.thinkingBudget).not.toBe(0);
+  });
+});
+
 describe("transcribeWithGemini transport selection", () => {
   it("sends small files inline and never touches the Files API", async () => {
     stat.mockResolvedValue({ size: SAFE - 1 });
