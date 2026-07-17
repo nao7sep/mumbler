@@ -52,7 +52,8 @@ jobs:
       # electron-builder targets the current platform, so macOS makes the .dmg +
       # portable .zip, and Windows the setup.exe + portable .zip.
       # --publish never (in the script) means it builds but uploads nothing here.
-      # CSC_IDENTITY_AUTO_DISCOVERY=false gives the ad-hoc (unsigned) macOS bundle.
+      # CSC_IDENTITY_AUTO_DISCOVERY=false only blocks real-cert discovery; the ad-hoc
+      # bundle seal comes from the mac `identity: "-"` in the builder config.
       - name: Package (host OS)
         run: npm run dist
         env:

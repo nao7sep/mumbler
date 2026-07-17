@@ -28,6 +28,11 @@ mac:
   icon: build/icon.icns
   extendInfo:
     CFBundleIconName: broadcast-mic-soundwaves
+  # Ad-hoc sign the whole bundle (identity "-") so its seal is valid and the app
+  # launches cleanly. No Apple Developer cert; CSC_IDENTITY_AUTO_DISCOVERY=false in
+  # CI only blocks real-cert discovery — the "-" identity is what produces the seal.
+  # macOS still shows "unidentified developer" until a Developer ID cert + notarization.
+  identity: "-"
   # Pin arm64 explicitly so the macOS artifact's architecture is deterministic,
   # not inherited from whatever the build host/runner happens to be.
   target:
