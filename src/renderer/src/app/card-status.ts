@@ -1,12 +1,9 @@
 import type { CardProcessingStep, MumblerCard } from "@shared/app-shell";
 
-export function isCardBusy(card: MumblerCard): boolean {
-  return (
-    card.status === "Queued" ||
-    card.status === "Transcribing" ||
-    card.status === "Generating Metadata"
-  );
-}
+// The busy predicate lives in shared so the renderer's control disabling and the
+// main process's mutation guards read the same definition; re-exported here so
+// renderer callers keep one import for all card-status helpers.
+export { isCardBusy } from "@shared/card-status";
 
 export function formatStepName(step: Exclude<CardProcessingStep, null> | "startup-recovery"): string {
   switch (step) {
