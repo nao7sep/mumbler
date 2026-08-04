@@ -50,6 +50,7 @@ import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
 import { useSettingsModal } from "./useSettingsModal";
 import { formatCardStatusMessage, formatStepName, isCardBusy } from "./card-status";
+import { useTablist } from "./useTablist";
 import {
   describeTrimDecision,
   formatOptionalSeconds,
@@ -120,6 +121,19 @@ function ToolsChipIcon({ role }: { role: StatusRole }): ReactElement {
   );
 }
 
+// The detail pane's wizard tabs, in workflow order: check the loaded info,
+// trim the audio, transcribe and review the metadata, then save. Every tab is
+// freely revisitable; the Next button on each is a convenience for walking the
+// flow forward, not a gate.
+const DETAIL_TABS = ["info", "trim", "transcribe", "output"] as const;
+type DetailTab = (typeof DETAIL_TABS)[number];
+const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
+  info: "Info",
+  trim: "Trim",
+  transcribe: "Transcribe",
+  output: "Output",
+};
+
 export function App(): ReactElement {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -147,6 +161,16 @@ export function App(): ReactElement {
     result: Extract<SaveCardResult, { kind: "conflict" }>;
   } | null>(null);
   const [pendingRemoveCardId, setPendingRemoveCardId] = useState<string | null>(null);
+  // Sticky across card switches: reviewing several cards on the same step (e.g.
+  // arrowing through the queue on the Transcribe tab) should not snap back to
+  // Info. Ephemeral UI state, deliberately not persisted.
+  const [detailTab, setDetailTab] = useState<DetailTab>("info");
+  const detailTablist = useTablist<DetailTab>({
+    tabs: DETAIL_TABS,
+    selected: detailTab,
+    onSelect: setDetailTab,
+    idBase: "detail",
+  });
   const [pendingGenerate, setPendingGenerate] = useState<{
     cardId: string;
     target: GenerateTarget;
@@ -978,408 +1002,445 @@ export function App(): ReactElement {
           </div>
 
           {selectedCard ? (
-            <div className="detail-grid">
+            <>
+              <div className="app-tabs" {...detailTablist.tablistProps} aria-label="Detail steps">
+                {DETAIL_TABS.map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    className={`app-tab${detailTab === tab ? " app-tab--active" : ""}`}
+                    {...detailTablist.getTabProps(tab)}
+                  >
+                    {DETAIL_TAB_LABELS[tab]}
+                  </button>
+                ))}
+              </div>
+              <div className="detail-grid">
 
-              {/* ── Group 1: Detail (3 columns) ─────────────────────── */}
-              <div className="detail-row">
-                <section className={`detail-card detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
-                  <div className="detail-card__header">
-                    <h3>Timestamps</h3>
-                  </div>
-                  <dl className="meta-list">
-                    <div>
-                      <dt>Original filename</dt>
-                      <dd>{selectedCard.originalFilename}</dd>
+              <div className="app-tabpanel" {...detailTablist.getPanelProps("info")} hidden={detailTab !== "info"}>
+                {/* ── Group 1: Detail (3 columns) ─────────────────────── */}
+                <div className="detail-row">
+                  <section className={`detail-card detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
+                    <div className="detail-card__header">
+                      <h3>Timestamps</h3>
                     </div>
-                    <div>
-                      <dt>Confirmed local</dt>
-                      <dd>{selectedCard.timestamps.confirmedLocal}</dd>
-                    </div>
-                    {selectedCard.timestamps.frontTrimOffsetSec > 0 && (
+                    <dl className="meta-list">
                       <div>
-                        <dt>Effective local</dt>
-                        <dd>{selectedCard.timestamps.effectiveLocal}</dd>
+                        <dt>Original filename</dt>
+                        <dd>{selectedCard.originalFilename}</dd>
                       </div>
-                    )}
-                    <div>
-                      <dt>Timezone</dt>
-                      <dd>{selectedCard.timestamps.timezone}</dd>
-                    </div>
-                    <div>
-                      <dt>Effective UTC</dt>
-                      <dd>{formatUtcForDisplay(selectedCard.timestamps.effectiveUtc)}</dd>
-                    </div>
-                  </dl>
-                </section>
+                      <div>
+                        <dt>Confirmed local</dt>
+                        <dd>{selectedCard.timestamps.confirmedLocal}</dd>
+                      </div>
+                      {selectedCard.timestamps.frontTrimOffsetSec > 0 && (
+                        <div>
+                          <dt>Effective local</dt>
+                          <dd>{selectedCard.timestamps.effectiveLocal}</dd>
+                        </div>
+                      )}
+                      <div>
+                        <dt>Timezone</dt>
+                        <dd>{selectedCard.timestamps.timezone}</dd>
+                      </div>
+                      <div>
+                        <dt>Effective UTC</dt>
+                        <dd>{formatUtcForDisplay(selectedCard.timestamps.effectiveUtc)}</dd>
+                      </div>
+                    </dl>
+                  </section>
 
-                <section className="detail-card">
+                  <section className="detail-card">
+                    <div className="detail-card__header">
+                      <h3>Audio</h3>
+                    </div>
+                    <dl className="meta-list">
+                      <div>
+                        <dt>Duration</dt>
+                        <dd>{formatDuration(selectedCard.durationSec)}</dd>
+                      </div>
+                      <div>
+                        <dt>Format</dt>
+                        <dd>{(() => {
+                          const codec = selectedCard.audioProfile?.codecName ?? null;
+                          const container = selectedCard.audioProfile?.formatName ?? null;
+                          if (!codec && !container) return "Unknown";
+                          if (codec === container || !container) return codec ?? "Unknown";
+                          if (!codec) return container ?? "Unknown";
+                          return `${codec} (${container})`;
+                        })()}</dd>
+                      </div>
+                      <div>
+                        <dt>Bitrate</dt>
+                        <dd>
+                          {selectedCard.audioProfile?.bitRateKbps == null
+                            ? "Unknown"
+                            : `${selectedCard.audioProfile.bitRateKbps} kbps`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Sample rate</dt>
+                        <dd>
+                          {selectedCard.audioProfile?.sampleRateHz == null
+                            ? "Unknown"
+                            : `${selectedCard.audioProfile.sampleRateHz} Hz`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Channels</dt>
+                        <dd>{selectedCard.audioProfile?.channels ?? "Unknown"}</dd>
+                      </div>
+                      <div>
+                        <dt>File size</dt>
+                        <dd>{formatBytes(selectedCard.fileSizeBytes)}</dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section className="detail-card">
+                    <div className="detail-card__header">
+                      <h3>Options</h3>
+                    </div>
+                    <div className="field-stack">
+                      <label className="field">
+                        <span>Transcription Model</span>
+                        <select
+                          value={snapshot?.settingsSummary?.transcriptionModel ?? ""}
+                          disabled={selectedCardIsBusy}
+                          onChange={(event) => void handleDetailModelChange("transcriptionModel", event.target.value)}
+                        >
+                          {(snapshot?.settingsSummary?.geminiModels ?? []).map((id) => (
+                            <option key={id} value={id}>{id}</option>
+                          ))}
+                          {snapshot?.settingsSummary?.transcriptionModel &&
+                            !(snapshot?.settingsSummary?.geminiModels ?? []).includes(snapshot.settingsSummary.transcriptionModel) && (
+                            <option value={snapshot.settingsSummary.transcriptionModel}>
+                              {snapshot.settingsSummary.transcriptionModel}
+                            </option>
+                          )}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Metadata Model</span>
+                        <select
+                          value={snapshot?.settingsSummary?.metadataModel ?? ""}
+                          disabled={selectedCardIsBusy}
+                          onChange={(event) => void handleDetailModelChange("metadataModel", event.target.value)}
+                        >
+                          {(snapshot?.settingsSummary?.geminiModels ?? []).map((id) => (
+                            <option key={id} value={id}>{id}</option>
+                          ))}
+                          {snapshot?.settingsSummary?.metadataModel &&
+                            !(snapshot?.settingsSummary?.geminiModels ?? []).includes(snapshot.settingsSummary.metadataModel) && (
+                            <option value={snapshot.settingsSummary.metadataModel}>
+                              {snapshot.settingsSummary.metadataModel}
+                            </option>
+                          )}
+                        </select>
+                      </label>
+                    </div>
+                  </section>
+                </div>
+                <div className="app-tabpanel__footer">
+                  <button type="button" className="button button--ghost" onClick={() => setDetailTab("trim")}>
+                    Next
+                  </button>
+                </div>
+              </div>
+
+              <div className="app-tabpanel" {...detailTablist.getPanelProps("trim")} hidden={detailTab !== "trim"}>
+                {/* ── Group 2: Player and Trim ─────────────────────────── */}
+                <section className="detail-card detail-card--wide">
                   <div className="detail-card__header">
-                    <h3>Audio</h3>
+                    <h3>Player and Trim</h3>
                   </div>
-                  <dl className="meta-list">
-                    <div>
-                      <dt>Duration</dt>
-                      <dd>{formatDuration(selectedCard.durationSec)}</dd>
+                  <WaveformEditor
+                    ref={waveformEditorRef}
+                    card={selectedCard}
+                    previewSnippetSeconds={snapshot?.settingsSummary?.previewSnippetSeconds ?? 10}
+                    skipIntervalSec={snapshot?.settingsSummary?.skipIntervalSec ?? 5}
+                    disabled={selectedCardIsBusy}
+                    onDuplicateCard={handleDuplicateCard}
+                    onTrimCommit={handleTrimCommit}
+                    onError={(message) => addPersistent(message, "error")}
+                  />
+                  <div className="trim-analysis">
+                    <div className="trim-analysis__header">
+                      <span className="trim-analysis__label">Trim Analysis</span>
                     </div>
-                    <div>
-                      <dt>Format</dt>
-                      <dd>{(() => {
-                        const codec = selectedCard.audioProfile?.codecName ?? null;
-                        const container = selectedCard.audioProfile?.formatName ?? null;
-                        if (!codec && !container) return "Unknown";
-                        if (codec === container || !container) return codec ?? "Unknown";
-                        if (!codec) return container ?? "Unknown";
-                        return `${codec} (${container})`;
-                      })()}</dd>
+                    <p className="panel__note">{describeTrimDecision(selectedCard.trimDecision)}</p>
+                    <dl className="trim-analysis-grid">
+                      <div>
+                        <dt>Requested start</dt>
+                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedStartSec ?? null)}</dd>
+                      </div>
+                      <div>
+                        <dt>Requested end</dt>
+                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedEndSec ?? null)}</dd>
+                      </div>
+                      <div>
+                        <dt>Start search window</dt>
+                        <dd>
+                          {selectedCard.trimDecision?.searchStartFromSec === null || selectedCard.trimDecision?.searchStartFromSec === undefined
+                            ? "—"
+                            : `${formatOptionalSeconds(selectedCard.trimDecision.searchStartFromSec)} – ${formatOptionalSeconds(selectedCard.trimDecision.searchStartToSec ?? null)}`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>End search window</dt>
+                        <dd>
+                          {selectedCard.trimDecision?.searchEndFromSec === null || selectedCard.trimDecision?.searchEndFromSec === undefined
+                            ? "—"
+                            : `${formatOptionalSeconds(selectedCard.trimDecision.searchEndFromSec)} – ${formatOptionalSeconds(selectedCard.trimDecision.searchEndToSec ?? null)}`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Chosen start boundary</dt>
+                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenStartBoundarySec ?? null)}</dd>
+                      </div>
+                      <div>
+                        <dt>Chosen end boundary</dt>
+                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenEndBoundarySec ?? null)}</dd>
+                      </div>
+                      <div>
+                        <dt>Start delta</dt>
+                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.startDeltaSec ?? null)}</dd>
+                      </div>
+                      <div>
+                        <dt>End delta</dt>
+                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.endDeltaSec ?? null)}</dd>
+                      </div>
+                      <div className="trim-analysis-grid__reason">
+                        <dt>Reason</dt>
+                        <dd>{selectedCard.trimDecision?.reason ?? "No markers set yet."}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </section>
+                <div className="app-tabpanel__footer">
+                  <button type="button" className="button button--ghost" onClick={() => setDetailTab("transcribe")}>
+                    Next
+                  </button>
+                </div>
+              </div>
+
+              <div className="app-tabpanel" {...detailTablist.getPanelProps("transcribe")} hidden={detailTab !== "transcribe"}>
+                {/* ── Group 3: Transcription and Metadata ──────────────── */}
+                <section className={`detail-card detail-card--wide detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
+                  <div className="detail-card__header">
+                    <h3>Transcription and Metadata</h3>
+                  </div>
+                  <div className="action-toolbar">
+                    <button
+                      type="button"
+                      className="button button--primary"
+                      onClick={() => executeGenerate(selectedCard.id, "slug")}
+                      disabled={selectedCardIsBusy || generateDisabledReason !== null}
+                    >
+                      Generate All
+                    </button>
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      onClick={() => handleCancelCardProcessing(selectedCard.id)}
+                      disabled={!selectedCardIsBusy}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {generateDisabledReason ? (
+                    <p className="panel__note">{generateDisabledReason}</p>
+                  ) : null}
+                  <p className={`panel__note status-text status-text--${statusModifier(selectedCard.status)}`}>
+                    {formatCardStatusMessage(selectedCard)}
+                  </p>
+                  <div className="result-grid">
+                    <label className="field field--tall">
+                      <span className="field-label-with-action">
+                        <span>Transcription</span>
+                        <span className="field-actions">
+                          <button
+                            type="button"
+                            className="button button--ghost button--compact"
+                            onClick={() => handleRequestGenerate(selectedCard, "transcription")}
+                            disabled={selectedCardIsBusy}
+                          >
+                            Generate
+                          </button>
+                          <button
+                            type="button"
+                            className="button button--ghost button--compact"
+                            onClick={() => void handleCopyResult("Transcription", selectedCard.transcription.text)}
+                            disabled={(selectedCard.transcription.text ?? "").trim().length === 0}
+                          >
+                            Copy
+                          </button>
+                        </span>
+                      </span>
+                      <textarea
+                        readOnly
+                        className="result-output result-output--tall"
+                        value={selectedCard.transcription.text ?? ""}
+                        placeholder=""
+                      />
+                    </label>
+                    <div className="result-secondary">
+                      <label className="field field--tall">
+                        <span className="field-label-with-action">
+                          <span>Structured transcription</span>
+                          <span className="field-actions">
+                            <button
+                              type="button"
+                              className="button button--ghost button--compact"
+                              onClick={() => handleRequestGenerate(selectedCard, "structured")}
+                              disabled={selectedCardIsBusy}
+                            >
+                              Generate
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--ghost button--compact"
+                              onClick={() => void handleCopyResult("Structured transcription", selectedCard.metadata.structured)}
+                              disabled={(selectedCard.metadata.structured ?? "").trim().length === 0}
+                            >
+                              Copy
+                            </button>
+                          </span>
+                        </span>
+                        <textarea
+                          readOnly
+                          className="result-output result-output--structured"
+                          value={selectedCard.metadata.structured ?? ""}
+                          placeholder=""
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label-with-action">
+                          <span>Title</span>
+                          <span className="field-actions">
+                            <button
+                              type="button"
+                              className="button button--ghost button--compact"
+                              onClick={() => handleRequestGenerate(selectedCard, "title")}
+                              disabled={selectedCardIsBusy}
+                            >
+                              Generate
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--ghost button--compact"
+                              onClick={() => void handleCopyResult("Title", selectedCard.metadata.title)}
+                              disabled={(selectedCard.metadata.title ?? "").trim().length === 0}
+                            >
+                              Copy
+                            </button>
+                          </span>
+                        </span>
+                        <textarea
+                          readOnly
+                          className="result-output result-output--short"
+                          value={selectedCard.metadata.title ?? ""}
+                          placeholder=""
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label-with-action">
+                          <span>Slug</span>
+                          <span className="field-actions">
+                            <button
+                              type="button"
+                              className="button button--ghost button--compact"
+                              onClick={() => handleRequestGenerate(selectedCard, "slug")}
+                              disabled={selectedCardIsBusy}
+                            >
+                              Generate
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--ghost button--compact"
+                              onClick={() => void handleCopyResult("Slug", selectedCard.metadata.slug)}
+                              disabled={(selectedCard.metadata.slug ?? "").trim().length === 0}
+                            >
+                              Copy
+                            </button>
+                          </span>
+                        </span>
+                        <textarea
+                          readOnly
+                          className="result-output result-output--slug"
+                          value={selectedCard.metadata.slug ?? ""}
+                          placeholder=""
+                        />
+                      </label>
                     </div>
+                  </div>
+                </section>
+                <div className="app-tabpanel__footer">
+                  <button type="button" className="button button--ghost" onClick={() => setDetailTab("output")}>
+                    Next
+                  </button>
+                </div>
+              </div>
+
+              <div className="app-tabpanel" {...detailTablist.getPanelProps("output")} hidden={detailTab !== "output"}>
+                {/* ── Group 4: Output and Save ──────────────────────────── */}
+                <section className="detail-card detail-card--wide">
+                  <div className="detail-card__header">
+                    <h3>Output and Save</h3>
+                  </div>
+                  <dl className="meta-list compact-meta-list">
                     <div>
-                      <dt>Bitrate</dt>
+                      <dt>Output directory</dt>
                       <dd>
-                        {selectedCard.audioProfile?.bitRateKbps == null
-                          ? "Unknown"
-                          : `${selectedCard.audioProfile.bitRateKbps} kbps`}
+                        {snapshot?.settingsSummary?.outputDirectory ??
+                          snapshot?.settingsSummary?.defaultOutputDirectory ??
+                          ""}
                       </dd>
                     </div>
-                    <div>
-                      <dt>Sample rate</dt>
-                      <dd>
-                        {selectedCard.audioProfile?.sampleRateHz == null
-                          ? "Unknown"
-                          : `${selectedCard.audioProfile.sampleRateHz} Hz`}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Channels</dt>
-                      <dd>{selectedCard.audioProfile?.channels ?? "Unknown"}</dd>
-                    </div>
-                    <div>
-                      <dt>File size</dt>
-                      <dd>{formatBytes(selectedCard.fileSizeBytes)}</dd>
-                    </div>
+                    {selectedCard.lastError ? (
+                      <div>
+                        <dt>Last stopped step</dt>
+                        <dd>{formatStepName(selectedCard.lastError.failedStep)}</dd>
+                      </div>
+                    ) : null}
                   </dl>
-                </section>
-
-                <section className="detail-card">
-                  <div className="detail-card__header">
-                    <h3>Options</h3>
+                  <div className="action-toolbar">
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      onClick={() => void handleChooseOutputDirectory()}
+                      disabled={selectedCardIsBusy}
+                    >
+                      Change Output Directory
+                    </button>
                   </div>
-                  <div className="field-stack">
-                    <label className="field">
-                      <span>Transcription Model</span>
-                      <select
-                        value={snapshot?.settingsSummary?.transcriptionModel ?? ""}
-                        disabled={selectedCardIsBusy}
-                        onChange={(event) => void handleDetailModelChange("transcriptionModel", event.target.value)}
-                      >
-                        {(snapshot?.settingsSummary?.geminiModels ?? []).map((id) => (
-                          <option key={id} value={id}>{id}</option>
-                        ))}
-                        {snapshot?.settingsSummary?.transcriptionModel &&
-                          !(snapshot?.settingsSummary?.geminiModels ?? []).includes(snapshot.settingsSummary.transcriptionModel) && (
-                          <option value={snapshot.settingsSummary.transcriptionModel}>
-                            {snapshot.settingsSummary.transcriptionModel}
-                          </option>
-                        )}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>Metadata Model</span>
-                      <select
-                        value={snapshot?.settingsSummary?.metadataModel ?? ""}
-                        disabled={selectedCardIsBusy}
-                        onChange={(event) => void handleDetailModelChange("metadataModel", event.target.value)}
-                      >
-                        {(snapshot?.settingsSummary?.geminiModels ?? []).map((id) => (
-                          <option key={id} value={id}>{id}</option>
-                        ))}
-                        {snapshot?.settingsSummary?.metadataModel &&
-                          !(snapshot?.settingsSummary?.geminiModels ?? []).includes(snapshot.settingsSummary.metadataModel) && (
-                          <option value={snapshot.settingsSummary.metadataModel}>
-                            {snapshot.settingsSummary.metadataModel}
-                          </option>
-                        )}
-                      </select>
-                    </label>
+                  <div className="action-toolbar">
+                    <button
+                      type="button"
+                      className="button button--primary"
+                      onClick={() => void handleSaveCard(selectedCard.id)}
+                      disabled={saveDisabledReason !== null}
+                    >
+                      Save and Remove
+                    </button>
+                    <button
+                      type="button"
+                      className="button button--danger"
+                      onClick={() => setPendingRemoveCardId(selectedCard.id)}
+                      disabled={selectedCardIsBusy}
+                    >
+                      Remove
+                    </button>
                   </div>
+                  <p className="field-hint">Saving exports audio and metadata, then removes this recording from the queue.</p>
+                  {saveDisabledReason && !selectedCardIsBusy ? (
+                    <p className="panel__note">{saveDisabledReason}</p>
+                  ) : null}
                 </section>
               </div>
 
-              {/* ── Group 2: Player and Trim ─────────────────────────── */}
-              <section className="detail-card detail-card--wide">
-                <div className="detail-card__header">
-                  <h3>Player and Trim</h3>
-                </div>
-                <WaveformEditor
-                  ref={waveformEditorRef}
-                  card={selectedCard}
-                  previewSnippetSeconds={snapshot?.settingsSummary?.previewSnippetSeconds ?? 10}
-                  skipIntervalSec={snapshot?.settingsSummary?.skipIntervalSec ?? 5}
-                  disabled={selectedCardIsBusy}
-                  onDuplicateCard={handleDuplicateCard}
-                  onTrimCommit={handleTrimCommit}
-                  onError={(message) => addPersistent(message, "error")}
-                />
-                <div className="trim-analysis">
-                  <div className="trim-analysis__header">
-                    <span className="trim-analysis__label">Trim Analysis</span>
-                  </div>
-                  <p className="panel__note">{describeTrimDecision(selectedCard.trimDecision)}</p>
-                  <dl className="trim-analysis-grid">
-                    <div>
-                      <dt>Requested start</dt>
-                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedStartSec ?? null)}</dd>
-                    </div>
-                    <div>
-                      <dt>Requested end</dt>
-                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedEndSec ?? null)}</dd>
-                    </div>
-                    <div>
-                      <dt>Start search window</dt>
-                      <dd>
-                        {selectedCard.trimDecision?.searchStartFromSec === null || selectedCard.trimDecision?.searchStartFromSec === undefined
-                          ? "—"
-                          : `${formatOptionalSeconds(selectedCard.trimDecision.searchStartFromSec)} – ${formatOptionalSeconds(selectedCard.trimDecision.searchStartToSec ?? null)}`}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>End search window</dt>
-                      <dd>
-                        {selectedCard.trimDecision?.searchEndFromSec === null || selectedCard.trimDecision?.searchEndFromSec === undefined
-                          ? "—"
-                          : `${formatOptionalSeconds(selectedCard.trimDecision.searchEndFromSec)} – ${formatOptionalSeconds(selectedCard.trimDecision.searchEndToSec ?? null)}`}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Chosen start boundary</dt>
-                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenStartBoundarySec ?? null)}</dd>
-                    </div>
-                    <div>
-                      <dt>Chosen end boundary</dt>
-                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenEndBoundarySec ?? null)}</dd>
-                    </div>
-                    <div>
-                      <dt>Start delta</dt>
-                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.startDeltaSec ?? null)}</dd>
-                    </div>
-                    <div>
-                      <dt>End delta</dt>
-                      <dd>{formatOptionalSeconds(selectedCard.trimDecision?.endDeltaSec ?? null)}</dd>
-                    </div>
-                    <div className="trim-analysis-grid__reason">
-                      <dt>Reason</dt>
-                      <dd>{selectedCard.trimDecision?.reason ?? "No markers set yet."}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </section>
-
-              {/* ── Group 3: Transcription and Metadata ──────────────── */}
-              <section className={`detail-card detail-card--wide detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
-                <div className="detail-card__header">
-                  <h3>Transcription and Metadata</h3>
-                </div>
-                <div className="action-toolbar">
-                  <button
-                    type="button"
-                    className="button button--primary"
-                    onClick={() => executeGenerate(selectedCard.id, "slug")}
-                    disabled={selectedCardIsBusy || generateDisabledReason !== null}
-                  >
-                    Generate All
-                  </button>
-                  <button
-                    type="button"
-                    className="button button--ghost"
-                    onClick={() => handleCancelCardProcessing(selectedCard.id)}
-                    disabled={!selectedCardIsBusy}
-                  >
-                    Cancel
-                  </button>
-                </div>
-                {generateDisabledReason ? (
-                  <p className="panel__note">{generateDisabledReason}</p>
-                ) : null}
-                <p className={`panel__note status-text status-text--${statusModifier(selectedCard.status)}`}>
-                  {formatCardStatusMessage(selectedCard)}
-                </p>
-                <div className="result-grid">
-                  <label className="field field--tall">
-                    <span className="field-label-with-action">
-                      <span>Transcription</span>
-                      <span className="field-actions">
-                        <button
-                          type="button"
-                          className="button button--ghost button--compact"
-                          onClick={() => handleRequestGenerate(selectedCard, "transcription")}
-                          disabled={selectedCardIsBusy}
-                        >
-                          Generate
-                        </button>
-                        <button
-                          type="button"
-                          className="button button--ghost button--compact"
-                          onClick={() => void handleCopyResult("Transcription", selectedCard.transcription.text)}
-                          disabled={(selectedCard.transcription.text ?? "").trim().length === 0}
-                        >
-                          Copy
-                        </button>
-                      </span>
-                    </span>
-                    <textarea
-                      readOnly
-                      className="result-output result-output--tall"
-                      value={selectedCard.transcription.text ?? ""}
-                      placeholder=""
-                    />
-                  </label>
-                  <div className="result-secondary">
-                    <label className="field field--tall">
-                      <span className="field-label-with-action">
-                        <span>Structured transcription</span>
-                        <span className="field-actions">
-                          <button
-                            type="button"
-                            className="button button--ghost button--compact"
-                            onClick={() => handleRequestGenerate(selectedCard, "structured")}
-                            disabled={selectedCardIsBusy}
-                          >
-                            Generate
-                          </button>
-                          <button
-                            type="button"
-                            className="button button--ghost button--compact"
-                            onClick={() => void handleCopyResult("Structured transcription", selectedCard.metadata.structured)}
-                            disabled={(selectedCard.metadata.structured ?? "").trim().length === 0}
-                          >
-                            Copy
-                          </button>
-                        </span>
-                      </span>
-                      <textarea
-                        readOnly
-                        className="result-output result-output--structured"
-                        value={selectedCard.metadata.structured ?? ""}
-                        placeholder=""
-                      />
-                    </label>
-                    <label className="field">
-                      <span className="field-label-with-action">
-                        <span>Title</span>
-                        <span className="field-actions">
-                          <button
-                            type="button"
-                            className="button button--ghost button--compact"
-                            onClick={() => handleRequestGenerate(selectedCard, "title")}
-                            disabled={selectedCardIsBusy}
-                          >
-                            Generate
-                          </button>
-                          <button
-                            type="button"
-                            className="button button--ghost button--compact"
-                            onClick={() => void handleCopyResult("Title", selectedCard.metadata.title)}
-                            disabled={(selectedCard.metadata.title ?? "").trim().length === 0}
-                          >
-                            Copy
-                          </button>
-                        </span>
-                      </span>
-                      <textarea
-                        readOnly
-                        className="result-output result-output--short"
-                        value={selectedCard.metadata.title ?? ""}
-                        placeholder=""
-                      />
-                    </label>
-                    <label className="field">
-                      <span className="field-label-with-action">
-                        <span>Slug</span>
-                        <span className="field-actions">
-                          <button
-                            type="button"
-                            className="button button--ghost button--compact"
-                            onClick={() => handleRequestGenerate(selectedCard, "slug")}
-                            disabled={selectedCardIsBusy}
-                          >
-                            Generate
-                          </button>
-                          <button
-                            type="button"
-                            className="button button--ghost button--compact"
-                            onClick={() => void handleCopyResult("Slug", selectedCard.metadata.slug)}
-                            disabled={(selectedCard.metadata.slug ?? "").trim().length === 0}
-                          >
-                            Copy
-                          </button>
-                        </span>
-                      </span>
-                      <textarea
-                        readOnly
-                        className="result-output result-output--slug"
-                        value={selectedCard.metadata.slug ?? ""}
-                        placeholder=""
-                      />
-                    </label>
-                  </div>
-                </div>
-              </section>
-
-              {/* ── Group 4: Output and Save ──────────────────────────── */}
-              <section className="detail-card detail-card--wide">
-                <div className="detail-card__header">
-                  <h3>Output and Save</h3>
-                </div>
-                <dl className="meta-list compact-meta-list">
-                  <div>
-                    <dt>Output directory</dt>
-                    <dd>
-                      {snapshot?.settingsSummary?.outputDirectory ??
-                        snapshot?.settingsSummary?.defaultOutputDirectory ??
-                        ""}
-                    </dd>
-                  </div>
-                  {selectedCard.lastError ? (
-                    <div>
-                      <dt>Last stopped step</dt>
-                      <dd>{formatStepName(selectedCard.lastError.failedStep)}</dd>
-                    </div>
-                  ) : null}
-                </dl>
-                <div className="action-toolbar">
-                  <button
-                    type="button"
-                    className="button button--ghost"
-                    onClick={() => void handleChooseOutputDirectory()}
-                    disabled={selectedCardIsBusy}
-                  >
-                    Change Output Directory
-                  </button>
-                </div>
-                <div className="action-toolbar">
-                  <button
-                    type="button"
-                    className="button button--primary"
-                    onClick={() => void handleSaveCard(selectedCard.id)}
-                    disabled={saveDisabledReason !== null}
-                  >
-                    Save and Remove
-                  </button>
-                  <button
-                    type="button"
-                    className="button button--danger"
-                    onClick={() => setPendingRemoveCardId(selectedCard.id)}
-                    disabled={selectedCardIsBusy}
-                  >
-                    Remove
-                  </button>
-                </div>
-                <p className="field-hint">Saving exports audio and metadata, then removes this recording from the queue.</p>
-                {saveDisabledReason && !selectedCardIsBusy ? (
-                  <p className="panel__note">{saveDisabledReason}</p>
-                ) : null}
-              </section>
-
-            </div>
+              </div>
+            </>
           ) : snapshot?.state?.cards.length ? (
             <section className="panel panel--nested queue-empty">
               <p className="empty-state__title">Select a recording</p>

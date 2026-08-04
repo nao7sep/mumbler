@@ -730,6 +730,55 @@ textarea:focus-visible,
   gap: 12px;
 }
 
+/* The app's tab bars (the detail pane's wizard tabs, the Settings tabs), all
+   driven by useTablist (composite-control conventions: one tab stop, arrows
+   move, activation follows focus). Flat pill tabs, so active/hover emphasis is
+   a background fill, never a bolted-on ring; the keyboard cursor keeps the
+   platform :focus-visible ring. */
+.app-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.app-tab {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.app-tab:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.app-tab--active {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The Settings tab bar: fixed chrome between the modal header and the scrolling
+   body (matches the fleet's settings tab strips), so the tabs never scroll
+   away. Horizontal padding mirrors .modal-card__body's. */
+.settings-tabs {
+  padding: 0 20px 14px;
+}
+
+/* Each wizard step's forward affordance, right-aligned below the step's cards. */
+.app-tabpanel__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1371,13 +1420,11 @@ textarea:focus-visible,
   padding-top: 16px;
 }
 
-.settings-subheading {
-  font-size: 0.85rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0;
-  color: var(--text-tertiary);
-  margin: 16px 0 6px;
+/* The top border is an inter-section separator. A tab panel's first section
+   sits directly under the fixed tab bar, where the line is just noise. */
+.app-tabpanel > .settings-section:first-child {
+  border-top: none;
+  padding-top: 0;
 }
 
 .api-key-status {
