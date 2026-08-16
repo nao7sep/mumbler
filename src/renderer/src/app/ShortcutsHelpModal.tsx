@@ -60,6 +60,18 @@ export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactE
               </div>
             </div>
           ))}
+          <div className="shortcut-group">
+            <p className="shortcut-group__name">Help</p>
+            <div className="shortcut-list">
+              <div className="shortcut-item">
+                <span>Show this list</span>
+                {/* The running platform's single word (keyboard-shortcut-conventions);
+                    the chord is bound in App.tsx, outside COMMAND_DEFINITIONS,
+                    because it opens a modal rather than firing a command. */}
+                <kbd>{/Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent) ? "Cmd" : "Ctrl"}+Slash</kbd>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </ModalShell>

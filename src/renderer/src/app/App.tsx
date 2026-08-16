@@ -752,6 +752,24 @@ export function App(): ReactElement {
         return;
       }
 
+      // Cmd/Ctrl+Slash opens the shortcuts help (the fleet's conventional help
+      // chord); Alt is excluded so Windows AltGr — delivered as Ctrl+Alt —
+      // keeps typing characters, and like every mumbler shortcut it stands
+      // down while typing, which also keeps the Ctrl half off Cocoa's own
+      // Ctrl+Slash text binding (keyboard-shortcut-conventions).
+      if (
+        !modalIsOpen &&
+        !isMenuOpen &&
+        !isTypingTarget(event.target) &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        event.key === "/"
+      ) {
+        event.preventDefault();
+        setShowShortcutsHelp(true);
+        return;
+      }
+
       const settingsSummary = snapshot?.settingsSummary;
       // The open app menu is a composite that owns the arrow / type-ahead /
       // activation keys while it has focus; suppress the global command layer so
