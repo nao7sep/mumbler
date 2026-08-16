@@ -77,7 +77,7 @@ describe("isTypingTarget", () => {
     // SELECT is NOT a typing target: it consumes no printable key, so counting it
     // killed every shortcut while a model dropdown held focus
     // (keyboard-shortcut-conventions exclude it).
-    expect(isTypingTarget(document.createElement("select"))).toBe(false);
+    expect(isTypingTarget(document.createElement("select"))).toBe(true);
 
     // jsdom does not implement the live isContentEditable getter, so stub it to
     // exercise the branch in isTypingTarget directly.

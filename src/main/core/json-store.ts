@@ -8,14 +8,7 @@ export class CorruptStateError extends Error {
   constructor(
     readonly filePath: string,
     readonly reason: string,
-    /**
-     * "corrupt" — the bytes are unreadable or not the shape we expect, so the file
-     * may be set aside. "future-version" — the file is INTACT data written by a
-     * newer build: it is reported and left exactly in place, never quarantined and
-     * never overwritten, so the version that wrote it can still read it
-     * (storage-path conventions). Callers that recover by quarantining MUST check
-     * this: treating a future-version file as corrupt destroys good data.
-     */
+    /** Only genuine corruption may be set aside; future-version data stays intact. */
     readonly kind: "corrupt" | "future-version" = "corrupt",
   ) {
     super(`Could not load ${filePath}: ${reason}.`);

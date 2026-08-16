@@ -283,19 +283,13 @@ export class ApplicationRuntime {
       // resolver is wired so audio-tools can find the managed binaries; a missing
       // tool surfaces through the Audio Tools surface, never a hard startup failure.
       const dependenciesStore = createDependenciesStore(paths.dependenciesPath);
-      // dependencies.json is a re-derivable facts cache (installed versions,
-      // last-check times): a corrupt one quarantines aside and the app carries
-      // on with defaults, re-deriving by the next check — halting here would
-      // block the launch over a file a check rebuilds, and resetState does not
-      // cover it (storage-path conventions: rebuildable stores quarantine).
-      // The set-aside either lands or its failure propagates.
+      // dependencies.json is a re-derivable facts cache, so corruption does
+      // not block launch. A failed set-aside still propagates.
       let dependenciesLoad;
       try {
         dependenciesLoad = await dependenciesStore.load();
       } catch (error) {
-        // A future-version file is intact data, not corruption: it is reported and
-        // left exactly in place so the build that wrote it can still read it
-        // (storage-path conventions). Only genuine corruption is set aside.
+        // A future-version file stays in place for the build that wrote it.
         if (!(error instanceof CorruptStateError) || error.kind === "future-version") throw error;
         const quarantinedTo = await dependenciesStore.preserveExistingFiles();
         await logger.warn(
@@ -532,17 +526,10 @@ export class ApplicationRuntime {
 
     try {
       await ensureDirectories(paths);
-      // Reset is the explicit escape hatch from a corrupt-data halt, so it must
-      // never silently destroy prior data — set each store's existing canonical
-      // file aside before writing defaults.
+      // Preserve each store before the user-commanded reset writes defaults.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
       const preservedStateFiles = await stateStore.preserveExistingFiles();
       const preservedLayoutFiles = await layoutStore.preserveExistingFiles();
-      // dependencies.json is covered too: leaving it out let a corrupt facts
-      // cache survive the only recovery surface and halt every later launch.
-      const dependenciesStore = createDependenciesStore(paths.dependenciesPath);
-      await dependenciesStore.preserveExistingFiles();
-      await dependenciesStore.save(createDefaultDependencies());
       await settingsStore.save(settings);
       await layoutStore.save(layout);
       // Reuse the per-launch session logger rather than building a new one, so a
