@@ -8,6 +8,15 @@ export class CorruptStateError extends Error {
   constructor(
     readonly filePath: string,
     readonly reason: string,
+    /**
+     * "corrupt" — the bytes are unreadable or not the shape we expect, so the file
+     * may be set aside. "future-version" — the file is INTACT data written by a
+     * newer build: it is reported and left exactly in place, never quarantined and
+     * never overwritten, so the version that wrote it can still read it
+     * (storage-path conventions). Callers that recover by quarantining MUST check
+     * this: treating a future-version file as corrupt destroys good data.
+     */
+    readonly kind: "corrupt" | "future-version" = "corrupt",
   ) {
     super(`Could not load ${filePath}: ${reason}.`);
     this.name = "CorruptStateError";
@@ -88,6 +97,7 @@ export class JsonStore<T> {
       throw new CorruptStateError(
         this.options.path,
         `on-disk schema version ${onDiskVersion} is newer than this build supports (${this.options.schemaVersion})`,
+        "future-version",
       );
     }
 

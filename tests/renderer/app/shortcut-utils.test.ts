@@ -71,10 +71,13 @@ describe("findMatchingCommand", () => {
 });
 
 describe("isTypingTarget", () => {
-  it("treats form fields and contenteditable as typing targets", () => {
+  it("treats text fields and contenteditable as typing targets", () => {
     expect(isTypingTarget(document.createElement("input"))).toBe(true);
     expect(isTypingTarget(document.createElement("textarea"))).toBe(true);
-    expect(isTypingTarget(document.createElement("select"))).toBe(true);
+    // SELECT is NOT a typing target: it consumes no printable key, so counting it
+    // killed every shortcut while a model dropdown held focus
+    // (keyboard-shortcut-conventions exclude it).
+    expect(isTypingTarget(document.createElement("select"))).toBe(false);
 
     // jsdom does not implement the live isContentEditable getter, so stub it to
     // exercise the branch in isTypingTarget directly.

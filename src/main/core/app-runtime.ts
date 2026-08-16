@@ -293,7 +293,10 @@ export class ApplicationRuntime {
       try {
         dependenciesLoad = await dependenciesStore.load();
       } catch (error) {
-        if (!(error instanceof CorruptStateError)) throw error;
+        // A future-version file is intact data, not corruption: it is reported and
+        // left exactly in place so the build that wrote it can still read it
+        // (storage-path conventions). Only genuine corruption is set aside.
+        if (!(error instanceof CorruptStateError) || error.kind === "future-version") throw error;
         const quarantinedTo = await dependenciesStore.preserveExistingFiles();
         await logger.warn(
           "dependencies.corrupt-quarantined",

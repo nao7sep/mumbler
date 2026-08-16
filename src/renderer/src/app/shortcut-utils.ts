@@ -73,8 +73,11 @@ export function isTypingTarget(target: EventTarget | null): boolean {
     return true;
   }
 
+  // SELECT is deliberately NOT here: it consumes no printable key, so treating a
+  // focused model dropdown as "typing" killed every shortcut while it held focus
+  // (keyboard-shortcut-conventions exclude it from the editable predicate).
   const tagName = target.tagName.toLowerCase();
-  return tagName === "input" || tagName === "textarea" || tagName === "select";
+  return tagName === "input" || tagName === "textarea";
 }
 
 // True when the focused element activates on Space (a button, link, or summary).
