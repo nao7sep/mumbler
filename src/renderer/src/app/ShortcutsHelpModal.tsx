@@ -5,19 +5,20 @@ import { COMMAND_DEFINITIONS } from "@shared/commands";
 
 import { ModalShell } from "./modal/ModalShell";
 
-const KEY_SYMBOLS: Record<string, string> = {
+// event.key → the display word the keyboard-shortcut-conventions prescribe
+// (full key names, symbols spelled out); bare letters just uppercase.
+const KEY_DISPLAY: Record<string, string> = {
   ArrowLeft: "Left",
   ArrowRight: "Right",
   ArrowUp: "Up",
   ArrowDown: "Down",
-  Up: "Up",
-  Down: "Down",
+  " ": "Space",
   "[": "Left Bracket",
   "]": "Right Bracket",
 };
 
 function formatShortcutKey(key: string): string {
-  return KEY_SYMBOLS[key] ?? key;
+  return KEY_DISPLAY[key] ?? (key.length === 1 ? key.toUpperCase() : key);
 }
 
 export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactElement {
@@ -54,7 +55,7 @@ export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactE
                 {group.commands.map((command) => (
                   <div key={command.id} className="shortcut-item">
                     <span>{command.label}</span>
-                    <kbd>{formatShortcutKey(command.defaultShortcut)}</kbd>
+                    <kbd>{formatShortcutKey(command.key)}</kbd>
                   </div>
                 ))}
               </div>

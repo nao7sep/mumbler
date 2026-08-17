@@ -31,7 +31,7 @@ import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
 import { HamburgerIcon } from "./Icon";
 import { Menu, MenuItem } from "./Menu";
 import { SettingsModal } from "./SettingsModal";
-import { findMatchingCommand, isActivationTarget, isTypingTarget } from "./shortcut-utils";
+import { findMatchingCommand, isActivationTarget, isTextEditingTarget, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
 import { QueueList, formatBytes, formatDuration, statusModifier } from "./QueueList";
 import { PaneSplitter } from "./PaneSplitter";
@@ -754,16 +754,18 @@ export function App(): ReactElement {
 
       // Cmd/Ctrl+Slash opens the shortcuts help (the fleet's conventional help
       // chord); Alt is excluded so Windows AltGr — delivered as Ctrl+Alt —
-      // keeps typing characters, and like every mumbler shortcut it stands
-      // down while typing, which also keeps the Ctrl half off Cocoa's own
-      // Ctrl+Slash text binding (keyboard-shortcut-conventions).
+      // keeps typing characters. On macOS the Ctrl half stands down while the
+      // target takes typed text — Ctrl belongs to the text system there — and
+      // the Cmd half is the binding and always fires
+      // (keyboard-shortcut-conventions).
+      const isMac = snapshot == null || snapshot.platform === "darwin";
       if (
         !modalIsOpen &&
         !isMenuOpen &&
-        !isTypingTarget(event.target) &&
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
-        event.key === "/"
+        event.key === "/" &&
+        !(isMac && event.ctrlKey && !event.metaKey && isTextEditingTarget(event.target))
       ) {
         event.preventDefault();
         setShowShortcutsHelp(true);

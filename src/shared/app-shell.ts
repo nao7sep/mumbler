@@ -82,7 +82,8 @@ export interface CommandDefinition {
   id: CommandId;
   label: string;
   group: string;
-  defaultShortcut: string;
+  /** The literal event.key this command matches (letters lowercase). */
+  key: string;
 }
 
 export interface RetryPolicy {
