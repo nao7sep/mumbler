@@ -90,8 +90,14 @@ export function ModalShell({
     setModalId(id);
 
     if (card !== null) {
+      // A surface may name the control that takes focus with [data-modal-autofocus] —
+      // a confirmation marks its safe action, so a reflexive Enter can never reach a
+      // destructive one even if the footer is reordered. Unmarked surfaces keep the
+      // "firstControl" / "surface" choice.
+      const named = card.querySelector<HTMLElement>("[data-modal-autofocus]");
       const target =
-        initialFocus === "firstControl" ? getFocusableElements(card)[0] ?? card : card;
+        named ??
+        (initialFocus === "firstControl" ? getFocusableElements(card)[0] ?? card : card);
       target.focus();
     }
 
