@@ -1634,6 +1634,9 @@ textarea:focus-visible,
   color: var(--link);
   font-size: 0.8125rem;
   text-decoration: none;
+  /* A label and its trailing mark are one unit: the container wraps between links,
+     never between a link's text and the mark that belongs to it. */
+  white-space: nowrap;
 }
 
 .about-links a:hover {
