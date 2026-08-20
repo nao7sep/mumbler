@@ -6,6 +6,7 @@ import { getSupportedTimezones } from "@shared/timestamps";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 import { ModalShell } from "./modal/ModalShell";
 import { useTablist } from "./useTablist";
+import { ExternalLinkIcon } from "./Icon";
 
 function parseEntries(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
@@ -283,7 +284,7 @@ export function SettingsModal({
                   </select>
                 </label>
                 <p className="field-hint">
-                  <a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" rel="noopener noreferrer">Full timezone list on Wikipedia ↗</a>
+                  <a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" rel="noopener noreferrer">Full timezone list on Wikipedia <ExternalLinkIcon /></a>
                 </p>
                 <div className="field">
                   <span>Timestamp Patterns</span>

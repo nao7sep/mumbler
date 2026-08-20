@@ -14,6 +14,7 @@ import { createPortal } from "react-dom";
 
 import { useComposing, isComposingKeyboardEvent } from "../useComposing";
 import { getFocusableElements, trapTabFocus } from "./focusTrap";
+import { CloseIcon } from "../Icon";
 import {
   MODAL_BASE_Z_INDEX,
   getModalLayer,
@@ -193,7 +194,7 @@ export function ModalShell({
               disabled={closeDisabled}
               aria-label="Close"
             >
-              ✕
+              <CloseIcon />
             </button>
           ) : null}
         </div>

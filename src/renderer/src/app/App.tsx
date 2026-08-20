@@ -51,6 +51,7 @@ import { useImportFlow } from "./useImportFlow";
 import { useSettingsModal } from "./useSettingsModal";
 import { formatCardStatusMessage, formatStepName, isCardBusy } from "./card-status";
 import { useTablist } from "./useTablist";
+import { CloseIcon } from "./Icon";
 import {
   describeTrimDecision,
   formatOptionalSeconds,
@@ -936,7 +937,7 @@ export function App(): ReactElement {
                 onClick={() => dismissNotification(n.id)}
                 aria-label="Dismiss notification"
               >
-                ✕
+                <CloseIcon />
               </button>
             </div>
           ))}

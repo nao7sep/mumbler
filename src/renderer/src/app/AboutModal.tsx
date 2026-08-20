@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 
 import { ModalShell } from "./modal/ModalShell";
+import { ExternalLinkIcon } from "./Icon";
 
 const GITHUB_URL = "https://github.com/nao7sep/mumbler";
 
@@ -31,10 +32,10 @@ export function AboutModal({
         </p>
         <div className="about-links">
           <a href={GITHUB_URL} target="_blank" rel="noreferrer">
-            GitHub ↗
+            GitHub <ExternalLinkIcon />
           </a>
           <a href={`${GITHUB_URL}/issues`} target="_blank" rel="noreferrer">
-            Report Issue ↗
+            Report Issue <ExternalLinkIcon />
           </a>
         </div>
         <p className="about-meta">
