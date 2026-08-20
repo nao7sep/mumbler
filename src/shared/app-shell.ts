@@ -2,9 +2,12 @@
 // model list (MumblerSettings.geminiModels) at first run. A small, editable starter
 // set — the user can add/remove entries and type any id; a wrong or unsupported id
 // surfaces at call time (the validity boundary), not from this list. Google's
-// `-preview` suffix is branding, not a reason to exclude a model — but it is a reason
-// to re-check: gemini-3-flash-preview sat in this list until Google shut it down, and
-// nothing in the app noticed, because nothing here queries a model list.
+// `-preview` suffix is branding, not a reason to exclude a model.
+//
+// Verified live 2026-08-20 against the models endpoint and a real call: every id below
+// resolves. The ids this list replaced (gemini-3.5-flash, gemini-3.1-flash-lite,
+// gemini-3-flash-preview) still resolve too — they were superseded, not retired, and
+// were dropped to keep one id per category rather than to route around a failure.
 //
 // Ordered by CATEGORY, one per category: pro (smartest) → flash (balanced) → flash
 // lite (fastest). That ordering and raw capability still disagree — 3.7-flash
