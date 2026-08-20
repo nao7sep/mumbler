@@ -29,7 +29,7 @@ function IconBase({ children, style, ...props }: SVGProps<SVGSVGElement>): React
       strokeLinejoin="round"
       aria-hidden="true"
       focusable="false"
-      style={{ verticalAlign: BASELINE_SHIFT, ...style }}
+      style={{ display: 'inline-block', verticalAlign: BASELINE_SHIFT, ...style }}
       {...props}
     >
       {children}

@@ -10,6 +10,7 @@ import {
 
 import type {
   AppSnapshot,
+  DependencyStatus,
   GenerateTarget,
   MumblerCard,
   PendingImportReviewItem,
@@ -95,8 +96,19 @@ interface AppNotification {
 // single status message at the worst role present that opens the Audio Tools
 // surface. It is deliberately a tinted status pill, not a plain button — a missing
 // or outdated tool needs to read as a condition that wants attention.
-function toolsChipMessage(role: StatusRole): string {
-  return role === "informational" ? "Audio tools: updates unchecked" : "Audio tools need attention";
+//
+// The informational state covers two different stories, and the chip can tell
+// them apart, so it does: a tool whose own version could not be read needs the
+// user to re-acquire it (the modal's Update), where a merely-unchecked one only
+// needs a check.
+function toolsChipMessage(role: StatusRole, dependencies: DependencyStatus[] | null): string {
+  if (role !== "informational") {
+    return "Audio tools need attention";
+  }
+  const unreadable = dependencies?.some(
+    (dep) => dep.state === "installed-unchecked" && dep.installedVersion === null,
+  );
+  return unreadable ? "Audio tools: version unreadable" : "Audio tools: updates unchecked";
 }
 
 function ToolsChipIcon({ role }: { role: StatusRole }): ReactElement {
@@ -862,7 +874,7 @@ export function App(): ReactElement {
               title="Open Audio Tools"
             >
               <ToolsChipIcon role={toolsRollUp} />
-              {toolsChipMessage(toolsRollUp)}
+              {toolsChipMessage(toolsRollUp, dependencies)}
             </button>
           ) : null}
           <div className="app-menu-anchor">

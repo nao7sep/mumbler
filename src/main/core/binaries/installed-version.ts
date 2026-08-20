@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile, writeFile, rename } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -88,8 +88,14 @@ export async function writeVersionSidecar(
   // excluded as a re-fetchable binary) and rewritten by the next install, so it rides
   // along into exclusion rather than being recorded orphaned (data-backup conventions).
   const staged = join(binDir, `${name}-${nanoid()}.tmp`);
-  await writeFile(staged, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  await rename(staged, target);
+  try {
+    await writeFile(staged, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    await rename(staged, target);
+  } catch (error) {
+    // A stranded temp is tolerated for a crash, not for an ordinary failure path.
+    await rm(staged, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 // The installed version of `name`, or null when it cannot be read — the binary will

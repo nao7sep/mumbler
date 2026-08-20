@@ -74,9 +74,9 @@ export class ToolManager {
   // reads what this recorded, so rendering never probes the filesystem or runs a
   // binary.
   async reconcile(): Promise<void> {
-    for (const name of TOOL_NAMES) {
-      await this.readFromDisk(name);
-    }
+    // Concurrently: this sits on the awaited startup path, and the two tools'
+    // probes are independent subprocesses.
+    await Promise.all(TOOL_NAMES.map((name) => this.readFromDisk(name)));
   }
 
   // The one place the artifact is read. Presence first — an absent tool has no
@@ -217,12 +217,16 @@ export class ToolManager {
       // resolved one beside it — AFTER the publish, so a failure here leaves a
       // present tool reading version-unknown (which offers a re-acquire) rather
       // than an old binary wearing the new version's label.
-      if (installedVersionSource(this.deps.platform).kind === "sidecar") {
-        await writeVersionSidecar(this.deps.binDir, name, resolved.version, Date.now());
+      try {
+        if (installedVersionSource(this.deps.platform).kind === "sidecar") {
+          await writeVersionSidecar(this.deps.binDir, name, resolved.version, Date.now());
+        }
+      } finally {
+        // Re-read the artifact even when the sidecar write fails: the binary in
+        // bin/ IS the new one, and presence/version must describe it rather than
+        // what was there before.
+        await this.readFromDisk(name);
       }
-      // Re-read the artifact: presence and version now describe what was just
-      // published, not what was there before.
-      await this.readFromDisk(name);
       // Only the upstream fact is persisted. What is now installed is read back
       // from the binary, so an install has nothing to record about it.
       await this.mutate(name, (facts) => recordLatest(facts, resolved.version, Date.now()));
