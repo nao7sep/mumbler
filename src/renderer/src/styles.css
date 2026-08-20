@@ -1765,9 +1765,17 @@ textarea:focus-visible,
 .tools-chip:not(:disabled):hover {
   filter: brightness(0.96);
 }
+/* The informational state ("updates unchecked", "version unreadable") is calm by
+   design: normal muted topbar text, no tinted pill — a benign FYI must not wear a
+   colour that reads as a condition. Warning/error keep their tints below. */
 .tools-chip--informational {
-  background: var(--processing-subtle);
-  color: var(--processing);
+  background: transparent;
+  color: var(--topbar-muted);
+  font-weight: 400;
+}
+.tools-chip--informational:not(:disabled):hover {
+  filter: none;
+  color: var(--topbar-text);
 }
 .tools-chip--warning {
   background: var(--warning-subtle);
