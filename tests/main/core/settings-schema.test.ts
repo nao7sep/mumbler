@@ -105,7 +105,7 @@ describe("applySettingsDraft — validation", () => {
 describe("Gemini model list (config-seeding: owned, editable, current defaults)", () => {
   it("seeds defaults whose selections are members of the built-in list", () => {
     const settings = createDefaultSettings("Asia/Tokyo");
-    expect(settings.transcriptionModel).toBe("gemini-3.5-flash");
+    expect(settings.transcriptionModel).toBe("gemini-3.7-flash");
     expect(settings.geminiModels).toContain(settings.transcriptionModel);
     expect(settings.geminiModels).toContain(settings.metadataModel);
     expect(settings.geminiModels.length).toBeGreaterThan(0);

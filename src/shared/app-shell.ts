@@ -2,18 +2,19 @@
 // model list (MumblerSettings.geminiModels) at first run. A small, editable starter
 // set — the user can add/remove entries and type any id; a wrong or unsupported id
 // surfaces at call time (the validity boundary), not from this list. Google's
-// `-preview` suffix is branding, not a reason to exclude a model.
+// `-preview` suffix is branding, not a reason to exclude a model — but it is a reason
+// to re-check: gemini-3-flash-preview sat in this list until Google shut it down, and
+// nothing in the app noticed, because nothing here queries a model list.
 //
-// Ordered by CATEGORY, not by benchmark: pro (smartest) → flash (balanced) → flash
-// lite (fastest). Right now that ordering and raw capability disagree — 3.5-flash
-// benchmarks above 3.1-pro-preview, since no 3.5 pro exists yet — which is why both
-// defaults are flash despite pro leading the list. When 3.5 pro ships, transcription
-// takes it and metadata stays on flash.
+// Ordered by CATEGORY, one per category: pro (smartest) → flash (balanced) → flash
+// lite (fastest). That ordering and raw capability still disagree — 3.7-flash
+// benchmarks above 3.1-pro-preview, since no newer pro exists yet — which is why both
+// defaults are flash despite pro leading the list. When a newer pro ships,
+// transcription takes it and metadata stays on flash.
 export const DEFAULT_GEMINI_MODELS: string[] = [
   "gemini-3.1-pro-preview",
-  "gemini-3.5-flash",
-  "gemini-3-flash-preview",
-  "gemini-3.1-flash-lite",
+  "gemini-3.7-flash",
+  "gemini-3.5-flash-lite",
 ];
 
 export const APP_SHELL_CHANNELS = {

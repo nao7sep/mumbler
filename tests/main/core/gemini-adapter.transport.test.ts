@@ -50,9 +50,10 @@ beforeEach(() => {
 });
 
 // Thinking is STATED, never left to the provider. The default is not one behaviour:
-// measured live, gemini-3.5-flash / 3.1-pro-preview / 3-flash-preview all think
-// unasked, while gemini-3.1-flash-lite does not and answers worse for it — so
-// silence shipped four behaviours nobody picked. `-1` (dynamic) is the one setting
+// measured live against the list seeded at the time, gemini-3.5-flash /
+// 3.1-pro-preview / 3-flash-preview all thought unasked, while gemini-3.1-flash-lite
+// did not and answered worse for it — so silence shipped four behaviours nobody
+// picked. Those ids have rotated out; the per-model variance they proved has not. `-1` (dynamic) is the one setting
 // every callable Gemini model accepts; `0` is NOT portable (3.1-pro-preview rejects
 // it: "Budget 0 is invalid. This model only works in thinking mode"), which is why
 // this is a constant and not a user toggle.
