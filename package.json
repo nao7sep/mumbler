@@ -25,26 +25,26 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@google/genai": "^2.10.0",
-    "nanoid": "^5.1.16",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
+    "@google/genai": "^2.18.0",
+    "nanoid": "^6.0.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "unzipper": "^0.12.5",
-    "wavesurfer.js": "^7.12.8"
+    "wavesurfer.js": "^7.12.11"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@types/unzipper": "^0.10.11",
     "@vitejs/plugin-react": "^5.2.0",
-    "@vitest/coverage-v8": "^4.1.9",
-    "electron": "^43.0.0",
+    "@vitest/coverage-v8": "^4.1.11",
+    "electron": "^43.4.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   }
 }
