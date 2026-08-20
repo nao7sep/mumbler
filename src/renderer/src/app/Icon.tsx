@@ -10,7 +10,13 @@ import type { ReactElement, SVGProps } from "react";
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, "children">;
 
-function IconBase({ children, ...props }: SVGProps<SVGSVGElement>): ReactElement {
+// CSS aligns an inline SVG's box BOTTOM to the text baseline, not its art, so an
+// icon flowing in a sentence rides high by however much box sits below its own
+// baseline — here 4 of 24 units. Inert inside a flex control (the hamburger's
+// button), which is why the set went without it until an icon appeared in text.
+const BASELINE_SHIFT = "-0.1667em";
+
+function IconBase({ children, style, ...props }: SVGProps<SVGSVGElement>): ReactElement {
   return (
     <svg
       width="1em"
@@ -23,6 +29,7 @@ function IconBase({ children, ...props }: SVGProps<SVGSVGElement>): ReactElement
       strokeLinejoin="round"
       aria-hidden="true"
       focusable="false"
+      style={{ verticalAlign: BASELINE_SHIFT, ...style }}
       {...props}
     >
       {children}
