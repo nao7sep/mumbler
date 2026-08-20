@@ -437,11 +437,16 @@ export type StatusRole = "none" | "informational" | "warning" | "error";
 // so a single "provision" kind covers both.
 export type ToolOperationKind = "provision" | "check";
 
-// Persisted, honest per-tool facts — the single source of truth status derives
-// from. installedVersion and desiredVersion are stored already normalized, so they
-// compare by string equality. Presence is NOT here: it is scanned from disk.
+// The honest per-tool facts status derives from. Both version strings are already
+// normalized, so they compare by string equality. Only desiredVersion and
+// lastCheckedAtUtc are PERSISTED — network facts with no on-disk source. `present`
+// and `installedVersion` are both read from the artifact (a filesystem scan and the
+// binary itself), so they cannot drift from disk or from each other.
 export interface ToolFacts {
   present: boolean;
+  // What the installed binary reports, or what the install recorded beside it.
+  // Null on a present tool means its version could not be read — not the same as
+  // absent, and never dressed up as up to date.
   installedVersion: string | null;
   // The last latest-version a check successfully resolved; null until one has.
   desiredVersion: string | null;

@@ -8,8 +8,9 @@ import { ModalShell } from "./modal/ModalShell";
 // managed-runtime-dependencies-conventions: one named, dismissible surface listing
 // every tool with its state, version facts, live progress, and per-tool error.
 // Each row offers a single context-aware action — Install when missing, Update
-// when a newer version is known, nothing when up to date — over the one acquire
-// operation (download the latest, verify once). A set-wide "Check for updates"
+// when a newer version is known or the installed one could not be read, nothing
+// otherwise — over the one acquire operation (download the latest, verify once).
+// A set-wide "Check for updates"
 // resolves the latest version. The single toggle ("check at launch") lives here,
 // not in Settings. Status is shown through the semantic role each row derives; the
 // theme owns the concrete colour.
@@ -43,11 +44,15 @@ const STATUS_LABEL: Record<DependencyState, string> = {
 };
 
 // The one per-row action: Install when missing, Update when a newer version is
-// known. Up-to-date and installed-unchecked offer no row action — the only move
-// there is the set-wide Check.
-function acquireLabel(state: DependencyState): string | null {
+// known — and Update again when a present tool's own version could not be read,
+// which is the only way out of that row: the set-wide Check resolves the LATEST,
+// so it can never clear an unreadable INSTALLED version, and re-acquiring is what
+// replaces the copy that would not answer. Up to date, and installed-but-unchecked
+// with a version in hand, offer no row action — the set-wide Check is that move.
+function acquireLabel(state: DependencyState, installedVersion: string | null): string | null {
   if (state === "not-installed") return "Install";
   if (state === "update-available") return "Update";
+  if (state === "installed-unchecked" && installedVersion === null) return "Update";
   return null;
 }
 
@@ -125,14 +130,17 @@ export function AudioToolsModal({
             {dependencies.map((status) => {
               const running = status.transient.kind === "running";
               const needsAttention = status.role === "warning" || status.role === "error";
-              const action = acquireLabel(status.state);
+              const action = acquireLabel(status.state, status.installedVersion);
               return (
                 <tr key={status.name}>
                   <td className="tools-table__name">{status.name}</td>
                   <td>
                     <span className={ROLE_CLASS[status.role]}>{STATUS_LABEL[status.state]}</span>
                   </td>
-                  <td>{status.installedVersion ?? "—"}</td>
+                  <td>
+                    {status.installedVersion ??
+                      (status.state === "not-installed" ? "—" : "version unreadable")}
+                  </td>
                   <td>{status.desiredVersion ?? (isChecking ? "…" : "unknown")}</td>
                   <td className="tools-table__action">
                     {running ? (

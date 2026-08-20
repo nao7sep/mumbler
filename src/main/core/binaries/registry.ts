@@ -90,6 +90,7 @@ interface GithubAsset {
 }
 interface GithubRelease {
   tag_name: string;
+  name?: string;
   assets: GithubAsset[];
 }
 
@@ -115,8 +116,15 @@ async function resolveBtbNWindows(arch: string): Promise<ResolvedTools> {
     sha256AssetName: zipName,
     innerName: exe,
   });
+  // The release TAG is the constant string `latest` — a rolling pointer, not a
+  // version, so comparing it to itself would read "up to date" forever and no
+  // Windows user would ever be offered an ffmpeg update. The release NAME carries
+  // the build moment ("Latest Auto-Build (2026-08-19 19:21)") and does change,
+  // which is the only version-shaped fact this source publishes. It is also why
+  // Windows reads its installed version from a sidecar rather than the binary: the
+  // .exe reports its master build (`N-119123-g…`), a different namespace entirely.
   return {
-    version: normalizeToolVersion(release.tag_name),
+    version: normalizeToolVersion(release.name?.trim() || release.tag_name),
     tools: { ffmpeg: tool("ffmpeg.exe"), ffprobe: tool("ffprobe.exe") },
   };
 }

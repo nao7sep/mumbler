@@ -6,18 +6,21 @@ import { TOOL_NAMES } from "./registry";
 
 // Persisted per-tool facts — the honest single source of truth the status is
 // derived from (managed-runtime-dependencies-conventions). Only what cannot be
-// re-derived is stored: the installed version, the last-known latest, and the
-// last *successful* check time. `present` is NOT persisted — it is scanned from
-// disk at startup, so the file can never claim a tool the user has since deleted.
-// No integrity flag, fault flag, or check-error is kept: a failed check writes
-// nothing, and a damaged file fails when used and is fixed by installing again.
+// re-derived is stored, and both survivors are NETWORK facts with no on-disk
+// source: the last-known latest and the last *successful* check time. `present`
+// is NOT persisted — it is scanned from disk at startup — and neither is the
+// INSTALLED version, which is read from the binary itself (installed-version.ts):
+// a fact about a file kept away from that file drifts the moment an install does
+// not write the record, and a present tool with no recorded version can only read
+// as "installed (not checked)" forever. No integrity flag, fault flag, or
+// check-error is kept either: a failed check writes nothing, and a damaged file
+// fails when used and is fixed by installing again.
 //
 // `lastCheckedAtUtc` is held in memory as epoch-ms (cheap to compare) but written
 // to disk as canonical ISO-8601 (per the timestamp-conventions) via the store's
 // serialize/validate hooks — the same epoch-ms-in-core / ISO-at-the-edge split the
 // state store uses.
 export interface PersistedToolFacts {
-  installedVersion: string | null;
   desiredVersion: string | null;
   lastCheckedAtUtc: number | null;
 }
@@ -31,7 +34,6 @@ const SCHEMA_VERSION = 1;
 
 function emptyFacts(): PersistedToolFacts {
   return {
-    installedVersion: null,
     desiredVersion: null,
     lastCheckedAtUtc: null,
   };
@@ -64,10 +66,10 @@ function asUtcMs(value: unknown): number | null {
 
 function normalizeFacts(raw: unknown): PersistedToolFacts {
   const record = raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  // Any legacy fields from the old model (installedSha256, faulted, lastError,
-  // lastCheckError) are simply not read here, so they drop on the next save.
+  // Fields from earlier models — installedVersion, and the older installedSha256,
+  // faulted, lastError, lastCheckError — are simply not read here, so they drop on
+  // the next save (the app is pre-release; no migration code).
   return {
-    installedVersion: asString(record.installedVersion),
     desiredVersion: asString(record.desiredVersion),
     lastCheckedAtUtc: asUtcMs(record.lastCheckedAtUtc),
   };
@@ -89,7 +91,6 @@ function serializeDependencies(value: DependenciesValue): unknown {
   for (const name of TOOL_NAMES) {
     const facts = value.tools[name];
     tools[name] = {
-      installedVersion: facts.installedVersion,
       desiredVersion: facts.desiredVersion,
       lastCheckedAtUtc:
         facts.lastCheckedAtUtc === null ? null : formatUtcIsoCompact(facts.lastCheckedAtUtc),

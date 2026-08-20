@@ -1,10 +1,11 @@
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppLogger } from "@main/core/logger";
+import type { ToolName } from "@shared/app-shell";
 
 // The network/extraction edges are stubbed; everything else (the store, the facts
 // transitions, the derivation, presence reconcile) runs for real against a temp
@@ -28,6 +29,25 @@ vi.mock("@main/core/binaries/registry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@main/core/binaries/registry")>();
   return { ...actual, resolveLatest: vi.fn() };
 });
+// The real read SPAWNS the installed binary; the "binary" published here is a text
+// file, so the stub reads its contents and runs them through the REAL banner parser
+// instead. What is under test is unchanged and is the point of the whole design:
+// the version travels with the artifact — it is whatever the file in bin/ says, and
+// a file that says nothing recognizable has no version.
+vi.mock("@main/core/binaries/installed-version", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@main/core/binaries/installed-version")>();
+  const { readFile } = await import("node:fs/promises");
+  return {
+    ...actual,
+    readInstalledVersion: vi.fn(async (name: ToolName, toolPath: string) => {
+      try {
+        return actual.parseVersionBanner(name, await readFile(toolPath, "utf8"));
+      } catch {
+        return null;
+      }
+    }),
+  };
+});
 
 import { assertArm64Slice } from "@main/core/binaries/arch";
 import { extractFileFromZip } from "@main/core/binaries/archive";
@@ -44,6 +64,11 @@ const RESOLVED = {
     ffprobe: { downloadUrl: "u", sha256Url: "s", sha256AssetName: "ffprobe.zip", innerName: "ffprobe" },
   },
 } as const;
+
+// What ffmpeg/ffprobe print on their first line.
+function banner(name: string, version: string): string {
+  return `${name} version ${version} Copyright (c) 2000-2026 the FFmpeg developers\n`;
+}
 
 function fakeLogger(): AppLogger {
   return {
@@ -86,8 +111,10 @@ beforeEach(async () => {
     await writeFile(opts.destPath, "zip-bytes");
     opts.onProgress?.(50, 100);
   });
-  vi.mocked(extractFileFromZip).mockImplementation(async (_zip, _inner, dest) => {
-    await writeFile(dest, "binary-bytes");
+  // The extracted "binary" is a stand-in whose contents are the version banner it
+  // would print — see the installed-version mock above.
+  vi.mocked(extractFileFromZip).mockImplementation(async (_zip, inner, dest) => {
+    await writeFile(dest, banner(inner, RESOLVED.version));
   });
   vi.mocked(resolveLatest).mockResolvedValue(RESOLVED as never);
 });
@@ -98,23 +125,58 @@ afterEach(async () => {
 });
 
 describe("reconcile", () => {
-  it("derives presence from disk, not from persisted facts", async () => {
+  it("derives presence AND the installed version from disk, not from persisted facts", async () => {
     const manager = await makeManager();
     await manager.reconcile();
     expect(manager.listStatuses().map((s) => s.state)).toEqual(["not-installed", "not-installed"]);
 
-    // installTool publishes a real binary into binDir; a fresh manager that only
-    // reconciles (no install) must see it present purely from the on-disk scan.
+    // installTool publishes a binary into binDir; a fresh manager that only
+    // reconciles (no install) must see it present, and read its version off it,
+    // purely from the on-disk scan.
     await manager.installTool("ffmpeg");
     const fresh = await makeManager();
     await fresh.reconcile();
     const ffmpeg = fresh.listStatuses().find((s) => s.name === "ffmpeg");
+    expect(ffmpeg?.installedVersion).toBe("8.2");
     expect(ffmpeg?.state).toBe("up-to-date");
+  });
+
+  // The defect this design removes: a binary present with NOTHING recorded about
+  // it. The facts store never learned of this one — it still reports its version,
+  // and a check can still find it current.
+  it("reads the version of a binary the facts store has never heard of", async () => {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(join(binDir, "ffmpeg"), banner("ffmpeg", "8.2"));
+
+    const manager = await makeManager();
+    await manager.reconcile();
+    const before = manager.listStatuses().find((s) => s.name === "ffmpeg");
+    expect(before?.installedVersion).toBe("8.2");
+    expect(before?.state).toBe("installed-unchecked");
+
+    await manager.checkTools();
+    expect(manager.listStatuses().find((s) => s.name === "ffmpeg")?.state).toBe("up-to-date");
+  });
+
+  // A present binary whose version cannot be read is not absent and is never
+  // dressed up as current — there is nothing to compare, so it holds at
+  // installed-unchecked even after a successful check.
+  it("holds a present-but-unreadable binary at installed-unchecked", async () => {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(join(binDir, "ffmpeg"), "not an ffmpeg banner");
+
+    const manager = await makeManager();
+    await manager.reconcile();
+    await manager.checkTools();
+
+    const ffmpeg = manager.listStatuses().find((s) => s.name === "ffmpeg");
+    expect(ffmpeg?.installedVersion).toBeNull();
+    expect(ffmpeg?.state).toBe("installed-unchecked");
   });
 });
 
 describe("installTool", () => {
-  it("publishes the binary and records installed = latest as up-to-date", async () => {
+  it("publishes the binary and reads its version back off it as up-to-date", async () => {
     const manager = await makeManager();
     await manager.reconcile();
     await manager.installTool("ffmpeg");
@@ -147,7 +209,7 @@ describe("installTool", () => {
     await manager.installTool("ffmpeg");
 
     const ffmpeg = manager.listStatuses().find((s) => s.name === "ffmpeg");
-    expect(ffmpeg?.installedVersion).toBeNull(); // I5 — prior facts intact
+    expect(ffmpeg?.installedVersion).toBeNull(); // nothing published, nothing to read
     expect(ffmpeg?.state).toBe("not-installed");
     expect(ffmpeg?.transient).toMatchObject({ kind: "failed", error: "network down" });
   });

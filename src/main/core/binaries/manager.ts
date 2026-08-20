@@ -14,8 +14,13 @@ import { OperationError } from "../operation-error";
 import { assertArm64Slice } from "./arch";
 import { extractFileFromZip } from "./archive";
 import { downloadToFile, fetchText } from "./http";
+import {
+  installedVersionSource,
+  readInstalledVersion,
+  writeVersionSidecar,
+} from "./installed-version";
 import { parseSha256Sidecar, verifySha256 } from "./integrity";
-import { afterCheckSuccess, afterInstall } from "./transitions";
+import { recordLatest } from "./transitions";
 import { TOOL_DOWNLOAD_MAX_BYTES, TOOL_NAMES, resolveLatest, toolFileName } from "./registry";
 import type { DependenciesValue, PersistedToolFacts } from "./store";
 
@@ -25,18 +30,22 @@ const execFileAsync = promisify(execFile);
 // and trim analysis, ffmpeg at trim/save).
 const REQUIRED = true;
 
-// Orchestrates the managed audio tools: their persisted facts, the scanned on-disk
-// presence, the transient status of an in-flight operation, and the two operations
-// — provision (Install/Update: acquire the latest and verify it once) and check
-// (resolve the latest version for the set). It is the only writer of dependency
-// state; the runtime reads `listStatuses()` for the snapshot and is notified to
-// re-emit it as state changes.
+// Orchestrates the managed audio tools: their persisted facts, the on-disk
+// presence and installed version, the transient status of an in-flight operation,
+// and the two operations — provision (Install/Update: acquire the latest and verify
+// it once) and check (resolve the latest version for the set). It is the only
+// writer of dependency state; the runtime reads `listStatuses()` for the snapshot
+// and is notified to re-emit it as state changes.
 export class ToolManager {
-  // Presence is scanned once at startup (reconcile), not per render — a tool
-  // deleted out of band mid-session is noticed at the next launch. The window is a
-  // deliberate, documented trade (matches the fleet's other managed-dependency
-  // apps) against probing the filesystem on every status read.
+  // Presence AND the installed version are both read from the artifact once at
+  // startup (reconcile), not per render — so the two can never disagree, and the
+  // version probe (a subprocess spawn) never lands on a render path. A tool
+  // changed out of band mid-session is noticed at the next launch; the window is a
+  // deliberate, documented trade (matching the fleet's other managed-dependency
+  // apps) against re-reading disk on every status read. An install refreshes both
+  // for the tool it replaced.
   private readonly present = new Map<ToolName, boolean>();
+  private readonly installedVersion = new Map<ToolName, string | null>();
   private readonly transient = new Map<ToolName, ToolTransient>();
   private readonly busy = new Set<ToolName>();
 
@@ -54,16 +63,47 @@ export class ToolManager {
   ) {
     for (const name of TOOL_NAMES) {
       this.present.set(name, false);
+      this.installedVersion.set(name, null);
       this.transient.set(name, { kind: "idle" });
     }
   }
 
-  // Reconcile persisted facts against disk once at startup: a tool is present only
-  // if its executable actually exists. Everything after reads these facts, so
-  // rendering never probes the filesystem.
+  // Read both artifact facts once at startup: a tool is present only if its
+  // executable actually exists, and its installed version comes from that same
+  // executable (or, on Windows, the sidecar written beside it). Everything after
+  // reads what this recorded, so rendering never probes the filesystem or runs a
+  // binary.
   async reconcile(): Promise<void> {
     for (const name of TOOL_NAMES) {
-      this.present.set(name, await this.fileExists(this.toolPath(name)));
+      await this.readFromDisk(name);
+    }
+  }
+
+  // The one place the artifact is read. Presence first — an absent tool has no
+  // version to read — then the version, from the source this platform uses. A
+  // present tool whose version cannot be read is logged and left null: that is not
+  // "absent" and never reads as up to date, and the surface offers the re-acquire
+  // that fixes it.
+  private async readFromDisk(name: ToolName): Promise<void> {
+    const present = await this.fileExists(this.toolPath(name));
+    this.present.set(name, present);
+    if (!present) {
+      this.installedVersion.set(name, null);
+      return;
+    }
+    const version = await readInstalledVersion(
+      name,
+      this.toolPath(name),
+      this.deps.binDir,
+      installedVersionSource(this.deps.platform),
+    );
+    this.installedVersion.set(name, version);
+    if (version === null) {
+      await this.deps.logger.warn(
+        "tools.version-unreadable",
+        "Installed audio tool did not report a version.",
+        { tool: name, path: this.toolPath(name) },
+      );
     }
   }
 
@@ -86,7 +126,7 @@ export class ToolManager {
     const persisted = this.deps.value.tools[name];
     return {
       present: this.present.get(name) ?? false,
-      installedVersion: persisted.installedVersion,
+      installedVersion: this.installedVersion.get(name) ?? null,
       desiredVersion: persisted.desiredVersion,
       lastCheckedAtUtc: persisted.lastCheckedAtUtc,
     };
@@ -173,8 +213,19 @@ export class ToolManager {
         await rm(stagedExe, { force: true }).catch(() => undefined);
       }
 
-      this.present.set(name, true);
-      await this.mutate(name, (facts) => afterInstall(facts, resolved.version, Date.now()));
+      // The binary has landed. Where it cannot report its own version, record the
+      // resolved one beside it — AFTER the publish, so a failure here leaves a
+      // present tool reading version-unknown (which offers a re-acquire) rather
+      // than an old binary wearing the new version's label.
+      if (installedVersionSource(this.deps.platform).kind === "sidecar") {
+        await writeVersionSidecar(this.deps.binDir, name, resolved.version, Date.now());
+      }
+      // Re-read the artifact: presence and version now describe what was just
+      // published, not what was there before.
+      await this.readFromDisk(name);
+      // Only the upstream fact is persisted. What is now installed is read back
+      // from the binary, so an install has nothing to record about it.
+      await this.mutate(name, (facts) => recordLatest(facts, resolved.version, Date.now()));
       await this.deps.logger.info("tools.installed", "Installed audio tool.", {
         tool: name,
         version: resolved.version,
@@ -214,7 +265,7 @@ export class ToolManager {
       const resolved = await resolveLatest(this.deps.platform, this.deps.arch);
       const now = Date.now();
       for (const name of TOOL_NAMES) {
-        await this.mutate(name, (facts) => afterCheckSuccess(facts, resolved.version, now));
+        await this.mutate(name, (facts) => recordLatest(facts, resolved.version, now));
       }
       await this.deps.logger.info("tools.checked", "Checked audio tool updates.", {
         latest: resolved.version,
