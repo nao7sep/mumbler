@@ -149,7 +149,7 @@ export async function transcribeWithGemini(
       });
     }
 
-    const text = normalizeResponseText(response.text);
+    const text = readResponseText(response);
     return {
       text,
       modelVersion: response.modelVersion ?? null,
@@ -200,7 +200,7 @@ export async function generateTextWithGemini(
     });
 
     return {
-      text: normalizeResponseText(response.text),
+      text: readResponseText(response),
       modelVersion: response.modelVersion ?? null,
       usageMetadata: response.usageMetadata ?? null,
     };
@@ -245,6 +245,41 @@ function buildTranscriptionPrompt(): string {
     "Return only the transcript text.",
     "Do not add summaries, timestamps, headings, speaker labels, markdown, or explanations.",
   ].join(" ");
+}
+
+/**
+ * The provider's own account of a result that is not what was asked for, read BEFORE the text
+ * (ai-model-routing-conventions: *never invent a cause the provider gave you*). Both call sites
+ * go through this rather than touching `response.text`, so the check cannot be forgotten at one
+ * of them.
+ *
+ * Measured 2026-08-20: a 100-second recording came back with no text and
+ * `promptFeedback.blockReason: "PROHIBITED_CONTENT"` — the audio was refused. Reading only
+ * `.text` reported "Gemini returned an empty text response", which is not merely unhelpful:
+ * it was believed, and produced a written finding that the model could not transcribe long
+ * audio. A refusal is the user's to act on, and only the stated reason tells them so.
+ *
+ * MAX_TOKENS is the quieter half: the text is present and looks like a complete short answer.
+ */
+function readResponseText(response: GenerateContentResponse): string {
+  const blockReason = response.promptFeedback?.blockReason;
+  if (blockReason) {
+    throw new Error(
+      `Gemini refused this request (${blockReason}). The input was rejected, not lost — try different audio or wording.`
+    );
+  }
+
+  const finishReason = response.candidates?.[0]?.finishReason;
+  if (finishReason === "MAX_TOKENS") {
+    throw new Error("Gemini stopped at its output limit, so this result is truncated rather than complete.");
+  }
+  // Anything other than a normal stop is the provider telling us the result is not what was
+  // asked for. Absent is fine — not every response carries one.
+  if (finishReason && finishReason !== "STOP") {
+    throw new Error(`Gemini stopped early (${finishReason}), so this result is incomplete.`);
+  }
+
+  return normalizeResponseText(response.text);
 }
 
 function normalizeResponseText(value: string | undefined): string {
