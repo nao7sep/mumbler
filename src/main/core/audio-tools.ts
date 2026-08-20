@@ -7,9 +7,95 @@ import { nanoid } from "nanoid";
 
 import type { AudioProfile, CardTrim, TrimDecision, ToolName } from "@shared/app-shell";
 import { type AppLogger } from "./logger";
+import { CancelledError, isNodeAbortError } from "./cancellation";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_TRIM_TOLERANCE_SEC = 3;
+
+// Every tool call is bounded, because both of these open a file and read it:
+// a truncated recording, a stalled network or removable mount, or a stuck
+// filter leaves the read never returning, and an unbounded await then hangs
+// whatever was waiting on it — an import, a save, or the whole pipeline — with
+// no error and nothing to cancel.
+//
+// Wall-clock rather than an idle watchdog, because unlike a download these have
+// a predictable duration: a probe reads headers and a bounded packet interval,
+// and a trim is bounded by the markers and runs many times faster than realtime.
+// Both bounds are therefore generous enough that only a genuinely stuck process
+// reaches them.
+const PROBE_TIMEOUT_MS = 60_000;
+const TRANSCODE_TIMEOUT_MS = 30 * 60 * 1000;
+
+// SIGTERM first so ffmpeg can close its output file, then SIGKILL if it ignores
+// that — Node's own `timeout` sends one signal and never escalates, so a child
+// that traps SIGTERM would otherwise outlive the bound it was given.
+const KILL_ESCALATION_MS = 5_000;
+
+interface RunToolOptions {
+  timeoutMs: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * The one place this module spawns anything. Applies the bound and the caller's
+ * cancellation signal, and translates an abort into the pipeline's own
+ * CancelledError so a user's Cancel records the card as cancelled rather than
+ * failed.
+ */
+export async function runTool(
+  toolPath: string,
+  args: string[],
+  options: RunToolOptions,
+): Promise<{ stdout: string }> {
+  // The bound and the signal are handled here rather than through execFile's own
+  // `timeout`/`signal` options, because those send ONE signal and never follow
+  // it: a tool that ignores SIGTERM would outlive the bound it was given, and
+  // the await would hang exactly as it did before.
+  const promise = execFileAsync(toolPath, args);
+  const child = promise.child;
+
+  let escalation: ReturnType<typeof setTimeout> | null = null;
+  const stop = (): void => {
+    child.kill("SIGTERM");
+    if (escalation !== null) return;
+    // Cleared in `finally`, which runs only once the child has actually exited
+    // — so this fires if and only if SIGTERM was ignored.
+    escalation = setTimeout(() => child.kill("SIGKILL"), KILL_ESCALATION_MS);
+    escalation.unref?.();
+  };
+
+  let timedOut = false;
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    stop();
+  }, options.timeoutMs);
+  deadline.unref?.();
+
+  const onAbort = (): void => stop();
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (options.signal?.aborted === true) stop();
+
+  try {
+    const { stdout } = await promise;
+    return { stdout };
+  } catch (error: unknown) {
+    if (options.signal?.aborted === true || isNodeAbortError(error)) {
+      throw new CancelledError();
+    }
+    // Say the bound was hit. "ffmpeg exited with signal SIGKILL" reads as a
+    // broken input file, which sends the user looking in the wrong place.
+    if (timedOut) {
+      throw new Error(
+        `${basename(toolPath)} did not finish within ${Math.round(options.timeoutMs / 1000)} seconds and was stopped.`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(deadline);
+    if (escalation !== null) clearTimeout(escalation);
+    options.signal?.removeEventListener("abort", onAbort);
+  }
+}
 
 // ffmpeg/ffprobe are managed dependencies resolved through the ToolManager (see
 // core/binaries), not npm wrappers. The runtime injects the resolver once the
@@ -56,10 +142,11 @@ export interface PreparedAudioInput {
 
 export async function probeAudioProfile(
   filePath: string,
+  signal?: AbortSignal,
 ): Promise<{ durationSec: number | null; audioProfile: AudioProfile | null }> {
   const ffprobePath = resolveFfprobePath();
 
-  const { stdout } = await execFileAsync(ffprobePath, [
+  const { stdout } = await runTool(ffprobePath, [
     "-v",
     "error",
     "-select_streams",
@@ -69,7 +156,7 @@ export async function probeAudioProfile(
     "-of",
     "json",
     filePath,
-  ]);
+  ], { timeoutMs: PROBE_TIMEOUT_MS, signal });
 
   const parsed = JSON.parse(stdout) as FfprobeFormatResponse;
   const stream = parsed.streams?.[0];
@@ -92,6 +179,7 @@ export async function analyzeTrimDecision(
   filePath: string,
   trim: CardTrim,
   durationSec: number | null,
+  signal?: AbortSignal,
 ): Promise<TrimDecision> {
   const requestedStartSec = trim.frontMarkerSec;
   const requestedEndSec = trim.backMarkerSec;
@@ -125,12 +213,12 @@ export async function analyzeTrimDecision(
   const startBoundary =
     requestedStartSec === null || requestedStartSec <= 0
       ? 0
-      : await findStartBoundary(filePath, searchStartFromSec!, searchStartToSec!);
+      : await findStartBoundary(filePath, searchStartFromSec!, searchStartToSec!, signal);
 
   const endBoundary =
     requestedEndSec === null || (durationSec !== null && requestedEndSec >= durationSec)
       ? requestedEndSec
-      : await findEndBoundary(filePath, searchEndFromSec!, searchEndToSec!);
+      : await findEndBoundary(filePath, searchEndFromSec!, searchEndToSec!, signal);
 
   const startDeltaSec =
     requestedStartSec === null || startBoundary === null
@@ -173,6 +261,7 @@ export async function prepareAudioForTranscription(params: {
   durationSec: number | null;
   audioProfile: AudioProfile | null;
   logger?: AppLogger;
+  signal?: AbortSignal;
 }): Promise<PreparedAudioInput> {
   const mimeType = inferAudioMimeType(params.sourceFilePath);
 
@@ -202,6 +291,7 @@ export async function prepareAudioForTranscription(params: {
       mode: "stream-copy",
       audioProfile: params.audioProfile,
       logger: params.logger,
+      signal: params.signal,
     });
 
     return {
@@ -222,6 +312,7 @@ export async function prepareAudioForTranscription(params: {
     mode: "reencode",
     audioProfile: params.audioProfile,
     logger: params.logger,
+    signal: params.signal,
   });
 
   return {
@@ -280,6 +371,7 @@ async function runFfmpegTrim(params: {
   mode: "stream-copy" | "reencode";
   audioProfile: AudioProfile | null;
   logger?: AppLogger;
+  signal?: AbortSignal;
 }): Promise<void> {
   const ffmpeg = resolveFfmpegPath();
 
@@ -311,7 +403,7 @@ async function runFfmpegTrim(params: {
     codecArgs,
   });
 
-  await execFileAsync(ffmpeg, [
+  await runTool(ffmpeg, [
     "-hide_banner",
     "-loglevel",
     "error",
@@ -322,7 +414,7 @@ async function runFfmpegTrim(params: {
     ...outputTimingArgs,
     ...codecArgs,
     params.outputPath,
-  ]);
+  ], { timeoutMs: TRANSCODE_TIMEOUT_MS, signal: params.signal });
 }
 
 // seekSec: value placed after -i as -ss (0 = omit). baseOffsetSec: amount
@@ -391,8 +483,9 @@ async function findStartBoundary(
   filePath: string,
   fromSec: number,
   toSec: number,
+  signal?: AbortSignal,
 ): Promise<number | null> {
-  const packets = await readPackets(filePath, fromSec, toSec);
+  const packets = await readPackets(filePath, fromSec, toSec, signal);
   if (packets.length === 0) {
     return null;
   }
@@ -408,8 +501,9 @@ async function findEndBoundary(
   filePath: string,
   fromSec: number,
   toSec: number,
+  signal?: AbortSignal,
 ): Promise<number | null> {
-  const packets = await readPackets(filePath, fromSec, toSec);
+  const packets = await readPackets(filePath, fromSec, toSec, signal);
   if (packets.length === 0) {
     return null;
   }
@@ -437,9 +531,10 @@ async function readPackets(
   filePath: string,
   fromSec: number,
   toSec: number,
+  signal?: AbortSignal,
 ): Promise<PacketBoundary[]> {
   const ffprobePath = resolveFfprobePath();
-  const { stdout } = await execFileAsync(ffprobePath, [
+  const { stdout } = await runTool(ffprobePath, [
     "-v",
     "error",
     "-select_streams",
@@ -451,7 +546,7 @@ async function readPackets(
     "-read_intervals",
     `${fromSec}%${toSec}`,
     filePath,
-  ]);
+  ], { timeoutMs: PROBE_TIMEOUT_MS, signal });
 
   const parsed = JSON.parse(stdout) as FfprobeFormatResponse;
   const packets = parsed.packets ?? [];

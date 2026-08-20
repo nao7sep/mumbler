@@ -24,12 +24,12 @@ vi.mock("@google/genai", () => ({
 vi.mock("node:fs/promises", () => ({ stat, readFile }));
 
 import {
-  GeminiCancelledError,
   GeminiTimeoutError,
   generateTextWithGemini,
   getInlineAudioSafetyLimitBytes,
   transcribeWithGemini,
 } from "@main/core/gemini-adapter";
+import { CancelledError } from "@main/core/cancellation";
 
 const SAFE = getInlineAudioSafetyLimitBytes();
 
@@ -156,7 +156,7 @@ describe("transcribeWithGemini cancellation and timeout", () => {
 
     await expect(
       transcribeWithGemini({ ...baseParams(), signal: controller.signal }),
-    ).rejects.toBeInstanceOf(GeminiCancelledError);
+    ).rejects.toBeInstanceOf(CancelledError);
     expect(generateContent).not.toHaveBeenCalled();
   });
 
@@ -212,7 +212,7 @@ describe("generateTextWithGemini", () => {
         timeoutMs: 60_000,
         signal: controller.signal,
       }),
-    ).rejects.toBeInstanceOf(GeminiCancelledError);
+    ).rejects.toBeInstanceOf(CancelledError);
     expect(generateContent).not.toHaveBeenCalled();
   });
 });

@@ -2,16 +2,15 @@ import { ApiError } from "@google/genai";
 import { describe, expect, it } from "vitest";
 
 import {
-  GeminiCancelledError,
   GeminiTimeoutError,
-  isGeminiCancelledError,
   isRetryableGeminiError,
 } from "@main/core/gemini-adapter";
+import { CancelledError, isCancelledError } from "@main/core/cancellation";
 
 describe("isRetryableGeminiError", () => {
   it("does not retry timeouts or cancellations", () => {
     expect(isRetryableGeminiError(new GeminiTimeoutError(30000))).toBe(false);
-    expect(isRetryableGeminiError(new GeminiCancelledError())).toBe(false);
+    expect(isRetryableGeminiError(new CancelledError())).toBe(false);
   });
 
   it("retries HTTP 429 and 5xx ApiErrors", () => {
@@ -42,10 +41,10 @@ describe("isRetryableGeminiError", () => {
   });
 });
 
-describe("isGeminiCancelledError", () => {
+describe("isCancelledError", () => {
   it("matches only the cancellation error", () => {
-    expect(isGeminiCancelledError(new GeminiCancelledError())).toBe(true);
-    expect(isGeminiCancelledError(new GeminiTimeoutError(1000))).toBe(false);
-    expect(isGeminiCancelledError(new Error("x"))).toBe(false);
+    expect(isCancelledError(new CancelledError())).toBe(true);
+    expect(isCancelledError(new GeminiTimeoutError(1000))).toBe(false);
+    expect(isCancelledError(new Error("x"))).toBe(false);
   });
 });

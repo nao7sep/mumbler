@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { ApiError, GoogleGenAI, type GenerateContentResponse } from "@google/genai";
 
 import { type AppLogger } from "./logger";
+import { CancelledError } from "./cancellation";
 
 const INLINE_REQUEST_LIMIT_BYTES = 20 * 1024 * 1024;
 const INLINE_AUDIO_SAFETY_LIMIT_BYTES = 18 * 1024 * 1024;
@@ -61,13 +62,6 @@ export class GeminiTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`Gemini request timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
     this.name = "GeminiTimeoutError";
-  }
-}
-
-export class GeminiCancelledError extends Error {
-  constructor() {
-    super("AI work cancelled by user.");
-    this.name = "GeminiCancelledError";
   }
 }
 
@@ -212,7 +206,7 @@ export async function generateTextWithGemini(
 }
 
 export function isRetryableGeminiError(error: unknown): boolean {
-  if (error instanceof GeminiTimeoutError || error instanceof GeminiCancelledError) {
+  if (error instanceof GeminiTimeoutError || error instanceof CancelledError) {
     return false;
   }
 
@@ -225,10 +219,6 @@ export function isRetryableGeminiError(error: unknown): boolean {
   }
 
   return false;
-}
-
-export function isGeminiCancelledError(error: unknown): boolean {
-  return error instanceof GeminiCancelledError;
 }
 
 export function getInlineAudioSafetyLimitBytes(): number {
@@ -334,7 +324,7 @@ function createGeminiAbortState(
 
 function throwIfExternallyCancelled(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
-    throw new GeminiCancelledError();
+    throw new CancelledError();
   }
 }
 
@@ -343,13 +333,13 @@ function normalizeGeminiAbortError(
   abortState: GeminiAbortState,
   timeoutMs: number,
 ): unknown {
-  if (error instanceof GeminiTimeoutError || error instanceof GeminiCancelledError) {
+  if (error instanceof GeminiTimeoutError || error instanceof CancelledError) {
     return error;
   }
 
   if (isAbortError(error)) {
     if (abortState.externallyCancelled()) {
-      return new GeminiCancelledError();
+      return new CancelledError();
     }
 
     if (abortState.timedOut()) {

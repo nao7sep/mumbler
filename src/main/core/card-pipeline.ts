@@ -14,14 +14,13 @@ import {
   prepareAudioForTranscription,
 } from "./audio-tools";
 import {
-  GeminiCancelledError,
   generateTextWithGemini,
   getInlineAudioSafetyLimitBytes,
   getInlineRequestLimitBytes,
-  isGeminiCancelledError,
   isRetryableGeminiError,
   transcribeWithGemini,
 } from "./gemini-adapter";
+import { CancelledError, isCancelledError } from "./cancellation";
 import { multiline } from "./text-cleanup";
 
 export interface CardPipelineContext {
@@ -109,12 +108,15 @@ export async function executeCardPipeline(
 
       const trimDecision =
         card.trimDecision ??
-        (await analyzeTrimDecision(card.sourceFilePath, card.trim, card.durationSec));
+        (await analyzeTrimDecision(card.sourceFilePath, card.trim, card.durationSec, ctx.signal));
       throwIfCancelled(ctx.signal);
       card.trimDecision = trimDecision;
       card.updatedAtUtc = Date.now();
       await ctx.persistState();
 
+      // The signal the Gemini call already honours now reaches the audio
+      // stage too: it was the one await in this pipeline that ignored Cancel,
+      // so a stop left ffmpeg running and the promise unsettled.
       const preparedAudio = await prepareAudioForTranscription({
         sourceFilePath: card.sourceFilePath,
         workingDir: ctx.paths.workingDir,
@@ -123,6 +125,7 @@ export async function executeCardPipeline(
         durationSec: card.durationSec,
         audioProfile: card.audioProfile,
         logger,
+        signal: ctx.signal,
       });
 
       try {
@@ -318,7 +321,7 @@ export async function executeCardPipeline(
       });
     }
   } catch (error: unknown) {
-    const wasCancelled = isGeminiCancelledError(error);
+    const wasCancelled = isCancelledError(error);
     card.status = wasCancelled ? "Cancelled" : "Error";
     card.activeStep = null;
     card.queuedMode = null;
@@ -354,7 +357,7 @@ async function logPipelineFailure(
   activeStep: PipelineStartStep,
   status: MumblerCard["status"],
 ): Promise<void> {
-  if (isGeminiCancelledError(error)) {
+  if (isCancelledError(error)) {
     await logger.info("pipeline.cancelled", "Card pipeline cancelled.", {
       cardId,
       failedStep: activeStep,
@@ -547,7 +550,7 @@ export function computeRetryDelayMs(
 function sleep(delayMs: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
-      reject(new GeminiCancelledError());
+      reject(new CancelledError());
       return;
     }
 
@@ -558,7 +561,7 @@ function sleep(delayMs: number, signal: AbortSignal): Promise<void> {
 
     const onAbort = (): void => {
       clearTimeout(timeoutId);
-      reject(new GeminiCancelledError());
+      reject(new CancelledError());
     };
 
     signal.addEventListener("abort", onAbort, { once: true });
@@ -567,6 +570,6 @@ function sleep(delayMs: number, signal: AbortSignal): Promise<void> {
 
 function throwIfCancelled(signal: AbortSignal): void {
   if (signal.aborted) {
-    throw new GeminiCancelledError();
+    throw new CancelledError();
   }
 }
