@@ -4,10 +4,24 @@
 // surfaces at call time (the validity boundary), not from this list. Google's
 // `-preview` suffix is branding, not a reason to exclude a model.
 //
-// Verified live 2026-08-20 against the models endpoint and a real call: every id below
+// Verified live 2026-08-20 against the models endpoint and real calls: every id below
 // resolves. The ids this list replaced (gemini-3.5-flash, gemini-3.1-flash-lite,
-// gemini-3-flash-preview) still resolve too — they were superseded, not retired, and
-// were dropped to keep one id per category rather than to route around a failure.
+// gemini-3-flash-preview) still resolve too — superseded, not retired.
+//
+// Transcription verified live 2026-08-20: 8 attempts per model on a 61-second English
+// recording, every model 8/8 clean, no refusals and no script drift.
+//
+// A caution earned the hard way, for whoever next builds an audio fixture here. That check
+// first ran on audio made with a bare `say`, which on a ja_JP machine picks a JAPANESE voice
+// and reads English text as katakana — audible nonsense, and 40% longer for the same words.
+// It produced two false findings before anyone listened to it: that some models "transliterate
+// English into katakana" (they were transcribing it accurately — the audio really was katakana
+// English), and that gemini-3.7-flash "spuriously refuses benign audio 4/8" (the malformed
+// audio was refused, not the content). Same passage, same model, one voice apart:
+//   `say -v Samantha`  0/8 refused
+//   bare `say`         8/8 refused
+// Always pass -v with an explicit voice, and listen to the file before drawing a conclusion
+// from it. A fixture nobody checked is not evidence.
 //
 // Ordered by CATEGORY, one per category: pro (smartest) → flash (balanced) → flash
 // lite (fastest). That ordering and raw capability still disagree — 3.7-flash
