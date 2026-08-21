@@ -127,7 +127,6 @@ export function ModalShell({
     };
     // Open-once: identity registration and focus capture must happen exactly
     // when this modal mounts. `initialFocus` is a mount-time choice.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function ownsTopmostInteraction(): boolean {

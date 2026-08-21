@@ -32,10 +32,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  closeBackupStore();
+  await closeBackupStore();
   // Restore the default console warn sink so a test that swapped it does not leak into the next.
   setBackupStoreWarn((message, details) => {
-    // eslint-disable-next-line no-console
     console.warn(message, details);
   });
   delete process.env.MUMBLER_HOME;
@@ -64,13 +63,13 @@ function readRows(path: string): Row[] {
 }
 
 describe("record — BLOB byte fidelity", () => {
-  it("stores the exact bytes verbatim, including CR/LF and a non-UTF-8 byte", () => {
+  it("stores the exact bytes verbatim, including CR/LF and a non-UTF-8 byte", async () => {
     const file = join(root, "config.json");
     // A CR, an LF, a CRLF pair, a UTF-8 BOM, a NUL, and a lone 0xC0 — 0xC0 is not a valid standalone
     // UTF-8 byte, so reading the file as a string would have mangled it. The BLOB path must keep it exact.
     const bytes = Buffer.from([0xef, 0xbb, 0xbf, 0x41, 0x0d, 0x0a, 0x42, 0x0d, 0x43, 0x0a, 0x00, 0xc0, 0xff]);
     record(file, bytes);
-    closeBackupStore();
+    await closeBackupStore();
 
     const rows = readRows(file);
     expect(rows).toHaveLength(1);
@@ -86,10 +85,10 @@ describe("record — BLOB byte fidelity", () => {
 });
 
 describe("record — written_at_utc shape", () => {
-  it("is the serialized ISO-8601-ms form (toISOString), NOT the yyyymmdd-hhmmss filename stamp", () => {
+  it("is the serialized ISO-8601-ms form (toISOString), NOT the yyyymmdd-hhmmss filename stamp", async () => {
     const file = join(root, "state.json");
     record(file, Buffer.from("x", "utf8"));
-    closeBackupStore();
+    await closeBackupStore();
 
     const stored = readRows(file)[0]!.written_at_utc;
     // ISO-8601 extended, exactly 3 fractional digits, Z suffix — e.g. 2026-07-06T04:05:12.345Z.
@@ -103,17 +102,17 @@ describe("record — written_at_utc shape", () => {
 });
 
 describe("record — dedup by content hash per path", () => {
-  it("skips an unchanged re-save (same bytes → no second row)", () => {
+  it("skips an unchanged re-save (same bytes → no second row)", async () => {
     const file = join(root, "config.json");
     const bytes = Buffer.from('{"a":1}\n', "utf8");
     record(file, bytes);
     record(file, Buffer.from('{"a":1}\n', "utf8")); // identical content, fresh buffer
-    closeBackupStore();
+    await closeBackupStore();
 
     expect(readRows(file)).toHaveLength(1);
   });
 
-  it("records a changed save, and records a revert to an earlier value as a new row", () => {
+  it("records a changed save, and records a revert to an earlier value as a new row", async () => {
     const file = join(root, "config.json");
     const v1 = Buffer.from('{"v":1}\n', "utf8");
     const v2 = Buffer.from('{"v":2}\n', "utf8");
@@ -121,7 +120,7 @@ describe("record — dedup by content hash per path", () => {
     record(file, v1); // row 1
     record(file, v2); // row 2 — changed
     record(file, v1); // row 3 — a revert differs from the immediately preceding row (v2), so it records
-    closeBackupStore();
+    await closeBackupStore();
 
     const rows = readRows(file);
     expect(rows).toHaveLength(3);
@@ -130,14 +129,14 @@ describe("record — dedup by content hash per path", () => {
     expect(Buffer.from(rows[2]!.content).toString("utf8")).toBe('{"v":1}\n');
   });
 
-  it("dedups per path independently — the same content under two paths records twice", () => {
+  it("dedups per path independently — the same content under two paths records twice", async () => {
     const a = join(root, "config.json");
     const b = join(root, "state.json");
     const bytes = Buffer.from("same", "utf8");
     record(a, bytes);
     record(b, bytes);
     record(a, Buffer.from("same", "utf8")); // dedup skip on a
-    closeBackupStore();
+    await closeBackupStore();
 
     expect(readRows(a)).toHaveLength(1);
     expect(readRows(b)).toHaveLength(1);
@@ -145,7 +144,7 @@ describe("record — dedup by content hash per path", () => {
 });
 
 describe("record — best-effort: a store failure never throws, logs one warn, save unaffected", () => {
-  it("catches an insert failure, logs exactly one warn, and does not throw", () => {
+  it("catches an insert failure, logs exactly one warn, and does not throw", async () => {
     // Force a failure at the store's OPEN step by pointing MUMBLER_HOME at a path whose parent is a file,
     // so mkdirSync of the store's directory throws (ENOTDIR). record() must swallow it and warn once.
     const blocker = join(root, "not-a-dir");
@@ -160,29 +159,30 @@ describe("record — best-effort: a store failure never throws, logs one warn, s
     // The call itself must not throw — the "never breaks the save" guarantee.
     expect(() => record(join(process.env.MUMBLER_HOME!, "config.json"), bytes)).not.toThrow();
 
-    // Exactly one warn line for the failed open; recording is then disabled for the session, so a second
-    // record does NOT warn again (no per-save flood).
-    expect(warn).toHaveBeenCalledTimes(1);
+    // Recording is asynchronous: enqueue a second record, then drain the worker.
+    // The failed open disables its engine, so the second record does not add a
+    // per-save warning flood.
     record(join(process.env.MUMBLER_HOME!, "state.json"), Buffer.from("more", "utf8"));
+    await closeBackupStore();
     expect(warn).toHaveBeenCalledTimes(1);
 
     // The caller's bytes are untouched by the failed record (no mutation, no consumption).
     expect(bytes.toString("utf8")).toBe("payload");
   });
 
-  it("a successful record logs NOTHING (only failures log)", () => {
+  it("a successful record logs NOTHING (only failures log)", async () => {
     const warn = vi.fn<BackupWarn>();
     setBackupStoreWarn(warn);
     record(join(root, "config.json"), Buffer.from("ok", "utf8"));
-    closeBackupStore();
+    await closeBackupStore();
     expect(warn).not.toHaveBeenCalled();
   });
 });
 
 describe("record — WAL sidecars are the store's own artifacts under the root", () => {
-  it("keeps the store and its -wal/-shm siblings directly under the resolved root", () => {
+  it("keeps the store and its -wal/-shm siblings directly under the resolved root", async () => {
     record(join(root, "config.json"), Buffer.from("x", "utf8"));
-    closeBackupStore();
+    await closeBackupStore();
     const names = readdirSync(root);
     // The store file itself is present (WAL sidecars may be checkpointed away on close, so they are not
     // asserted as always-present — only that nothing unexpected leaked and the store is where it belongs).

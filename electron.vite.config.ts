@@ -7,6 +7,15 @@ export default defineConfig({
   main: {
     build: {
       outDir: "out/main",
+      rollupOptions: {
+        input: {
+          index: resolve("src/main/index.ts"),
+          "backup-store-worker": resolve("src/main/core/backup-store-worker.ts"),
+        },
+        output: {
+          entryFileNames: "[name].js",
+        },
+      },
     },
     define: {
       "process.env.WS_NO_BUFFER_UTIL": '"1"',

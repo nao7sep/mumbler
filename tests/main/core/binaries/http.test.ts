@@ -65,16 +65,16 @@ describe("managed tool HTTPS transport", () => {
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
         const signal = init?.signal;
-        return {
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          url: "https://example.test/checksums.sha256",
-          text: () =>
-            new Promise<string>((_resolve, reject) => {
-              signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-            }),
-        } as Response;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal?.addEventListener(
+              "abort",
+              () => controller.error(signal.reason),
+              { once: true },
+            );
+          },
+        });
+        return responseAt("https://example.test/checksums.sha256", body);
       }),
     );
 
@@ -83,5 +83,32 @@ describe("managed tool HTTPS transport", () => {
     await vi.advanceTimersByTimeAsync(26);
 
     await timedOut;
+  });
+
+  it("rejects an oversized advertised metadata body before reading it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        responseAt("https://example.test/checksums.sha256", "small", {
+          status: 200,
+          headers: { "Content-Length": "100" },
+        }),
+      ),
+    );
+
+    await expect(
+      fetchText("https://example.test/checksums.sha256", {}, 30_000, undefined, 10),
+    ).rejects.toThrow(/text response too large/);
+  });
+
+  it("stops before retaining a streamed metadata body past its byte cap", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => responseAt("https://example.test/checksums.sha256", "12345")),
+    );
+
+    await expect(
+      fetchText("https://example.test/checksums.sha256", {}, 30_000, undefined, 4),
+    ).rejects.toThrow(/text response exceeded cap/);
   });
 });

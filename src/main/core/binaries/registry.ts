@@ -15,6 +15,8 @@ export const TOOL_NAMES: readonly ToolName[] = ["ffmpeg", "ffprobe"];
 
 // A generous per-archive cap; the real builds are ~28 MB.
 export const TOOL_DOWNLOAD_MAX_BYTES = 200 * 1024 * 1024;
+export const TOOL_EXTRACTED_MAX_BYTES = 500 * 1024 * 1024;
+export const TOOL_METADATA_MAX_BYTES = 2 * 1024 * 1024;
 
 // What `resolveLatest` yields for one tool: where to download it, where its
 // checksum lives, the asset name to match inside that checksum file, and the file
@@ -96,10 +98,16 @@ async function resolveBtbNWindows(arch: string, signal?: AbortSignal): Promise<R
     throw new Error(`Mumbler ships Windows x64 only; unsupported Windows architecture "${arch}".`);
   }
   // BtbN publishes a rolling `latest` release; one GPL zip carries both .exe's.
-  const raw = await fetchText("https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest", {
-    "User-Agent": "mumbler",
-    Accept: "application/vnd.github+json",
-  }, 30_000, signal);
+  const raw = await fetchText(
+    "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest",
+    {
+      "User-Agent": "mumbler",
+      Accept: "application/vnd.github+json",
+    },
+    30_000,
+    signal,
+    TOOL_METADATA_MAX_BYTES,
+  );
   const release = JSON.parse(raw) as GithubRelease;
   const zipName = "ffmpeg-master-latest-win64-gpl.zip";
   const zip = release.assets.find((asset) => asset.name === zipName);

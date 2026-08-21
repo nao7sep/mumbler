@@ -15,7 +15,7 @@ Mumbler is a desktop app for turning audio recordings into transcripts and publi
 
 - macOS (Apple Silicon) or Windows (x64) — Electron desktop app
 - A Google Gemini API key (the AI features call Gemini, billed to your key)
-- **ffmpeg and ffprobe**, used to read and trim audio. Mumbler fetches them as native builds (macOS arm64 from ffmpeg.martin-riedl.de, Windows x64 from BtbN), verifies each against the vendor's published SHA-256, and keeps them in `~/.mumbler/bin`. Nothing downloads silently: on first run the **Audio Tools** window opens so you can install them, and you install or update from there at any time. One toggle in that window controls whether Mumbler checks for newer builds at launch. An internet connection is needed for the download.
+- **ffmpeg and ffprobe**, used to read and trim audio. When you choose to install them, Mumbler downloads verified native builds from the third-party community builders martin-riedl.de (macOS) or BtbN (Windows). Installing both currently downloads about 60 MB on macOS or 340 MB on Windows; nothing downloads or updates silently.
 - Node.js 20+ — only to build or run from source
 
 ## Download

@@ -72,8 +72,8 @@ import { assertArm64Slice } from "@main/core/binaries/arch";
 import { extractFileFromZip } from "@main/core/binaries/archive";
 import { downloadToFile, fetchText } from "@main/core/binaries/http";
 import { verifySha256 } from "@main/core/binaries/integrity";
-import { ToolManager } from "@main/core/binaries/manager";
-import { resolveLatest } from "@main/core/binaries/registry";
+import { TOOL_INSTALL_WHOLE_TIMEOUT_MS, ToolManager } from "@main/core/binaries/manager";
+import { TOOL_EXTRACTED_MAX_BYTES, resolveLatest } from "@main/core/binaries/registry";
 import { createDependenciesStore } from "@main/core/binaries/store";
 import { JsonStore } from "@main/core/json-store";
 
@@ -141,6 +141,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.clearAllMocks();
   await rm(dir, { recursive: true, force: true });
 });
@@ -207,6 +208,33 @@ describe("installTool", () => {
     expect(ffmpeg?.desiredVersion).toBe("8.2");
     expect(ffmpeg?.state).toBe("up-to-date");
     expect(ffmpeg?.transient).toEqual({ kind: "idle" });
+    expect(extractFileFromZip).toHaveBeenCalledWith(
+      expect.any(String),
+      "ffmpeg",
+      expect.any(String),
+      TOOL_EXTRACTED_MAX_BYTES,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("settles a peer that trickles forever at the whole-operation deadline", async () => {
+    const manager = await makeManager();
+    vi.useFakeTimers();
+    vi.mocked(resolveLatest).mockImplementationOnce(
+      async (_platform, _arch, signal) =>
+        new Promise<never>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+
+    const installing = manager.installTool("ffmpeg");
+    await vi.advanceTimersByTimeAsync(TOOL_INSTALL_WHOLE_TIMEOUT_MS + 1);
+    await installing;
+
+    expect(manager.listStatuses().find((status) => status.name === "ffmpeg")?.transient).toMatchObject({
+      kind: "failed",
+      error: /timed out/,
+    });
   });
 
   it("emits a running transient with progress while downloading", async () => {
@@ -422,6 +450,32 @@ describe("checkTools", () => {
     vi.mocked(resolveLatest).mockRejectedValueOnce(new Error("offline"));
 
     await expect(manager.checkTools()).rejects.toThrow("offline");
+
+    for (const status of manager.listStatuses()) {
+      expect(status.desiredVersion).toBeNull();
+      expect(status.lastCheckedAtUtc).toBeNull();
+      expect(status.transient).toEqual({ kind: "idle" });
+    }
+  });
+
+  it("cancels an explicit check through its network edge without changing facts", async () => {
+    const manager = await makeManager();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    vi.mocked(resolveLatest).mockImplementationOnce(
+      async (_platform, _arch, signal) =>
+        new Promise<never>((_resolve, reject) => {
+          markStarted();
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+
+    const checking = manager.checkTools();
+    await started;
+    manager.cancelCheck();
+    await checking;
 
     for (const status of manager.listStatuses()) {
       expect(status.desiredVersion).toBeNull();

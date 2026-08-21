@@ -119,7 +119,7 @@ describe("API key secrets store", () => {
     // MUMBLER_HOME is `home` here, so the store — if it recorded — would create home/backups.sqlite3.
     await writeApiKey(apiKeysPath, ["gemini"], "AIzaSecretKey123");
     await writeApiKey(apiKeysPath, ["gemini"], "AIzaSecretKey999"); // a second, changed write
-    closeBackupStore();
+    await closeBackupStore();
 
     // The secret write path opts out of recording, so NO backup store file exists — the credential never
     // lands in a history that would otherwise become sensitive-at-rest (data-backup conventions).

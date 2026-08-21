@@ -694,6 +694,10 @@ export function App(): ReactElement {
       .finally(() => setIsCheckingTools(false));
   }
 
+  function handleCancelToolCheck(): void {
+    applyToolSnapshot(window.mumbler.cancelToolCheck(), "Failed to cancel audio tool update check.");
+  }
+
   function handleToggleCheckUpdates(checkUpdatesAtLaunch: boolean): void {
     applyToolSnapshot(
       window.mumbler.saveToolSettings(checkUpdatesAtLaunch),
@@ -1640,11 +1644,19 @@ export function App(): ReactElement {
         <AudioToolsModal
           dependencies={snapshot.dependencies}
           checkUpdatesAtLaunch={snapshot.settingsSummary?.checkUpdatesAtLaunch ?? true}
-          isChecking={isCheckingTools}
+          isChecking={
+            isCheckingTools ||
+            snapshot.dependencies.some(
+              (dependency) =>
+                dependency.transient.kind === "running" &&
+                dependency.transient.operation === "check",
+            )
+          }
           checkNotice={toolCheckNotice}
           onProvision={handleProvisionTool}
           onCancelProvision={handleCancelToolProvision}
           onCheck={handleCheckTools}
+          onCancelCheck={handleCancelToolCheck}
           onToggleCheckUpdates={handleToggleCheckUpdates}
           onClose={() => setShowAudioTools(false)}
         />

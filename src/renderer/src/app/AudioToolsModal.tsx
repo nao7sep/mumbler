@@ -26,6 +26,7 @@ export interface AudioToolsModalProps {
   onProvision: (name: ToolName) => void;
   onCancelProvision: (name: ToolName) => void;
   onCheck: () => void;
+  onCancelCheck: () => void;
   onToggleCheckUpdates: (value: boolean) => void;
   onClose: () => void;
 }
@@ -82,6 +83,7 @@ export function AudioToolsModal({
   onProvision,
   onCancelProvision,
   onCheck,
+  onCancelCheck,
   onToggleCheckUpdates,
   onClose,
 }: AudioToolsModalProps): ReactElement {
@@ -107,10 +109,9 @@ export function AudioToolsModal({
           <button
             type="button"
             className="button button--ghost button--compact"
-            onClick={onCheck}
-            disabled={isChecking}
+            onClick={isChecking ? onCancelCheck : onCheck}
           >
-            {isChecking ? "Checking…" : "Check for updates"}
+            {isChecking ? "Cancel check" : "Check for updates"}
           </button>
         </div>
 

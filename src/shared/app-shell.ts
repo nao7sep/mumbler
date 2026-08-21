@@ -64,6 +64,7 @@ export const APP_SHELL_CHANNELS = {
   provisionTool: "app-shell:provision-tool",
   cancelToolProvision: "app-shell:cancel-tool-provision",
   checkTools: "app-shell:check-tools",
+  cancelToolCheck: "app-shell:cancel-tool-check",
   saveToolSettings: "app-shell:save-tool-settings",
   saveLayout: "app-shell:save-layout",
 } as const;
@@ -581,6 +582,7 @@ export interface MumblerShellApi {
   provisionTool(name: ToolName): Promise<AppSnapshot>;
   cancelToolProvision(name: ToolName): Promise<AppSnapshot>;
   checkTools(): Promise<AppSnapshot>;
+  cancelToolCheck(): Promise<AppSnapshot>;
   saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot>;
   // Persist the queue (left) pane's dragged width intent to layout.json and return
   // a fresh snapshot. Called only on a splitter drag-commit; a window resize

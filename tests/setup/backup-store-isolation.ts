@@ -36,7 +36,7 @@ beforeEach(async () => {
 afterEach(async () => {
   // Release the SQLite file handle first, so the singleton re-opens against the next test's MUMBLER_HOME
   // and the throwaway root can be removed on every platform.
-  closeBackupStore();
+  await closeBackupStore();
   delete process.env.MUMBLER_HOME;
   if (root !== null) {
     await rm(root, { recursive: true, force: true });

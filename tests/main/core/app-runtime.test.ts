@@ -20,7 +20,7 @@ const {
   getAppPaths,
 } = await import("@main/core/app-runtime");
 
-const { join } = await import("node:path");
+const { join, parse } = await import("node:path");
 
 function authoritativeItem(): PendingImportReviewItem {
   return {
@@ -143,7 +143,9 @@ describe("applyFrontTrimOffset", () => {
 // directory is injected so these are pure, working-directory-independent
 // assertions that never touch the real environment or filesystem.
 describe("resolveStorageRoot", () => {
-  const HOME = "/Users/test";
+  const ROOT = parse(process.cwd()).root;
+  const HOME = join(ROOT, "Users", "test");
+  const ABSOLUTE_OVERRIDE = join(ROOT, "data", "mumbler-profile");
 
   it("defaults to <home>/.mumbler when the override is unset", () => {
     expect(resolveStorageRoot(undefined, HOME)).toBe(join(HOME, ".mumbler"));
@@ -155,11 +157,12 @@ describe("resolveStorageRoot", () => {
   });
 
   it("relocates the root to a set absolute override", () => {
-    expect(resolveStorageRoot("/data/mumbler-profile", HOME)).toBe("/data/mumbler-profile");
+    expect(resolveStorageRoot(ABSOLUTE_OVERRIDE, HOME)).toBe(ABSOLUTE_OVERRIDE);
   });
 
   it("trims surrounding whitespace before using the override", () => {
-    expect(resolveStorageRoot("  /data/mumbler  ", HOME)).toBe("/data/mumbler");
+    const override = join(ROOT, "data", "mumbler");
+    expect(resolveStorageRoot(`  ${override}  `, HOME)).toBe(override);
   });
 
   it("expands a leading ~ against the home directory", () => {
@@ -173,10 +176,15 @@ describe("resolveStorageRoot", () => {
 
   it("expands $VAR / ${VAR} environment references in the override", () => {
     const previous = process.env.MUMBLER_TEST_ROOT;
-    process.env.MUMBLER_TEST_ROOT = "/mnt/disk2";
+    const environmentRoot = join(ROOT, "mnt", "disk2");
+    process.env.MUMBLER_TEST_ROOT = environmentRoot;
     try {
-      expect(resolveStorageRoot("$MUMBLER_TEST_ROOT/mumbler", HOME)).toBe("/mnt/disk2/mumbler");
-      expect(resolveStorageRoot("${MUMBLER_TEST_ROOT}/mumbler", HOME)).toBe("/mnt/disk2/mumbler");
+      expect(resolveStorageRoot("$MUMBLER_TEST_ROOT/mumbler", HOME)).toBe(
+        join(environmentRoot, "mumbler"),
+      );
+      expect(resolveStorageRoot("${MUMBLER_TEST_ROOT}/mumbler", HOME)).toBe(
+        join(environmentRoot, "mumbler"),
+      );
     } finally {
       if (previous === undefined) delete process.env.MUMBLER_TEST_ROOT;
       else process.env.MUMBLER_TEST_ROOT = previous;
@@ -205,7 +213,7 @@ describe("getAppPaths standard layout", () => {
   // storage root. These assertions pin the filename mapping so a rename of any
   // store cannot silently drift: durable user settings live in config.json, and
   // that file stays distinct from the volatile state.json and layout.json stores.
-  const ROOT = "/data/mumbler-paths-test";
+  const ROOT = join(parse(process.cwd()).root, "data", "mumbler-paths-test");
 
   function withRoot<T>(run: () => T): T {
     const previous = process.env.MUMBLER_HOME;

@@ -93,7 +93,7 @@ describe("writeJsonFile — data-backup record hook", () => {
     const target = join(dir, "config.json");
 
     await writeJsonFile(target, { hello: "world" });
-    closeBackupStore();
+    await closeBackupStore();
 
     // The record captured the same absolute path and the exact serialized bytes the file holds on disk —
     // proving it reused the in-hand buffer, not a re-read. The on-disk bytes and the stored blob match.
@@ -112,7 +112,7 @@ describe("writeJsonFile — data-backup record hook", () => {
     const secret = join(dir, "api-keys.json");
 
     await writeJsonFile(secret, { keys: { gemini: "obf:zzz" } }, { record: false });
-    closeBackupStore();
+    await closeBackupStore();
 
     // No store file is created at all when the only write opts out — nothing recorded a secret.
     expect(readdirSync(dir)).not.toContain("backups.sqlite3");
@@ -123,7 +123,7 @@ describe("writeJsonFile — data-backup record hook", () => {
     const target = join(dir, "state.json");
 
     await writeJsonFile(target, { schemaVersion: 1 });
-    closeBackupStore();
+    await closeBackupStore();
 
     expect(storeRows(dir).filter((r) => r.path === target)).toHaveLength(1);
   });

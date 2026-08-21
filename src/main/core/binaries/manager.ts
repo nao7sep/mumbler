@@ -21,7 +21,14 @@ import {
   writeVersionSidecar,
 } from "./installed-version";
 import { parseSha256Sidecar, verifySha256 } from "./integrity";
-import { TOOL_DOWNLOAD_MAX_BYTES, TOOL_NAMES, resolveLatest, toolFileName } from "./registry";
+import {
+  TOOL_DOWNLOAD_MAX_BYTES,
+  TOOL_EXTRACTED_MAX_BYTES,
+  TOOL_METADATA_MAX_BYTES,
+  TOOL_NAMES,
+  resolveLatest,
+  toolFileName,
+} from "./registry";
 import type { DependenciesValue, PersistedToolFacts } from "./store";
 
 const execFileAsync = promisify(execFile);
@@ -29,6 +36,11 @@ const execFileAsync = promisify(execFile);
 // Both audio tools are required for mumbler to function (ffprobe at import/probe
 // and trim analysis, ffmpeg at trim/save).
 const REQUIRED = true;
+
+// The largest Windows archive is allowed 200 MiB. Six hours still permits a
+// very slow healthy connection while ensuring that a peer which keeps the idle
+// watchdog alive with a trickle cannot own an install forever.
+export const TOOL_INSTALL_WHOLE_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 // Orchestrates the managed audio tools: their persisted facts, the on-disk
 // presence and installed version, the transient status of an in-flight operation,
@@ -49,6 +61,7 @@ export class ToolManager {
   private readonly transient = new Map<ToolName, ToolTransient>();
   private readonly busy = new Set<ToolName>();
   private readonly installControllers = new Map<ToolName, AbortController>();
+  private checkController: AbortController | null = null;
   private factsQueue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -159,15 +172,30 @@ export class ToolManager {
       throw new OperationError(`${name} is already being installed.`);
     }
     this.busy.add(name);
-    const controller = new AbortController();
-    this.installControllers.set(name, controller);
+    const userController = new AbortController();
+    const deadlineController = new AbortController();
+    const deadline = setTimeout(
+      () =>
+        deadlineController.abort(
+          new Error("Audio tool installation timed out after 6 hours."),
+        ),
+      TOOL_INSTALL_WHOLE_TIMEOUT_MS,
+    );
+    const signal = AbortSignal.any([userController.signal, deadlineController.signal]);
+    this.installControllers.set(name, userController);
     let published = false;
     this.setTransient(name, { kind: "running", operation: "provision", percent: null });
     try {
-      const resolved = await resolveLatest(this.deps.platform, this.deps.arch, controller.signal);
+      const resolved = await resolveLatest(this.deps.platform, this.deps.arch, signal);
       const spec = resolved.tools[name];
 
-      const sidecar = await fetchText(spec.sha256Url, {}, 30_000, controller.signal);
+      const sidecar = await fetchText(
+        spec.sha256Url,
+        {},
+        30_000,
+        signal,
+        TOOL_METADATA_MAX_BYTES,
+      );
       const expected = parseSha256Sidecar(sidecar, spec.sha256AssetName);
       if (!expected) {
         throw new Error(`checksum for ${spec.sha256AssetName} not found at ${spec.sha256Url}`);
@@ -189,7 +217,7 @@ export class ToolManager {
           url: spec.downloadUrl,
           destPath: archivePath,
           maxBytes: TOOL_DOWNLOAD_MAX_BYTES,
-          signal: controller.signal,
+          signal,
           onProgress: (received, total) => {
             const percent = total > 0 ? Math.floor((received / total) * 100) : null;
             this.setTransient(name, { kind: "running", operation: "provision", percent });
@@ -197,22 +225,28 @@ export class ToolManager {
         });
         // Integrity gate: verify the downloaded archive before it becomes
         // executable. A mismatch throws and aborts the install.
-        await verifySha256(archivePath, expected, controller.signal);
-        await extractFileFromZip(archivePath, spec.innerName, stagedExe, controller.signal);
+        await verifySha256(archivePath, expected, signal);
+        await extractFileFromZip(
+          archivePath,
+          spec.innerName,
+          stagedExe,
+          TOOL_EXTRACTED_MAX_BYTES,
+          signal,
+        );
         if (this.deps.platform === "darwin") {
           // Architecture gate: reject an x86_64-only build before it is published,
           // so a wrong-arch download fails clean here rather than at exec time on
           // Apple Silicon (no Rosetta).
-          await assertArm64Slice(stagedExe, controller.signal);
+          await assertArm64Slice(stagedExe, signal);
         }
         if (this.deps.platform !== "win32") {
           await chmod(stagedExe, 0o755);
           if (this.deps.platform === "darwin") {
             await execFileAsync("xattr", ["-d", "com.apple.quarantine", stagedExe], {
-              signal: controller.signal,
+              signal,
               timeout: 30_000,
             }).catch((error: unknown) => {
-              controller.signal.throwIfAborted();
+              signal.throwIfAborted();
               if (
                 error instanceof Error &&
                 "killed" in error &&
@@ -226,7 +260,7 @@ export class ToolManager {
         // Publish with a single rename so the final path is only ever the complete,
         // executable binary — never mid-extract.
         await syncFile(stagedExe);
-        controller.signal.throwIfAborted();
+        signal.throwIfAborted();
         await rename(stagedExe, this.toolPath(name));
         published = true;
         await syncDirectory(this.deps.binDir);
@@ -249,6 +283,7 @@ export class ToolManager {
         // what was there before.
         await this.readFromDisk(name);
       }
+      signal.throwIfAborted();
       // Only the upstream fact is persisted. What is now installed is read back
       // from the binary, so an install has nothing to record about it.
       await this.mutateFacts((facts) => ({
@@ -266,7 +301,7 @@ export class ToolManager {
       this.setTransient(name, { kind: "idle" });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      if (controller.signal.aborted && !published) {
+      if (userController.signal.aborted && !published) {
         await this.deps.logger.info("tools.install-cancelled", "Cancelled audio tool install.", {
           tool: name,
         });
@@ -283,8 +318,9 @@ export class ToolManager {
       });
       this.setTransient(name, { kind: "failed", operation: "provision", error: message });
     } finally {
+      clearTimeout(deadline);
       this.busy.delete(name);
-      if (this.installControllers.get(name) === controller) {
+      if (this.installControllers.get(name) === userController) {
         this.installControllers.delete(name);
       }
     }
@@ -303,6 +339,11 @@ export class ToolManager {
   // successful knowledge), logs the failure, and rethrows so an explicit Check can
   // show a transient "couldn't check" notice. It never blocks and never persists.
   async checkTools(): Promise<void> {
+    if (this.checkController !== null) {
+      throw new OperationError("Audio tool updates are already being checked.");
+    }
+    const controller = new AbortController();
+    this.checkController = controller;
     // Never disturb a tool that is mid-install: its provision transient and
     // progress must survive a concurrent check. Only the tools idle at the start
     // get the running:check overlay; their facts are still recorded for all (a
@@ -312,8 +353,9 @@ export class ToolManager {
       this.setTransient(name, { kind: "running", operation: "check", percent: null });
     }
     try {
-      const resolved = await resolveLatest(this.deps.platform, this.deps.arch);
+      const resolved = await resolveLatest(this.deps.platform, this.deps.arch, controller.signal);
       const now = Date.now();
+      controller.signal.throwIfAborted();
       await this.mutateFacts((facts) => ({
         ffmpeg: { ...facts.ffmpeg, desiredVersion: resolved.version, lastCheckedAtUtc: now },
         ffprobe: { ...facts.ffprobe, desiredVersion: resolved.version, lastCheckedAtUtc: now },
@@ -322,12 +364,19 @@ export class ToolManager {
         latest: resolved.version,
       });
     } catch (error: unknown) {
+      if (controller.signal.aborted) {
+        await this.deps.logger.info("tools.check-cancelled", "Cancelled audio tool update check.");
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       await this.deps.logger.warn("tools.check-failed", "Audio tool update check failed.", {
         error: message,
       });
       throw error instanceof Error ? error : new Error(message);
     } finally {
+      if (this.checkController === controller) {
+        this.checkController = null;
+      }
       // Clear only the overlays we set, and only if an install has not since
       // claimed the tool (which now owns its transient).
       for (const name of overlaid) {
@@ -335,6 +384,12 @@ export class ToolManager {
           this.setTransient(name, { kind: "idle" });
         }
       }
+    }
+  }
+
+  cancelCheck(): void {
+    if (this.checkController !== null && !this.checkController.signal.aborted) {
+      this.checkController.abort(new Error("Audio tool update check cancelled by user."));
     }
   }
 

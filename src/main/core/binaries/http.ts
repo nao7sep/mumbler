@@ -81,19 +81,50 @@ export async function resolveRedirectLocation(
 export async function fetchText(
   url: string,
   headers: Record<string, string> = {},
-  idleTimeoutMs = 30_000,
+  timeoutMs = 30_000,
   signal?: AbortSignal,
+  maxBytes = 1024 * 1024,
 ): Promise<string> {
   assertHttps(url);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error(`timed out fetching ${url}`)), idleTimeoutMs);
+  const timer = setTimeout(() => controller.abort(new Error(`timed out fetching ${url}`)), timeoutMs);
   const combinedSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
   try {
     const res = await fetchFollowingHttpsRedirects(url, { headers }, combinedSignal);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} ${res.statusText} from ${url}`);
     }
-    return await res.text();
+    const advertisedRaw = res.headers.get("content-length");
+    if (advertisedRaw !== null) {
+      const advertised = Number(advertisedRaw);
+      if (!Number.isSafeInteger(advertised) || advertised < 0) {
+        throw new Error(`invalid Content-Length from ${url}: ${advertisedRaw}`);
+      }
+      if (advertised > maxBytes) {
+        throw new Error(`text response too large: ${advertised} bytes > cap ${maxBytes} from ${url}`);
+      }
+    }
+
+    if (res.body === null) return "";
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        received += next.value.byteLength;
+        if (received > maxBytes) {
+          const error = new Error(`text response exceeded cap ${maxBytes} bytes from ${url}`);
+          await reader.cancel(error).catch(() => undefined);
+          throw error;
+        }
+        chunks.push(next.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
   } finally {
     clearTimeout(timer);
   }

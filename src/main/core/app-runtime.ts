@@ -43,7 +43,7 @@ import {
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
-import { setBackupStoreWarn } from "./backupStore";
+import { closeBackupStore, setBackupStoreWarn } from "./backupStore";
 import { formatError } from "./file-io";
 import { CorruptStateError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
@@ -415,6 +415,11 @@ export class ApplicationRuntime {
 
   async checkTools(): Promise<AppSnapshot> {
     await this.ensureToolManager().checkTools();
+    return this.getSnapshot();
+  }
+
+  cancelToolCheck(): AppSnapshot {
+    this.ensureToolManager().cancelCheck();
     return this.getSnapshot();
   }
 
@@ -1140,6 +1145,7 @@ export class ApplicationRuntime {
       await this.runtime.stateStore?.flush();
       await this.runtime.settingsStore?.flush();
       await this.runtime.layoutStore?.flush();
+      await closeBackupStore();
       await this.runtime.logger.info("app.shutdown", "Graceful shutdown complete.", {
         reason: "before-quit",
         cardCount: this.runtime.state?.cards.length ?? 0,

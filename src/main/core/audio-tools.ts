@@ -47,6 +47,9 @@ export async function runTool(
   args: string[],
   options: RunToolOptions,
 ): Promise<{ stdout: string }> {
+  const isAborted = (): boolean => options.signal?.aborted === true;
+  if (isAborted()) throw new CancelledError();
+
   // The bound and the signal are handled here rather than through execFile's own
   // `timeout`/`signal` options, because those send ONE signal and never follow
   // it: a tool that ignores SIGTERM would outlive the bound it was given, and
@@ -56,11 +59,21 @@ export async function runTool(
 
   let escalation: ReturnType<typeof setTimeout> | null = null;
   const stop = (): void => {
-    child.kill("SIGTERM");
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      return;
+    }
     if (escalation !== null) return;
     // Cleared in `finally`, which runs only once the child has actually exited
     // — so this fires if and only if SIGTERM was ignored.
-    escalation = setTimeout(() => child.kill("SIGKILL"), KILL_ESCALATION_MS);
+    escalation = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The process exited between the deadline and the escalation.
+      }
+    }, KILL_ESCALATION_MS);
     escalation.unref?.();
   };
 
@@ -73,13 +86,11 @@ export async function runTool(
 
   const onAbort = (): void => stop();
   options.signal?.addEventListener("abort", onAbort, { once: true });
-  if (options.signal?.aborted === true) stop();
-
   try {
     const { stdout } = await promise;
     return { stdout };
   } catch (error: unknown) {
-    if (options.signal?.aborted === true || isNodeAbortError(error)) {
+    if (isAborted() || isNodeAbortError(error)) {
       throw new CancelledError();
     }
     // Say the bound was hit. "ffmpeg exited with signal SIGKILL" reads as a
