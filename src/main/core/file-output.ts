@@ -1,11 +1,11 @@
 import { app } from "electron";
-import { copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { nanoid } from "nanoid";
 
 import type { MumblerCard } from "@shared/app-shell";
 import { formatUtcIsoCompact } from "@shared/timestamps";
-import { fileExists, formatError, syncFile } from "./file-io";
+import { fileExists, formatError, syncDirectory, syncFile } from "./file-io";
 
 export interface SaveTargetPaths {
   audioPath: string;
@@ -61,8 +61,22 @@ export async function finalizeOutputsAtomically(params: {
   const audioTempPath = tempPathFor(params.targets.audioPath);
   const jsonTempPath = tempPathFor(params.targets.jsonPath);
   const markdownTempPath = tempPathFor(params.targets.markdownPath);
+  const targetDirectories = [
+    ...new Set(
+      [params.targets.audioPath, params.targets.jsonPath, params.targets.markdownPath].map(dirname),
+    ),
+  ];
+  const syncTargetDirectories = async (): Promise<void> => {
+    for (const directory of targetDirectories) {
+      await syncDirectory(directory);
+    }
+  };
 
   await copyFile(params.sourceAudioPath, audioTempPath);
+  // A copied recording can inherit a read-only mode from removable media or the
+  // source file. The staged output is user-owned and must be writable both for
+  // the durability sync below and after it is published.
+  await chmod(audioTempPath, 0o600);
   await syncFile(audioTempPath);
   await writeFile(jsonTempPath, params.jsonContent, "utf8");
   await syncFile(jsonTempPath);
@@ -98,6 +112,12 @@ export async function finalizeOutputsAtomically(params: {
     jsonFinalized = true;
     await rename(markdownTempPath, params.targets.markdownPath);
     markdownFinalized = true;
+
+    // The files were synced before publication; now make their directory entries
+    // durable before the caller is allowed to delete the only working recording.
+    // syncDirectory is best-effort on platforms (notably Windows) that cannot open
+    // directories for fsync, preserving their existing rename behavior.
+    await syncTargetDirectories();
   } catch (error: unknown) {
     if (markdownFinalized) {
       await rm(params.targets.markdownPath, { force: true }).catch(() => undefined);
@@ -137,6 +157,10 @@ export async function finalizeOutputsAtomically(params: {
   if (markdownHadExisting) {
     await rm(markdownBackupPath, { force: true }).catch(() => undefined);
   }
+  // Persist backup removal too, so a completed overwrite does not resurrect stale
+  // backups after a crash. This remains best-effort where directory fsync is not
+  // available.
+  await syncTargetDirectories();
 }
 
 export function buildOutputPayload(params: {

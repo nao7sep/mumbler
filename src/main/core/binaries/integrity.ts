@@ -8,14 +8,22 @@ import { createReadStream } from "node:fs";
 // managed-runtime-dependencies-conventions' integrity gate.
 
 // Stream the file through the hash so a ~27 MB archive never sits in memory.
-export async function sha256OfFile(filePath: string): Promise<string> {
+export async function sha256OfFile(filePath: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   const hash = createHash("sha256");
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(filePath);
-    stream.on("error", reject);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("end", () => resolve());
-  });
+  const stream = createReadStream(filePath);
+  const abort = (): void => {
+    stream.destroy(signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled."));
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    for await (const chunk of stream) {
+      signal?.throwIfAborted();
+      hash.update(chunk as Buffer);
+    }
+  } finally {
+    signal?.removeEventListener("abort", abort);
+  }
   return hash.digest("hex");
 }
 
@@ -41,12 +49,16 @@ export class IntegrityError extends Error {
 
 // Verify a downloaded file against an expected hex digest. A mismatch throws and
 // aborts the install — never a warning the caller can click past.
-export async function verifySha256(filePath: string, expectedHex: string): Promise<void> {
+export async function verifySha256(
+  filePath: string,
+  expectedHex: string,
+  signal?: AbortSignal,
+): Promise<void> {
   const expected = expectedHex.trim().toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(expected)) {
     throw new IntegrityError(`malformed expected SHA-256: ${expectedHex}`);
   }
-  const actual = await sha256OfFile(filePath);
+  const actual = await sha256OfFile(filePath, signal);
   if (actual !== expected) {
     throw new IntegrityError(`SHA-256 mismatch: expected ${expected}, got ${actual}`);
   }

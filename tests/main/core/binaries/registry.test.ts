@@ -4,7 +4,6 @@ import {
   martinMacArch,
   normalizeToolVersion,
   parseMartinBuildVersion,
-  platformIsSupported,
   toolFileName,
 } from "@main/core/binaries/registry";
 
@@ -43,16 +42,6 @@ describe("parseMartinBuildVersion", () => {
 
   it("throws on an unparseable Location rather than inventing a version", () => {
     expect(() => parseMartinBuildVersion("https://example.com/nope/ffmpeg.zip")).toThrow();
-  });
-});
-
-describe("platformIsSupported", () => {
-  it("supports macOS arm64 and Windows x64 only", () => {
-    expect(platformIsSupported("darwin", "arm64")).toBe(true);
-    expect(platformIsSupported("win32", "x64")).toBe(true);
-    expect(platformIsSupported("darwin", "x64")).toBe(false);
-    expect(platformIsSupported("win32", "arm64")).toBe(false);
-    expect(platformIsSupported("linux", "arm64")).toBe(false);
   });
 });
 

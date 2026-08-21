@@ -20,17 +20,51 @@ function assertHttps(url: string): void {
   }
 }
 
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+async function fetchFollowingHttpsRedirects(
+  url: string,
+  init: Omit<RequestInit, "redirect" | "signal">,
+  signal: AbortSignal,
+): Promise<Response> {
+  let currentUrl = url;
+  for (let redirectCount = 0; ; redirectCount += 1) {
+    assertHttps(currentUrl);
+    const response = await fetch(currentUrl, { ...init, redirect: "manual", signal });
+    if (!REDIRECT_STATUSES.has(response.status)) {
+      assertHttps(response.url || currentUrl);
+      return response;
+    }
+
+    const location = response.headers.get("location");
+    await response.body?.cancel().catch(() => undefined);
+    if (location === null) {
+      throw new Error(`redirect from ${currentUrl} omitted Location`);
+    }
+    if (redirectCount >= 10) {
+      throw new Error(`too many redirects fetching ${url}`);
+    }
+    currentUrl = new URL(location, currentUrl).toString();
+    assertHttps(currentUrl);
+  }
+}
+
 // Resolve a single redirect hop without following it — martin-riedl's
 // `/redirect/latest/...` 307s to the versioned `/download/...` path, and that
 // Location is both the download URL and the carrier of the version. Returns the
 // absolute Location.
-export async function resolveRedirectLocation(url: string, idleTimeoutMs = 30_000): Promise<string> {
+export async function resolveRedirectLocation(
+  url: string,
+  idleTimeoutMs = 30_000,
+  signal?: AbortSignal,
+): Promise<string> {
   assertHttps(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`timed out resolving ${url}`)), idleTimeoutMs);
+  const combinedSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
   let res: Response;
   try {
-    res = await fetch(url, { method: "GET", redirect: "manual", signal: controller.signal });
+    res = await fetch(url, { method: "GET", redirect: "manual", signal: combinedSignal });
   } finally {
     clearTimeout(timer);
   }
@@ -48,20 +82,21 @@ export async function fetchText(
   url: string,
   headers: Record<string, string> = {},
   idleTimeoutMs = 30_000,
+  signal?: AbortSignal,
 ): Promise<string> {
   assertHttps(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`timed out fetching ${url}`)), idleTimeoutMs);
-  let res: Response;
+  const combinedSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
   try {
-    res = await fetch(url, { redirect: "follow", headers, signal: controller.signal });
+    const res = await fetchFollowingHttpsRedirects(url, { headers }, combinedSignal);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText} from ${url}`);
+    }
+    return await res.text();
   } finally {
     clearTimeout(timer);
   }
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} ${res.statusText} from ${url}`);
-  }
-  return res.text();
 }
 
 export interface DownloadOptions {
@@ -69,6 +104,7 @@ export interface DownloadOptions {
   destPath: string;
   maxBytes: number;
   idleTimeoutMs?: number;
+  signal?: AbortSignal;
   onProgress?: (received: number, total: number) => void;
 }
 
@@ -79,6 +115,9 @@ export async function downloadToFile(opts: DownloadOptions): Promise<void> {
   assertHttps(opts.url);
   const idleTimeoutMs = opts.idleTimeoutMs ?? 120_000;
   const controller = new AbortController();
+  const combinedSignal = opts.signal
+    ? AbortSignal.any([controller.signal, opts.signal])
+    : controller.signal;
   let idle: ReturnType<typeof setTimeout> | null = null;
   const kick = (): void => {
     if (idle) clearTimeout(idle);
@@ -89,40 +128,31 @@ export async function downloadToFile(opts: DownloadOptions): Promise<void> {
   };
 
   kick();
-  let res: Response;
   try {
-    res = await fetch(opts.url, { redirect: "follow", signal: controller.signal });
-  } catch (error) {
-    if (idle) clearTimeout(idle);
-    throw error;
-  }
-
-  if (!res.ok || !res.body) {
-    if (idle) clearTimeout(idle);
-    throw new Error(`HTTP ${res.status} ${res.statusText} from ${opts.url}`);
-  }
-
-  const total = Number(res.headers.get("content-length") ?? 0);
-  if (total > opts.maxBytes) {
-    if (idle) clearTimeout(idle);
-    throw new Error(`tool download too large: ${total} bytes > cap ${opts.maxBytes}`);
-  }
-
-  let received = 0;
-  const source = Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>);
-  source.on("data", (chunk: Buffer) => {
-    received += chunk.length;
-    kick();
-    if (received > opts.maxBytes) {
-      controller.abort(new Error(`tool download exceeded cap ${opts.maxBytes} bytes for ${opts.url}`));
-      return;
+    const res = await fetchFollowingHttpsRedirects(opts.url, {}, combinedSignal);
+    if (!res.ok || !res.body) {
+      throw new Error(`HTTP ${res.status} ${res.statusText} from ${opts.url}`);
     }
-    opts.onProgress?.(received, total);
-  });
 
-  const out: Writable = createWriteStream(opts.destPath);
-  try {
-    await pipeline(source, out);
+    const total = Number(res.headers.get("content-length") ?? 0);
+    if (total > opts.maxBytes) {
+      throw new Error(`tool download too large: ${total} bytes > cap ${opts.maxBytes}`);
+    }
+
+    let received = 0;
+    const source = Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>);
+    source.on("data", (chunk: Buffer) => {
+      received += chunk.length;
+      kick();
+      if (received > opts.maxBytes) {
+        controller.abort(new Error(`tool download exceeded cap ${opts.maxBytes} bytes for ${opts.url}`));
+        return;
+      }
+      opts.onProgress?.(received, total);
+    });
+
+    const out: Writable = createWriteStream(opts.destPath);
+    await pipeline(source, out, { signal: combinedSignal });
   } finally {
     if (idle) clearTimeout(idle);
   }

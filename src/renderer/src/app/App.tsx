@@ -670,6 +670,13 @@ export function App(): ReactElement {
     applyToolSnapshot(window.mumbler.provisionTool(name), "Failed to install audio tool.");
   }
 
+  function handleCancelToolProvision(name: ToolName): void {
+    applyToolSnapshot(
+      window.mumbler.cancelToolProvision(name),
+      "Failed to cancel audio tool installation.",
+    );
+  }
+
   // An explicit check that fails writes nothing to the facts (the convention's
   // honest-state rule), so its only surface is this transient, auto-clearing
   // notice in the modal toolbar.
@@ -1636,6 +1643,7 @@ export function App(): ReactElement {
           isChecking={isCheckingTools}
           checkNotice={toolCheckNotice}
           onProvision={handleProvisionTool}
+          onCancelProvision={handleCancelToolProvision}
           onCheck={handleCheckTools}
           onToggleCheckUpdates={handleToggleCheckUpdates}
           onClose={() => setShowAudioTools(false)}

@@ -14,7 +14,9 @@ export async function extractFileFromZip(
   zipPath: string,
   innerName: string,
   outPath: string,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   const directory = await unzipper.Open.file(zipPath);
   const files = directory.files.filter((file) => file.type === "File");
   const byBasename = files.filter((file) => file.path.endsWith("/" + innerName));
@@ -33,5 +35,5 @@ export async function extractFileFromZip(
     );
   }
 
-  await pipeline(file.stream(), createWriteStream(outPath));
+  await pipeline(file.stream(), createWriteStream(outPath), { signal });
 }

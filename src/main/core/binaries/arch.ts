@@ -16,8 +16,11 @@ export function hasArm64Slice(lipoArchsOutput: string): boolean {
   return lipoArchsOutput.trim().split(/\s+/).filter(Boolean).includes("arm64");
 }
 
-export async function assertArm64Slice(filePath: string): Promise<void> {
-  const { stdout } = await execFileAsync("lipo", ["-archs", filePath]);
+export async function assertArm64Slice(filePath: string, signal?: AbortSignal): Promise<void> {
+  const { stdout } = await execFileAsync("lipo", ["-archs", filePath], {
+    signal,
+    timeout: 30_000,
+  });
   if (!hasArm64Slice(stdout)) {
     throw new Error(
       `downloaded binary is not arm64-native (lipo reports: ${stdout.trim() || "no slices"})`,

@@ -62,4 +62,11 @@ describe("verifySha256", () => {
   it("throws IntegrityError on a malformed expected digest rather than passing it through", async () => {
     await expect(verifySha256(file, "not-a-sha")).rejects.toBeInstanceOf(IntegrityError);
   });
+
+  it("stops hashing when cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("hash cancelled"));
+
+    await expect(sha256OfFile(file, controller.signal)).rejects.toThrow("hash cancelled");
+  });
 });

@@ -1,10 +1,23 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MumblerCard } from "@shared/app-shell";
+
+const { syncedDirectories } = vi.hoisted(() => ({ syncedDirectories: [] as string[] }));
+
+vi.mock("@main/core/file-io", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@main/core/file-io")>();
+  return {
+    ...actual,
+    syncDirectory: vi.fn(async (path: string) => {
+      await actual.syncDirectory(path);
+      syncedDirectories.push(path);
+    }),
+  };
+});
 
 // buildOutputPayload reads app.getVersion(); stub electron so the module loads
 // and that one field is deterministic under the node test environment.
@@ -177,9 +190,11 @@ describe("finalizeOutputsAtomically", () => {
     dir = await mkdtemp(join(tmpdir(), "mumbler-out-"));
     sourceAudio = join(dir, "source.m4a");
     await writeFile(sourceAudio, "AUDIO-BYTES");
+    syncedDirectories.length = 0;
   });
 
   afterEach(async () => {
+    await chmod(sourceAudio, 0o600).catch(() => undefined);
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -208,6 +223,24 @@ describe("finalizeOutputsAtomically", () => {
     expect(await readFile(t.audioPath, "utf8")).toBe("AUDIO-BYTES");
     expect(await readFile(t.jsonPath, "utf8")).toBe('{"k":1}');
     expect(await readFile(t.markdownPath, "utf8")).toBe("# md");
+    expect(await leftoverTempsAndBackups()).toEqual([]);
+    expect(syncedDirectories).toEqual([dir, dir]);
+  });
+
+  it("publishes a writable output when the source recording is read-only", async () => {
+    const t = targets("readonly-source");
+    await chmod(sourceAudio, 0o400);
+
+    await finalizeOutputsAtomically({
+      sourceAudioPath: sourceAudio,
+      targets: t,
+      overwrite: false,
+      jsonContent: "{}",
+      markdownContent: "# md",
+    });
+
+    await expect(writeFile(t.audioPath, "REPLACED")).resolves.toBeUndefined();
+    expect(await readFile(t.audioPath, "utf8")).toBe("REPLACED");
     expect(await leftoverTempsAndBackups()).toEqual([]);
   });
 
@@ -252,5 +285,6 @@ describe("finalizeOutputsAtomically", () => {
     expect(await fileExists(t.audioPath)).toBe(false);
     expect(await fileExists(t.jsonPath)).toBe(false);
     expect(await leftoverTempsAndBackups()).toEqual([]);
+    expect(syncedDirectories).toEqual([]);
   });
 });

@@ -8,6 +8,7 @@ import { nanoid } from "nanoid";
 import type { DependencyStatus, ToolFacts, ToolName, ToolTransient } from "@shared/app-shell";
 import { deriveStatus } from "@shared/dependency-status";
 
+import { syncDirectory, syncFile } from "../file-io";
 import type { AppLogger } from "../logger";
 import type { JsonStore } from "../json-store";
 import { OperationError } from "../operation-error";
@@ -48,6 +49,8 @@ export class ToolManager {
   private readonly installedVersion = new Map<ToolName, string | null>();
   private readonly transient = new Map<ToolName, ToolTransient>();
   private readonly busy = new Set<ToolName>();
+  private readonly installControllers = new Map<ToolName, AbortController>();
+  private factsQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly deps: {
@@ -157,12 +160,15 @@ export class ToolManager {
       throw new OperationError(`${name} is already being installed.`);
     }
     this.busy.add(name);
+    const controller = new AbortController();
+    this.installControllers.set(name, controller);
+    let published = false;
     this.setTransient(name, { kind: "running", operation: "provision", percent: null });
     try {
-      const resolved = await resolveLatest(this.deps.platform, this.deps.arch);
+      const resolved = await resolveLatest(this.deps.platform, this.deps.arch, controller.signal);
       const spec = resolved.tools[name];
 
-      const sidecar = await fetchText(spec.sha256Url);
+      const sidecar = await fetchText(spec.sha256Url, {}, 30_000, controller.signal);
       const expected = parseSha256Sidecar(sidecar, spec.sha256AssetName);
       if (!expected) {
         throw new Error(`checksum for ${spec.sha256AssetName} not found at ${spec.sha256Url}`);
@@ -184,6 +190,7 @@ export class ToolManager {
           url: spec.downloadUrl,
           destPath: archivePath,
           maxBytes: TOOL_DOWNLOAD_MAX_BYTES,
+          signal: controller.signal,
           onProgress: (received, total) => {
             const percent = total > 0 ? Math.floor((received / total) * 100) : null;
             this.setTransient(name, { kind: "running", operation: "provision", percent });
@@ -191,23 +198,39 @@ export class ToolManager {
         });
         // Integrity gate: verify the downloaded archive before it becomes
         // executable. A mismatch throws and aborts the install.
-        await verifySha256(archivePath, expected);
-        await extractFileFromZip(archivePath, spec.innerName, stagedExe);
+        await verifySha256(archivePath, expected, controller.signal);
+        await extractFileFromZip(archivePath, spec.innerName, stagedExe, controller.signal);
         if (this.deps.platform === "darwin") {
           // Architecture gate: reject an x86_64-only build before it is published,
           // so a wrong-arch download fails clean here rather than at exec time on
           // Apple Silicon (no Rosetta).
-          await assertArm64Slice(stagedExe);
+          await assertArm64Slice(stagedExe, controller.signal);
         }
         if (this.deps.platform !== "win32") {
           await chmod(stagedExe, 0o755);
           if (this.deps.platform === "darwin") {
-            await execFileAsync("xattr", ["-d", "com.apple.quarantine", stagedExe]).catch(() => undefined);
+            await execFileAsync("xattr", ["-d", "com.apple.quarantine", stagedExe], {
+              signal: controller.signal,
+              timeout: 30_000,
+            }).catch((error: unknown) => {
+              controller.signal.throwIfAborted();
+              if (
+                error instanceof Error &&
+                "killed" in error &&
+                (error as Error & { killed?: boolean }).killed
+              ) {
+                throw error;
+              }
+            });
           }
         }
         // Publish with a single rename so the final path is only ever the complete,
         // executable binary — never mid-extract.
+        await syncFile(stagedExe);
+        controller.signal.throwIfAborted();
         await rename(stagedExe, this.toolPath(name));
+        published = true;
+        await syncDirectory(this.deps.binDir);
       } finally {
         await rm(archivePath, { force: true }).catch(() => undefined);
         await rm(stagedExe, { force: true }).catch(() => undefined);
@@ -237,6 +260,13 @@ export class ToolManager {
       this.setTransient(name, { kind: "idle" });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
+      if (controller.signal.aborted && !published) {
+        await this.deps.logger.info("tools.install-cancelled", "Cancelled audio tool install.", {
+          tool: name,
+        });
+        this.setTransient(name, { kind: "idle" });
+        return;
+      }
       // A failed install is transient (managed-runtime-dependencies-conventions):
       // the existing install, if any, is untouched — we only ever rename a fully
       // verified staging file into place — so the error lives in the transient
@@ -248,6 +278,16 @@ export class ToolManager {
       this.setTransient(name, { kind: "failed", operation: "provision", error: message });
     } finally {
       this.busy.delete(name);
+      if (this.installControllers.get(name) === controller) {
+        this.installControllers.delete(name);
+      }
+    }
+  }
+
+  cancelInstall(name: ToolName): void {
+    const controller = this.installControllers.get(name);
+    if (controller && !controller.signal.aborted) {
+      controller.abort(new Error(`${name} installation cancelled by user.`));
     }
   }
 
@@ -268,9 +308,10 @@ export class ToolManager {
     try {
       const resolved = await resolveLatest(this.deps.platform, this.deps.arch);
       const now = Date.now();
-      for (const name of TOOL_NAMES) {
-        await this.mutate(name, (facts) => recordLatest(facts, resolved.version, now));
-      }
+      await this.mutateFacts((facts) => ({
+        ffmpeg: recordLatest(facts.ffmpeg, resolved.version, now),
+        ffprobe: recordLatest(facts.ffprobe, resolved.version, now),
+      }));
       await this.deps.logger.info("tools.checked", "Checked audio tool updates.", {
         latest: resolved.version,
       });
@@ -300,9 +341,35 @@ export class ToolManager {
     name: ToolName,
     update: (facts: PersistedToolFacts) => PersistedToolFacts,
   ): Promise<void> {
-    this.deps.value.tools[name] = update(this.deps.value.tools[name]);
-    await this.deps.store.save(this.deps.value);
-    this.deps.notify();
+    await this.mutateFacts((facts) => ({
+      ...facts,
+      [name]: update(facts[name]),
+    }));
+  }
+
+  // Compute, persist, and only then expose a complete facts replacement. Keeping
+  // this manager-level queue means a concurrent install/check computes from the
+  // last committed value rather than overwriting another operation's update with
+  // a stale snapshot. A failed save applies nothing in memory and does not wedge
+  // later writes.
+  private async mutateFacts(
+    update: (
+      facts: Record<ToolName, PersistedToolFacts>,
+    ) => Record<ToolName, PersistedToolFacts>,
+  ): Promise<void> {
+    const work = async (): Promise<void> => {
+      const nextTools = update(this.deps.value.tools);
+      const nextValue: DependenciesValue = {
+        ...this.deps.value,
+        tools: nextTools,
+      };
+      await this.deps.store.save(nextValue);
+      this.deps.value.tools = nextTools;
+      this.deps.notify();
+    };
+    const operation = this.factsQueue.then(work, work);
+    this.factsQueue = operation.catch(() => undefined);
+    await operation;
   }
 
   private async fileExists(path: string): Promise<boolean> {

@@ -81,9 +81,9 @@ export async function writeJsonFile(
 
 // Best-effort fsync of a directory so the rename above — the atomic-write commit
 // point — is itself durable across power loss. Opening a directory is not
-// supported on every platform (Windows throws), so failures are ignored: this
-// is a durability nicety, not required for correctness.
-async function syncDirectory(directoryPath: string): Promise<void> {
+// supported on every platform (Windows throws), so failures are ignored while
+// platforms that support it get the stronger crash-durability guarantee.
+export async function syncDirectory(directoryPath: string): Promise<void> {
   try {
     const handle = await open(directoryPath, "r");
     try {
@@ -106,7 +106,7 @@ export async function fileExists(filePath: string): Promise<boolean> {
 }
 
 export async function syncFile(filePath: string): Promise<void> {
-  const handle = await open(filePath, "r");
+  const handle = await open(filePath, "r+");
   try {
     await handle.sync();
   } finally {

@@ -244,6 +244,11 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     return runtime.provisionTool(name);
   });
 
+  handle(APP_SHELL_CHANNELS.cancelToolProvision, (_event, name: ToolName) => {
+    assertToolName(name);
+    return runtime.cancelToolProvision(name);
+  });
+
   handle(APP_SHELL_CHANNELS.checkTools, () => runtime.checkTools());
 
   handle(APP_SHELL_CHANNELS.saveToolSettings, (_event, checkUpdatesAtLaunch: boolean) => {

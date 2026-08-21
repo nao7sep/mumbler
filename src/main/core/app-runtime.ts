@@ -408,6 +408,11 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
+  cancelToolProvision(name: ToolName): AppSnapshot {
+    this.ensureToolManager().cancelInstall(name);
+    return this.getSnapshot();
+  }
+
   async checkTools(): Promise<AppSnapshot> {
     await this.ensureToolManager().checkTools();
     return this.getSnapshot();

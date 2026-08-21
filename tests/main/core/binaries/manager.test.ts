@@ -1,11 +1,30 @@
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppLogger } from "@main/core/logger";
 import type { ToolName } from "@shared/app-shell";
+
+const { durabilityEvents } = vi.hoisted(() => ({
+  durabilityEvents: [] as Array<{ kind: "file" | "directory"; path: string }>,
+}));
+
+vi.mock("@main/core/file-io", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@main/core/file-io")>();
+  return {
+    ...actual,
+    syncFile: vi.fn(async (path: string) => {
+      await actual.syncFile(path);
+      durabilityEvents.push({ kind: "file", path });
+    }),
+    syncDirectory: vi.fn(async (path: string) => {
+      await actual.syncDirectory(path);
+      durabilityEvents.push({ kind: "directory", path });
+    }),
+  };
+});
 
 // The network/extraction edges are stubbed; everything else (the store, the facts
 // transitions, the derivation, presence reconcile) runs for real against a temp
@@ -56,6 +75,7 @@ import { verifySha256 } from "@main/core/binaries/integrity";
 import { ToolManager } from "@main/core/binaries/manager";
 import { resolveLatest } from "@main/core/binaries/registry";
 import { createDependenciesStore } from "@main/core/binaries/store";
+import { JsonStore } from "@main/core/json-store";
 
 const RESOLVED = {
   version: "8.2",
@@ -104,6 +124,7 @@ beforeEach(async () => {
   binDir = join(dir, "bin");
   tempDir = join(dir, "temp");
   notify.mockClear();
+  durabilityEvents.length = 0;
   vi.mocked(fetchText).mockResolvedValue("a".repeat(64) + "  ffmpeg.zip\n");
   // downloadToFile lands the archive in temp/ and reports progress; the extractor
   // writes the executable to its staging path so the manager can publish it.
@@ -199,6 +220,55 @@ describe("installTool", () => {
     });
     await manager.installTool("ffmpeg");
     expect(seen).toBe("50");
+  });
+
+  it("cancels an in-flight install without publishing or surfacing a failure", async () => {
+    const manager = await makeManager();
+    await manager.reconcile();
+    let markDownloadStarted!: () => void;
+    const downloadStarted = new Promise<void>((resolve) => {
+      markDownloadStarted = resolve;
+    });
+    vi.mocked(downloadToFile).mockImplementationOnce(async (opts) => {
+      await writeFile(opts.destPath, "partial-zip");
+      markDownloadStarted();
+      opts.signal?.throwIfAborted();
+      await new Promise<void>((_resolve, reject) => {
+        opts.signal?.addEventListener(
+          "abort",
+          () => reject(opts.signal?.reason ?? new Error("cancelled")),
+          { once: true },
+        );
+      });
+    });
+
+    const installing = manager.installTool("ffmpeg");
+    await downloadStarted;
+    manager.cancelInstall("ffmpeg");
+    await installing;
+
+    const ffmpeg = manager.listStatuses().find((s) => s.name === "ffmpeg");
+    expect(ffmpeg?.state).toBe("not-installed");
+    expect(ffmpeg?.transient).toEqual({ kind: "idle" });
+    expect(await readdir(binDir)).toEqual([]);
+    expect(await readdir(tempDir)).toEqual([]);
+  });
+
+  it("checks cancellation immediately before publishing", async () => {
+    const manager = await makeManager();
+    await manager.reconcile();
+    vi.mocked(assertArm64Slice).mockImplementationOnce(async (_path, signal) => {
+      manager.cancelInstall("ffmpeg");
+      signal?.throwIfAborted();
+    });
+
+    await manager.installTool("ffmpeg");
+
+    const ffmpeg = manager.listStatuses().find((s) => s.name === "ffmpeg");
+    expect(ffmpeg?.state).toBe("not-installed");
+    expect(ffmpeg?.transient).toEqual({ kind: "idle" });
+    expect(await readdir(binDir)).toEqual([]);
+    expect(await readdir(tempDir)).toEqual([]);
   });
 
   it("leaves persisted facts untouched and surfaces a failed transient when the download fails", async () => {
@@ -308,6 +378,18 @@ describe("installTool", () => {
     expect(ffmpeg?.transient).toEqual({ kind: "idle" });
     expect(ffmpeg?.state).toBe("up-to-date");
   });
+
+  it("syncs the staged executable and then the published bin directory", async () => {
+    const manager = await makeManager();
+
+    await manager.installTool("ffmpeg");
+
+    expect(durabilityEvents).toHaveLength(2);
+    expect(durabilityEvents[0]).toMatchObject({ kind: "file" });
+    expect(dirname(durabilityEvents[0]!.path)).toBe(tempDir);
+    expect(basename(durabilityEvents[0]!.path)).toMatch(/^ffmpeg-[\w-]+\.tmp$/);
+    expect(durabilityEvents[1]).toEqual({ kind: "directory", path: binDir });
+  });
 });
 
 describe("resolveToolPath", () => {
@@ -322,6 +404,7 @@ describe("resolveToolPath", () => {
     await manager.installTool("ffmpeg");
     expect(manager.resolveToolPath("ffmpeg")).toBe(join(binDir, "ffmpeg"));
   });
+
 });
 
 describe("checkTools", () => {
@@ -344,6 +427,28 @@ describe("checkTools", () => {
       expect(status.desiredVersion).toBeNull();
       expect(status.lastCheckedAtUtc).toBeNull();
       expect(status.transient).toEqual({ kind: "idle" });
+    }
+  });
+
+  it("uses one save and applies no in-memory facts when that atomic save fails", async () => {
+    const manager = await makeManager();
+    const saveSpy = vi
+      .spyOn(JsonStore.prototype, "save")
+      .mockRejectedValueOnce(new Error("dependencies disk full"));
+
+    await expect(manager.checkTools()).rejects.toThrow("dependencies disk full");
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    for (const status of manager.listStatuses()) {
+      expect(status.desiredVersion).toBeNull();
+      expect(status.lastCheckedAtUtc).toBeNull();
+      expect(status.transient).toEqual({ kind: "idle" });
+    }
+
+    saveSpy.mockRestore();
+    await manager.checkTools();
+    for (const status of manager.listStatuses()) {
+      expect(status.desiredVersion).toBe("8.2");
+      expect(status.lastCheckedAtUtc).not.toBeNull();
     }
   });
 });

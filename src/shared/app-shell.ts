@@ -62,6 +62,7 @@ export const APP_SHELL_CHANNELS = {
   resetState: "app-shell:reset-state",
   cancelPendingImports: "app-shell:cancel-pending-imports",
   provisionTool: "app-shell:provision-tool",
+  cancelToolProvision: "app-shell:cancel-tool-provision",
   checkTools: "app-shell:check-tools",
   saveToolSettings: "app-shell:save-tool-settings",
   saveLayout: "app-shell:save-layout",
@@ -578,6 +579,7 @@ export interface MumblerShellApi {
   // provisionTool is the single acquire operation (Install when absent, Update
   // when a newer version is known — same flow underneath).
   provisionTool(name: ToolName): Promise<AppSnapshot>;
+  cancelToolProvision(name: ToolName): Promise<AppSnapshot>;
   checkTools(): Promise<AppSnapshot>;
   saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot>;
   // Persist the queue (left) pane's dragged width intent to layout.json and return

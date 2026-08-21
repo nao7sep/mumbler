@@ -47,10 +47,7 @@ export function martinMacArch(arch: string): string {
   if (arch === "arm64") {
     return "arm64";
   }
-  throw new Error(
-    `Mumbler ships native Apple Silicon only; unsupported macOS architecture "${arch}". ` +
-      `Install ffmpeg/ffprobe yourself and place them on PATH, or run on Apple Silicon.`,
-  );
+  throw new Error(`Mumbler does not support macOS architecture "${arch}".`);
 }
 
 // A resolved download Location is `.../download/<os>/<arch>/<buildId>_<version>/<file>`.
@@ -64,13 +61,13 @@ export function parseMartinBuildVersion(location: string): string {
   return normalizeToolVersion(match[2]);
 }
 
-async function resolveMartinMac(arch: string): Promise<ResolvedTools> {
+async function resolveMartinMac(arch: string, signal?: AbortSignal): Promise<ResolvedTools> {
   const a = martinMacArch(arch);
   const base = `https://ffmpeg.martin-riedl.de/redirect/latest/macos/${a}/release`;
 
   // Resolve ffmpeg's redirect to get the versioned directory + version; ffprobe
   // lives in the same build directory, so derive its URL from the same dir.
-  const ffmpegLocation = await resolveRedirectLocation(`${base}/ffmpeg.zip`);
+  const ffmpegLocation = await resolveRedirectLocation(`${base}/ffmpeg.zip`, 30_000, signal);
   const version = parseMartinBuildVersion(ffmpegLocation);
   const dir = ffmpegLocation.replace(/\/ffmpeg\.zip$/, "");
 
@@ -94,7 +91,7 @@ interface GithubRelease {
   assets: GithubAsset[];
 }
 
-async function resolveBtbNWindows(arch: string): Promise<ResolvedTools> {
+async function resolveBtbNWindows(arch: string, signal?: AbortSignal): Promise<ResolvedTools> {
   if (arch !== "x64") {
     throw new Error(`Mumbler ships Windows x64 only; unsupported Windows architecture "${arch}".`);
   }
@@ -102,7 +99,7 @@ async function resolveBtbNWindows(arch: string): Promise<ResolvedTools> {
   const raw = await fetchText("https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest", {
     "User-Agent": "mumbler",
     Accept: "application/vnd.github+json",
-  });
+  }, 30_000, signal);
   const release = JSON.parse(raw) as GithubRelease;
   const zipName = "ffmpeg-master-latest-win64-gpl.zip";
   const zip = release.assets.find((asset) => asset.name === zipName);
@@ -132,30 +129,18 @@ async function resolveBtbNWindows(arch: string): Promise<ResolvedTools> {
 // Resolve the latest available build for the running platform/arch. Throws a
 // clear, actionable error on an unsupported target (Intel macOS, Linux) — there
 // is no trustworthy native-arm64 automatic source wired for those.
-export async function resolveLatest(platform: string, arch: string): Promise<ResolvedTools> {
+export async function resolveLatest(
+  platform: string,
+  arch: string,
+  signal?: AbortSignal,
+): Promise<ResolvedTools> {
   if (platform === "darwin") {
-    return resolveMartinMac(arch);
+    return resolveMartinMac(arch, signal);
   }
   if (platform === "win32") {
-    return resolveBtbNWindows(arch);
+    return resolveBtbNWindows(arch, signal);
   }
-  throw new Error(
-    `no managed ffmpeg/ffprobe source for platform "${platform}"; install them yourself and place them on PATH.`,
-  );
-}
-
-// Whether the running platform has a wired managed source at all (used to decide
-// whether to even surface the Audio Tools provisioning flow).
-export function platformIsSupported(platform: string, arch: string): boolean {
-  try {
-    if (platform === "darwin") {
-      martinMacArch(arch);
-      return true;
-    }
-    return platform === "win32" && arch === "x64";
-  } catch {
-    return false;
-  }
+  throw new Error(`Mumbler does not support platform "${platform}".`);
 }
 
 // The on-disk executable name for a tool on this platform.

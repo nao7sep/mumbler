@@ -24,6 +24,7 @@ export interface AudioToolsModalProps {
   // this is the only surface it gets — and it auto-clears.
   checkNotice: string | null;
   onProvision: (name: ToolName) => void;
+  onCancelProvision: (name: ToolName) => void;
   onCheck: () => void;
   onToggleCheckUpdates: (value: boolean) => void;
   onClose: () => void;
@@ -79,6 +80,7 @@ export function AudioToolsModal({
   isChecking,
   checkNotice,
   onProvision,
+  onCancelProvision,
   onCheck,
   onToggleCheckUpdates,
   onClose,
@@ -144,10 +146,22 @@ export function AudioToolsModal({
                   <td>{status.desiredVersion ?? (isChecking ? "…" : "unknown")}</td>
                   <td className="tools-table__action">
                     {running ? (
-                      <span className="field-hint">
-                        {status.transient.kind === "running" && status.transient.percent !== null
-                          ? `${status.transient.percent}%`
-                          : "working…"}
+                      <span className="tools-table__actions">
+                        <span className="field-hint">
+                          {status.transient.kind === "running" && status.transient.percent !== null
+                            ? `${status.transient.percent}%`
+                            : "working…"}
+                        </span>
+                        {status.transient.kind === "running" &&
+                        status.transient.operation === "provision" ? (
+                          <button
+                            type="button"
+                            className="button button--compact button--ghost"
+                            onClick={() => onCancelProvision(status.name)}
+                          >
+                            Cancel
+                          </button>
+                        ) : null}
                       </span>
                     ) : action === null ? null : (
                       <button
