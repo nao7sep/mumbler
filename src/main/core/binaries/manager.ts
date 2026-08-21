@@ -21,7 +21,6 @@ import {
   writeVersionSidecar,
 } from "./installed-version";
 import { parseSha256Sidecar, verifySha256 } from "./integrity";
-import { recordLatest } from "./transitions";
 import { TOOL_DOWNLOAD_MAX_BYTES, TOOL_NAMES, resolveLatest, toolFileName } from "./registry";
 import type { DependenciesValue, PersistedToolFacts } from "./store";
 
@@ -252,7 +251,14 @@ export class ToolManager {
       }
       // Only the upstream fact is persisted. What is now installed is read back
       // from the binary, so an install has nothing to record about it.
-      await this.mutate(name, (facts) => recordLatest(facts, resolved.version, Date.now()));
+      await this.mutateFacts((facts) => ({
+        ...facts,
+        [name]: {
+          ...facts[name],
+          desiredVersion: resolved.version,
+          lastCheckedAtUtc: Date.now(),
+        },
+      }));
       await this.deps.logger.info("tools.installed", "Installed audio tool.", {
         tool: name,
         version: resolved.version,
@@ -309,8 +315,8 @@ export class ToolManager {
       const resolved = await resolveLatest(this.deps.platform, this.deps.arch);
       const now = Date.now();
       await this.mutateFacts((facts) => ({
-        ffmpeg: recordLatest(facts.ffmpeg, resolved.version, now),
-        ffprobe: recordLatest(facts.ffprobe, resolved.version, now),
+        ffmpeg: { ...facts.ffmpeg, desiredVersion: resolved.version, lastCheckedAtUtc: now },
+        ffprobe: { ...facts.ffprobe, desiredVersion: resolved.version, lastCheckedAtUtc: now },
       }));
       await this.deps.logger.info("tools.checked", "Checked audio tool updates.", {
         latest: resolved.version,
@@ -335,16 +341,6 @@ export class ToolManager {
   private setTransient(name: ToolName, transient: ToolTransient): void {
     this.transient.set(name, transient);
     this.deps.notify();
-  }
-
-  private async mutate(
-    name: ToolName,
-    update: (facts: PersistedToolFacts) => PersistedToolFacts,
-  ): Promise<void> {
-    await this.mutateFacts((facts) => ({
-      ...facts,
-      [name]: update(facts[name]),
-    }));
   }
 
   // Compute, persist, and only then expose a complete facts replacement. Keeping
