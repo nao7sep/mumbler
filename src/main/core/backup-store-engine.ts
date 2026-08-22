@@ -32,20 +32,37 @@ export class BackupStoreEngine {
   record(absolutePath: string, bytes: Uint8Array, writtenAtUtc: string): void {
     const store = this.ensureOpen();
     if (store === null) return;
+    let transactionOpen = false;
     try {
       const content = Buffer.from(bytes);
       const hash = createHash("sha256").update(content).digest("hex");
+      // Acquire SQLite's one writer slot before reading the predecessor. In WAL
+      // mode a deferred/read transaction could observe an old predecessor while
+      // another process is committing the same successor, then append a duplicate
+      // after waiting at INSERT. BEGIN IMMEDIATE serializes that decision across
+      // every app process while retaining per-path revert history.
+      store.exec("BEGIN IMMEDIATE");
+      transactionOpen = true;
       const latest = store
         .prepare("SELECT content_sha256 AS h FROM backups WHERE path = ? ORDER BY id DESC LIMIT 1")
         .get(absolutePath) as { h: string } | undefined;
-      if (latest?.h === hash) return;
-
-      store
-        .prepare(
-          "INSERT INTO backups (path, content, content_sha256, byte_size, written_at_utc) VALUES (?, ?, ?, ?, ?)",
-        )
-        .run(absolutePath, content, hash, content.byteLength, writtenAtUtc);
+      if (latest?.h !== hash) {
+        store
+          .prepare(
+            "INSERT INTO backups (path, content, content_sha256, byte_size, written_at_utc) VALUES (?, ?, ?, ?, ?)",
+          )
+          .run(absolutePath, content, hash, content.byteLength, writtenAtUtc);
+      }
+      store.exec("COMMIT");
+      transactionOpen = false;
     } catch (error: unknown) {
+      if (transactionOpen) {
+        try {
+          store.exec("ROLLBACK");
+        } catch {
+          // Preserve the original record failure in the single warning below.
+        }
+      }
       this.warnOnce("backup store: failed to record a managed write", {
         file: absolutePath,
         error: errorInfo(error),

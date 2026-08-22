@@ -199,9 +199,25 @@ describe("API key secrets store", () => {
     expect(await resolveApiKey(apiKeysPath, ["gemini", "text"], { fallback: false })).toBe("text-stored");
   });
 
-  it("treats a wrong-shaped but valid-JSON key file as empty", async () => {
-    await writeFile(apiKeysPath, JSON.stringify({ unexpected: true }), "utf8");
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBeNull();
+  it("preserves a wrong-shaped valid-JSON key file before rebuilding it", async () => {
+    const original = '{"unexpected":{"secret":"hand-authored"}}\n';
+    await writeFile(apiKeysPath, original, "utf8");
+
+    const warn = vi.fn();
+    await writeApiKey(apiKeysPath, ["gemini"], "replacement-key", warn);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("unexpected shape"),
+      expect.objectContaining({ path: apiKeysPath }),
+    );
+
+    const preservedName = (await readdir(home)).find((entry) =>
+      /^api-keys-\d{8}-\d{6}-\d{3}-utc\.invalid$/.test(entry),
+    );
+    expect(preservedName).toBeDefined();
+    expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
+
+    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("replacement-key");
+    expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
   });
 
   it("moves a corrupt (unparseable) key file aside and resolves to no key instead of throwing", async () => {

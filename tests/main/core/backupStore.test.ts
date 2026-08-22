@@ -12,6 +12,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -140,6 +141,45 @@ describe("record — dedup by content hash per path", () => {
 
     expect(readRows(a)).toHaveLength(1);
     expect(readRows(b)).toHaveLength(1);
+  });
+
+  it("dedups an identical successor committed by another process while its worker waits", async () => {
+    const file = join(root, "config.json");
+    const before = Buffer.from('{"v":1}\n', "utf8");
+    const successor = Buffer.from('{"v":2}\n', "utf8");
+    const successorHash = createHash("sha256").update(successor).digest("hex");
+
+    record(file, before);
+    await closeBackupStore();
+
+    // Model a second app process publishing the successor while this process's
+    // backup worker starts the same record. WAL readers can observe the old row
+    // while another connection owns the writer lock, so SELECT + INSERT must
+    // acquire that lock before reading or both processes append the same bytes.
+    const competing = new DatabaseSync(storeFilePath);
+    try {
+      competing.exec("PRAGMA busy_timeout = 5000");
+      competing.exec("BEGIN IMMEDIATE");
+      competing
+        .prepare(
+          "INSERT INTO backups (path, content, content_sha256, byte_size, written_at_utc) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(file, successor, successorHash, successor.byteLength, new Date().toISOString());
+
+      record(file, successor);
+      // Let the fresh worker reach the locked database before the competing
+      // commit. Without a write transaction it reads the stale predecessor,
+      // waits only at INSERT, and creates a duplicate after this commit.
+      await delay(500);
+      competing.exec("COMMIT");
+    } finally {
+      competing.close();
+    }
+
+    await closeBackupStore();
+    const rows = readRows(file);
+    expect(rows).toHaveLength(2);
+    expect(Buffer.from(rows[1]!.content).equals(successor)).toBe(true);
   });
 });
 

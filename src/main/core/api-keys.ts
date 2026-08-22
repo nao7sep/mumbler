@@ -130,11 +130,13 @@ async function warnIfInsecureMode(filePath: string, warn: WarnFn): Promise<void>
 
 // Validate and canonicalize the on-disk shape: `{ keys: { id: value } }`, ids
 // lowercased and matched against the id grammar, values kept only when strings.
-// A hand-edited or partly-bad file degrades to whatever is valid, never throws.
-function normalize(raw: unknown): ApiKeysFile {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { keys: {} };
+// A hand-edited, otherwise valid container degrades to whatever entries are
+// valid. A wrong root/container shape returns null so the caller can preserve
+// the original bytes before treating the canonical store as empty.
+function normalize(raw: unknown): ApiKeysFile | null {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
   const rawKeys = (raw as { keys?: unknown }).keys;
-  if (!rawKeys || typeof rawKeys !== "object" || Array.isArray(rawKeys)) return { keys: {} };
+  if (!rawKeys || typeof rawKeys !== "object" || Array.isArray(rawKeys)) return null;
   const keys: Record<string, string> = {};
   for (const [id, value] of Object.entries(rawKeys as Record<string, unknown>)) {
     const canonical = id.toLowerCase();
@@ -161,7 +163,15 @@ async function readAll(filePath: string, warn: WarnFn): Promise<ApiKeysFile> {
     return { keys: {} };
   }
   if (raw === null) return { keys: {} };
-  return normalize(raw);
+  const normalized = normalize(raw);
+  if (normalized !== null) return normalized;
+
+  const preserved = await preserveAside(filePath).catch(() => null);
+  warn("api-keys.json had an unexpected shape; moved aside and treating as empty", {
+    path: filePath,
+    preserved,
+  });
+  return { keys: {} };
 }
 
 async function writeAll(filePath: string, data: ApiKeysFile): Promise<void> {
