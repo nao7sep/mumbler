@@ -1,8 +1,15 @@
-import { useEffect, useState, type Dispatch, type SetStateAction, type DragEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+  type DragEvent,
+} from "react";
 
 import type { AppSnapshot, PendingImportReviewItem } from "@shared/app-shell";
 
-import { parseDroppedPaths, reconcilePendingReviewDrafts } from "./import-rules";
+import { isFileDrag, parseDroppedPaths, reconcilePendingReviewDrafts } from "./import-rules";
 
 interface UseImportFlowOptions {
   snapshot: AppSnapshot | null;
@@ -35,6 +42,38 @@ export function useImportFlow({
   const [isConfirmingReview, setIsConfirmingReview] = useState(false);
   const [pendingReviewDrafts, setPendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
+  const dragResetTimerRef = useRef<number | null>(null);
+
+  function clearDragResetTimer(): void {
+    if (dragResetTimerRef.current !== null) {
+      window.clearTimeout(dragResetTimerRef.current);
+      dragResetTimerRef.current = null;
+    }
+  }
+
+  function resetDragState(): void {
+    clearDragResetTimer();
+    setIsDragActive(false);
+  }
+
+  function scheduleDragReset(): void {
+    clearDragResetTimer();
+    dragResetTimerRef.current = window.setTimeout(() => {
+      dragResetTimerRef.current = null;
+      setIsDragActive(false);
+    }, 1000);
+  }
+
+  useEffect(() => {
+    const reset = (): void => resetDragState();
+    window.addEventListener("blur", reset);
+    window.addEventListener("dragend", reset);
+    return () => {
+      window.removeEventListener("blur", reset);
+      window.removeEventListener("dragend", reset);
+      clearDragResetTimer();
+    };
+  }, []);
 
   useEffect(() => {
     const snapshotImports = snapshot?.state?.pendingImports ?? [];
@@ -122,8 +161,15 @@ export function useImportFlow({
   }
 
   function onDragOver(event: DragEvent<HTMLElement>): void {
+    if (!isFileDrag(event.dataTransfer)) {
+      resetDragState();
+      return;
+    }
+
     event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
     setIsDragActive(true);
+    scheduleDragReset();
   }
 
   function onDragLeave(event: DragEvent<HTMLElement>): void {
@@ -131,12 +177,17 @@ export function useImportFlow({
       return;
     }
 
-    setIsDragActive(false);
+    resetDragState();
   }
 
   function onDrop(event: DragEvent<HTMLElement>): void {
+    const acceptsDrop = isFileDrag(event.dataTransfer);
+    resetDragState();
+    if (!acceptsDrop) {
+      return;
+    }
+
     event.preventDefault();
-    setIsDragActive(false);
 
     const paths = parseDroppedPaths(event.dataTransfer.files, (file) =>
       window.mumbler.getPathForFile(file),

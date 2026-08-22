@@ -64,4 +64,38 @@ describe("AudioToolsModal update check", () => {
     expect(onCancelCheck).toHaveBeenCalledTimes(1);
     expect(onCheck).not.toHaveBeenCalled();
   });
+
+  it("sentence-cases fallback status values presented to the user", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        React.createElement(AudioToolsModal, {
+          dependencies: [
+            {
+              ...dependency,
+              state: "installed-unchecked",
+              installedVersion: null,
+              transient: { kind: "running", operation: "provision", percent: null },
+            },
+          ],
+          checkUpdatesAtLaunch: true,
+          isChecking: false,
+          checkNotice: null,
+          onProvision: vi.fn(),
+          onCancelProvision: vi.fn(),
+          onCheck: vi.fn(),
+          onCancelCheck: vi.fn(),
+          onToggleCheckUpdates: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      );
+    });
+
+    expect(document.body.textContent).toContain("Version unreadable");
+    expect(document.body.textContent).toContain("Unknown");
+    expect(document.body.textContent).toContain("Working…");
+  });
 });

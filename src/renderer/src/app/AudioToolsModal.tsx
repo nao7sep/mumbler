@@ -142,16 +142,16 @@ export function AudioToolsModal({
                   </td>
                   <td>
                     {status.installedVersion ??
-                      (status.state === "not-installed" ? "—" : "version unreadable")}
+                      (status.state === "not-installed" ? "—" : "Version unreadable")}
                   </td>
-                  <td>{status.desiredVersion ?? (isChecking ? "…" : "unknown")}</td>
+                  <td>{status.desiredVersion ?? (isChecking ? "…" : "Unknown")}</td>
                   <td className="tools-table__action">
                     {running ? (
                       <span className="tools-table__actions">
                         <span className="field-hint">
                           {status.transient.kind === "running" && status.transient.percent !== null
                             ? `${status.transient.percent}%`
-                            : "working…"}
+                            : "Working…"}
                         </span>
                         {status.transient.kind === "running" &&
                         status.transient.operation === "provision" ? (

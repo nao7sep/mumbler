@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { PendingImportReviewItem } from "@shared/app-shell";
-import { parseDroppedPaths, reconcilePendingReviewDrafts } from "@renderer/app/import-rules";
+import {
+  isFileDrag,
+  parseDroppedPaths,
+  reconcilePendingReviewDrafts,
+} from "@renderer/app/import-rules";
 
 const item = (id: string): PendingImportReviewItem => ({ id }) as unknown as PendingImportReviewItem;
 
@@ -17,6 +21,32 @@ describe("parseDroppedPaths", () => {
   it("returns an empty array when nothing resolves", () => {
     const files = [{ name: "a" }] as unknown as File[];
     expect(parseDroppedPaths(files, () => "")).toEqual([]);
+  });
+});
+
+describe("isFileDrag", () => {
+  it("accepts the native Files transfer type", () => {
+    expect(isFileDrag({ types: ["Files"], items: [] as unknown as DataTransferItemList })).toBe(
+      true,
+    );
+  });
+
+  it("accepts an explicitly file-kind item", () => {
+    expect(
+      isFileDrag({
+        types: [],
+        items: [{ kind: "file" }] as unknown as DataTransferItemList,
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects text and other non-file payloads", () => {
+    expect(
+      isFileDrag({
+        types: ["text/plain"],
+        items: [{ kind: "string" }] as unknown as DataTransferItemList,
+      }),
+    ).toBe(false);
   });
 });
 

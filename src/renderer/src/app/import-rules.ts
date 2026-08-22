@@ -17,6 +17,14 @@ export function parseDroppedPaths(
     .filter((value) => value.length > 0);
 }
 
+/** Whether the current drag advertises file payloads that Mumbler can import. */
+export function isFileDrag(dataTransfer: Pick<DataTransfer, "types" | "items">): boolean {
+  return (
+    Array.from(dataTransfer.types).includes("Files") ||
+    Array.from(dataTransfer.items).some((item) => item.kind === "file")
+  );
+}
+
 /**
  * Reconcile the local in-review drafts against a fresh snapshot's pending
  * imports: keep the user's local edits when the *set of items is unchanged*,
