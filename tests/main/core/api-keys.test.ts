@@ -220,6 +220,20 @@ describe("API key secrets store", () => {
     expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
   });
 
+  it("preserves a valid JSON null instead of mistaking it for a missing key file", async () => {
+    const original = "null\n";
+    await writeFile(apiKeysPath, original, "utf8");
+
+    await writeApiKey(apiKeysPath, ["gemini"], "replacement-key");
+
+    const preservedName = (await readdir(home)).find((entry) =>
+      /^api-keys-\d{8}-\d{6}-\d{3}-utc\.invalid$/.test(entry),
+    );
+    expect(preservedName).toBeDefined();
+    expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
+    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("replacement-key");
+  });
+
   it("moves a corrupt (unparseable) key file aside and resolves to no key instead of throwing", async () => {
     await writeFile(apiKeysPath, "not json at all", "utf8");
 

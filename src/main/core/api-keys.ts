@@ -1,6 +1,6 @@
 import { chmod, stat } from "node:fs/promises";
 
-import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
+import { fileExists, formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 
 /**
  * API key storage and resolution — the secret store, kept in its own 0600 file
@@ -162,7 +162,10 @@ async function readAll(filePath: string, warn: WarnFn): Promise<ApiKeysFile> {
     });
     return { keys: {} };
   }
-  if (raw === null) return { keys: {} };
+  // readJsonFile uses null for both a missing file and a file containing the
+  // valid JSON literal null. Only the former is an empty store; preserve the
+  // latter just like every other wrong root shape.
+  if (raw === null && !(await fileExists(filePath))) return { keys: {} };
   const normalized = normalize(raw);
   if (normalized !== null) return normalized;
 
