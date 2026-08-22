@@ -31,6 +31,24 @@ function expandEnvReferences(value: string): string {
     .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (_match, name: string) => process.env[name] ?? "");
 }
 
+// Resolve any user/configured path with the same expansion rules as the storage
+// root. A relative value is anchored to the home directory, never process.cwd(),
+// so a typed path behaves identically in development and in the packaged app.
+export function resolvePathFromHome(rawValue: string, homeDirectory: string): string {
+  let value = expandEnvReferences(rawValue.trim()).trim();
+  if (value.length === 0) {
+    throw new Error(`Path "${rawValue}" expands to an empty value.`);
+  }
+
+  if (value === "~") {
+    value = homeDirectory;
+  } else if (value.startsWith("~/") || value.startsWith("~\\")) {
+    value = join(homeDirectory, value.slice(2));
+  }
+
+  return isAbsolute(value) ? resolve(value) : resolve(homeDirectory, value);
+}
+
 // Resolve the single storage root per the storage-path-conventions. The root is MUMBLER_HOME when that
 // variable is set and non-empty (trimmed); otherwise the default `<home>/.mumbler`. An override is
 // expanded (a leading `~`/`~/` and `$VAR` env references), then made absolute against the HOME directory —
@@ -46,29 +64,16 @@ export function resolveStorageRoot(
     return join(homeDirectory, ".mumbler");
   }
 
-  let value = expandEnvReferences(trimmed).trim();
-
-  // An override that is set but expands to nothing — an unset `$VAR`/`%VAR%`, say — is a misconfiguration.
-  // Rejecting it is the "reported startup error, not a silent fallback" the convention requires, and it
-  // avoids silently collapsing the root onto the bare home directory.
-  if (value.length === 0) {
+  try {
+    return resolvePathFromHome(trimmed, homeDirectory);
+  } catch {
+    // A set-but-empty-expanding override is a misconfiguration. Reject it rather
+    // than silently collapsing the root onto the bare home directory.
     throw new Error(
       `MUMBLER_HOME is set to "${rawOverride}" but expands to an empty path ` +
         `(an unset $VAR/%VAR%?). Set it to a usable directory, or unset it to use ~/.mumbler.`,
     );
   }
-
-  // Expand a leading `~` / `~/` (and `~\` on Windows) to the home directory.
-  if (value === "~") {
-    value = homeDirectory;
-  } else if (value.startsWith("~/") || value.startsWith("~\\")) {
-    value = join(homeDirectory, value.slice(2));
-  }
-
-  // A still-relative value is resolved against the HOME directory, not the working directory, so launch
-  // context can never move the storage root. resolve() always returns an absolute path, so no further
-  // guard is needed.
-  return isAbsolute(value) ? resolve(value) : resolve(homeDirectory, value);
 }
 
 // The resolved storage root for this process, honoring MUMBLER_HOME. Computed lazily at every call (not

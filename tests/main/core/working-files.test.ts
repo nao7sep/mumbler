@@ -1,33 +1,43 @@
-import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
-import type { MumblerCard, MumblerState } from "@shared/app-shell";
-import { selectExistingCardId } from "@main/core/working-files";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-function state(cardIds: string[], selectedCardId: string | null): MumblerState {
-  return {
-    schemaVersion: 1,
-    pendingImports: [],
-    cards: cardIds.map((id) => ({ id }) as MumblerCard),
-    selectedCardId,
-    updatedAtUtc: 0,
-  };
-}
+import { copyIntoWorking, copyOriginalToBackup } from "@main/core/working-files";
 
-describe("selectExistingCardId", () => {
-  it("keeps the current selection when it still exists", () => {
-    expect(selectExistingCardId(state(["a", "b", "c"], "b"))).toBe("b");
+let dir: string;
+
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), "mumbler-working-files-"));
+});
+
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
+
+describe("working audio copies", () => {
+  it("copies imported audio under a case-insensitively unique working path", async () => {
+    const source = join(dir, "source.wav");
+    const working = join(dir, "working");
+    await writeFile(source, "audio", "utf8");
+    await mkdir(working, { recursive: true });
+    await writeFile(join(working, "Clip.wav"), "existing", "utf8");
+
+    const copied = await copyIntoWorking(source, working, "clip.wav");
+
+    expect(basename(copied).toLowerCase()).not.toBe("clip.wav");
+    expect(await readFile(copied, "utf8")).toBe("audio");
   });
 
-  it("falls back to the first card when the selection is gone", () => {
-    expect(selectExistingCardId(state(["a", "b"], "missing"))).toBe("a");
-  });
+  it("copies an original into the chosen backup directory", async () => {
+    const source = join(dir, "source.m4a");
+    const backup = join(dir, "backup");
+    await writeFile(source, "audio", "utf8");
 
-  it("falls back to the first card when nothing is selected", () => {
-    expect(selectExistingCardId(state(["a", "b"], null))).toBe("a");
-  });
+    const copied = await copyOriginalToBackup(source, backup);
 
-  it("returns null when there are no cards", () => {
-    expect(selectExistingCardId(state([], "anything"))).toBeNull();
-    expect(selectExistingCardId(state([], null))).toBeNull();
+    expect(copied).toBe(join(backup, "source.m4a"));
+    expect(await readFile(copied, "utf8")).toBe("audio");
   });
 });

@@ -34,6 +34,8 @@ export interface JsonStoreOptions<T> {
    * persistence edge while keeping the core in epoch-ms.
    */
   serialize?: (value: T) => unknown;
+  /** Whether writes enter backups.sqlite3. Defaults to true for managed text. */
+  record?: boolean;
 }
 
 export interface LoadResult<T> {
@@ -100,7 +102,7 @@ export class JsonStore<T> {
   async save(value: T): Promise<void> {
     const work = async (): Promise<void> => {
       const wire = this.options.serialize ? this.options.serialize(value) : value;
-      await writeJsonFile(this.options.path, wire);
+      await writeJsonFile(this.options.path, wire, { record: this.options.record });
     };
     // Chain on the tail so writes never overlap, and a failed write doesn't
     // wedge the queue (errors propagate to that caller but the chain continues).

@@ -47,7 +47,7 @@ import { closeBackupStore, setBackupStoreWarn } from "./backupStore";
 import { formatError } from "./file-io";
 import { CorruptStateError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
-import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, selectExistingCardId } from "./working-files";
+import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState } from "./working-files";
 import {
   buildMarkdownContent,
   buildOutputPayload,
@@ -59,7 +59,12 @@ import {
 } from "./file-output";
 
 import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, getSystemTimezone, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
-import { clampQueueWidth, createDefaultLayout, createLayoutStore } from "./layout-store";
+import {
+  clampQueueWidth,
+  createDefaultLayout,
+  createLayoutStore,
+  selectExistingCardId,
+} from "./layout-store";
 import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
 import { type AppLogger, createLogger, serializeError } from "./logger";
 import { OperationError } from "./operation-error";
@@ -80,8 +85,8 @@ interface AppRuntimeState {
   paths: AppPaths | null;
   settings: MumblerSettings | null;
   state: MumblerState | null;
-  // Disposable pane geometry (the draggable queue-pane width). Loaded leniently:
-  // a corrupt layout file self-heals to defaults rather than failing startup.
+  // Disposable presentation state (pane width and last-selected card). Loaded
+  // leniently: a corrupt layout file self-heals rather than failing startup.
   layout: MumblerLayout | null;
   settingsStore: JsonStore<MumblerSettings> | null;
   stateStore: JsonStore<MumblerState> | null;
@@ -205,11 +210,10 @@ export class ApplicationRuntime {
       const recovered = recoverInterruptedCards(stateLoad.value);
       const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
 
-      // Persist startup fix-ups (interrupted-card recovery, working-file
-      // reconciliation) only. state.json is volatile UI state and is NOT
-      // materialized on first run (storage-path conventions) — a freshly created
-      // file is left unwritten until there is real state to record; an unchanged,
-      // already-good state is never rewritten either.
+      // Persist startup fix-ups (interrupted-card recovery and working-file
+      // reconciliation) only. state.json holds precious queue/work data, so a
+      // fresh empty queue has nothing to materialize and an unchanged existing
+      // store is never rewritten.
       const stateChanged =
         recovered.recoveredInterruptedCards > 0 ||
         reconciliation.droppedPendingImports > 0 ||
@@ -218,10 +222,9 @@ export class ApplicationRuntime {
         await stateStore.save(reconciliation.state);
       }
 
-      // Pane geometry (disposable, volatile). Like state.json it is NOT materialized
-      // on first run — a missing layout loads defaults in memory and is written only
-      // once the user actually changes it. A corrupt or too-new layout.json must NOT
-      // halt launch — losing a pane width costs the user nothing — so its load
+      // Presentation state (disposable, volatile). A missing layout loads defaults
+      // in memory and is written only once the user changes the pane width or card
+      // selection. A corrupt or too-new layout.json must not halt launch, so it
       // self-heals to defaults and overwrites the bad file.
       const layoutStore = createLayoutStore(paths.layoutPath);
       let layout: MumblerLayout;
@@ -235,6 +238,13 @@ export class ApplicationRuntime {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      layout = {
+        ...layout,
+        selectedCardId: selectExistingCardId(
+          reconciliation.state.cards.map((card) => card.id),
+          layout.selectedCardId,
+        ),
+      };
 
       await logger.info("app.startup", "Application runtime initialized.", {
         appVersion: app.getVersion(),
@@ -469,7 +479,7 @@ export class ApplicationRuntime {
           : {
               cardCount: state.cards.length,
               pendingImportCount: state.pendingImports.length,
-              selectedCardId: state.selectedCardId,
+              selectedCardId: layout?.selectedCardId ?? null,
               recoveredInterruptedCards: this.runtime.recoveredInterruptedCards,
             },
       commands: COMMAND_DEFINITIONS,
@@ -784,9 +794,11 @@ export class ApplicationRuntime {
     state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
       left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
     );
-    state.selectedCardId = cardsToAdd[0]?.id ?? state.selectedCardId;
 
     await this.persistState();
+    if (cardsToAdd.length > 0) {
+      await this.persistSelectedCard(cardsToAdd[0].id);
+    }
     await this.runtime.logger.info(
       "import.confirm-review",
       "Confirmed pending imports into queue.",
@@ -828,8 +840,7 @@ export class ApplicationRuntime {
       throw new OperationError("Selected card no longer exists.");
     }
 
-    state.selectedCardId = cardId;
-    await this.persistState();
+    await this.persistSelectedCard(cardId);
     // Selection is a high-frequency navigation action (arrow keys), so it is
     // traced at debug — developer-only — rather than info, per the volume rules.
     await this.runtime.logger.debug("card.select", "Selected card.", { cardId });
@@ -854,9 +865,9 @@ export class ApplicationRuntime {
     state.cards = [...state.cards, duplicate].sort((left, right) =>
       left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
     );
-    state.selectedCardId = duplicate.id;
 
     await this.persistState();
+    await this.persistSelectedCard(duplicate.id);
     await this.runtime.logger.info("card.duplicate", "Duplicated card for independent trimming.", {
       sourceCardId: source.id,
       duplicateCardId: duplicate.id,
@@ -1456,7 +1467,6 @@ export class ApplicationRuntime {
         ? createEmptyState()
         : {
             ...state,
-            selectedCardId: selectExistingCardId(state),
             updatedAtUtc: Date.now(),
           };
 
@@ -1464,10 +1474,26 @@ export class ApplicationRuntime {
     // The store serializes writes, so overlapping persistState calls can never
     // interleave on disk.
     await this.runtime.stateStore!.save(normalized);
+    const selectedCardId = selectExistingCardId(
+      normalized.cards.map((card) => card.id),
+      this.runtime.layout?.selectedCardId ?? null,
+    );
+    if (selectedCardId !== (this.runtime.layout?.selectedCardId ?? null)) {
+      await this.persistSelectedCard(selectedCardId);
+    }
 
     if (this.onPipelineProgressCallback !== null) {
       this.onPipelineProgressCallback();
     }
+  }
+
+  private async persistSelectedCard(selectedCardId: string | null): Promise<void> {
+    const layout: MumblerLayout = {
+      ...(this.runtime.layout ?? createDefaultLayout()),
+      selectedCardId,
+    };
+    this.runtime.layout = layout;
+    await this.runtime.layoutStore!.save(layout);
   }
 
   private async persistSettings(): Promise<void> {

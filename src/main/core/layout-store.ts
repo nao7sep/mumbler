@@ -3,11 +3,9 @@ import { QUEUE_WIDTH } from "@shared/layout";
 
 import { JsonStore } from "./json-store";
 
-// Bumped only on a breaking change to layout.json's shape. A file whose version
-// is newer than this build refuses to load (JsonStore). Unlike settings/state,
-// the runtime treats that refusal leniently — pane geometry is disposable, so a
-// corrupt or too-new layout file self-heals to defaults rather than halting
-// launch (see ApplicationRuntime.initialize).
+// Bumped only on a breaking change to layout.json's shape. Unlike settings/work
+// data, this presentation state is disposable, so the runtime self-heals a
+// corrupt or too-new file rather than halting launch.
 export const LAYOUT_SCHEMA_VERSION = 1;
 
 // Snap a persisted/candidate width to the queue-pane bounds. A non-finite or
@@ -21,14 +19,29 @@ export function clampQueueWidth(value: unknown): number {
 }
 
 export function createDefaultLayout(): MumblerLayout {
-  return { schemaVersion: LAYOUT_SCHEMA_VERSION, queueWidth: QUEUE_WIDTH.default };
+  return {
+    schemaVersion: LAYOUT_SCHEMA_VERSION,
+    queueWidth: QUEUE_WIDTH.default,
+    selectedCardId: null,
+  };
 }
 
 export function normalizeLayout(raw: Record<string, unknown>): MumblerLayout {
   return {
     schemaVersion: LAYOUT_SCHEMA_VERSION,
     queueWidth: clampQueueWidth(raw.queueWidth),
+    selectedCardId: typeof raw.selectedCardId === "string" ? raw.selectedCardId : null,
   };
+}
+
+export function selectExistingCardId(
+  cardIds: readonly string[],
+  selectedCardId: string | null,
+): string | null {
+  if (selectedCardId !== null && cardIds.includes(selectedCardId)) {
+    return selectedCardId;
+  }
+  return cardIds[0] ?? null;
 }
 
 export function createLayoutStore(path: string): JsonStore<MumblerLayout> {

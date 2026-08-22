@@ -28,6 +28,8 @@ export async function copyIntoWorking(
   const workingFilePath = await uniquePathInDirectory(workingDir, preferredName);
 
   try {
+    // not recorded: working/ contains managed audio binaries; state.json records
+    // the durable queue/work metadata that gives those copies meaning.
     await copyFile(sourcePath, workingFilePath);
     await access(workingFilePath, fsConstants.R_OK);
   } catch (error: unknown) {
@@ -51,6 +53,8 @@ export async function copyOriginalToBackup(
   const targetPath = await uniquePathInDirectory(backupDir, basename(sourcePath));
 
   try {
+    // not recorded: this is a user-requested copy of the original audio binary,
+    // written as output and never reopened as Mumbler-managed state.
     await copyFile(sourcePath, targetPath);
   } catch (error: unknown) {
     throw new Error(`Failed to copy ${sourcePath} to backup directory: ${formatError(error)}`);
@@ -183,11 +187,6 @@ export async function reconcileWorkingState(
           ...state,
           pendingImports: nextPendingImports,
           cards: nextCards,
-          selectedCardId: selectExistingCardId({
-            ...state,
-            pendingImports: nextPendingImports,
-            cards: nextCards,
-          }),
           updatedAtUtc: Date.now(),
         };
 
@@ -214,12 +213,4 @@ function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
     },
     updatedAtUtc: Date.now(),
   };
-}
-
-export function selectExistingCardId(state: MumblerState): string | null {
-  if (state.selectedCardId !== null && state.cards.some((card) => card.id === state.selectedCardId)) {
-    return state.selectedCardId;
-  }
-
-  return state.cards[0]?.id ?? null;
 }

@@ -68,7 +68,6 @@ function stateWith(cards: MumblerCard[]): MumblerState {
     schemaVersion: 1,
     pendingImports: [],
     cards,
-    selectedCardId: cards[0]?.id ?? null,
     updatedAtUtc: 0,
   };
 }
@@ -84,10 +83,15 @@ describe("state store", () => {
   });
 
   it("normalizes a present state file on load", async () => {
-    await writeFile(statePath(), JSON.stringify(stateWith([card({ id: "x" })])), "utf8");
+    await writeFile(
+      statePath(),
+      JSON.stringify({ ...stateWith([card({ id: "x" })]), selectedCardId: "x" }),
+      "utf8",
+    );
     const { value, origin } = await createStateStore(statePath()).load();
     expect(origin).toBe("loaded");
     expect(value.cards.map((c) => c.id)).toEqual(["x"]);
+    expect(value).not.toHaveProperty("selectedCardId");
   });
 
   it("writes UTC instants as canonical ISO strings and reads epoch-ms back", async () => {
@@ -201,6 +205,22 @@ describe("settings store", () => {
       "utf8",
     );
     expect((await createSettingsStore(settingsPath()).load()).value.checkUpdatesAtLaunch).toBe(false);
+  });
+
+  it("resolves hand-edited configured paths against HOME rather than cwd", async () => {
+    const home = join(dir, "home");
+    await writeFile(
+      settingsPath(),
+      JSON.stringify({
+        schemaVersion: 1,
+        outputDirectory: "~/output",
+        backupDirectory: "relative/backups",
+      }),
+      "utf8",
+    );
+    const settings = (await createSettingsStore(settingsPath(), home).load()).value;
+    expect(settings.outputDirectory).toBe(join(home, "output"));
+    expect(settings.backupDirectory).toBe(join(home, "relative", "backups"));
   });
 });
 

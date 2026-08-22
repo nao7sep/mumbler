@@ -284,7 +284,6 @@ export interface MumblerState {
   schemaVersion: 1;
   pendingImports: PendingImportReviewItem[];
   cards: MumblerCard[];
-  selectedCardId: string | null;
   updatedAtUtc: number;
 }
 
@@ -292,9 +291,8 @@ export interface AppPaths {
   homeDir: string;
   settingsPath: string;
   statePath: string;
-  // Disposable pane geometry (the draggable queue-pane width). Its own file, apart
-  // from settingsPath/statePath, so it self-heals on corruption instead of halting
-  // launch (see MumblerLayout below).
+  // Disposable presentation state (pane width and last selection). Its own file,
+  // apart from settingsPath/statePath, so it self-heals independently.
   layoutPath: string;
   // The secrets file. The Gemini API key lives here in its own 0600 file, not in
   // settingsPath (storage-path-conventions, "Secrets and keys").
@@ -478,16 +476,13 @@ export interface DependencyStatus {
   transient: ToolTransient;
 }
 
-// Disposable window/view geometry — the pane sizes the user drags. Persisted in
-// its own layout.json (never config.json, which the user edits, nor state.json,
-// which holds precious card data): losing a pane width costs the user nothing, so
-// unlike those stores a corrupt layout file self-heals to defaults instead of
-// halting launch. queueWidth is the user's dragged INTENT in CSS pixels, bounded
-// by QUEUE_WIDTH (@shared/layout); the renderer re-clamps it to the live window
-// for display (clampSplitter) and persists it only on a splitter drag.
+// Disposable presentation state, separate from config.json and state.json (which
+// holds precious card data). queueWidth is the user's dragged intent in CSS
+// pixels; selectedCardId remembers where the user left the queue view.
 export interface MumblerLayout {
   schemaVersion: number;
   queueWidth: number;
+  selectedCardId: string | null;
 }
 
 export interface AppSnapshot {
@@ -503,8 +498,8 @@ export interface AppSnapshot {
   startupDiagnostic: StartupDiagnostic | null;
   appWideError: StartupDiagnostic | null;
   state: MumblerState | null;
-  // Disposable pane geometry (the draggable queue-pane width). Null until the
-  // runtime is ready, like the other snapshot slices.
+  // Disposable presentation state. Null until the runtime is ready, like the
+  // other snapshot slices.
   layout: MumblerLayout | null;
   // Derived status of each managed audio tool, computed in main via deriveStatus
   // from persisted facts + transient operation status. The renderer reads these

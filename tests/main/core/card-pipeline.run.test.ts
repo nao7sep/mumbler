@@ -82,7 +82,6 @@ function makePaths(): AppPaths {
 function makeContext(card: MumblerCard, signal: AbortSignal): CardPipelineContext {
   const state = createEmptyState();
   state.cards = [card];
-  state.selectedCardId = card.id;
   const settings = createDefaultSettings("Asia/Tokyo");
   // The key is now resolved by the runtime and passed in via ctx.apiKey; a
   // non-empty value is all the pipeline's key guard needs.

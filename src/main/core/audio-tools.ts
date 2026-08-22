@@ -289,6 +289,8 @@ export async function prepareAudioForTranscription(params: {
   await mkdir(derivedDir, { recursive: true });
 
   const extension = extname(params.sourceFilePath) || ".audio";
+  // not recorded: derived/ holds disposable audio binaries produced for the
+  // current pipeline; the durable decisions and text remain in state.json.
   const outputPath = join(derivedDir, `${nanoid()}${extension}`);
 
   if (params.trimDecision?.kind === "stream-copy") {

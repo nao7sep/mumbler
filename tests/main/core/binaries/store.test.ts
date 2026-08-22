@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createDependenciesStore } from "@main/core/binaries/store";
+import { closeBackupStore } from "@main/core/backupStore";
 
 let dir: string;
 
@@ -63,6 +64,14 @@ describe("dependencies store — timestamp persistence", () => {
     const store = createDependenciesStore(storePath());
     await store.save((await store.load()).value);
     expect((await onDisk()).tools.ffmpeg.lastCheckedAtUtc).toBeNull();
+  });
+
+  it("does not record re-derivable dependency facts in the backup history", async () => {
+    process.env.MUMBLER_HOME = dir;
+    const store = createDependenciesStore(storePath());
+    await store.save((await store.load()).value);
+    await closeBackupStore();
+    expect(await readdir(dir)).not.toContain("backups.sqlite3");
   });
 
   it("still reads a legacy epoch-ms number from an older file", async () => {

@@ -106,5 +106,8 @@ export function createDependenciesStore(path: string): JsonStore<DependenciesVal
     validate: normalize,
     createDefault: createDefaultDependencies,
     serialize: serializeDependencies,
+    // not recorded: dependencies.json contains only re-derivable latest-version
+    // and successful-check facts; losing it causes a refresh, not lost user work.
+    record: false,
   });
 }

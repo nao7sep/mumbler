@@ -6,6 +6,7 @@ import {
   createDefaultLayout,
   LAYOUT_SCHEMA_VERSION,
   normalizeLayout,
+  selectExistingCardId,
 } from "@main/core/layout-store";
 
 describe("clampQueueWidth", () => {
@@ -31,6 +32,7 @@ describe("createDefaultLayout", () => {
     expect(createDefaultLayout()).toEqual({
       schemaVersion: LAYOUT_SCHEMA_VERSION,
       queueWidth: QUEUE_WIDTH.default,
+      selectedCardId: null,
     });
   });
 });
@@ -40,11 +42,34 @@ describe("normalizeLayout", () => {
     expect(normalizeLayout({ schemaVersion: 1, queueWidth: 640 })).toEqual({
       schemaVersion: LAYOUT_SCHEMA_VERSION,
       queueWidth: 640,
+      selectedCardId: null,
     });
   });
 
   it("self-heals a missing or garbage width to the default rather than rejecting", () => {
     expect(normalizeLayout({}).queueWidth).toBe(QUEUE_WIDTH.default);
     expect(normalizeLayout({ queueWidth: "wide" }).queueWidth).toBe(QUEUE_WIDTH.default);
+  });
+
+  it("keeps a string selection and resets a missing or invalid one", () => {
+    expect(normalizeLayout({ selectedCardId: "card-a" }).selectedCardId).toBe("card-a");
+    expect(normalizeLayout({ selectedCardId: 42 }).selectedCardId).toBeNull();
+    expect(normalizeLayout({}).selectedCardId).toBeNull();
+  });
+});
+
+describe("selectExistingCardId", () => {
+  it("keeps a selection that still exists", () => {
+    expect(selectExistingCardId(["a", "b", "c"], "b")).toBe("b");
+  });
+
+  it("falls back to the first card for an absent or missing selection", () => {
+    expect(selectExistingCardId(["a", "b"], "missing")).toBe("a");
+    expect(selectExistingCardId(["a", "b"], null)).toBe("a");
+  });
+
+  it("returns null when the queue is empty", () => {
+    expect(selectExistingCardId([], "anything")).toBeNull();
+    expect(selectExistingCardId([], null)).toBeNull();
   });
 });

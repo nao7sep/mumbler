@@ -49,6 +49,9 @@ export async function finalizeOutputsAtomically(params: {
 }): Promise<void> {
   await mkdir(dirname(params.targets.audioPath), { recursive: true });
 
+  // not recorded: the finalized audio, JSON, and Markdown are output written for
+  // the user and then forgotten when the card leaves Mumbler's queue.
+
   // Audio/json/markdown targets share one stem (see buildUniqueSuffixedTargets), so each temp/backup
   // path draws its own nanoid rather than a token shared across the three — otherwise they would collide
   // on the same derived name.

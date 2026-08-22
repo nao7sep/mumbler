@@ -6,6 +6,7 @@ import type {
   SettingsDraft,
   SettingsSummary,
 } from "@shared/app-shell";
+import { homedir } from "node:os";
 import {
   formatUtcIsoCompact,
   isValidTimezone,
@@ -15,6 +16,7 @@ import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-valid
 import { DEFAULT_GEMINI_MODELS } from "@shared/app-shell";
 import { JsonStore } from "./json-store";
 import { OperationError } from "./operation-error";
+import { resolvePathFromHome } from "./storage-root";
 import { multiline } from "./text-cleanup";
 
 const SETTINGS_SCHEMA_VERSION = 1;
@@ -63,9 +65,15 @@ function normalizeGeminiModels(value: unknown, fallback: string[]): string[] {
   return cleaned.length > 0 ? cleaned : fallback;
 }
 
+function normalizeOptionalPath(value: unknown, homeDirectory: string): string | null {
+  const raw = asNullableString(value)?.trim() ?? "";
+  return raw.length === 0 ? null : resolvePathFromHome(raw, homeDirectory);
+}
+
 function normalizeSettings(
   raw: Record<string, unknown>,
   defaults: MumblerSettings,
+  homeDirectory: string,
 ): MumblerSettings {
   const prompts = asRecord(raw.prompts);
   const retryPolicy = asRecord(raw.retryPolicy);
@@ -76,8 +84,8 @@ function normalizeSettings(
     // Appearance — free text; blank resolves to the built-in default stack at apply time.
     uiFontFamily: asString(raw.uiFontFamily) ?? defaults.uiFontFamily,
     // Files
-    outputDirectory: asNullableString(raw.outputDirectory),
-    backupDirectory: asNullableString(raw.backupDirectory),
+    outputDirectory: normalizeOptionalPath(raw.outputDirectory, homeDirectory),
+    backupDirectory: normalizeOptionalPath(raw.backupDirectory, homeDirectory),
     // Import
     defaultTimezone:
       asString(raw.defaultTimezone) && isValidTimezone(asString(raw.defaultTimezone)!)
@@ -222,7 +230,6 @@ function normalizeState(raw: Record<string, unknown>, defaults: MumblerState): M
     cards: Array.isArray(raw.cards)
       ? (raw.cards as MumblerCard[]).map(normalizeCardRecord)
       : defaults.cards,
-    selectedCardId: asNullableString(raw.selectedCardId),
     updatedAtUtc: normalizeUtcMs(raw.updatedAtUtc, defaults.updatedAtUtc),
   };
 }
@@ -407,11 +414,15 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
 // → CorruptStateError with the file left untouched).
 // Startup recovery (recoverInterruptedCards) and filesystem reconciliation are
 // applied by the caller after load, keeping the store a pure persistence layer.
-export function createSettingsStore(path: string): JsonStore<MumblerSettings> {
+export function createSettingsStore(
+  path: string,
+  homeDirectory: string = homedir(),
+): JsonStore<MumblerSettings> {
   return new JsonStore<MumblerSettings>({
     path,
     schemaVersion: SETTINGS_SCHEMA_VERSION,
-    validate: (raw) => normalizeSettings(raw, createDefaultSettings(getSystemTimezone())),
+    validate: (raw) =>
+      normalizeSettings(raw, createDefaultSettings(getSystemTimezone()), homeDirectory),
     createDefault: () => createDefaultSettings(getSystemTimezone()),
   });
 }
@@ -431,7 +442,6 @@ export function createEmptyState(): MumblerState {
     schemaVersion: STATE_SCHEMA_VERSION,
     pendingImports: [],
     cards: [],
-    selectedCardId: null,
     updatedAtUtc: Date.now(),
   };
 }
@@ -508,7 +518,11 @@ export function buildSettingsDraft(
   };
 }
 
-export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraft): MumblerSettings {
+export function applySettingsDraft(
+  current: MumblerSettings,
+  draft: SettingsDraft,
+  homeDirectory: string = homedir(),
+): MumblerSettings {
   const outputDirectory = draft.outputDirectory.trim();
   const backupDirectory = draft.backupDirectory.trim();
   const defaultTimezone = draft.defaultTimezone.trim();
@@ -577,8 +591,14 @@ export function applySettingsDraft(current: MumblerSettings, draft: SettingsDraf
     // Appearance — free text; blank means the built-in default stack.
     uiFontFamily: draft.uiFontFamily.trim(),
     // Files
-    outputDirectory: outputDirectory.length === 0 ? null : outputDirectory,
-    backupDirectory: backupDirectory.length === 0 ? null : backupDirectory,
+    outputDirectory:
+      outputDirectory.length === 0
+        ? null
+        : resolvePathFromHome(outputDirectory, homeDirectory),
+    backupDirectory:
+      backupDirectory.length === 0
+        ? null
+        : resolvePathFromHome(backupDirectory, homeDirectory),
     // Import
     defaultTimezone,
     timestampPatterns,

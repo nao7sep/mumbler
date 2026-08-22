@@ -475,7 +475,9 @@ export function App(): ReactElement {
   }, []);
 
   const selectedCard =
-    snapshot?.state?.cards.find((card) => card.id === snapshot.state?.selectedCardId) ?? null;
+    snapshot?.state?.cards.find(
+      (card) => card.id === snapshot.queueSummary?.selectedCardId,
+    ) ?? null;
   const selectedCardIsBusy =
     selectedCard !== null &&
     (activePipelineCards.includes(selectedCard.id) || isCardBusy(selectedCard));
@@ -1008,7 +1010,7 @@ export function App(): ReactElement {
           ) : snapshot?.state?.cards.length ? (
             <QueueList
               cards={snapshot.state.cards}
-              selectedCardId={snapshot.state.selectedCardId}
+              selectedCardId={snapshot.queueSummary?.selectedCardId ?? null}
               onSelect={(cardId) => void handleCardSelect(cardId)}
             />
           ) : (

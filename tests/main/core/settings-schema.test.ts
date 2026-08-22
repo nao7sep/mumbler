@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { join, parse } from "node:path";
 
 import { isValidTimezone } from "@shared/timestamps";
 import {
@@ -11,6 +12,7 @@ import {
 
 const OUT = "/home/user/.mumbler/output";
 const BACKUP = "/home/user/.mumbler/backups";
+const TEST_HOME = join(parse(process.cwd()).root, "Users", "test");
 
 function freshDraft() {
   return buildSettingsDraft(createDefaultSettings("Asia/Tokyo"), OUT, BACKUP, false);
@@ -32,12 +34,34 @@ describe("applySettingsDraft — happy path", () => {
   it("trims directories to null when blank and parses pattern text", () => {
     const draft = freshDraft();
     draft.outputDirectory = "   ";
-    draft.backupDirectory = "/custom/backups";
+    draft.backupDirectory = join(TEST_HOME, "custom", "backups");
     draft.timestampPatternsText = "  pat-a  \n pat-b \n pat-a ";
-    const result = applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft);
+    const result = applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft, TEST_HOME);
     expect(result.outputDirectory).toBeNull();
-    expect(result.backupDirectory).toBe("/custom/backups");
+    expect(result.backupDirectory).toBe(join(TEST_HOME, "custom", "backups"));
     expect(result.timestampPatterns).toEqual(["pat-a", "pat-b"]); // trimmed + de-duplicated
+  });
+
+  it("expands and absolutizes typed directories against HOME, never cwd", () => {
+    const previous = process.env.MUMBLER_TEST_OUTPUT;
+    process.env.MUMBLER_TEST_OUTPUT = join(TEST_HOME, "external");
+    try {
+      const draft = freshDraft();
+      draft.outputDirectory = "$MUMBLER_TEST_OUTPUT/exports";
+      draft.backupDirectory = "relative/backups";
+      const result = applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft, TEST_HOME);
+      expect(result.outputDirectory).toBe(join(TEST_HOME, "external", "exports"));
+      expect(result.backupDirectory).toBe(join(TEST_HOME, "relative", "backups"));
+
+      draft.outputDirectory = "~/handled-audio";
+      expect(
+        applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft, TEST_HOME)
+          .outputDirectory,
+      ).toBe(join(TEST_HOME, "handled-audio"));
+    } finally {
+      if (previous === undefined) delete process.env.MUMBLER_TEST_OUTPUT;
+      else process.env.MUMBLER_TEST_OUTPUT = previous;
+    }
   });
 
   it("defaults the UI font to blank and round-trips a trimmed custom value", () => {
