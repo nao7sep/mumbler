@@ -19,16 +19,24 @@
  */
 
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
-// Expand `$VAR` / `${VAR}` (POSIX) and `%VAR%` (Windows) references against the current environment. An
-// undefined reference expands to empty, matching shell behavior, rather than being left as a literal that
-// would later become a directory name.
+// Expand `$VAR` / `${VAR}` (POSIX) and `%VAR%` (Windows) references against the
+// current environment. An unset reference is an invalid configured path: letting
+// it collapse to empty could turn `$MISSING/output` into a drive-rooted `/output`.
 function expandEnvReferences(value: string): string {
+  const expand = (_match: string, name: string): string => {
+    const resolved = process.env[name];
+    if (resolved === undefined) {
+      throw new Error(`Path "${value}" references unset environment variable "${name}".`);
+    }
+    return resolved;
+  };
+
   return value
-    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => process.env[name] ?? "")
-    .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, name: string) => process.env[name] ?? "")
-    .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (_match, name: string) => process.env[name] ?? "");
+    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, expand)
+    .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, expand)
+    .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, expand);
 }
 
 // Resolve any user/configured path with the same expansion rules as the storage
@@ -46,7 +54,11 @@ export function resolvePathFromHome(rawValue: string, homeDirectory: string): st
     value = join(homeDirectory, value.slice(2));
   }
 
-  return isAbsolute(value) ? resolve(value) : resolve(homeDirectory, value);
+  // Supplying homeDirectory even for a rooted Windows path is load-bearing:
+  // `\\output` and `/output` have no drive, so resolve(value) would borrow the
+  // process.cwd() drive. resolve(homeDirectory, value) borrows the home drive;
+  // fully-qualified drive and UNC paths still replace the home argument.
+  return resolve(homeDirectory, value);
 }
 
 // Resolve the single storage root per the storage-path-conventions. The root is MUMBLER_HOME when that
@@ -66,12 +78,11 @@ export function resolveStorageRoot(
 
   try {
     return resolvePathFromHome(trimmed, homeDirectory);
-  } catch {
-    // A set-but-empty-expanding override is a misconfiguration. Reject it rather
-    // than silently collapsing the root onto the bare home directory.
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `MUMBLER_HOME is set to "${rawOverride}" but expands to an empty path ` +
-        `(an unset $VAR/%VAR%?). Set it to a usable directory, or unset it to use ~/.mumbler.`,
+      `MUMBLER_HOME is set to "${rawOverride}" but could not be resolved: ${reason} ` +
+        `Set it to a usable directory, or unset it to use ~/.mumbler.`,
     );
   }
 }

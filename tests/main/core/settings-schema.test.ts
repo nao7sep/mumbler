@@ -64,6 +64,19 @@ describe("applySettingsDraft — happy path", () => {
     }
   });
 
+  const windowsIt = process.platform === "win32" ? it : it.skip;
+  windowsIt("resolves a root-relative Windows directory on the HOME drive", () => {
+    const cwdDrive = parse(process.cwd()).root.toLowerCase();
+    const homeDrive = cwdDrive === "c:\\" ? "D:\\" : "C:\\";
+    const home = join(homeDrive, "Users", "test");
+    const draft = freshDraft();
+    draft.outputDirectory = "\\handled-audio";
+
+    const result = applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft, home);
+
+    expect(result.outputDirectory).toBe(join(homeDrive, "handled-audio"));
+  });
+
   it("defaults the UI font to blank and round-trips a trimmed custom value", () => {
     expect(createDefaultSettings("Asia/Tokyo").uiFontFamily).toBe("");
 
@@ -76,6 +89,22 @@ describe("applySettingsDraft — happy path", () => {
 });
 
 describe("applySettingsDraft — validation", () => {
+  it("rejects an unset leading environment reference instead of targeting the drive root", () => {
+    const variableName = "MUMBLER_TEST_UNSET_OUTPUT";
+    const previous = process.env[variableName];
+    delete process.env[variableName];
+    try {
+      const draft = freshDraft();
+      draft.outputDirectory = `$${variableName}/handled-audio`;
+      expect(() =>
+        applySettingsDraft(createDefaultSettings("Asia/Tokyo"), draft, TEST_HOME),
+      ).toThrow(/unset environment variable "MUMBLER_TEST_UNSET_OUTPUT"/i);
+    } finally {
+      if (previous === undefined) delete process.env[variableName];
+      else process.env[variableName] = previous;
+    }
+  });
+
   it("rejects an unsupported timezone", () => {
     const draft = freshDraft();
     draft.defaultTimezone = "Mars/Olympus";
