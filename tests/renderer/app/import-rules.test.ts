@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { PendingImportReviewItem } from "@shared/app-shell";
 import {
   isFileDrag,
+  inspectFileDragOffer,
   parseDroppedPaths,
   reconcilePendingReviewDrafts,
 } from "@renderer/app/import-rules";
@@ -47,6 +48,32 @@ describe("isFileDrag", () => {
         items: [{ kind: "string" }] as unknown as DataTransferItemList,
       }),
     ).toBe(false);
+  });
+});
+
+describe("inspectFileDragOffer", () => {
+  it("keeps a protected Files marker delivery-only", () => {
+    expect(
+      inspectFileDragOffer({ types: ["Files"], items: [] as unknown as DataTransferItemList }),
+    ).toBe("delivery-only");
+  });
+
+  it("accepts an inspectable file item", () => {
+    expect(
+      inspectFileDragOffer({
+        types: ["Files"],
+        items: [{ kind: "file" }] as unknown as DataTransferItemList,
+      }),
+    ).toBe("accepted");
+  });
+
+  it("rejects non-file data", () => {
+    expect(
+      inspectFileDragOffer({
+        types: ["text/plain"],
+        items: [{ kind: "string" }] as unknown as DataTransferItemList,
+      }),
+    ).toBe("rejected");
   });
 });
 

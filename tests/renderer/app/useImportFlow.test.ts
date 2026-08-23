@@ -34,10 +34,10 @@ function Harness({ onError }: { onError: (message: string | null) => void }): Re
   });
 }
 
-function dragEvent(type: string, offeredTypes: string[]): Event {
+function dragEvent(type: string, offeredTypes: string[], items: Array<{ kind: string }> = []): Event {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperty(event, "dataTransfer", {
-    value: { types: offeredTypes, items: [], files: [], dropEffect: "none" },
+    value: { types: offeredTypes, items, files: [], dropEffect: "none" },
   });
   return event;
 }
@@ -77,8 +77,7 @@ describe("useImportFlow drag acceptance", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it("clears a native file-drag affordance when drag events stop", async () => {
-    vi.useFakeTimers();
+  it("keeps a protected Files offer delivery-only", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -88,6 +87,25 @@ describe("useImportFlow drag acceptance", () => {
 
     const target = container.querySelector("main");
     const over = dragEvent("dragover", ["Files"]);
+    await act(async () => target?.dispatchEvent(over));
+    expect(over.defaultPrevented).toBe(true);
+    expect(
+      (over as Event & { dataTransfer: { dropEffect: string } }).dataTransfer.dropEffect,
+    ).toBe("none");
+    expect(target?.getAttribute("data-active")).toBe("no");
+  });
+
+  it("clears an inspectable file-drag affordance when drag events stop", async () => {
+    vi.useFakeTimers();
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () =>
+      root?.render(React.createElement(Harness, { onError: vi.fn() })),
+    );
+
+    const target = container.querySelector("main");
+    const over = dragEvent("dragover", ["Files"], [{ kind: "file" }]);
     await act(async () => target?.dispatchEvent(over));
     expect(over.defaultPrevented).toBe(true);
     expect(target?.getAttribute("data-active")).toBe("yes");

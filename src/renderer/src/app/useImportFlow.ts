@@ -9,7 +9,12 @@ import {
 
 import type { AppSnapshot, PendingImportReviewItem } from "@shared/app-shell";
 
-import { isFileDrag, parseDroppedPaths, reconcilePendingReviewDrafts } from "./import-rules";
+import {
+  inspectFileDragOffer,
+  isFileDrag,
+  parseDroppedPaths,
+  reconcilePendingReviewDrafts,
+} from "./import-rules";
 
 interface UseImportFlowOptions {
   snapshot: AppSnapshot | null;
@@ -164,7 +169,9 @@ export function useImportFlow({
     // The workspace owns every drop boundary so Chromium cannot navigate or open a
     // rejected URL/text payload. Rejected data still advertises no accepted action.
     event.preventDefault();
-    if (!isFileDrag(event.dataTransfer)) {
+    event.stopPropagation();
+    const offer = inspectFileDragOffer(event.dataTransfer);
+    if (offer !== "accepted") {
       event.dataTransfer.dropEffect = "none";
       resetDragState();
       return;
@@ -187,6 +194,7 @@ export function useImportFlow({
     // Consume the browser default even for rejected payloads; acceptance below
     // controls only Mumbler's import behavior and visual affordance.
     event.preventDefault();
+    event.stopPropagation();
     const acceptsDrop = isFileDrag(event.dataTransfer);
     resetDragState();
     if (!acceptsDrop) {

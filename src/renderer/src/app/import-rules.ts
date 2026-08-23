@@ -25,6 +25,20 @@ export function isFileDrag(dataTransfer: Pick<DataTransfer, "types" | "items">):
   );
 }
 
+export type FileDragOffer = "rejected" | "delivery-only" | "accepted";
+
+/**
+ * Classifies a drag without treating Chromium's protected `Files` marker as
+ * proof that an importable file is already inspectable.
+ */
+export function inspectFileDragOffer(
+  dataTransfer: Pick<DataTransfer, "types" | "items">,
+): FileDragOffer {
+  const items = Array.from(dataTransfer.items);
+  if (items.some((item) => item.kind === "file")) return "accepted";
+  return Array.from(dataTransfer.types).includes("Files") ? "delivery-only" : "rejected";
+}
+
 /**
  * Reconcile the local in-review drafts against a fresh snapshot's pending
  * imports: keep the user's local edits when the *set of items is unchanged*,
