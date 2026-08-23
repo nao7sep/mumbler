@@ -161,12 +161,15 @@ export function useImportFlow({
   }
 
   function onDragOver(event: DragEvent<HTMLElement>): void {
+    // The workspace owns every drop boundary so Chromium cannot navigate or open a
+    // rejected URL/text payload. Rejected data still advertises no accepted action.
+    event.preventDefault();
     if (!isFileDrag(event.dataTransfer)) {
+      event.dataTransfer.dropEffect = "none";
       resetDragState();
       return;
     }
 
-    event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     setIsDragActive(true);
     scheduleDragReset();
@@ -181,13 +184,14 @@ export function useImportFlow({
   }
 
   function onDrop(event: DragEvent<HTMLElement>): void {
+    // Consume the browser default even for rejected payloads; acceptance below
+    // controls only Mumbler's import behavior and visual affordance.
+    event.preventDefault();
     const acceptsDrop = isFileDrag(event.dataTransfer);
     resetDragState();
     if (!acceptsDrop) {
       return;
     }
-
-    event.preventDefault();
 
     const paths = parseDroppedPaths(event.dataTransfer.files, (file) =>
       window.mumbler.getPathForFile(file),

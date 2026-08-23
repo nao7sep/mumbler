@@ -3,13 +3,21 @@
 import React, { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useImportFlow } from "@renderer/app/useImportFlow";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root | null = null;
+const importDroppedPaths = vi.fn();
+
+beforeEach(() => {
+  Object.defineProperty(window, "mumbler", {
+    configurable: true,
+    value: { importDroppedPaths },
+  });
+});
 
 function Harness({ onError }: { onError: (message: string | null) => void }): ReactElement {
   const flow = useImportFlow({
@@ -41,10 +49,12 @@ afterEach(async () => {
     root = null;
   }
   document.body.innerHTML = "";
+  importDroppedPaths.mockReset();
+  delete (window as unknown as { mumbler?: unknown }).mumbler;
 });
 
 describe("useImportFlow drag acceptance", () => {
-  it("ignores text drags without showing a file-import error", async () => {
+  it("blocks browser defaults for text drags without accepting or importing them", async () => {
     const onError = vi.fn();
     const container = document.createElement("div");
     document.body.append(container);
@@ -54,12 +64,16 @@ describe("useImportFlow drag acceptance", () => {
     const target = container.querySelector("main");
     const over = dragEvent("dragover", ["text/plain"]);
     await act(async () => target?.dispatchEvent(over));
-    expect(over.defaultPrevented).toBe(false);
+    expect(over.defaultPrevented).toBe(true);
+    expect(
+      (over as Event & { dataTransfer: { dropEffect: string } }).dataTransfer.dropEffect,
+    ).toBe("none");
     expect(target?.getAttribute("data-active")).toBe("no");
 
     const drop = dragEvent("drop", ["text/plain"]);
     await act(async () => target?.dispatchEvent(drop));
-    expect(drop.defaultPrevented).toBe(false);
+    expect(drop.defaultPrevented).toBe(true);
+    expect(importDroppedPaths).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
   });
 
