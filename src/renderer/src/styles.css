@@ -744,7 +744,7 @@ textarea:focus-visible,
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.4rem 0.9rem;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 500;
   color: var(--text-muted);
   background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
@@ -1239,7 +1239,7 @@ textarea:focus-visible,
 
 .shortcut-group__name {
   margin: 0 0 6px;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -1334,6 +1334,12 @@ textarea:focus-visible,
 
 .modal-card__header {
   padding-top: 20px;
+}
+
+.modal-card__header h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
 }
 
 .modal-footer-note {

@@ -424,7 +424,7 @@ describe("resolveToolPath", () => {
   it("throws a surface-pointing error when the tool is absent", async () => {
     const manager = await makeManager();
     await manager.reconcile();
-    expect(() => manager.resolveToolPath("ffmpeg")).toThrow(/Audio Tools/);
+    expect(() => manager.resolveToolPath("ffmpeg")).toThrow(/Managed tools/);
   });
 
   it("returns the bin path once the tool is installed", async () => {

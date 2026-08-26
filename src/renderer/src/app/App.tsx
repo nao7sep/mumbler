@@ -884,7 +884,7 @@ export function App(): ReactElement {
               type="button"
               className={`tools-chip tools-chip--${toolsRollUp}`}
               onClick={() => setShowAudioTools(true)}
-              title="Open Audio Tools"
+              title="Open Managed tools"
             >
               <ToolsChipIcon role={toolsRollUp} />
               {toolsChipMessage(toolsRollUp, dependencies)}
@@ -934,7 +934,7 @@ export function App(): ReactElement {
                 disabled={snapshot === null || snapshot.dependencies === null}
                 onSelect={() => setShowAudioTools(true)}
               >
-                Audio Tools
+                Managed tools
               </MenuItem>
               <MenuItem
                 className="app-menu-item"

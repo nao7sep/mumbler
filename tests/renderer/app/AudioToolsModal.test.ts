@@ -98,4 +98,38 @@ describe("AudioToolsModal update check", () => {
     expect(document.body.textContent).toContain("Unknown");
     expect(document.body.textContent).toContain("Working…");
   });
+
+  it("uses the fleet management title and presents rolling builds by date", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        React.createElement(AudioToolsModal, {
+          dependencies: [{
+            ...dependency,
+            state: "update-available",
+            installedVersion: "Latest Auto-Build (2026-08-23 13:03)",
+            desiredVersion: "Latest Auto-Build (2026-08-24 14:04)",
+            transient: { kind: "idle" },
+          }],
+          checkUpdatesAtLaunch: true,
+          isChecking: false,
+          checkNotice: null,
+          onProvision: vi.fn(),
+          onCancelProvision: vi.fn(),
+          onCheck: vi.fn(),
+          onCancelCheck: vi.fn(),
+          onToggleCheckUpdates: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      );
+    });
+
+    expect(document.body.textContent).toContain("Managed tools");
+    expect(document.body.textContent).toContain("2026-08-23 13:03");
+    expect(document.body.textContent).toContain("2026-08-24 14:04");
+    expect(document.body.textContent).not.toContain("Latest Auto-Build");
+  });
 });

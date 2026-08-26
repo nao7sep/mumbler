@@ -75,6 +75,10 @@ function lastCheckedHint(dependencies: DependencyStatus[], isChecking: boolean):
   return `Last checked ${relativeTime(Math.max(...stamps))}.`;
 }
 
+function displayArtifactIdentity(identity: string | null): string | null {
+  return identity?.match(/^Latest Auto-Build \((.+)\)$/)?.[1] ?? identity;
+}
+
 export function AudioToolsModal({
   dependencies,
   checkUpdatesAtLaunch,
@@ -89,7 +93,7 @@ export function AudioToolsModal({
 }: AudioToolsModalProps): ReactElement {
   return (
     <ModalShell
-      title="Audio Tools"
+      title="Managed tools"
       onRequestClose={onClose}
       describedById="audio-tools-description"
       footer={
@@ -141,10 +145,10 @@ export function AudioToolsModal({
                     <span className={ROLE_CLASS[status.role]}>{STATUS_LABEL[status.state]}</span>
                   </td>
                   <td>
-                    {status.installedVersion ??
+                    {displayArtifactIdentity(status.installedVersion) ??
                       (status.state === "not-installed" ? "—" : "Version unreadable")}
                   </td>
-                  <td>{status.desiredVersion ?? (isChecking ? "…" : "Unknown")}</td>
+                  <td>{displayArtifactIdentity(status.desiredVersion) ?? (isChecking ? "…" : "Unknown")}</td>
                   <td className="tools-table__action">
                     {running ? (
                       <span className="tools-table__actions">

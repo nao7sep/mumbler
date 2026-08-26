@@ -131,7 +131,7 @@ export class ToolManager {
   resolveToolPath(name: ToolName): string {
     if (!(this.present.get(name) ?? false)) {
       throw new OperationError(
-        `${name} is not installed. Open Audio Tools to install the required audio tools.`,
+        `${name} is not installed. Open Managed tools to install the required audio tools.`,
       );
     }
     return this.toolPath(name);
