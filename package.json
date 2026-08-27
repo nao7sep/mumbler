@@ -49,8 +49,11 @@
     "vitest": "^4.1.11"
   },
   "allowScripts": {
+    "@google/genai": false,
     "electron-winstaller@5.4.0": true,
     "esbuild@0.25.12": true,
-    "esbuild@0.28.1": true
+    "esbuild@0.28.1": true,
+    "fsevents": false,
+    "protobufjs": false
   }
 }
