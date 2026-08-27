@@ -2,6 +2,7 @@
   "name": "mumbler",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@12.0.2",
   "description": "Desktop audio transcription app",
   "author": {
     "name": "Yoshinao Inoguchi",
@@ -49,11 +50,11 @@
     "vitest": "^4.1.11"
   },
   "allowScripts": {
-    "@google/genai": false,
+    "@google/genai@2.18.0": false,
     "electron-winstaller@5.4.0": true,
     "esbuild@0.25.12": true,
     "esbuild@0.28.1": true,
-    "fsevents": false,
-    "protobufjs": false
+    "fsevents@2.3.3": false,
+    "protobufjs@7.6.5": false
   }
 }
