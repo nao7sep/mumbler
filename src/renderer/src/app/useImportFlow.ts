@@ -7,7 +7,11 @@ import {
   type DragEvent,
 } from "react";
 
-import type { AppSnapshot, PendingImportReviewItem } from "@shared/app-shell";
+import type {
+  AppSnapshot,
+  ImportOperationResult,
+  PendingImportReviewItem,
+} from "@shared/app-shell";
 
 import {
   inspectFileDragOffer,
@@ -15,12 +19,18 @@ import {
   parseDroppedPaths,
   reconcilePendingReviewDrafts,
 } from "./import-rules";
+import { isTextEditingDropTarget } from "./external-drop-boundary";
 
 interface UseImportFlowOptions {
   snapshot: AppSnapshot | null;
   onSnapshotUpdate: (snapshot: AppSnapshot) => void;
   onError: (message: string | null) => void;
-  onPersistentNotice: (message: string) => void;
+}
+
+export interface ImportResultNotice {
+  message: string;
+  severity: "information" | "warning" | "error";
+  issueKeys: string[];
 }
 
 interface UseImportFlowResult {
@@ -28,7 +38,9 @@ interface UseImportFlowResult {
   isConfirmingReview: boolean;
   pendingReviewDrafts: PendingImportReviewItem[];
   isDragActive: boolean;
+  importResult: ImportResultNotice | null;
   setPendingReviewDrafts: Dispatch<SetStateAction<PendingImportReviewItem[]>>;
+  dismissImportResult: () => void;
   handleImportClick: () => Promise<void>;
   handleConfirmPendingImports: () => Promise<void>;
   handleCancelPendingImports: () => Promise<void>;
@@ -41,12 +53,12 @@ export function useImportFlow({
   snapshot,
   onSnapshotUpdate,
   onError,
-  onPersistentNotice,
 }: UseImportFlowOptions): UseImportFlowResult {
   const [isImporting, setIsImporting] = useState(false);
   const [isConfirmingReview, setIsConfirmingReview] = useState(false);
   const [pendingReviewDrafts, setPendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResultNotice | null>(null);
   const dragResetTimerRef = useRef<number | null>(null);
 
   function clearDragResetTimer(): void {
@@ -107,16 +119,79 @@ export function useImportFlow({
     };
   }, [pendingReviewDrafts]);
 
+  function resultKey(sourcePath: string): string {
+    return `source:${sourcePath}`;
+  }
+
+  function coversKeys(resolved: readonly string[], issues: readonly string[]): boolean {
+    const resolvedSet = new Set(resolved);
+    const issueSet = new Set(issues);
+    return issueSet.size > 0 && [...issueSet].every((key) => resolvedSet.has(key));
+  }
+
+  function presentImportResult(
+    result: Pick<
+      ImportOperationResult,
+      "attemptedPaths" | "importedCount" | "failedImports" | "duplicateImports"
+    >,
+    unavailable: Array<{ sourcePath: string; message: string }> = [],
+  ): void {
+    const failures = [...result.failedImports, ...unavailable.map((failure) => ({
+      ...failure,
+      kind: "invalid" as const,
+    }))];
+    const attemptedKeys = [
+      ...result.attemptedPaths.map(resultKey),
+      ...unavailable.map((failure) => resultKey(failure.sourcePath)),
+    ];
+    if (failures.length === 0 && result.duplicateImports.length === 0) {
+      if (attemptedKeys.length > 0) {
+        setImportResult((current) =>
+          current !== null && coversKeys(attemptedKeys, current.issueKeys) ? null : current
+        );
+      }
+      return;
+    }
+    const imported = result.importedCount;
+    const failureText = failures
+      .map((failure) => `${failure.sourcePath} — ${failure.message}`)
+      .join("; ");
+    const parts: string[] = [];
+    if (imported > 0) parts.push(`Imported ${imported} file${imported === 1 ? "" : "s"}`);
+    if (result.duplicateImports.length > 0) {
+      parts.push(`Repeated in this import: ${result.duplicateImports.join(", ")}`);
+    }
+    if (failures.length > 0) {
+      parts.push(
+        `${failures.length} item${failures.length === 1 ? "" : "s"} could not be imported: ${failureText}`,
+      );
+    }
+    setImportResult({
+      severity: failures.some((failure) => failure.kind === "failure")
+        ? "error"
+        : failures.length > 0
+          ? "warning"
+          : "information",
+      message: `${parts.join("; ")}.`,
+      issueKeys: [
+        ...failures.map((failure) => resultKey(failure.sourcePath)),
+        ...result.duplicateImports.map(resultKey),
+      ],
+    });
+  }
+
   async function handleImportClick(): Promise<void> {
     setIsImporting(true);
     try {
       const result = await window.mumbler.openImportDialog();
       onSnapshotUpdate(result.snapshot);
-      for (const failure of result.failedImports) {
-        onPersistentNotice(`Import failed: ${failure.sourcePath} — ${failure.message}`);
-      }
+      presentImportResult(result);
     } catch (error: unknown) {
-      onError(error instanceof Error ? error.message : "Import failed.");
+      setImportResult({
+        severity: "error",
+        message: error instanceof Error ? error.message : "Import failed.",
+        issueKeys: ["operation:file-picker"],
+      });
     } finally {
       setIsImporting(false);
     }
@@ -146,7 +221,10 @@ export function useImportFlow({
     setPendingReviewDrafts([]);
   }
 
-  async function handleDroppedPaths(paths: string[]): Promise<void> {
+  async function handleDroppedPaths(
+    paths: string[],
+    unavailable: Array<{ sourcePath: string; message: string }> = [],
+  ): Promise<void> {
     if (paths.length === 0) {
       return;
     }
@@ -155,28 +233,33 @@ export function useImportFlow({
     try {
       const result = await window.mumbler.importDroppedPaths(paths);
       onSnapshotUpdate(result.snapshot);
-      for (const failure of result.failedImports) {
-        onPersistentNotice(`Import failed: ${failure.sourcePath} — ${failure.message}`);
-      }
+      presentImportResult(result, unavailable);
     } catch (error: unknown) {
-      onError(error instanceof Error ? error.message : "Dropped import failed.");
+      setImportResult({
+        severity: "error",
+        message: error instanceof Error ? error.message : "Dropped import failed.",
+        issueKeys: paths.map(resultKey),
+      });
     } finally {
       setIsImporting(false);
     }
   }
 
   function onDragOver(event: DragEvent<HTMLElement>): void {
-    // The workspace owns every drop boundary so Chromium cannot navigate or open a
-    // rejected URL/text payload. Rejected data still advertises no accepted action.
+    const offer = inspectFileDragOffer(event.dataTransfer);
+    if (offer === "rejected" && isTextEditingDropTarget(event.target)) return;
+    // Queue owns every remaining drop boundary so Chromium cannot
+    // navigate or open rejected data.
     event.preventDefault();
     event.stopPropagation();
-    const offer = inspectFileDragOffer(event.dataTransfer);
-    if (offer !== "accepted") {
+    if (offer === "rejected") {
       event.dataTransfer.dropEffect = "none";
       resetDragState();
       return;
     }
 
+    // Chromium needs the transport action to deliver the native offer. Browser
+    // file items are not local-path provenance, so presentation stays neutral.
     event.dataTransfer.dropEffect = "copy";
     setIsDragActive(true);
     scheduleDragReset();
@@ -191,26 +274,37 @@ export function useImportFlow({
   }
 
   function onDrop(event: DragEvent<HTMLElement>): void {
-    // Consume the browser default even for rejected payloads; acceptance below
+    const acceptsDrop = isFileDrag(event.dataTransfer);
+    if (!acceptsDrop && isTextEditingDropTarget(event.target)) return;
+    // Consume the browser default for every remaining payload; acceptance below
     // controls only Mumbler's import behavior and visual affordance.
     event.preventDefault();
     event.stopPropagation();
-    const acceptsDrop = isFileDrag(event.dataTransfer);
     resetDragState();
     if (!acceptsDrop) {
+      setImportResult({
+        severity: "warning",
+        message: "Queue accepts local audio files from Finder or Import.",
+        issueKeys: ["offer:non-file"],
+      });
       return;
     }
 
-    const paths = parseDroppedPaths(event.dataTransfer.files, (file) =>
+    const admission = parseDroppedPaths(event.dataTransfer.files, (file) =>
       window.mumbler.getPathForFile(file),
     );
 
-    if (paths.length === 0) {
-      onError("No valid file paths found in the dropped items.");
+    if (admission.paths.length === 0) {
+      presentImportResult({
+        attemptedPaths: [],
+        importedCount: 0,
+        failedImports: [],
+        duplicateImports: [],
+      }, admission.unavailable);
       return;
     }
 
-    void handleDroppedPaths(paths);
+    void handleDroppedPaths(admission.paths, admission.unavailable);
   }
 
   return {
@@ -218,7 +312,9 @@ export function useImportFlow({
     isConfirmingReview,
     pendingReviewDrafts,
     isDragActive,
+    importResult,
     setPendingReviewDrafts,
+    dismissImportResult: () => setImportResult(null),
     handleImportClick,
     handleConfirmPendingImports,
     handleCancelPendingImports,

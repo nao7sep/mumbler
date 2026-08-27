@@ -25,6 +25,7 @@ import {
   type SettingsDraft,
   type ToolName,
 } from "@shared/app-shell";
+import { AUDIO_IMPORT_EXTENSIONS, isSupportedAudioImportName } from "@shared/audio-import";
 import { isCardBusy } from "@shared/card-status";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
 import {
@@ -81,6 +82,8 @@ const DEBUG_LOGGING_ENABLED = !app.isPackaged || process.env.MUMBLER_DEBUG === "
 // this window — keeps the startup check off the network on most launches.
 const TOOL_CHECK_STALE_MS = 24 * 60 * 60 * 1000;
 
+class ImportAdmissionError extends Error {}
+
 interface AppRuntimeState {
   paths: AppPaths | null;
   settings: MumblerSettings | null;
@@ -113,6 +116,10 @@ export class ApplicationRuntime {
   private shutdownPromise: Promise<void> | null = null;
   private onPipelineProgressCallback: (() => void) | null = null;
   private onDependenciesChangedCallback: (() => void) | null = null;
+  // Picker and drop are two entry paths into one mutable import boundary. Keep
+  // copy -> pending state -> persistence ordered here; renderer disabling is
+  // presentation and cannot own data safety.
+  private importTail: Promise<void> = Promise.resolve();
 
   private constructor(runtime: AppRuntimeState) {
     this.runtime = runtime;
@@ -619,18 +626,7 @@ export class ApplicationRuntime {
       filters: [
         {
           name: "Audio Files",
-          extensions: [
-            "mp3",
-            "m4a",
-            "aac",
-            "wav",
-            "flac",
-            "ogg",
-            "oga",
-            "aif",
-            "aiff",
-            "mp4",
-          ],
+          extensions: [...AUDIO_IMPORT_EXTENSIONS],
         },
         { name: "All Files", extensions: ["*"] },
       ],
@@ -639,8 +635,10 @@ export class ApplicationRuntime {
     if (result.canceled || result.filePaths.length === 0) {
       return {
         snapshot: this.getSnapshot(),
+        attemptedPaths: [],
         importedCount: 0,
         failedImports: [],
+        duplicateImports: [],
       };
     }
 
@@ -1348,26 +1346,60 @@ export class ApplicationRuntime {
     sourcePaths: string[],
     importSource: ImportSource,
   ): Promise<ImportOperationResult> {
+    const operation = this.importTail.then(() => this.importPathsExclusive(sourcePaths, importSource));
+    this.importTail = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private async importPathsExclusive(
+    sourcePaths: string[],
+    importSource: ImportSource,
+  ): Promise<ImportOperationResult> {
     this.ensureReady();
     const failedImports: FailedImport[] = [];
-    const uniquePaths = [...new Set(sourcePaths.filter((path) => path.trim().length > 0))];
+    const attemptedPaths = [...sourcePaths];
+    const duplicateImports: string[] = [];
+    const seenPaths = new Set<string>();
     let importedCount = 0;
 
-    for (const sourcePath of uniquePaths) {
+    for (const sourcePath of sourcePaths) {
+      if (sourcePath.trim().length === 0) {
+        failedImports.push({
+          sourcePath: "Empty path",
+          message: "No usable local file path was available.",
+          kind: "invalid",
+        });
+        continue;
+      }
+      if (seenPaths.has(sourcePath)) {
+        duplicateImports.push(sourcePath);
+        continue;
+      }
+      seenPaths.add(sourcePath);
       try {
         await this.importSinglePath(sourcePath, importSource);
         importedCount += 1;
       } catch (error: unknown) {
+        const kind = error instanceof ImportAdmissionError ? "invalid" : "failure";
         failedImports.push({
           sourcePath,
           message: error instanceof Error ? error.message : "Unknown import failure.",
+          kind,
         });
-        await this.runtime.logger.error(
-          "import.failed",
-          "Failed to import source file.",
-          error,
-          { sourcePath, importSource },
-        );
+        if (kind === "invalid") {
+          await this.runtime.logger.warn("import.rejected", "Source did not meet audio import requirements.", {
+            sourcePath,
+            importSource,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        } else {
+          await this.runtime.logger.error(
+            "import.failed",
+            "Failed to import source file.",
+            error,
+            { sourcePath, importSource },
+          );
+        }
       }
     }
 
@@ -1376,24 +1408,30 @@ export class ApplicationRuntime {
       await this.runtime.logger.info("import.completed", "Imported files into pending review.", {
         importedCount,
         failedCount: failedImports.length,
+        duplicateCount: duplicateImports.length,
         importSource,
       });
     }
 
     return {
       snapshot: this.getSnapshot(),
+      attemptedPaths,
       importedCount,
       failedImports,
+      duplicateImports,
     };
   }
 
   private async importSinglePath(sourcePath: string, importSource: ImportSource): Promise<void> {
     const paths = this.runtime.paths!;
     const settings = this.runtime.settings!;
+    if (!isSupportedAudioImportName(sourcePath)) {
+      throw new ImportAdmissionError("Unsupported audio file type.");
+    }
     const sourceStats = await stat(sourcePath);
 
     if (!sourceStats.isFile()) {
-      throw new Error("Only files can be imported.");
+      throw new ImportAdmissionError("Only files can be imported.");
     }
 
     const originalFilename = basename(sourcePath);

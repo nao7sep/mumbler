@@ -1,23 +1,44 @@
 import type { PendingImportReviewItem } from "@shared/app-shell";
+import { isSupportedAudioImportName } from "@shared/audio-import";
 
 // The pure decisions behind useImportFlow, lifted out of the hook so they are
 // testable without a DOM drag event or a React effect.
 
-/**
- * The non-empty absolute paths of a set of dropped files, resolved through the
- * preload bridge's `getPathForFile`. Files that resolve to an empty path (no
- * real path available) are dropped.
- */
+export interface DroppedPathAdmission {
+  paths: string[];
+  unavailable: Array<{ sourcePath: string; message: string }>;
+}
+
+/** Resolve every delivered file once, preserving unavailable members for the
+ * committed result. Duplicate paths deliberately remain in `paths`; the owning
+ * main-process boundary applies and reports the shared duplicate policy. */
 export function parseDroppedPaths(
   files: ArrayLike<File>,
   getPathForFile: (file: File) => string,
-): string[] {
-  return Array.from(files)
-    .map((file) => getPathForFile(file))
-    .filter((value) => value.length > 0);
+): DroppedPathAdmission {
+  const paths: string[] = [];
+  const unavailable: DroppedPathAdmission["unavailable"] = [];
+  for (const file of Array.from(files)) {
+    try {
+      const path = getPathForFile(file);
+      if (path) paths.push(path);
+      else unavailable.push({
+        sourcePath: file.name || "Unavailable dropped item",
+        message: "No usable local file path was available.",
+      });
+    } catch (error: unknown) {
+      unavailable.push({
+        sourcePath: file.name || "Unavailable dropped item",
+        message: error instanceof Error && error.message
+          ? `Local path could not be read: ${error.message}`
+          : "Local path could not be read.",
+      });
+    }
+  }
+  return { paths, unavailable };
 }
 
-/** Whether the current drag advertises file payloads that Mumbler can import. */
+/** Whether the current drag advertises file payloads eligible for delivery. */
 export function isFileDrag(dataTransfer: Pick<DataTransfer, "types" | "items">): boolean {
   return (
     Array.from(dataTransfer.types).includes("Files") ||
@@ -25,7 +46,7 @@ export function isFileDrag(dataTransfer: Pick<DataTransfer, "types" | "items">):
   );
 }
 
-export type FileDragOffer = "rejected" | "delivery-only" | "accepted";
+export type FileDragOffer = "rejected" | "delivery-only";
 
 /**
  * Classifies a drag without treating Chromium's protected `Files` marker as
@@ -34,9 +55,23 @@ export type FileDragOffer = "rejected" | "delivery-only" | "accepted";
 export function inspectFileDragOffer(
   dataTransfer: Pick<DataTransfer, "types" | "items">,
 ): FileDragOffer {
-  const items = Array.from(dataTransfer.items);
-  if (items.some((item) => item.kind === "file")) return "accepted";
-  return Array.from(dataTransfer.types).includes("Files") ? "delivery-only" : "rejected";
+  let protectedFile = false;
+  let sawFile = false;
+  for (const item of Array.from(dataTransfer.items)) {
+    if (item.kind !== "file") continue;
+    sawFile = true;
+    try {
+      const file = item.getAsFile();
+      if (!file) protectedFile = true;
+      else if (isSupportedAudioImportName(file.name)) return "delivery-only";
+    } catch {
+      protectedFile = true;
+    }
+  }
+  if (protectedFile || (!sawFile && Array.from(dataTransfer.types).includes("Files"))) {
+    return "delivery-only";
+  }
+  return "rejected";
 }
 
 /**

@@ -510,12 +510,15 @@ export interface AppSnapshot {
 export interface FailedImport {
   sourcePath: string;
   message: string;
+  kind: "invalid" | "failure";
 }
 
 export interface ImportOperationResult {
   snapshot: AppSnapshot;
+  attemptedPaths: string[];
   importedCount: number;
   failedImports: FailedImport[];
+  duplicateImports: string[];
 }
 
 export type SaveConflictResolution = "overwrite" | "suffix" | "cancel";

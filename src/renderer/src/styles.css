@@ -279,12 +279,6 @@ textarea:focus-visible,
   align-items: start;
 }
 
-.workspace--drag-active {
-  outline: 2px dashed var(--accent);
-  outline-offset: 8px;
-  border-radius: var(--radius-lg);
-}
-
 /* The queue/detail resize handle. Taken out of the grid flow (absolute) so it does
    not consume a track, and positioned to overlay the 20px gap that begins exactly
    at --queue-width. Full-height hit target with a slim centred grip that brightens
@@ -386,6 +380,46 @@ textarea:focus-visible,
   top: 20px;
   max-height: calc(100vh - var(--vertical-chrome));
   overflow-y: auto;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.queue-pane--drag-delivery {
+  background: var(--surface-active);
+  border-color: var(--text-secondary);
+  box-shadow: 0 0 0 2px var(--text-secondary), var(--shadow-sm);
+}
+
+.queue-import-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid;
+  border-radius: var(--radius);
+  font-size: 0.8125rem;
+}
+
+.queue-import-result > span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.queue-import-result--information {
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+  border-color: var(--border-subtle);
+}
+
+.queue-import-result--warning {
+  color: var(--warning);
+  background: var(--warning-subtle);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+}
+
+.queue-import-result--error {
+  color: var(--danger);
+  background: var(--danger-subtle);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 .queue-list {

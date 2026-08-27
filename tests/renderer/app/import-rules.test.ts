@@ -11,17 +11,31 @@ import {
 const item = (id: string): PendingImportReviewItem => ({ id }) as unknown as PendingImportReviewItem;
 
 describe("parseDroppedPaths", () => {
-  it("resolves each file's path and drops empties", () => {
+  it("preserves duplicate paths and accounts for inaccessible entries", () => {
     const files = [{ name: "a" }, { name: "b" }, { name: "c" }] as unknown as File[];
-    const paths = parseDroppedPaths(files, (file) =>
-      (file as { name: string }).name === "b" ? "" : `/abs/${(file as { name: string }).name}`,
-    );
-    expect(paths).toEqual(["/abs/a", "/abs/c"]);
+    const paths = parseDroppedPaths(files, (file) => {
+      const name = (file as { name: string }).name;
+      if (name === "b") throw new Error("unavailable");
+      return "/abs/audio.wav";
+    });
+    expect(paths).toEqual({
+      paths: ["/abs/audio.wav", "/abs/audio.wav"],
+      unavailable: [{
+        sourcePath: "b",
+        message: "Local path could not be read: unavailable",
+      }],
+    });
   });
 
   it("returns an empty array when nothing resolves", () => {
     const files = [{ name: "a" }] as unknown as File[];
-    expect(parseDroppedPaths(files, () => "")).toEqual([]);
+    expect(parseDroppedPaths(files, () => "")).toEqual({
+      paths: [],
+      unavailable: [{
+        sourcePath: "a",
+        message: "No usable local file path was available.",
+      }],
+    });
   });
 });
 
@@ -58,13 +72,31 @@ describe("inspectFileDragOffer", () => {
     ).toBe("delivery-only");
   });
 
-  it("accepts an inspectable file item", () => {
+  it("keeps an inspectable file item delivery-only until its local path resolves", () => {
     expect(
       inspectFileDragOffer({
         types: ["Files"],
-        items: [{ kind: "file" }] as unknown as DataTransferItemList,
+        items: [{ kind: "file", getAsFile: () => ({ name: "audio.wav" }) }] as unknown as DataTransferItemList,
       }),
-    ).toBe("accepted");
+    ).toBe("delivery-only");
+  });
+
+  it("keeps a protected file item delivery-only", () => {
+    expect(
+      inspectFileDragOffer({
+        types: ["Files"],
+        items: [{ kind: "file", getAsFile: () => null }] as unknown as DataTransferItemList,
+      }),
+    ).toBe("delivery-only");
+  });
+
+  it("rejects an inspectable unsupported file item", () => {
+    expect(
+      inspectFileDragOffer({
+        types: ["Files"],
+        items: [{ kind: "file", getAsFile: () => ({ name: "notes.txt" }) }] as unknown as DataTransferItemList,
+      }),
+    ).toBe("rejected");
   });
 
   it("rejects non-file data", () => {

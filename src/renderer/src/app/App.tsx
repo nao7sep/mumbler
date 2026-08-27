@@ -205,7 +205,6 @@ export function App(): ReactElement {
     snapshot,
     onSnapshotUpdate: setSnapshot,
     onError: (msg) => { if (msg !== null) addPersistent(msg, "error"); },
-    onPersistentNotice: (msg) => addPersistent(msg, "error"),
   });
 
   const settingsModal = useSettingsModal({
@@ -971,13 +970,15 @@ export function App(): ReactElement {
 
       <main
         ref={workspaceRef}
-        className={`workspace${importFlow.isDragActive ? " workspace--drag-active" : ""}`}
+        className="workspace"
         style={{ "--queue-width": `${queueWidth}px` } as CSSProperties}
-        onDragOver={importFlow.onDragOver}
-        onDragLeave={importFlow.onDragLeave}
-        onDrop={importFlow.onDrop}
       >
-        <aside className="queue-pane panel">
+        <aside
+          className={`queue-pane panel${importFlow.isDragActive ? " queue-pane--drag-delivery" : ""}`}
+          onDragOver={importFlow.onDragOver}
+          onDragLeave={importFlow.onDragLeave}
+          onDrop={importFlow.onDrop}
+        >
           <div className="panel__header">
             <h2>Queue</h2>
             <div className="toolbar">
@@ -991,6 +992,23 @@ export function App(): ReactElement {
               </button>
             </div>
           </div>
+
+          {importFlow.importResult ? (
+            <div
+              className={`queue-import-result queue-import-result--${importFlow.importResult.severity}`}
+              role={importFlow.importResult.severity === "error" ? "alert" : "status"}
+            >
+              <span>{importFlow.importResult.message}</span>
+              <button
+                type="button"
+                className="button button--ghost button--compact"
+                onClick={importFlow.dismissImportResult}
+                aria-label="Dismiss import result"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          ) : null}
 
           {snapshot?.startupDiagnostic ? (
             <section className="panel panel--nested queue-empty">
@@ -1023,7 +1041,7 @@ export function App(): ReactElement {
               <p className="empty-state__body">
                 {snapshot?.state?.pendingImports.length
                   ? "Confirm timestamps to add files to the queue."
-                  : "Import audio files or drop them into this window to get started."}
+                  : "Import audio files or drop them into Queue to get started."}
               </p>
             </section>
           )}
