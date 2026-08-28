@@ -130,8 +130,7 @@ describe("useImportFlow drag acceptance", () => {
     expect(target?.getAttribute("data-active")).toBe("yes");
   });
 
-  it("clears an inspectable file-drag affordance when drag events stop", async () => {
-    vi.useFakeTimers();
+  it("clears an inspectable file-drag affordance when the Queue is left", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -147,7 +146,7 @@ describe("useImportFlow drag acceptance", () => {
     expect(over.defaultPrevented).toBe(true);
     expect(target?.getAttribute("data-active")).toBe("yes");
 
-    await act(async () => vi.advanceTimersByTime(1001));
+    await act(async () => target?.dispatchEvent(dragEvent("dragleave", ["Files"])));
     expect(target?.getAttribute("data-active")).toBe("no");
   });
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CommandId } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
-import { findMatchingCommand, isTypingTarget } from "@renderer/app/shortcut-utils";
+import { findMatchingCommand, isTextEditingTarget, isTypingTarget } from "@renderer/app/shortcut-utils";
 
 function keydown(init: KeyboardEventInit): KeyboardEvent {
   return new KeyboardEvent("keydown", init);
@@ -74,9 +74,7 @@ describe("isTypingTarget", () => {
   it("treats text fields and contenteditable as typing targets", () => {
     expect(isTypingTarget(document.createElement("input"))).toBe(true);
     expect(isTypingTarget(document.createElement("textarea"))).toBe(true);
-    // SELECT is NOT a typing target: it consumes no printable key, so counting it
-    // killed every shortcut while a model dropdown held focus
-    // (keyboard-shortcut-conventions exclude it).
+    // Select owns keyboard type-ahead, so the global bare-key commands stand down.
     expect(isTypingTarget(document.createElement("select"))).toBe(true);
 
     // jsdom does not implement the live isContentEditable getter, so stub it to
@@ -90,5 +88,16 @@ describe("isTypingTarget", () => {
     expect(isTypingTarget(document.createElement("div"))).toBe(false);
     expect(isTypingTarget(document.createElement("button"))).toBe(false);
     expect(isTypingTarget(null)).toBe(false);
+  });
+});
+
+describe("isTextEditingTarget", () => {
+  it("distinguishes native text editors from other shortcut-owning inputs", () => {
+    expect(isTextEditingTarget(document.createElement("textarea"))).toBe(true);
+    expect(isTextEditingTarget(document.createElement("input"))).toBe(true);
+    const range = document.createElement("input");
+    range.type = "range";
+    expect(isTextEditingTarget(range)).toBe(false);
+    expect(isTypingTarget(range)).toBe(true);
   });
 });

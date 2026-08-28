@@ -1,6 +1,17 @@
 import type { CommandId } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
 
+const TEXT_INPUT_TYPES = new Set([
+  "",
+  "email",
+  "number",
+  "password",
+  "search",
+  "tel",
+  "text",
+  "url",
+]);
+
 /**
  * Every mumbler command is a bare key: any modifier means the keystroke is
  * something else (a chord, typed punctuation, AltGr output) and no command
@@ -32,17 +43,17 @@ export function isTextEditingTarget(target: EventTarget | null): boolean {
   }
 
   const tagName = target.tagName.toLowerCase();
-  return tagName === "input" || tagName === "textarea";
+  if (tagName === "textarea") return true;
+  return tagName === "input" && TEXT_INPUT_TYPES.has(target.getAttribute("type")?.toLowerCase() ?? "");
 }
 
-/** Keyboard-owning targets for the global bare-key commands: text entry, plus a
- * native select — it owns printable-key type-ahead even though it is not a text
- * editor, so bare keys must still stand down while it has focus. */
+/** Keyboard-owning targets for the global bare-key commands: text entry and
+ * native input/select controls whose own key behavior must take precedence. */
 export function isTypingTarget(target: EventTarget | null): boolean {
   if (isTextEditingTarget(target)) {
     return true;
   }
-  return target instanceof HTMLElement && target.tagName.toLowerCase() === "select";
+  return target instanceof HTMLElement && ["input", "select"].includes(target.tagName.toLowerCase());
 }
 
 // True when the focused element activates on Space (a button, link, or summary).

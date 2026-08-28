@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useRef,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -19,7 +18,7 @@ import {
   parseDroppedPaths,
   reconcilePendingReviewDrafts,
 } from "./import-rules";
-import { isTextEditingDropTarget } from "./external-drop-boundary";
+import { isTextEditingTarget } from "./shortcut-utils";
 
 interface UseImportFlowOptions {
   snapshot: AppSnapshot | null;
@@ -59,26 +58,9 @@ export function useImportFlow({
   const [pendingReviewDrafts, setPendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const [importResult, setImportResult] = useState<ImportResultNotice | null>(null);
-  const dragResetTimerRef = useRef<number | null>(null);
-
-  function clearDragResetTimer(): void {
-    if (dragResetTimerRef.current !== null) {
-      window.clearTimeout(dragResetTimerRef.current);
-      dragResetTimerRef.current = null;
-    }
-  }
 
   function resetDragState(): void {
-    clearDragResetTimer();
     setIsDragActive(false);
-  }
-
-  function scheduleDragReset(): void {
-    clearDragResetTimer();
-    dragResetTimerRef.current = window.setTimeout(() => {
-      dragResetTimerRef.current = null;
-      setIsDragActive(false);
-    }, 1000);
   }
 
   useEffect(() => {
@@ -88,7 +70,6 @@ export function useImportFlow({
     return () => {
       window.removeEventListener("blur", reset);
       window.removeEventListener("dragend", reset);
-      clearDragResetTimer();
     };
   }, []);
 
@@ -247,7 +228,7 @@ export function useImportFlow({
 
   function onDragOver(event: DragEvent<HTMLElement>): void {
     const offer = inspectFileDragOffer(event.dataTransfer);
-    if (offer === "rejected" && isTextEditingDropTarget(event.target)) return;
+    if (offer === "rejected" && isTextEditingTarget(event.target)) return;
     // Queue owns every remaining drop boundary so Chromium cannot
     // navigate or open rejected data.
     event.preventDefault();
@@ -262,7 +243,6 @@ export function useImportFlow({
     // file items are not local-path provenance, so presentation stays neutral.
     event.dataTransfer.dropEffect = "copy";
     setIsDragActive(true);
-    scheduleDragReset();
   }
 
   function onDragLeave(event: DragEvent<HTMLElement>): void {
@@ -275,7 +255,7 @@ export function useImportFlow({
 
   function onDrop(event: DragEvent<HTMLElement>): void {
     const acceptsDrop = isFileDrag(event.dataTransfer);
-    if (!acceptsDrop && isTextEditingDropTarget(event.target)) return;
+    if (!acceptsDrop && isTextEditingTarget(event.target)) return;
     // Consume the browser default for every remaining payload; acceptance below
     // controls only Mumbler's import behavior and visual affordance.
     event.preventDefault();
