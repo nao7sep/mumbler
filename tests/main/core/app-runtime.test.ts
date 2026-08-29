@@ -1,3 +1,7 @@
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, parse } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { PendingImportReviewItem } from "@shared/app-shell";
@@ -6,13 +10,38 @@ import type { PendingImportReviewItem } from "@shared/app-shell";
 // pure helpers can be exercised under the node test environment. The helpers
 // under test never touch electron.
 vi.mock("electron", () => ({
-  app: { getVersion: () => "9.9.9-test", getPath: () => "/tmp" },
+  app: {
+    getName: () => "Mumbler Test",
+    getVersion: () => "9.9.9-test",
+    getPath: () => "/tmp",
+    isPackaged: false,
+  },
   BrowserWindow: class {},
   dialog: {},
   shell: {},
 }));
 
+// Runtime initialization should exercise the real storage and import boundaries,
+// but managed ffmpeg/ffprobe maintenance is unrelated to dropped-path admission.
+// Keep that independent boundary inert so this remains a local, deterministic
+// main-process seam rather than a network or host-tool test.
+vi.mock("@main/core/binaries/manager", () => ({
+  ToolManager: class {
+    async reconcile(): Promise<void> {}
+    listStatuses(): [] {
+      return [];
+    }
+    checkIsStale(): boolean {
+      return false;
+    }
+    resolveToolPath(name: string): string {
+      return `/unused/${name}`;
+    }
+  },
+}));
+
 const {
+  ApplicationRuntime,
   applyPendingImportDraft,
   buildConfirmedTimestamps,
   applyFrontTrimOffset,
@@ -20,7 +49,7 @@ const {
   getAppPaths,
 } = await import("@main/core/app-runtime");
 
-const { join, parse } = await import("node:path");
+const { createStateStore } = await import("@main/core/settings-schema");
 
 function authoritativeItem(): PendingImportReviewItem {
   return {
@@ -250,6 +279,80 @@ describe("getAppPaths standard layout", () => {
     // The old name is fully retired — nothing resolves to settings.json.
     for (const p of distinct) {
       expect(p.endsWith("settings.json")).toBe(false);
+    }
+  });
+});
+
+describe("ApplicationRuntime dropped-path import authority", () => {
+  it("accounts for complete batches and durably serializes overlapping deliveries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mumbler-runtime-import-"));
+    const sourceDir = join(root, "sources");
+    const firstAudio = join(sourceDir, "first.wav");
+    const secondAudio = join(sourceDir, "second.mp3");
+    const unsupported = join(sourceDir, "notes.txt");
+    const unavailable = join(sourceDir, "missing.wav");
+    const previousRoot = process.env.MUMBLER_HOME;
+    process.env.MUMBLER_HOME = join(root, "profile");
+
+    await mkdir(sourceDir, { recursive: true });
+    await Promise.all([
+      writeFile(firstAudio, "first audio"),
+      writeFile(secondAudio, "second audio"),
+      writeFile(unsupported, "not audio"),
+    ]);
+
+    let runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>> | null = null;
+    try {
+      runtime = await ApplicationRuntime.initialize();
+      expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+
+      const [mixed, overlapping] = await Promise.all([
+        runtime.importDroppedPaths([firstAudio, firstAudio, "", unsupported, unavailable]),
+        runtime.importDroppedPaths([secondAudio]),
+      ]);
+
+      expect(mixed.attemptedPaths).toEqual([
+        firstAudio,
+        firstAudio,
+        "",
+        unsupported,
+        unavailable,
+      ]);
+      expect(mixed.importedCount).toBe(1);
+      expect(mixed.duplicateImports).toEqual([firstAudio]);
+      expect(mixed.failedImports).toEqual([
+        {
+          sourcePath: "Empty path",
+          message: "No usable local file path was available.",
+          kind: "invalid",
+        },
+        {
+          sourcePath: unsupported,
+          message: "Unsupported audio file type.",
+          kind: "invalid",
+        },
+        expect.objectContaining({ sourcePath: unavailable, kind: "failure" }),
+      ]);
+      expect(overlapping.importedCount).toBe(1);
+      expect(overlapping.failedImports).toEqual([]);
+
+      const pending = runtime.getSnapshot().state?.pendingImports ?? [];
+      expect(pending.map((item) => item.originalSourcePath)).toEqual([firstAudio, secondAudio]);
+      expect(pending.every((item) => item.importSource === "drag-and-drop")).toBe(true);
+      for (const item of pending) {
+        expect((await stat(item.workingFilePath)).isFile()).toBe(true);
+      }
+
+      const persisted = await createStateStore(join(process.env.MUMBLER_HOME, "state.json")).load();
+      expect(persisted.value.pendingImports.map((item) => item.originalSourcePath)).toEqual([
+        firstAudio,
+        secondAudio,
+      ]);
+    } finally {
+      await runtime?.shutdown();
+      if (previousRoot === undefined) delete process.env.MUMBLER_HOME;
+      else process.env.MUMBLER_HOME = previousRoot;
+      await rm(root, { force: true, recursive: true });
     }
   });
 });
