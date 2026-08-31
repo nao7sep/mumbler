@@ -54,6 +54,12 @@ import { formatCardStatusMessage, formatStepName, isCardBusy } from "./card-stat
 import { useTablist } from "./useTablist";
 import { CloseIcon } from "./Icon";
 import {
+  PersistentNotifications,
+  ToastNotifications,
+  pipelineNotification,
+  type AppNotification,
+} from "./Notifications";
+import {
   describeTrimDecision,
   formatOptionalSeconds,
   getGenerateConfirmBody,
@@ -83,13 +89,6 @@ async function copyTextToClipboard(value: string): Promise<void> {
   if (!copied) {
     throw new Error("Clipboard is not available.");
   }
-}
-
-interface AppNotification {
-  id: string;
-  message: string;
-  kind: "toast" | "persistent";
-  variant: "info" | "error";
 }
 
 // The topbar dependency roll-up (managed-runtime-dependencies-conventions): a
@@ -152,15 +151,18 @@ export function App(): ReactElement {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const snapshotRef = useRef<AppSnapshot | null>(null);
 
-  const addToast = useCallback((message: string, variant: AppNotification["variant"] = "info") => {
+  const addToast = useCallback((message: string) => {
     const id = nanoid();
-    setNotifications(prev => [...prev, { id, message, kind: "toast", variant }]);
+    setNotifications(prev => [...prev, { id, message, kind: "toast" }]);
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 4000);
   }, []);
 
-  const addPersistent = useCallback((message: string, variant: AppNotification["variant"] = "info") => {
+  const addPersistent = useCallback((
+    message: string,
+    variant: Extract<AppNotification, { kind: "persistent" }>["variant"] = "info",
+  ) => {
     const id = nanoid();
     setNotifications(prev => [...prev, { id, message, kind: "persistent", variant }]);
   }, []);
@@ -348,10 +350,11 @@ export function App(): ReactElement {
             for (const card of nextSnapshot.state?.cards ?? []) {
               const prevCard = prevSnapshot.state.cards.find((c) => c.id === card.id);
               if (prevCard && prevCard.status !== card.status) {
-                if (card.status === "Ready to Save") {
-                  addToast(`Ready to save: ${card.originalFilename}`);
-                } else if (card.status === "Error") {
-                  addToast(`Failed: ${card.originalFilename} — ${card.lastError?.message ?? "Unknown error"}`, "error");
+                const notification = pipelineNotification(card);
+                if (notification?.kind === "toast") {
+                  addToast(notification.message);
+                } else if (notification?.kind === "persistent") {
+                  addPersistent(notification.message, notification.variant);
                 }
               }
             }
@@ -950,23 +953,10 @@ export function App(): ReactElement {
         </div>
       </header>
 
-      {notifications.filter(n => n.kind === "persistent").length > 0 && (
-        <div className="persistent-strip">
-          {notifications.filter(n => n.kind === "persistent").map(n => (
-            <div key={n.id} className={`persistent-notice persistent-notice--${n.variant}`}>
-              <span className="persistent-notice__message">{n.message}</span>
-              <button
-                type="button"
-                className="button button--ghost button--compact"
-                onClick={() => dismissNotification(n.id)}
-                aria-label="Dismiss notification"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <PersistentNotifications
+        notifications={notifications}
+        onDismiss={dismissNotification}
+      />
 
       <main
         ref={workspaceRef}
@@ -1682,19 +1672,10 @@ export function App(): ReactElement {
         />
       ) : null}
 
-      {notifications.filter(n => n.kind === "toast").length > 0 && (
-        <div className="toast-container">
-          {notifications.filter(n => n.kind === "toast").map(n => (
-            <div
-              key={n.id}
-              className={`toast toast--${n.variant}`}
-              onClick={() => dismissNotification(n.id)}
-            >
-              {n.message}
-            </div>
-          ))}
-        </div>
-      )}
+      <ToastNotifications
+        notifications={notifications}
+        onDismiss={dismissNotification}
+      />
     </div>
   );
 }

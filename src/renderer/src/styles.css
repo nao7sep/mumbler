@@ -1598,6 +1598,15 @@ textarea:focus-visible,
   border-color: color-mix(in srgb, var(--danger) 20%, transparent);
 }
 
+.persistent-notice__severity {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .persistent-notice__message {
   flex: 1;
   overflow-wrap: anywhere;
@@ -1632,12 +1641,6 @@ textarea:focus-visible,
 .toast--info {
   background: var(--surface-raised);
   border: 1px solid var(--border);
-  color: var(--text);
-}
-
-.toast--error {
-  background: color-mix(in srgb, var(--danger) 15%, var(--surface-raised));
-  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
   color: var(--text);
 }
 
