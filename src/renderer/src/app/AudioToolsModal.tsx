@@ -23,6 +23,7 @@ export interface AudioToolsModalProps {
   // rate-limited). The convention writes nothing to the facts on a failed check, so
   // this is the only surface it gets — and it auto-clears.
   checkNotice: string | null;
+  operationError: string | null;
   onProvision: (name: ToolName) => void;
   onCancelProvision: (name: ToolName) => void;
   onCheck: () => void;
@@ -84,6 +85,7 @@ export function AudioToolsModal({
   checkUpdatesAtLaunch,
   isChecking,
   checkNotice,
+  operationError,
   onProvision,
   onCancelProvision,
   onCheck,
@@ -121,6 +123,12 @@ export function AudioToolsModal({
 
         {checkNotice !== null && (
           <p className="banner banner--warning tools-error">{checkNotice}</p>
+        )}
+
+        {operationError !== null && (
+          <p className="banner banner--error tools-error" role="alert">
+            {operationError}
+          </p>
         )}
 
         <table className="tools-table">
@@ -190,7 +198,7 @@ export function AudioToolsModal({
           .map((status) => {
             const message = status.transient.kind === "failed" ? status.transient.error : null;
             return message === null ? null : (
-              <p key={status.name} className="banner banner--error tools-error">
+              <p key={status.name} className="banner banner--error tools-error" role="alert">
                 {status.name}: {message}
               </p>
             );

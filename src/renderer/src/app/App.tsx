@@ -198,6 +198,7 @@ export function App(): ReactElement {
   const [showAudioTools, setShowAudioTools] = useState(false);
   const [isCheckingTools, setIsCheckingTools] = useState(false);
   const [toolCheckNotice, setToolCheckNotice] = useState<string | null>(null);
+  const [toolOperationError, setToolOperationError] = useState<string | null>(null);
   const autoOpenedAudioToolsRef = useRef(false);
   const [showReviewDiscardConfirm, setShowReviewDiscardConfirm] = useState(false);
   const initialReviewDraftsRef = useRef<PendingImportReviewItem[] | null>(null);
@@ -656,14 +657,16 @@ export function App(): ReactElement {
   }
 
   // Audio-tool operations. The main process records per-tool progress/errors in
-  // the snapshot (live, via onDependenciesUpdated), so these just apply the
-  // returned snapshot; a thrown failure (e.g. an operation already in flight)
-  // surfaces as a persistent notice.
+  // the snapshot (live, via onDependenciesUpdated), while a thrown failure (for
+  // example an operation already in flight) belongs to the still-open modal that
+  // initiated it. Keeping that error here leaves it above the backdrop and next
+  // to the retry action instead of sending it to app chrome behind the modal.
   function applyToolSnapshot(promise: Promise<AppSnapshot>, failMessage: string): void {
+    setToolOperationError(null);
     void promise
       .then((nextSnapshot) => setSnapshot(nextSnapshot))
       .catch((error: unknown) => {
-        addPersistent(error instanceof Error ? error.message : failMessage, "error");
+        setToolOperationError(error instanceof Error ? error.message : failMessage);
       });
   }
 
@@ -1663,12 +1666,17 @@ export function App(): ReactElement {
             )
           }
           checkNotice={toolCheckNotice}
+          operationError={toolOperationError}
           onProvision={handleProvisionTool}
           onCancelProvision={handleCancelToolProvision}
           onCheck={handleCheckTools}
           onCancelCheck={handleCancelToolCheck}
           onToggleCheckUpdates={handleToggleCheckUpdates}
-          onClose={() => setShowAudioTools(false)}
+          onClose={() => {
+            setShowAudioTools(false);
+            setToolCheckNotice(null);
+            setToolOperationError(null);
+          }}
         />
       ) : null}
 

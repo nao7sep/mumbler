@@ -46,6 +46,7 @@ describe("AudioToolsModal update check", () => {
           checkUpdatesAtLaunch: true,
           isChecking: true,
           checkNotice: null,
+          operationError: null,
           onProvision: vi.fn(),
           onCancelProvision: vi.fn(),
           onCheck,
@@ -84,6 +85,7 @@ describe("AudioToolsModal update check", () => {
           checkUpdatesAtLaunch: true,
           isChecking: false,
           checkNotice: null,
+          operationError: null,
           onProvision: vi.fn(),
           onCancelProvision: vi.fn(),
           onCheck: vi.fn(),
@@ -117,6 +119,7 @@ describe("AudioToolsModal update check", () => {
           checkUpdatesAtLaunch: true,
           isChecking: false,
           checkNotice: null,
+          operationError: null,
           onProvision: vi.fn(),
           onCancelProvision: vi.fn(),
           onCheck: vi.fn(),
@@ -131,5 +134,32 @@ describe("AudioToolsModal update check", () => {
     expect(document.body.textContent).toContain("2026-08-23 13:03");
     expect(document.body.textContent).toContain("2026-08-24 14:04");
     expect(document.body.textContent).not.toContain("Latest Auto-Build");
+  });
+
+  it("keeps a thrown tool operation failure inside the open modal as an alert", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        React.createElement(AudioToolsModal, {
+          dependencies: [{ ...dependency, transient: { kind: "idle" } }],
+          checkUpdatesAtLaunch: true,
+          isChecking: false,
+          checkNotice: null,
+          operationError: "Another tool operation is already running.",
+          onProvision: vi.fn(),
+          onCancelProvision: vi.fn(),
+          onCheck: vi.fn(),
+          onCancelCheck: vi.fn(),
+          onToggleCheckUpdates: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      );
+    });
+
+    const alert = document.querySelector('[role="dialog"] [role="alert"]');
+    expect(alert?.textContent).toBe("Another tool operation is already running.");
   });
 });
