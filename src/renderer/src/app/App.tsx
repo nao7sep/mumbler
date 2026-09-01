@@ -419,16 +419,6 @@ export function App(): ReactElement {
     }
   }, [dependencies]);
 
-  // The failed-check notice is a temporary FYI: clear it after a few seconds so it
-  // doesn't linger as if it were a persisted state.
-  useEffect(() => {
-    if (toolCheckNotice === null) {
-      return;
-    }
-    const timer = setTimeout(() => setToolCheckNotice(null), 6000);
-    return () => clearTimeout(timer);
-  }, [toolCheckNotice]);
-
   useEffect(() => {
     snapshotRef.current = snapshot;
   }, [snapshot]);
@@ -685,8 +675,8 @@ export function App(): ReactElement {
   }
 
   // An explicit check that fails writes nothing to the facts (the convention's
-  // honest-state rule), so its only surface is this transient, auto-clearing
-  // notice in the modal toolbar.
+  // honest-state rule), so its application-owned terminal notice remains visible
+  // across modal replacement until the next explicit check supersedes it.
   function handleCheckTools(): void {
     setIsCheckingTools(true);
     setToolCheckNotice(null);
@@ -1673,9 +1663,10 @@ export function App(): ReactElement {
           onCancelCheck={handleCancelToolCheck}
           onToggleCheckUpdates={handleToggleCheckUpdates}
           onClose={() => {
+            // Managed tools is replaceable presentation. Keep application-owned
+            // terminal notices across close/reopen; their matching retry paths
+            // clear them when a new operation supersedes the old result.
             setShowAudioTools(false);
-            setToolCheckNotice(null);
-            setToolOperationError(null);
           }}
         />
       ) : null}

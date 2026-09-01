@@ -19,9 +19,9 @@ export interface AudioToolsModalProps {
   dependencies: DependencyStatus[];
   checkUpdatesAtLaunch: boolean;
   isChecking: boolean;
-  // A transient, non-persisted notice when an explicit check just failed (offline,
-  // rate-limited). The convention writes nothing to the facts on a failed check, so
-  // this is the only surface it gets — and it auto-clears.
+  // A non-persisted terminal notice when an explicit check just failed (offline,
+  // rate-limited). The application owner retains it across view replacement until
+  // the next matching check supersedes it.
   checkNotice: string | null;
   operationError: string | null;
   onProvision: (name: ToolName) => void;
