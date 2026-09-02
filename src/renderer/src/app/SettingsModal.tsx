@@ -1,12 +1,16 @@
 import { useMemo, useRef, useState, type ReactElement } from "react";
 
 import { type SettingsDraft } from "@shared/app-shell";
-import { getSettingsNumberErrors } from "@shared/settings-validation";
+import {
+  getSettingsNumberIssues,
+  type NumericSettingField,
+} from "@shared/settings-validation";
 import { getSupportedTimezones } from "@shared/timestamps";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 import { ModalShell } from "./modal/ModalShell";
 import { useTablist } from "./useTablist";
 import { ExternalLinkIcon } from "./Icon";
+import { InlineError } from "./InlineResult";
 
 function parseEntries(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
@@ -154,8 +158,16 @@ export function SettingsModal({
   const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
   const geminiModelEntries = useMemo(() => parseEntries(draft.geminiModelsText), [draft.geminiModelsText]);
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
-  const numberErrors = useMemo(() => getSettingsNumberErrors(draft), [draft]);
-  const canSave = isDirty && numberErrors.length === 0 && !isSaving;
+  const numberIssues = useMemo(() => getSettingsNumberIssues(draft), [draft]);
+  const canSave = isDirty && numberIssues.length === 0 && !isSaving;
+  const numberIssueByField = new Map(numberIssues.map((issue) => [issue.field, issue]));
+  const numberFieldProps = (field: NumericSettingField): {
+    "aria-invalid": true | undefined;
+    "aria-describedby": string | undefined;
+  } => ({
+    "aria-invalid": numberIssueByField.has(field) ? true : undefined,
+    "aria-describedby": numberIssueByField.has(field) ? `settings-number-error-${field}` : undefined,
+  });
 
   return (
     <ModalShell
@@ -191,14 +203,18 @@ export function SettingsModal({
 
       <div className="modal-card__body">
 
-        {errorMessage ? <p className="inline-error">{errorMessage}</p> : null}
+        {errorMessage ? <InlineError>{errorMessage}</InlineError> : null}
 
-        {numberErrors.length > 0 ? (
-          <ul className="inline-error settings-number-errors">
-            {numberErrors.map((message) => (
-              <li key={message}>{message}</li>
-            ))}
-          </ul>
+        {numberIssues.length > 0 ? (
+          <InlineError>
+            <ul className="settings-number-errors">
+              {numberIssues.map((issue) => (
+                <li id={`settings-number-error-${issue.field}`} key={issue.field}>
+                  {issue.message}
+                </li>
+              ))}
+            </ul>
+          </InlineError>
         ) : null}
 
         <div className="settings-sections">
@@ -310,6 +326,7 @@ export function SettingsModal({
                       min={1}
                       step={1}
                       value={draft.skipIntervalSec}
+                      {...numberFieldProps("skipIntervalSec")}
                       onChange={(e) => onChange({ ...draft, skipIntervalSec: Number.parseInt(e.target.value, 10) })}
                     />
                   </label>
@@ -323,6 +340,7 @@ export function SettingsModal({
                       min={1}
                       step={1}
                       value={draft.previewSnippetSeconds}
+                      {...numberFieldProps("previewSnippetSeconds")}
                       onChange={(e) => onChange({ ...draft, previewSnippetSeconds: Number.parseInt(e.target.value, 10) })}
                     />
                   </label>
@@ -440,6 +458,7 @@ export function SettingsModal({
                     min={1}
                     step={1}
                     value={draft.concurrencyLimit}
+                    {...numberFieldProps("concurrencyLimit")}
                     onChange={(e) => onChange({ ...draft, concurrencyLimit: Number.parseInt(e.target.value, 10) })}
                   />
                 </label>
@@ -500,6 +519,7 @@ export function SettingsModal({
                       min={1}
                       step={1}
                       value={draft.retryMaxRetries}
+                      {...numberFieldProps("retryMaxRetries")}
                       onChange={(event) => onChange({ ...draft, retryMaxRetries: Number.parseInt(event.target.value, 10) })}
                     />
                   </label>
@@ -513,6 +533,7 @@ export function SettingsModal({
                       min={1}
                       step={1}
                       value={draft.retryInitialDelayMs}
+                      {...numberFieldProps("retryInitialDelayMs")}
                       onChange={(event) => onChange({ ...draft, retryInitialDelayMs: Number.parseInt(event.target.value, 10) })}
                     />
                   </label>
@@ -526,6 +547,7 @@ export function SettingsModal({
                       min={1}
                       step={1}
                       value={draft.retryMaxDelayMs}
+                      {...numberFieldProps("retryMaxDelayMs")}
                       onChange={(event) => onChange({ ...draft, retryMaxDelayMs: Number.parseInt(event.target.value, 10) })}
                     />
                   </label>
@@ -540,6 +562,7 @@ export function SettingsModal({
                       max={1}
                       step={0.05}
                       value={draft.retryJitterRatio}
+                      {...numberFieldProps("retryJitterRatio")}
                       onChange={(event) => onChange({ ...draft, retryJitterRatio: Number.parseFloat(event.target.value) })}
                     />
                   </label>
@@ -553,6 +576,7 @@ export function SettingsModal({
                       min={1}
                       step={1000}
                       value={draft.transcriptionTimeoutMs}
+                      {...numberFieldProps("transcriptionTimeoutMs")}
                       onChange={(event) => onChange({ ...draft, transcriptionTimeoutMs: Number.parseInt(event.target.value, 10) })}
                     />
                   </label>
@@ -566,6 +590,7 @@ export function SettingsModal({
                       min={1}
                       step={1000}
                       value={draft.metadataTimeoutMs}
+                      {...numberFieldProps("metadataTimeoutMs")}
                       onChange={(event) => onChange({ ...draft, metadataTimeoutMs: Number.parseInt(event.target.value, 10) })}
                     />
                   </label>

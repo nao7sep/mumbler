@@ -54,6 +54,7 @@ export function SaveConflictModal({
   onCancel,
   onOverwrite,
   onAddSuffix,
+  errorMessage,
 }: {
   audioPath: string;
   jsonPath: string;
@@ -61,6 +62,7 @@ export function SaveConflictModal({
   onCancel: () => void;
   onOverwrite: () => void;
   onAddSuffix: () => void;
+  errorMessage?: string | null;
 }): ReactElement {
   return (
     <DecisionModal
@@ -72,6 +74,7 @@ export function SaveConflictModal({
         { label: "Add Suffix", variant: "primary", onClick: onAddSuffix },
       ]}
       onRequestClose={onCancel}
+      errorMessage={errorMessage}
     />
   );
 }
@@ -123,10 +126,12 @@ export function RemoveRecordingModal({
   body,
   onCancel,
   onRemove,
+  errorMessage,
 }: {
   body: string;
   onCancel: () => void;
   onRemove: () => void;
+  errorMessage?: string | null;
 }): ReactElement {
   return (
     <DecisionModal
@@ -137,6 +142,7 @@ export function RemoveRecordingModal({
         { label: "Remove", variant: "danger", onClick: onRemove },
       ]}
       onRequestClose={onCancel}
+      errorMessage={errorMessage}
     />
   );
 }

@@ -362,6 +362,47 @@ textarea:focus-visible,
   font-weight: 500;
 }
 
+.inline-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: 0.8125rem;
+}
+
+.inline-result--error {
+  border-color: color-mix(in srgb, var(--danger) 24%, transparent);
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+}
+
+.inline-result__severity {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.inline-result__message {
+  flex: 1;
+  min-width: 0;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.menu-action-result {
+  margin-bottom: 16px;
+}
+
+.card-action-results {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
 .settings-number-errors {
   display: grid;
   gap: 2px;
@@ -1345,8 +1386,13 @@ textarea:focus-visible,
 
 .modal-card__body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0 20px 16px;
+}
+
+.decision-modal__error {
+  margin-top: 12px;
 }
 
 .modal-card--narrow {

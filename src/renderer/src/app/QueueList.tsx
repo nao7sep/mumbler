@@ -87,7 +87,14 @@ export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): 
             {formatCardStatusMessage(card)}
           </div>
           {card.lastError ? (
-            <div className="queue-row__error">{card.lastError.message}</div>
+            <div
+              className="queue-row__error"
+              role={card.status === "Error" ? "alert" : undefined}
+              aria-atomic={card.status === "Error" ? "true" : undefined}
+            >
+              {card.status === "Error" ? <strong>Error: </strong> : null}
+              {card.lastError.message}
+            </div>
           ) : null}
         </div>
       ))}

@@ -53,10 +53,12 @@ import { useSettingsModal } from "./useSettingsModal";
 import { formatCardStatusMessage, formatStepName, isCardBusy } from "./card-status";
 import { useTablist } from "./useTablist";
 import { CloseIcon } from "./Icon";
+import { InlineError } from "./InlineResult";
+import { CardActionResults, type CardActionError } from "./CardActionResults";
 import {
   PersistentNotifications,
   ToastNotifications,
-  pipelineNotification,
+  pipelineCompletionNotification,
   type AppNotification,
 } from "./Notifications";
 import {
@@ -171,11 +173,15 @@ export function App(): ReactElement {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
   const [activePipelineCards, setActivePipelineCards] = useState<string[]>([]);
+  const [cardActionErrors, setCardActionErrors] = useState<CardActionError[]>([]);
+  const [menuActionError, setMenuActionError] = useState<string | null>(null);
   const [pendingSaveConflict, setPendingSaveConflict] = useState<{
     cardId: string;
     result: Extract<SaveCardResult, { kind: "conflict" }>;
   } | null>(null);
+  const [saveConflictError, setSaveConflictError] = useState<string | null>(null);
   const [pendingRemoveCardId, setPendingRemoveCardId] = useState<string | null>(null);
+  const [removeCardError, setRemoveCardError] = useState<string | null>(null);
   // Sticky across card switches: reviewing several cards on the same step (e.g.
   // arrowing through the queue on the Transcribe tab) should not snap back to
   // Info. Ephemeral UI state, deliberately not persisted.
@@ -351,11 +357,9 @@ export function App(): ReactElement {
             for (const card of nextSnapshot.state?.cards ?? []) {
               const prevCard = prevSnapshot.state.cards.find((c) => c.id === card.id);
               if (prevCard && prevCard.status !== card.status) {
-                const notification = pipelineNotification(card);
+                const notification = pipelineCompletionNotification(card);
                 if (notification?.kind === "toast") {
                   addToast(notification.message);
-                } else if (notification?.kind === "persistent") {
-                  addPersistent(notification.message, notification.variant);
                 }
               }
             }
@@ -494,6 +498,24 @@ export function App(): ReactElement {
     showAudioTools ||
     snapshot?.startupDiagnostic != null ||
     snapshot?.appWideError != null;
+
+  function setCardActionError(cardId: string, operation: string, message: string): void {
+    setCardActionErrors((current) => [
+      ...current.filter((result) => result.cardId !== cardId || result.operation !== operation),
+      { cardId, operation, message },
+    ]);
+  }
+
+  function clearCardActionError(cardId: string, operation: string): void {
+    setCardActionErrors((current) =>
+      current.filter((result) => result.cardId !== cardId || result.operation !== operation),
+    );
+  }
+
+  function clearCardActionErrors(cardId: string): void {
+    setCardActionErrors((current) => current.filter((result) => result.cardId !== cardId));
+  }
+
   async function handleCardSelect(cardId: string): Promise<void> {
     try {
       const nextSnapshot = await window.mumbler.selectCard(cardId);
@@ -504,24 +526,14 @@ export function App(): ReactElement {
   }
 
   async function handleDuplicateCard(cardId: string): Promise<void> {
-    try {
-      const nextSnapshot = await window.mumbler.duplicateCard(cardId);
-      setSnapshot(nextSnapshot);
-      addToast("Recording duplicated.");
-    } catch (error: unknown) {
-      addPersistent(error instanceof Error ? error.message : "Failed to duplicate card.", "error");
-      throw error;
-    }
+    const nextSnapshot = await window.mumbler.duplicateCard(cardId);
+    setSnapshot(nextSnapshot);
+    addToast("Recording duplicated.");
   }
 
   async function handleTrimCommit(cardId: string, trim: MumblerCard["trim"]): Promise<void> {
-    try {
-      const nextSnapshot = await window.mumbler.updateCardTrim(cardId, trim);
-      setSnapshot(nextSnapshot);
-    } catch (error: unknown) {
-      addPersistent(error instanceof Error ? error.message : "Failed to update trim.", "error");
-      throw error;
-    }
+    const nextSnapshot = await window.mumbler.updateCardTrim(cardId, trim);
+    setSnapshot(nextSnapshot);
   }
 
   function beginCardOperation(cardId: string): void {
@@ -540,9 +552,14 @@ export function App(): ReactElement {
       .generateCardStep(cardId, target)
       .then((nextSnapshot) => {
         setSnapshot(nextSnapshot);
+        clearCardActionError(cardId, `generate-${target}`);
       })
       .catch((error: unknown) => {
-        addPersistent(error instanceof Error ? error.message : "Failed to generate AI output.", "error");
+        setCardActionError(
+          cardId,
+          `generate-${target}`,
+          error instanceof Error ? error.message : "Failed to generate AI output.",
+        );
       })
       .finally(() => {
         endCardOperation(cardId);
@@ -554,9 +571,14 @@ export function App(): ReactElement {
       .cancelCardProcessing(cardId)
       .then((nextSnapshot) => {
         setSnapshot(nextSnapshot);
+        clearCardActionError(cardId, "cancel-processing");
       })
       .catch((error: unknown) => {
-        addPersistent(error instanceof Error ? error.message : "Failed to cancel AI work.", "error");
+        setCardActionError(
+          cardId,
+          "cancel-processing",
+          error instanceof Error ? error.message : "Failed to cancel AI work.",
+        );
       });
   }
 
@@ -585,26 +607,43 @@ export function App(): ReactElement {
   }
 
   async function handleChooseOutputDirectory(): Promise<void> {
+    const cardId = selectedCard?.id ?? null;
     try {
       const nextSnapshot = await window.mumbler.chooseOutputDirectory();
       setSnapshot(nextSnapshot);
+      if (cardId !== null) {
+        clearCardActionError(cardId, "choose-output-directory");
+      }
       addToast("Output directory set.");
     } catch (error: unknown) {
-      addPersistent(
-        error instanceof Error ? error.message : "Failed to choose output directory.",
-        "error",
-      );
+      if (cardId !== null) {
+        setCardActionError(
+          cardId,
+          "choose-output-directory",
+          error instanceof Error ? error.message : "Failed to choose output directory.",
+        );
+      }
     }
   }
 
   async function handleDetailModelChange(field: "transcriptionModel" | "metadataModel", value: string): Promise<void> {
+    const cardId = selectedCard?.id ?? null;
     try {
       const draft = await window.mumbler.getSettingsDraft();
       const nextSnapshot = await window.mumbler.saveSettingsDraft({ ...draft, [field]: value });
       setSnapshot(nextSnapshot);
+      if (cardId !== null) {
+        clearCardActionError(cardId, `model-${field}`);
+      }
       addToast("Model updated.");
     } catch (error: unknown) {
-      addPersistent(error instanceof Error ? error.message : "Failed to update model.", "error");
+      if (cardId !== null) {
+        setCardActionError(
+          cardId,
+          `model-${field}`,
+          error instanceof Error ? error.message : "Failed to update model.",
+        );
+      }
     }
   }
 
@@ -613,11 +652,21 @@ export function App(): ReactElement {
       return;
     }
 
+    const cardId = selectedCard?.id ?? null;
     try {
       await copyTextToClipboard(value);
+      if (cardId !== null) {
+        clearCardActionError(cardId, `copy-${label}`);
+      }
       addToast(`${label} copied.`);
     } catch (error: unknown) {
-      addPersistent(error instanceof Error ? error.message : `Failed to copy ${label}.`, "error");
+      if (cardId !== null) {
+        setCardActionError(
+          cardId,
+          `copy-${label}`,
+          error instanceof Error ? error.message : `Failed to copy ${label}.`,
+        );
+      }
     }
   }
 
@@ -838,6 +887,7 @@ export function App(): ReactElement {
 
       if (result.kind === "conflict") {
         setPendingSaveConflict({ cardId, result });
+        setSaveConflictError(null);
         return;
       }
 
@@ -847,10 +897,17 @@ export function App(): ReactElement {
       }
 
       setPendingSaveConflict(null);
+      setSaveConflictError(null);
+      clearCardActionErrors(cardId);
       addToast(`Saved to ${result.audioPath}`);
       window.scrollTo({ top: 0 });
     } catch (error: unknown) {
-      addPersistent(error instanceof Error ? error.message : "Failed to save card.", "error");
+      const message = error instanceof Error ? error.message : "Failed to save card.";
+      if (pendingSaveConflict?.cardId === cardId) {
+        setSaveConflictError(message);
+      } else {
+        setCardActionError(cardId, "save-card", message);
+      }
     }
   }
 
@@ -858,12 +915,13 @@ export function App(): ReactElement {
     try {
       const nextSnapshot = await window.mumbler.removeCard(cardId);
       setSnapshot(nextSnapshot);
+      clearCardActionErrors(cardId);
+      setPendingRemoveCardId(null);
+      setRemoveCardError(null);
       addToast("Recording removed.");
       window.scrollTo({ top: 0 });
     } catch (error: unknown) {
-      addPersistent(error instanceof Error ? error.message : "Failed to remove card.", "error");
-    } finally {
-      setPendingRemoveCardId(null);
+      setRemoveCardError(error instanceof Error ? error.message : "Failed to remove card.");
     }
   }
 
@@ -907,10 +965,10 @@ export function App(): ReactElement {
                 onSelect={() => {
                   void window.mumbler
                     .openOutputDirectory()
+                    .then(() => setMenuActionError(null))
                     .catch((error: unknown) =>
-                      addPersistent(
+                      setMenuActionError(
                         error instanceof Error ? error.message : "Failed to open output directory.",
-                        "error",
                       ),
                     );
                 }}
@@ -945,6 +1003,12 @@ export function App(): ReactElement {
           </div>
         </div>
       </header>
+
+      {menuActionError ? (
+        <InlineError className="menu-action-result" onDismiss={() => setMenuActionError(null)}>
+          {menuActionError}
+        </InlineError>
+      ) : null}
 
       <PersistentNotifications
         notifications={notifications}
@@ -1062,6 +1126,11 @@ export function App(): ReactElement {
                   </button>
                 ))}
               </div>
+              <CardActionResults
+                cardId={selectedCard.id}
+                results={cardActionErrors}
+                onDismiss={(operation) => clearCardActionError(selectedCard.id, operation)}
+              />
               <div className="detail-grid">
 
               <div className="app-tabpanel" {...detailTablist.getPanelProps("info")} hidden={detailTab !== "info"}>
@@ -1209,7 +1278,6 @@ export function App(): ReactElement {
                     disabled={selectedCardIsBusy}
                     onDuplicateCard={handleDuplicateCard}
                     onTrimCommit={handleTrimCommit}
-                    onError={(message) => addPersistent(message, "error")}
                   />
                   <div className="trim-analysis">
                     <div className="trim-analysis__header">
@@ -1473,7 +1541,10 @@ export function App(): ReactElement {
                     <button
                       type="button"
                       className="button button--danger"
-                      onClick={() => setPendingRemoveCardId(selectedCard.id)}
+                      onClick={() => {
+                        setRemoveCardError(null);
+                        setPendingRemoveCardId(selectedCard.id);
+                      }}
                       disabled={selectedCardIsBusy}
                     >
                       Remove
@@ -1601,9 +1672,13 @@ export function App(): ReactElement {
           audioPath={pendingSaveConflict.result.audioPath}
           jsonPath={pendingSaveConflict.result.jsonPath}
           markdownPath={pendingSaveConflict.result.markdownPath}
-          onCancel={() => setPendingSaveConflict(null)}
+          onCancel={() => {
+            setPendingSaveConflict(null);
+            setSaveConflictError(null);
+          }}
           onOverwrite={() => void handleSaveCard(pendingSaveConflict.cardId, "overwrite")}
           onAddSuffix={() => void handleSaveCard(pendingSaveConflict.cardId, "suffix")}
+          errorMessage={saveConflictError}
         />
       ) : null}
 
@@ -1630,8 +1705,12 @@ export function App(): ReactElement {
             snapshot?.state?.cards.find((c) => c.id === pendingRemoveCardId) ??
               ({ trim: {}, transcription: {}, metadata: {} } as unknown as MumblerCard),
           )}
-          onCancel={() => setPendingRemoveCardId(null)}
+          onCancel={() => {
+            setPendingRemoveCardId(null);
+            setRemoveCardError(null);
+          }}
           onRemove={() => void confirmRemoveCard(pendingRemoveCardId)}
+          errorMessage={removeCardError}
         />
       ) : null}
 

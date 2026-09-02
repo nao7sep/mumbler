@@ -13,6 +13,7 @@ import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
 
 import type { CardTrim, MumblerCard } from "@shared/app-shell";
+import { InlineError } from "./InlineResult";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 
 const REGION_COLOR = "rgba(61, 122, 90, 0.22)";
@@ -82,7 +83,6 @@ interface WaveformEditorProps {
   disabled: boolean;
   onDuplicateCard: (cardId: string) => Promise<void>;
   onTrimCommit: (cardId: string, trim: CardTrim) => Promise<void>;
-  onError: (message: string) => void;
 }
 
 export interface WaveformEditorHandle {
@@ -102,7 +102,6 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   disabled,
   onDuplicateCard,
   onTrimCommit,
-  onError,
 }, ref): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const waveSurferRef = useRef<WaveSurfer | null>(null);
@@ -165,7 +164,6 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         const message =
           error instanceof Error ? error.message : "Failed to load working audio for playback.";
         setPlayerError(message);
-        onError(message);
       })
       .finally(() => {
         if (!cancelled) {
@@ -238,7 +236,6 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       waveSurfer.on("error", (error) => {
         const message = error instanceof Error ? error.message : String(error);
         setPlayerError(message);
-        onError(message);
       }),
       // region-update / region-updated fire only from a user drag or resize:
       // WaveSurfer's programmatic setOptions emits "render", not "update", so
@@ -306,7 +303,6 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       setDraftTrim(card.trim);
       setFrontInput(formatMarkerInput(card.trim.frontMarkerSec));
       setBackInput(formatMarkerInput(card.trim.backMarkerSec));
-      onError(message);
       throw error;
     }
   }
@@ -367,7 +363,6 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Invalid trim marker.";
       setPlayerError(message);
-      onError(message);
     }
   }
 
@@ -428,7 +423,6 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to duplicate card.";
       setPlayerError(message);
-      onError(message);
     }
   }
 
@@ -478,7 +472,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       {isLoadingMedia ? (
         <p className="panel__note">Loading working audio…</p>
       ) : null}
-      {playerError ? <p className="inline-error">{playerError}</p> : null}
+      {playerError ? <InlineError>{playerError}</InlineError> : null}
 
       <div className="control-row control-row--five">
         <button type="button" className="button button--ghost" onClick={() => void playPause()}>

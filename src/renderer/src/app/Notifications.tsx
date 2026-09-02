@@ -7,20 +7,12 @@ export type AppNotification =
   | { id: string; message: string; kind: "toast" }
   | { id: string; message: string; kind: "persistent"; variant: "info" | "error" };
 
-export type PipelineNotification =
-  | { message: string; kind: "toast" }
-  | { message: string; kind: "persistent"; variant: "error" };
+export type PipelineCompletionNotification =
+  { message: string; kind: "toast" };
 
-export function pipelineNotification(card: MumblerCard): PipelineNotification | null {
+export function pipelineCompletionNotification(card: MumblerCard): PipelineCompletionNotification | null {
   if (card.status === "Ready to Save") {
     return { message: `Ready to save: ${card.originalFilename}`, kind: "toast" };
-  }
-  if (card.status === "Error") {
-    return {
-      message: `Failed: ${card.originalFilename} — ${card.lastError?.message ?? "Unknown error"}`,
-      kind: "persistent",
-      variant: "error",
-    };
   }
   return null;
 }

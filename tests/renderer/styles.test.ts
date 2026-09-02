@@ -28,4 +28,9 @@ describe("styles.css window chrome", () => {
     expect(css).not.toContain("400px minmax(0, 1fr)");
     expect(css).toContain("minmax(var(--detail-min-width), 1fr)");
   });
+
+  it("keeps modal actions fixed while added results scroll inside the body", () => {
+    expect(css).toMatch(/\.modal-card__body\s*\{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/s);
+    expect(css).toMatch(/\.modal-actions\s*\{[^}]*flex-wrap:\s*wrap;/s);
+  });
 });

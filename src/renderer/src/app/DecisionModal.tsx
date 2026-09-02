@@ -1,6 +1,7 @@
 import { useId, type ReactElement } from "react";
 
 import { ModalShell } from "./modal/ModalShell";
+import { InlineError } from "./InlineResult";
 
 export interface DecisionModalProps {
   title: string;
@@ -13,9 +14,16 @@ export interface DecisionModalProps {
   // Escape and backdrop both route here. Callers pass the safe/cancel path so a
   // dismissal never performs the destructive choice.
   onRequestClose: () => void;
+  errorMessage?: string | null;
 }
 
-export function DecisionModal({ title, body, actions, onRequestClose }: DecisionModalProps): ReactElement {
+export function DecisionModal({
+  title,
+  body,
+  actions,
+  onRequestClose,
+  errorMessage = null,
+}: DecisionModalProps): ReactElement {
   const bodyId = useId();
   // The safe action takes focus: the first one that is not destructive. A confirmation
   // exists because something could go wrong, so the action a reflexive Enter reaches
@@ -46,6 +54,7 @@ export function DecisionModal({ title, body, actions, onRequestClose }: Decision
     >
       <div className="modal-card__body">
         <p id={bodyId} className="empty-state__body">{body}</p>
+        {errorMessage ? <InlineError className="decision-modal__error">{errorMessage}</InlineError> : null}
       </div>
     </ModalShell>
   );

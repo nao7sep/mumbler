@@ -13,7 +13,7 @@ export function isRatioSetting(value: number): boolean {
   return Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
-type NumericSettingField =
+export type NumericSettingField =
   | "skipIntervalSec"
   | "previewSnippetSeconds"
   | "concurrencyLimit"
@@ -31,6 +31,11 @@ interface NumericSettingRule {
   requirement: string;
 }
 
+export interface NumericSettingIssue {
+  field: NumericSettingField;
+  message: string;
+}
+
 const NUMERIC_SETTING_RULES: NumericSettingRule[] = [
   { field: "skipIntervalSec", label: "Skip interval", isValid: isPositiveIntegerSetting, requirement: "a positive integer" },
   { field: "previewSnippetSeconds", label: "Preview duration", isValid: isPositiveIntegerSetting, requirement: "a positive integer" },
@@ -43,10 +48,18 @@ const NUMERIC_SETTING_RULES: NumericSettingRule[] = [
   { field: "retryJitterRatio", label: "Retry jitter", isValid: isRatioSetting, requirement: "between 0 and 1" },
 ];
 
-// One human-readable message per invalid numeric field, in form order. An empty
-// array means every numeric setting is valid and the form is safe to commit.
-export function getSettingsNumberErrors(draft: SettingsDraft): string[] {
+// One field-addressable issue per invalid numeric setting, in form order. The
+// renderer uses the field identity for aria-invalid / aria-describedby while the
+// message remains the same validation truth shown to the user.
+export function getSettingsNumberIssues(draft: SettingsDraft): NumericSettingIssue[] {
   return NUMERIC_SETTING_RULES.filter((rule) => !rule.isValid(draft[rule.field])).map(
-    (rule) => `${rule.label} must be ${rule.requirement}.`,
+    (rule) => ({
+      field: rule.field,
+      message: `${rule.label} must be ${rule.requirement}.`,
+    }),
   );
+}
+
+export function getSettingsNumberErrors(draft: SettingsDraft): string[] {
+  return getSettingsNumberIssues(draft).map((issue) => issue.message);
 }

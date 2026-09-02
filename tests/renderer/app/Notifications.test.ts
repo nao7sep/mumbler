@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PersistentNotifications,
   ToastNotifications,
-  pipelineNotification,
+  pipelineCompletionNotification,
   type AppNotification,
 } from "@renderer/app/Notifications";
 import type { MumblerCard } from "@shared/app-shell";
@@ -50,16 +50,12 @@ function card(status: MumblerCard["status"]): MumblerCard {
 }
 
 describe("notification lifetime and severity surfaces", () => {
-  it("routes pipeline success transiently and failure persistently", () => {
-    expect(pipelineNotification(card("Ready to Save"))).toEqual({
+  it("routes pipeline success transiently and leaves pipeline failure on the card", () => {
+    expect(pipelineCompletionNotification(card("Ready to Save"))).toEqual({
       message: "Ready to save: recording.wav",
       kind: "toast",
     });
-    expect(pipelineNotification(card("Error"))).toEqual({
-      message: "Failed: recording.wav — Transcription failed",
-      kind: "persistent",
-      variant: "error",
-    });
+    expect(pipelineCompletionNotification(card("Error"))).toBeNull();
   });
 
   it("stacks persistent results independently from the transient success", async () => {
