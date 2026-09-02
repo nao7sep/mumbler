@@ -127,9 +127,89 @@ const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
 };
 
 export function App(): ReactElement {
-  const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const snapshotRef = useRef<AppSnapshot | null>(null);
+  const [startupLoad, setStartupLoad] = useState<
+    | { status: "loading" }
+    | { status: "failed"; retrying: boolean; message: string }
+    | { status: "ready"; snapshot: AppSnapshot }
+  >({ status: "loading" });
+  const startupAttemptRef = useRef(0);
+
+  const loadStartupSnapshot = useCallback(async (): Promise<void> => {
+    const attempt = ++startupAttemptRef.current;
+    setStartupLoad((current) =>
+      current.status === "failed"
+        ? { ...current, retrying: true }
+        : { status: "loading" },
+    );
+    try {
+      const snapshot = await window.mumbler.getSnapshot();
+      if (startupAttemptRef.current === attempt) {
+        setStartupLoad({ status: "ready", snapshot });
+      }
+    } catch (error: unknown) {
+      if (startupAttemptRef.current === attempt) {
+        setStartupLoad({
+          status: "failed",
+          retrying: false,
+          message: presentFailure(
+            error,
+            "Mumbler could not load the current queue. No recordings or saved files were changed. Check that Mumbler’s data folder is available, then try again.",
+            "app snapshot load failed",
+          ),
+        });
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStartupSnapshot();
+    return () => {
+      startupAttemptRef.current += 1;
+    };
+  }, [loadStartupSnapshot]);
+
+  if (startupLoad.status !== "ready") {
+    return (
+      <main
+        className="renderer-failure"
+        role={startupLoad.status === "failed" ? "alert" : "status"}
+        aria-busy={startupLoad.status === "loading" || startupLoad.retrying ? "true" : undefined}
+      >
+        <div className="renderer-failure__card">
+          <h1>{startupLoad.status === "failed" ? "Mumbler could not load its queue" : "Opening Mumbler…"}</h1>
+          {startupLoad.status === "failed" ? <p>{startupLoad.message}</p> : null}
+          {startupLoad.status === "failed" ? (
+            <button
+              className="button button--primary"
+              type="button"
+              disabled={startupLoad.retrying}
+              onClick={() => void loadStartupSnapshot()}
+            >
+              {startupLoad.retrying ? "Retrying…" : "Retry"}
+            </button>
+          ) : null}
+        </div>
+      </main>
+    );
+  }
+
+  return <LoadedApp initialSnapshot={startupLoad.snapshot} />;
+}
+
+function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): ReactElement {
+  const [snapshot, setSnapshot] = useState<AppSnapshot | null>(initialSnapshot);
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    const recovered = initialSnapshot.queueSummary?.recoveredInterruptedCards ?? 0;
+    return recovered > 0
+      ? [{
+          id: nanoid(),
+          message: `${recovered} recording${recovered === 1 ? "" : "s"} recovered from an interrupted session — generate again to resume.`,
+          kind: "persistent",
+          variant: "info",
+        }]
+      : [];
+  });
+  const snapshotRef = useRef<AppSnapshot | null>(initialSnapshot);
 
   const addToast = useCallback((message: string) => {
     const id = nanoid();
@@ -295,35 +375,6 @@ export function App(): ReactElement {
   function handleCancelDiscardReview(): void {
     setShowReviewDiscardConfirm(false);
   }
-
-  useEffect(() => {
-    let cancelled = false;
-
-    void window.mumbler
-      .getSnapshot()
-      .then((data) => {
-        if (!cancelled) {
-          snapshotRef.current = data;
-          setSnapshot(data);
-          const recovered = data.queueSummary?.recoveredInterruptedCards ?? 0;
-          if (recovered > 0) {
-            addPersistent(`${recovered} recording${recovered === 1 ? "" : "s"} recovered from an interrupted session — generate again to resume.`);
-          }
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          addPersistent(
-            presentFailure(error, "Mumbler could not load the current queue. Reopen the app to try again.", "app snapshot load failed"),
-            "error",
-          );
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     return window.mumbler.onPipelineProgressUpdated(() => {
