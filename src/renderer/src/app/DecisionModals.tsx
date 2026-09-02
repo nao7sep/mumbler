@@ -116,7 +116,7 @@ export function AppWideErrorModal({
     <DecisionModal
       title={title}
       body={message}
-      actions={[{ label: "Dismiss", variant: "primary", onClick: onDismiss }]}
+      actions={[{ label: "Close", variant: "primary", onClick: onDismiss }]}
       onRequestClose={onDismiss}
     />
   );

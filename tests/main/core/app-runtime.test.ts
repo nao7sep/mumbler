@@ -47,9 +47,24 @@ const {
   applyFrontTrimOffset,
   resolveStorageRoot,
   getAppPaths,
+  resetFailureDiagnostic,
 } = await import("@main/core/app-runtime");
 
 const { createStateStore } = await import("@main/core/settings-schema");
+
+describe("reset failure presentation", () => {
+  it("keeps exception, IPC, and internal path diagnostics out of the retained snapshot message", () => {
+    const hostile = new Error(
+      "Error invoking remote method 'resetState': EACCES /private/tmp/MUMBLER_RESET_SENTINEL",
+    );
+
+    const presentation = resetFailureDiagnostic(hostile);
+
+    expect(presentation.title).toBe("Reset Failed");
+    expect(presentation.message).toContain("Existing files were left unchanged");
+    expect(presentation.message).not.toMatch(/EACCES|private\/tmp|SENTINEL|invoking remote method/i);
+  });
+});
 
 function authoritativeItem(): PendingImportReviewItem {
   return {

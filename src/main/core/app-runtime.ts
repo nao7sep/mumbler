@@ -45,7 +45,6 @@ import {
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 import { closeBackupStore, setBackupStoreWarn } from "./backupStore";
-import { formatError } from "./file-io";
 import { CorruptStateError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState } from "./working-files";
@@ -96,6 +95,15 @@ function rendererReportError(report: RendererErrorReport): Error {
     return error;
   };
   return build(report, 0);
+}
+
+/** Stable presentation for a failed user-commanded reset; the thrown value is
+ * retained by the IPC/logger boundary and must never become later snapshot UI. */
+export function resetFailureDiagnostic(_error: unknown): NonNullable<AppSnapshot["startupDiagnostic"]> {
+  return {
+    title: "Reset Failed",
+    message: "Mumbler could not reset its saved state. Existing files were left unchanged; check the log and try again.",
+  };
 }
 
 class ImportAdmissionError extends Error {}
@@ -612,10 +620,7 @@ export class ApplicationRuntime {
 
       return this.getSnapshot();
     } catch (error: unknown) {
-      this.runtime.startupDiagnostic = {
-        title: "Reset Failed",
-        message: formatError(error),
-      };
+      this.runtime.startupDiagnostic = resetFailureDiagnostic(error);
       throw error;
     }
   }
