@@ -52,6 +52,19 @@ afterEach(async () => {
 });
 
 describe("ModalShell layering", () => {
+  it("uses a quiet app-owned header close control", async () => {
+    const appRoot = mountRoot();
+
+    await act(async () => {
+      appRoot.render(modal("Quiet close", vi.fn()));
+    });
+
+    const close = document.querySelector<HTMLButtonElement>(".modal-close");
+    expect(close?.getAttribute("aria-label")).toBe("Close");
+    expect(close?.classList.contains("button")).toBe(false);
+    expect(close?.querySelector('svg[width="1em"][height="1em"]')).not.toBeNull();
+  });
+
   it("paints the newly opened topmost modal above older modals even when JSX order is earlier", async () => {
     const closeExisting = vi.fn();
     const closeNew = vi.fn();

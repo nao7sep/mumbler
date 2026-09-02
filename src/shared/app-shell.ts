@@ -391,6 +391,15 @@ export interface RendererErrorReport {
   message: string;
   source: string;
   stack?: string;
+  name?: string;
+  cause?: RendererErrorCause;
+}
+
+export interface RendererErrorCause {
+  name?: string;
+  message: string;
+  stack?: string;
+  cause?: RendererErrorCause;
 }
 
 // The Node platform string (the member set of NodeJS.Platform), spelled out as a

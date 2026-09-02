@@ -56,16 +56,6 @@ export function CloseIcon(props: IconProps): ReactElement {
   );
 }
 
-export function ErrorIcon(props: IconProps): ReactElement {
-  return (
-    <IconBase {...props}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v6" />
-      <path d="M12 17h.01" />
-    </IconBase>
-  );
-}
-
 export function ExternalLinkIcon(props: IconProps): ReactElement {
   return (
     <IconBase {...props}>

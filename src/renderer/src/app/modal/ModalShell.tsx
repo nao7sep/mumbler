@@ -188,7 +188,7 @@ export function ModalShell({
           {showCloseButton ? (
             <button
               type="button"
-              className="button button--ghost button--compact modal-close"
+              className="modal-close"
               onClick={onRequestClose}
               disabled={closeDisabled}
               aria-label="Close"

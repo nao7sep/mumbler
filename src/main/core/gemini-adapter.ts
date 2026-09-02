@@ -214,10 +214,6 @@ export function isRetryableGeminiError(error: unknown): boolean {
     return error.status === 429 || error.status >= 500;
   }
 
-  if (error instanceof Error) {
-    return /network|fetch|stream/i.test(error.message);
-  }
-
   return false;
 }
 

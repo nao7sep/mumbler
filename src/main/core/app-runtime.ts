@@ -82,6 +82,22 @@ const DEBUG_LOGGING_ENABLED = !app.isPackaged || process.env.MUMBLER_DEBUG === "
 // this window — keeps the startup check off the network on most launches.
 const TOOL_CHECK_STALE_MS = 24 * 60 * 60 * 1000;
 
+function rendererReportError(report: RendererErrorReport): Error {
+  const seen = new WeakSet<object>();
+  const build = (diagnostic: { name?: unknown; message?: unknown; stack?: unknown; cause?: unknown }, depth: number): Error => {
+    if (seen.has(diagnostic) || depth >= 8) return new Error("Renderer cause chain was truncated.");
+    seen.add(diagnostic);
+    const cause = diagnostic.cause && typeof diagnostic.cause === "object"
+      ? build(diagnostic.cause as { name?: unknown; message?: unknown; stack?: unknown; cause?: unknown }, depth + 1)
+      : undefined;
+    const error = new Error(String(diagnostic.message ?? "Unknown renderer error."), cause === undefined ? undefined : { cause });
+    error.name = typeof diagnostic.name === "string" ? diagnostic.name : "Error";
+    if (typeof diagnostic.stack === "string") error.stack = diagnostic.stack;
+    return error;
+  };
+  return build(report, 0);
+}
+
 class ImportAdmissionError extends Error {}
 
 interface AppRuntimeState {
@@ -518,7 +534,7 @@ export class ApplicationRuntime {
     await this.setAppWideError(
       "Mumbler could not continue",
       "The window encountered an unexpected problem. Restart Mumbler to continue; your saved files are unchanged.",
-      new Error(report.message),
+      rendererReportError(report),
       {
       source: report.source,
       stack: report.stack,
@@ -531,7 +547,7 @@ export class ApplicationRuntime {
     await this.runtime.logger.error(
       "renderer.recovered",
       report.source,
-      new Error(report.message),
+      rendererReportError(report),
       { stack: report.stack },
     );
   }

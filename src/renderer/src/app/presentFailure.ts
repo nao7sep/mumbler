@@ -8,15 +8,33 @@ export function presentFailure(error: unknown, userMessage: string, source: stri
 }
 
 export function reportRendererDiagnostic(error: unknown, source: string): void {
-  const known = error instanceof Error ? error : new Error(String(error));
+  const diagnostic = describeRendererError(error);
   const reporter = window.mumbler?.reportRendererDiagnostic;
-  if (typeof reporter !== "function") return;
+  if (typeof reporter !== "function") {
+    console.error("[Mumbler] Renderer diagnostic bridge is unavailable.", { source, diagnostic });
+    return;
+  }
   void reporter({
-    message: known.message,
+    ...diagnostic,
     source,
-    stack: known.stack,
-  }).catch(() => {
-    // The failed operation's IPC boundary normally has the same diagnostic.
-    // Reporting must never replace the recovered failure.
+  }).catch((reportError) => {
+    console.error("[Mumbler] Renderer diagnostic could not be recorded.", { reportError, source, diagnostic });
   });
+}
+
+function describeRendererError(error: unknown, seen = new WeakSet<object>()): {
+  name?: string;
+  message: string;
+  stack?: string;
+  cause?: ReturnType<typeof describeRendererError>;
+} {
+  if (!(error instanceof Error)) return { message: String(error) };
+  if (seen.has(error)) return { name: error.name, message: error.message, cause: { message: "Circular cause" } };
+  seen.add(error);
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    ...(error.cause === undefined ? {} : { cause: describeRendererError(error.cause, seen) }),
+  };
 }

@@ -28,10 +28,10 @@ describe("isRetryableGeminiError", () => {
     expect(isRetryableGeminiError(new ApiError({ message: "forbidden", status: 403 }))).toBe(false);
   });
 
-  it("retries transient network-shaped error messages", () => {
-    expect(isRetryableGeminiError(new Error("network timeout while connecting"))).toBe(true);
-    expect(isRetryableGeminiError(new Error("fetch failed"))).toBe(true);
-    expect(isRetryableGeminiError(new Error("stream interrupted"))).toBe(true);
+  it("does not infer retry policy from arbitrary exception prose", () => {
+    expect(isRetryableGeminiError(new Error("network timeout while connecting"))).toBe(false);
+    expect(isRetryableGeminiError(new Error("fetch failed"))).toBe(false);
+    expect(isRetryableGeminiError(new Error("stream interrupted"))).toBe(false);
   });
 
   it("does not retry generic errors or non-error values", () => {
