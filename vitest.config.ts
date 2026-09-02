@@ -17,7 +17,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.{ts,tsx}"],
     // Isolate the write-through backup store per test: point MUMBLER_HOME at a throwaway root and close the
     // store singleton after each test, so a recording save never touches the developer's real ~/.mumbler
     // and the store re-opens per root (data-backup conventions' test-migration). See the setup file.

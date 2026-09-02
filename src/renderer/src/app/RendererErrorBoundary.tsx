@@ -27,7 +27,7 @@ export class RendererErrorBoundary extends React.Component<React.PropsWithChildr
         <div className="renderer-failure__card">
           <h1>Mumbler could not keep this window open.</h1>
           <p>Reload the window to recover. Your recordings and saved files are unchanged.</p>
-          <button type="button" onClick={() => window.location.reload()}>Reload window</button>
+          <button className="button button--primary" type="button" onClick={() => window.location.reload()}>Reload window</button>
         </div>
       </main>
     );
