@@ -246,7 +246,9 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       }),
       regions.on("region-updated", (region) => {
         const nextTrim = regionToTrim(region, waveSurfer.getDuration());
-        void commitTrim(nextTrim);
+        void commitTrim(nextTrim).catch((error: unknown) => {
+          setPlayerError(presentFailure(error, "The trim markers are outside this recording's duration. Reset them and try again.", "trim region validation failed"));
+        });
       }),
       regions.on("region-removed", () => {
         // A removal we initiated clears regionRef *before* calling remove(), so a
@@ -288,19 +290,18 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   }, [draftTrim.backMarkerSec, draftTrim.frontMarkerSec, resolvedDurationSec]);
 
   async function commitTrim(nextTrim: CardTrim): Promise<void> {
+    const normalizedTrim = normalizeTrimDraft(nextTrim, resolvedDurationSec);
+    setDraftTrim(normalizedTrim);
+    setFrontInput(formatMarkerInput(normalizedTrim.frontMarkerSec));
+    setBackInput(formatMarkerInput(normalizedTrim.backMarkerSec));
+    setPlayerError(null);
     try {
-      const normalizedTrim = normalizeTrimDraft(nextTrim, resolvedDurationSec);
-      setDraftTrim(normalizedTrim);
-      setFrontInput(formatMarkerInput(normalizedTrim.frontMarkerSec));
-      setBackInput(formatMarkerInput(normalizedTrim.backMarkerSec));
-      setPlayerError(null);
       await onTrimCommitRef.current(cardIdRef.current, normalizedTrim);
     } catch (error: unknown) {
       setPlayerError(presentFailure(error, "The trim markers could not be saved. The previous markers remain in effect; try again.", "trim marker save failed"));
       setDraftTrim(card.trim);
       setFrontInput(formatMarkerInput(card.trim.frontMarkerSec));
       setBackInput(formatMarkerInput(card.trim.backMarkerSec));
-      throw error;
     }
   }
 
