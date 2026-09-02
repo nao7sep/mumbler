@@ -50,7 +50,7 @@ describe("QueueList card results", () => {
 
     const alerts = document.querySelectorAll<HTMLElement>('[role="alert"]');
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]?.textContent).toContain("Error: Pipeline failed");
+    expect(alerts[0]?.textContent).toBe("Pipeline failed");
     expect(document.body.textContent).toContain("AI work cancelled by user.");
   });
 });

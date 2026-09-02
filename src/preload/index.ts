@@ -73,6 +73,8 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.removeCard, cardId) as Promise<AppSnapshot>,
   reportRendererError: (report: RendererErrorReport) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.reportRendererError, report) as Promise<AppSnapshot>,
+  reportRendererDiagnostic: (report: RendererErrorReport) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.reportRendererDiagnostic, report) as Promise<void>,
   dismissAppWideError: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.dismissAppWideError) as Promise<AppSnapshot>,
   resetState: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.resetState) as Promise<AppSnapshot>,

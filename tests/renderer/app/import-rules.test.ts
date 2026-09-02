@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { PendingImportReviewItem } from "@shared/app-shell";
 import {
@@ -12,19 +12,27 @@ const item = (id: string): PendingImportReviewItem => ({ id }) as unknown as Pen
 
 describe("parseDroppedPaths", () => {
   it("preserves duplicate paths and accounts for inaccessible entries", () => {
+    const onDiagnostic = vi.fn();
     const files = [{ name: "a" }, { name: "b" }, { name: "c" }] as unknown as File[];
     const paths = parseDroppedPaths(files, (file) => {
       const name = (file as { name: string }).name;
-      if (name === "b") throw new Error("unavailable");
+      if (name === "b") {
+        throw new Error("Error invoking remote method 'getPathForFile': EACCES /private/tmp/MUMBLER_SENTINEL");
+      }
       return "/abs/audio.wav";
-    });
+    }, onDiagnostic);
     expect(paths).toEqual({
       paths: ["/abs/audio.wav", "/abs/audio.wav"],
       unavailable: [{
         sourcePath: "b",
-        message: "Local path could not be read: unavailable",
+        message: "The local file path could not be read.",
       }],
     });
+    expect(JSON.stringify(paths)).not.toMatch(/EACCES|private\/tmp|MUMBLER_SENTINEL|invoking remote method/i);
+    expect(onDiagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("MUMBLER_SENTINEL") }),
+      "dropped file path resolution failed",
+    );
   });
 
   it("returns an empty array when nothing resolves", () => {

@@ -318,7 +318,11 @@ export class ToolManager {
         tool: name,
         error: message,
       });
-      this.setTransient(name, { kind: "failed", operation: "provision", error: message });
+      this.setTransient(name, {
+        kind: "failed",
+        operation: "provision",
+        error: `${name} could not be installed or updated. The existing tool, if any, is unchanged; try again.`,
+      });
     } finally {
       clearTimeout(deadline);
       this.busy.delete(name);

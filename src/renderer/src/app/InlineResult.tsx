@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
 
-import { CloseIcon, ErrorIcon } from "./Icon";
+import { CloseIcon } from "./Icon";
 
 export function InlineError({
   children,
@@ -20,17 +20,13 @@ export function InlineError({
       role="alert"
       aria-atomic="true"
     >
-      <span className="inline-result__severity">
-        <ErrorIcon />
-        <span>Error</span>
-      </span>
       <div className="inline-result__message">{children}</div>
       {onDismiss ? (
         <button
           type="button"
-          className="button button--ghost button--compact"
+          className="result-close"
           onClick={onDismiss}
-          aria-label="Dismiss error"
+          aria-label="Close result"
         >
           <CloseIcon />
         </button>

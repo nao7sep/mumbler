@@ -15,6 +15,7 @@ export interface DroppedPathAdmission {
 export function parseDroppedPaths(
   files: ArrayLike<File>,
   getPathForFile: (file: File) => string,
+  onDiagnostic?: (error: unknown, source: string) => void,
 ): DroppedPathAdmission {
   const paths: string[] = [];
   const unavailable: DroppedPathAdmission["unavailable"] = [];
@@ -27,11 +28,10 @@ export function parseDroppedPaths(
         message: "No usable local file path was available.",
       });
     } catch (error: unknown) {
+      onDiagnostic?.(error, "dropped file path resolution failed");
       unavailable.push({
         sourcePath: file.name || "Unavailable dropped item",
-        message: error instanceof Error && error.message
-          ? `Local path could not be read: ${error.message}`
-          : "Local path could not be read.",
+        message: "The local file path could not be read.",
       });
     }
   }

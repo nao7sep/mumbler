@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import type { MumblerCard } from "@shared/app-shell";
 
-import { CloseIcon, ErrorIcon } from "./Icon";
+import { CloseIcon } from "./Icon";
 
 export type AppNotification =
   | { id: string; message: string; kind: "toast" }
@@ -41,18 +41,12 @@ export function PersistentNotifications({
           aria-atomic="true"
           className={`persistent-notice persistent-notice--${notification.variant}`}
         >
-          {notification.variant === "error" ? (
-            <span className="persistent-notice__severity">
-              <ErrorIcon />
-              <span>Error</span>
-            </span>
-          ) : null}
           <span className="persistent-notice__message">{notification.message}</span>
           <button
             type="button"
-            className="button button--ghost button--compact"
+            className="result-close"
             onClick={() => onDismiss(notification.id)}
-            aria-label="Dismiss notification"
+            aria-label="Close notification"
           >
             <CloseIcon />
           </button>

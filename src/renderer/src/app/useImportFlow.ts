@@ -19,6 +19,7 @@ import {
   reconcilePendingReviewDrafts,
 } from "./import-rules";
 import { isTextEditingTarget } from "./shortcut-utils";
+import { presentFailure, reportRendererDiagnostic } from "./presentFailure";
 
 interface UseImportFlowOptions {
   snapshot: AppSnapshot | null;
@@ -87,11 +88,7 @@ export function useImportFlow({
       void window.mumbler
         .updatePendingImportDrafts(pendingReviewDrafts)
         .catch((error: unknown) => {
-          onError(
-            error instanceof Error
-              ? error.message
-              : "Failed to persist pending timestamp review edits.",
-          );
+          onError(presentFailure(error, "Timestamp review edits could not be saved. Your edits are still shown; try again.", "pending import review save failed"));
         });
     }, 250);
 
@@ -170,7 +167,7 @@ export function useImportFlow({
     } catch (error: unknown) {
       setImportResult({
         severity: "error",
-        message: error instanceof Error ? error.message : "Import failed.",
+        message: presentFailure(error, "Files could not be imported. The queue is unchanged; check that the files are still available and try again.", "file picker import failed"),
         issueKeys: ["operation:file-picker"],
       });
     } finally {
@@ -184,9 +181,7 @@ export function useImportFlow({
       const nextSnapshot = await window.mumbler.confirmPendingImports(pendingReviewDrafts);
       onSnapshotUpdate(nextSnapshot);
     } catch (error: unknown) {
-      onError(
-        error instanceof Error ? error.message : "Failed to confirm imported timestamps.",
-      );
+      onError(presentFailure(error, "Imported timestamps could not be confirmed. The review is still open; try again.", "import timestamp confirmation failed"));
     } finally {
       setIsConfirmingReview(false);
     }
@@ -197,7 +192,7 @@ export function useImportFlow({
       const nextSnapshot = await window.mumbler.cancelPendingImports();
       onSnapshotUpdate(nextSnapshot);
     } catch (error: unknown) {
-      onError(error instanceof Error ? error.message : "Failed to cancel import.");
+      onError(presentFailure(error, "The pending import could not be cancelled. The review remains open; try again.", "pending import cancellation failed"));
     }
     setPendingReviewDrafts([]);
   }
@@ -218,7 +213,7 @@ export function useImportFlow({
     } catch (error: unknown) {
       setImportResult({
         severity: "error",
-        message: error instanceof Error ? error.message : "Dropped import failed.",
+        message: presentFailure(error, "The dropped files could not be imported. The queue is unchanged; check that the files are still available and try again.", "dropped import failed"),
         issueKeys: paths.map(resultKey),
       });
     } finally {
@@ -272,6 +267,7 @@ export function useImportFlow({
 
     const admission = parseDroppedPaths(event.dataTransfer.files, (file) =>
       window.mumbler.getPathForFile(file),
+      reportRendererDiagnostic,
     );
 
     if (admission.paths.length === 0) {

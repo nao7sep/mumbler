@@ -279,7 +279,7 @@ describe("useImportFlow drag acceptance", () => {
 
     expect(importDroppedPaths).toHaveBeenCalledWith(["/fixtures/sample.wav"]);
     expect(container.querySelector('[data-result="warning"]')?.textContent).toContain(
-      "unavailable.wav — Local path could not be read: path unavailable",
+      "unavailable.wav — The local file path could not be read.",
     );
   });
 

@@ -15,6 +15,7 @@ import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.e
 import type { CardTrim, MumblerCard } from "@shared/app-shell";
 import { InlineError } from "./InlineResult";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
+import { presentFailure } from "./presentFailure";
 
 const REGION_COLOR = "rgba(61, 122, 90, 0.22)";
 const WAVE_COLOR = "rgba(72, 108, 88, 0.24)";
@@ -161,9 +162,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           return;
         }
 
-        const message =
-          error instanceof Error ? error.message : "Failed to load working audio for playback.";
-        setPlayerError(message);
+        setPlayerError(presentFailure(error, "The working audio could not be loaded for playback. Check that the file is still available, then reopen the recording.", "working audio load failed"));
       })
       .finally(() => {
         if (!cancelled) {
@@ -234,8 +233,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         setCursorSec(nextTime);
       }),
       waveSurfer.on("error", (error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        setPlayerError(message);
+        setPlayerError(presentFailure(error, "The working audio could not be played. Reload the recording to try again.", "audio playback failed"));
       }),
       // region-update / region-updated fire only from a user drag or resize:
       // WaveSurfer's programmatic setOptions emits "render", not "update", so
@@ -298,8 +296,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       setPlayerError(null);
       await onTrimCommitRef.current(cardIdRef.current, normalizedTrim);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Failed to update trim markers.";
-      setPlayerError(message);
+      setPlayerError(presentFailure(error, "The trim markers could not be saved. The previous markers remain in effect; try again.", "trim marker save failed"));
       setDraftTrim(card.trim);
       setFrontInput(formatMarkerInput(card.trim.frontMarkerSec));
       setBackInput(formatMarkerInput(card.trim.backMarkerSec));
@@ -361,8 +358,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
       await commitTrim(nextTrim);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Invalid trim marker.";
-      setPlayerError(message);
+      setPlayerError(presentFailure(error, "Enter a marker within the recording's duration, then try again.", "trim marker validation failed"));
     }
   }
 
@@ -421,8 +417,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     try {
       await onDuplicateCard(card.id);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Failed to duplicate card.";
-      setPlayerError(message);
+      setPlayerError(presentFailure(error, "The recording could not be duplicated. The original is unchanged; try again.", "recording duplication failed"));
     }
   }
 

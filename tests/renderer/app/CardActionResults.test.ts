@@ -44,7 +44,7 @@ describe("CardActionResults", () => {
     expect(document.body.textContent).not.toContain("Other card failed");
 
     await act(async () => {
-      document.querySelector<HTMLButtonElement>('button[aria-label="Dismiss error"]')?.click();
+      document.querySelector<HTMLButtonElement>('button[aria-label="Close result"]')?.click();
     });
     expect(onDismiss).toHaveBeenCalledWith("save");
   });

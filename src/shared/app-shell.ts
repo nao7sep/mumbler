@@ -58,6 +58,7 @@ export const APP_SHELL_CHANNELS = {
   saveCard: "app-shell:save-card",
   removeCard: "app-shell:remove-card",
   reportRendererError: "app-shell:report-renderer-error",
+  reportRendererDiagnostic: "app-shell:report-renderer-diagnostic",
   dismissAppWideError: "app-shell:dismiss-app-wide-error",
   resetState: "app-shell:reset-state",
   cancelPendingImports: "app-shell:cancel-pending-imports",
@@ -570,6 +571,7 @@ export interface MumblerShellApi {
   saveCard(cardId: string, resolution?: SaveConflictResolution): Promise<SaveCardResult>;
   removeCard(cardId: string): Promise<AppSnapshot>;
   reportRendererError(report: RendererErrorReport): Promise<AppSnapshot>;
+  reportRendererDiagnostic(report: RendererErrorReport): Promise<void>;
   dismissAppWideError(): Promise<AppSnapshot>;
   resetState(): Promise<AppSnapshot>;
   cancelPendingImports(): Promise<AppSnapshot>;

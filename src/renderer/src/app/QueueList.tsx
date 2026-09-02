@@ -92,7 +92,6 @@ export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): 
               role={card.status === "Error" ? "alert" : undefined}
               aria-atomic={card.status === "Error" ? "true" : undefined}
             >
-              {card.status === "Error" ? <strong>Error: </strong> : null}
               {card.lastError.message}
             </div>
           ) : null}

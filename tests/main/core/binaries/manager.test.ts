@@ -309,7 +309,10 @@ describe("installTool", () => {
     const ffmpeg = manager.listStatuses().find((s) => s.name === "ffmpeg");
     expect(ffmpeg?.installedVersion).toBeNull(); // nothing published, nothing to read
     expect(ffmpeg?.state).toBe("not-installed");
-    expect(ffmpeg?.transient).toMatchObject({ kind: "failed", error: "network down" });
+    expect(ffmpeg?.transient).toMatchObject({
+      kind: "failed",
+      error: "ffmpeg could not be installed or updated. The existing tool, if any, is unchanged; try again.",
+    });
   });
 
   it("stages in temp/ and leaves it empty after publishing the binary to bin/", async () => {
@@ -351,7 +354,10 @@ describe("installTool", () => {
 
     const ffmpeg = manager.listStatuses().find((s) => s.name === "ffmpeg");
     expect(ffmpeg?.state).toBe("not-installed");
-    expect(ffmpeg?.transient).toMatchObject({ kind: "failed", error: "SHA-256 mismatch" });
+    expect(ffmpeg?.transient).toMatchObject({
+      kind: "failed",
+      error: "ffmpeg could not be installed or updated. The existing tool, if any, is unchanged; try again.",
+    });
     expect(await readdir(binDir)).toEqual([]); // never made it out of staging
     expect(await readdir(tempDir)).toEqual([]); // staged archive cleaned on failure
   });
@@ -367,7 +373,10 @@ describe("installTool", () => {
 
     const ffmpeg = manager.listStatuses().find((s) => s.name === "ffmpeg");
     expect(ffmpeg?.state).toBe("not-installed");
-    expect(ffmpeg?.transient).toMatchObject({ kind: "failed", error: /not arm64-native/ });
+    expect(ffmpeg?.transient).toMatchObject({
+      kind: "failed",
+      error: "ffmpeg could not be installed or updated. The existing tool, if any, is unchanged; try again.",
+    });
     expect(await readdir(binDir)).toEqual([]);
     expect(await readdir(tempDir)).toEqual([]);
   });

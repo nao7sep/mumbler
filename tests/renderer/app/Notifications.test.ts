@@ -68,7 +68,7 @@ describe("notification lifetime and severity surfaces", () => {
 
     expect(document.querySelectorAll('[role="alert"]')).toHaveLength(2);
     expect(Array.from(document.querySelectorAll(".persistent-notice__severity")))
-      .toHaveLength(2);
+      .toHaveLength(0);
     const statuses = Array.from(document.querySelectorAll<HTMLElement>('[role="status"]'));
     expect(statuses.some((status) => status.textContent === "Recovered recording")).toBe(true);
     expect(statuses.some((status) => status.textContent === "Recording duplicated")).toBe(true);
@@ -79,7 +79,7 @@ describe("notification lifetime and severity surfaces", () => {
     await render(React.createElement(PersistentNotifications, { notifications, onDismiss }));
 
     const buttons = document.querySelectorAll<HTMLButtonElement>(
-      'button[aria-label="Dismiss notification"]',
+      'button[aria-label="Close notification"]',
     );
     await act(async () => buttons[1]!.click());
     expect(onDismiss).toHaveBeenCalledWith("error-2");

@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 describe("InlineError", () => {
-  it("exposes an assertive structural severity cue and an independent dismissal", async () => {
+  it("exposes an assertive result without redundant severity copy", async () => {
     const onDismiss = vi.fn();
     const container = document.createElement("div");
     document.body.append(container);
@@ -30,12 +30,11 @@ describe("InlineError", () => {
     });
 
     const result = document.querySelector<HTMLElement>('[role="alert"]');
-    expect(result?.textContent).toContain("Error");
-    expect(result?.textContent).toContain("Save failed");
+    expect(result?.textContent).toBe("Save failed");
     expect(result?.getAttribute("aria-atomic")).toBe("true");
 
     await act(async () => {
-      document.querySelector<HTMLButtonElement>('button[aria-label="Dismiss error"]')?.click();
+      document.querySelector<HTMLButtonElement>('button[aria-label="Close result"]')?.click();
     });
     expect(onDismiss).toHaveBeenCalledOnce();
   });

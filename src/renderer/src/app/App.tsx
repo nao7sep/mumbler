@@ -54,6 +54,7 @@ import { formatCardStatusMessage, formatStepName, isCardBusy } from "./card-stat
 import { useTablist } from "./useTablist";
 import { CloseIcon } from "./Icon";
 import { InlineError } from "./InlineResult";
+import { presentFailure } from "./presentFailure";
 import { CardActionResults, type CardActionError } from "./CardActionResults";
 import {
   PersistentNotifications,
@@ -110,29 +111,6 @@ function toolsChipMessage(role: StatusRole, dependencies: DependencyStatus[] | n
     (dep) => dep.state === "installed-unchecked" && dep.installedVersion === null,
   );
   return unreadable ? "Audio tools: version unreadable" : "Audio tools: updates unchecked";
-}
-
-function ToolsChipIcon({ role }: { role: StatusRole }): ReactElement {
-  // A warning triangle for warning/error, an info circle for the benign
-  // not-yet-checked case. Inherits the chip's role colour via currentColor.
-  if (role === "informational") {
-    return (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-        strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 11.5v4.5" />
-        <path d="M12 8h.01" />
-      </svg>
-    );
-  }
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3.5 2.5 20.5h19L12 3.5Z" />
-      <path d="M12 10v4" />
-      <path d="M12 17.5h.01" />
-    </svg>
-  );
 }
 
 // The detail pane's wizard tabs, in workflow order: check the loaded info,
@@ -264,7 +242,7 @@ export function App(): ReactElement {
         .catch((error: unknown) => {
           setQueueDragWidth(null);
           addPersistent(
-            error instanceof Error ? error.message : "Failed to save the pane width.",
+            presentFailure(error, "The pane layout wasn't saved. Your current layout is still in use.", "pane layout save failed"),
             "error",
           );
         });
@@ -336,7 +314,7 @@ export function App(): ReactElement {
       .catch((error: unknown) => {
         if (!cancelled) {
           addPersistent(
-            error instanceof Error ? error.message : "Failed to load app snapshot.",
+            presentFailure(error, "Mumbler could not load the current queue. Reopen the app to try again.", "app snapshot load failed"),
             "error",
           );
         }
@@ -367,7 +345,7 @@ export function App(): ReactElement {
           setSnapshot(nextSnapshot);
         })
         .catch((error: unknown) => {
-          addPersistent(error instanceof Error ? error.message : "Failed to refresh card state.", "error");
+          addPersistent(presentFailure(error, "The recording state could not be refreshed. Reopen Mumbler to try again.", "card state refresh failed"), "error");
         });
     });
   }, []);
@@ -381,7 +359,7 @@ export function App(): ReactElement {
         })
         .catch((error: unknown) => {
           addPersistent(
-            error instanceof Error ? error.message : "Failed to refresh app-wide error state.",
+            presentFailure(error, "The window state could not be refreshed. Reopen Mumbler to continue.", "app error state refresh failed"),
             "error",
           );
         });
@@ -395,7 +373,7 @@ export function App(): ReactElement {
         .then((nextSnapshot) => setSnapshot(nextSnapshot))
         .catch((error: unknown) => {
           addPersistent(
-            error instanceof Error ? error.message : "Failed to refresh audio tools state.",
+            presentFailure(error, "Audio tool status could not be refreshed. Reopen Audio Tools to try again.", "audio tools state refresh failed"),
             "error",
           );
         });
@@ -434,9 +412,9 @@ export function App(): ReactElement {
         .then((nextSnapshot) => {
           setSnapshot(nextSnapshot);
         })
-        .catch((error: unknown) => {
+        .catch(() => {
           addPersistent(
-            error instanceof Error ? error.message : "Failed to report renderer error.",
+            "Mumbler could not record the unexpected window error. Restart the app to continue.",
             "error",
           );
         });
@@ -521,7 +499,7 @@ export function App(): ReactElement {
       const nextSnapshot = await window.mumbler.selectCard(cardId);
       setSnapshot(nextSnapshot);
     } catch (error: unknown) {
-      addPersistent(error instanceof Error ? error.message : "Failed to select card.", "error");
+      addPersistent(presentFailure(error, "The recording could not be selected. The current selection is unchanged; try again.", "card selection failed"), "error");
     }
   }
 
@@ -558,7 +536,7 @@ export function App(): ReactElement {
         setCardActionError(
           cardId,
           `generate-${target}`,
-          error instanceof Error ? error.message : "Failed to generate AI output.",
+          presentFailure(error, "AI output could not be generated. Existing transcript and metadata are unchanged; check the Gemini settings and try again.", "AI generation failed"),
         );
       })
       .finally(() => {
@@ -577,7 +555,7 @@ export function App(): ReactElement {
         setCardActionError(
           cardId,
           "cancel-processing",
-          error instanceof Error ? error.message : "Failed to cancel AI work.",
+          presentFailure(error, "The AI operation could not be cancelled yet. Wait for it to finish, then try again.", "AI cancellation failed"),
         );
       });
   }
@@ -620,7 +598,7 @@ export function App(): ReactElement {
         setCardActionError(
           cardId,
           "choose-output-directory",
-          error instanceof Error ? error.message : "Failed to choose output directory.",
+          presentFailure(error, "The output folder could not be selected. The current folder is unchanged; try again.", "output folder selection failed"),
         );
       }
     }
@@ -641,7 +619,7 @@ export function App(): ReactElement {
         setCardActionError(
           cardId,
           `model-${field}`,
-          error instanceof Error ? error.message : "Failed to update model.",
+          presentFailure(error, "The model selection could not be saved. The previous model remains in use; try again.", "model update failed"),
         );
       }
     }
@@ -664,7 +642,7 @@ export function App(): ReactElement {
         setCardActionError(
           cardId,
           `copy-${label}`,
-          error instanceof Error ? error.message : `Failed to copy ${label}.`,
+          presentFailure(error, `${label} could not be copied. Select the text and copy it manually.`, "clipboard copy failed"),
         );
       }
     }
@@ -676,7 +654,7 @@ export function App(): ReactElement {
       setSnapshot(nextSnapshot);
     } catch (error: unknown) {
       addPersistent(
-        error instanceof Error ? error.message : "Failed to dismiss app-wide error.",
+        presentFailure(error, "The message could not be closed. Restart Mumbler to clear it.", "app error dismissal failed"),
         "error",
       );
     }
@@ -689,7 +667,7 @@ export function App(): ReactElement {
       setSnapshot(nextSnapshot);
       addToast("Reset to defaults.");
     } catch (error: unknown) {
-      addPersistent(error instanceof Error ? error.message : "Failed to reset state.", "error");
+      addPersistent(presentFailure(error, "Mumbler could not reset its state. Existing files are unchanged; try again.", "state reset failed"), "error");
     } finally {
       setIsResettingState(false);
     }
@@ -705,7 +683,7 @@ export function App(): ReactElement {
     void promise
       .then((nextSnapshot) => setSnapshot(nextSnapshot))
       .catch((error: unknown) => {
-        setToolOperationError(error instanceof Error ? error.message : failMessage);
+        setToolOperationError(presentFailure(error, failMessage, "audio tool operation failed"));
       });
   }
 
@@ -734,7 +712,7 @@ export function App(): ReactElement {
       .then((nextSnapshot) => setSnapshot(nextSnapshot))
       .catch((error: unknown) => {
         setToolCheckNotice(
-          `Couldn't check for updates: ${error instanceof Error ? error.message : "the check failed"}.`,
+          presentFailure(error, "Updates could not be checked. Installed audio tools are unchanged; try again later.", "audio tool update check failed"),
         );
       })
       .finally(() => setIsCheckingTools(false));
@@ -902,7 +880,7 @@ export function App(): ReactElement {
       addToast(`Saved to ${result.audioPath}`);
       window.scrollTo({ top: 0 });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Failed to save card.";
+      const message = presentFailure(error, "The recording could not be saved. The working copy remains in the queue; check the output folder and try again.", "recording save failed");
       if (pendingSaveConflict?.cardId === cardId) {
         setSaveConflictError(message);
       } else {
@@ -921,7 +899,7 @@ export function App(): ReactElement {
       addToast("Recording removed.");
       window.scrollTo({ top: 0 });
     } catch (error: unknown) {
-      setRemoveCardError(error instanceof Error ? error.message : "Failed to remove card.");
+      setRemoveCardError(presentFailure(error, "The recording could not be removed. It remains in the queue; try again.", "recording removal failed"));
     }
   }
 
@@ -939,7 +917,6 @@ export function App(): ReactElement {
               onClick={() => setShowAudioTools(true)}
               title="Open Managed tools"
             >
-              <ToolsChipIcon role={toolsRollUp} />
               {toolsChipMessage(toolsRollUp, dependencies)}
             </button>
           ) : null}
@@ -968,7 +945,7 @@ export function App(): ReactElement {
                     .then(() => setMenuActionError(null))
                     .catch((error: unknown) =>
                       setMenuActionError(
-                        error instanceof Error ? error.message : "Failed to open output directory.",
+                        presentFailure(error, "The output folder could not be opened. Choose it in Settings or open it from Finder.", "output folder reveal failed"),
                       ),
                     );
                 }}
@@ -1048,9 +1025,9 @@ export function App(): ReactElement {
               <span>{importFlow.importResult.message}</span>
               <button
                 type="button"
-                className="button button--ghost button--compact"
+                className="result-close"
                 onClick={importFlow.dismissImportResult}
-                aria-label="Dismiss import result"
+                aria-label="Close import result"
               >
                 <CloseIcon />
               </button>

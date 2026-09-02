@@ -326,8 +326,8 @@ export async function executeCardPipeline(
     card.activeStep = null;
     card.queuedMode = null;
     card.queuedAtUtc = null;
-    card.lastError = {
-      message: getCardErrorMessage(error),
+    card.lastError = wasCancelled ? null : {
+      message: cardFailureMessage(activeStep),
       occurredAtUtc: Date.now(),
       failedStep: activeStep,
     };
@@ -523,12 +523,17 @@ export function sanitizeSlug(value: string): string {
     .slice(0, 80);
 }
 
-function getCardErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
+function cardFailureMessage(step: CardProcessingStep): string {
+  switch (step) {
+    case "transcription":
+      return "The recording could not be transcribed. Check the audio tools and Gemini settings, then try again.";
+    case "structured":
+    case "title":
+    case "slug":
+      return "AI metadata could not be generated. Existing transcript and metadata are unchanged; check the Gemini settings and try again.";
+    case null:
+      return "The recording could not be processed. Existing files are unchanged; try again.";
   }
-
-  return "Unknown processing failure.";
 }
 
 // Uses 4^n (not 2^n) for aggressive backoff suited to Gemini API rate limits,

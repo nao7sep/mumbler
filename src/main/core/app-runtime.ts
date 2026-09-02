@@ -160,10 +160,7 @@ export class ApplicationRuntime {
         logger,
         startupDiagnostic: {
           title: "Storage Location Could Not Be Resolved",
-          message:
-            error instanceof Error
-              ? error.message
-              : "The MUMBLER_HOME override could not be resolved to a usable storage location.",
+          message: "Mumbler could not use its configured storage folder. Restore access to that folder or remove the MUMBLER_HOME override, then reopen the app.",
         },
         appWideError: null,
         recoveredInterruptedCards: 0,
@@ -359,10 +356,9 @@ export class ApplicationRuntime {
             error instanceof CorruptStateError
               ? "Saved Data Could Not Be Loaded"
               : "Startup Failed",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Unknown startup failure while preparing app storage.",
+          message: error instanceof CorruptStateError
+            ? "Mumbler could not safely load its saved data. The files were left unchanged; check the log before reopening the app."
+            : "Mumbler could not finish preparing its storage. Reopen the app to try again; saved files were left unchanged.",
         },
         appWideError: null,
         recoveredInterruptedCards: 0,
@@ -519,15 +515,29 @@ export class ApplicationRuntime {
   }
 
   async reportRendererError(report: RendererErrorReport): Promise<AppSnapshot> {
-    await this.setAppWideError("Unexpected Renderer Error", report.message, {
+    await this.setAppWideError(
+      "Mumbler could not continue",
+      "The window encountered an unexpected problem. Restart Mumbler to continue; your saved files are unchanged.",
+      new Error(report.message),
+      {
       source: report.source,
       stack: report.stack,
-    });
+      },
+    );
     return this.getSnapshot();
   }
 
+  async reportRendererDiagnostic(report: RendererErrorReport): Promise<void> {
+    await this.runtime.logger.error(
+      "renderer.recovered",
+      report.source,
+      new Error(report.message),
+      { stack: report.stack },
+    );
+  }
+
   async reportMainProcessError(origin: "uncaughtException" | "unhandledRejection", error: unknown): Promise<void> {
-    await this.setAppWideError("Unexpected Main Process Error", formatError(error), {
+    await this.setAppWideError("Mumbler could not continue", "Mumbler encountered an unexpected problem. Restart the app to continue; your saved files are unchanged.", error, {
       origin,
       error: serializeError(error),
     });
@@ -1383,7 +1393,9 @@ export class ApplicationRuntime {
         const kind = error instanceof ImportAdmissionError ? "invalid" : "failure";
         failedImports.push({
           sourcePath,
-          message: error instanceof Error ? error.message : "Unknown import failure.",
+          message: error instanceof ImportAdmissionError
+            ? error.message
+            : "Mumbler could not import this file. Check that it is still available and try again.",
           kind,
         });
         if (kind === "invalid") {
@@ -1541,6 +1553,7 @@ export class ApplicationRuntime {
   private async setAppWideError(
     title: string,
     message: string,
+    error: unknown,
     details?: unknown,
   ): Promise<void> {
     this.runtime.appWideError = {
@@ -1548,7 +1561,7 @@ export class ApplicationRuntime {
       message,
     };
 
-    await this.runtime.logger.error("app.unhandled", title, new Error(message), details);
+    await this.runtime.logger.error("app.unhandled", title, error, details);
   }
 
   private async discardWorkingCard(card: MumblerCard): Promise<void> {

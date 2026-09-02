@@ -1,6 +1,7 @@
 import { useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
 
 import type { AppSnapshot, SettingsDraft } from "@shared/app-shell";
+import { presentFailure } from "./presentFailure";
 
 interface UseSettingsModalOptions {
   onSnapshotUpdate: (snapshot: AppSnapshot) => void;
@@ -66,7 +67,7 @@ export function useSettingsModal({
       initialDraftRef.current = draft;
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
-      onError(error instanceof Error ? error.message : "Failed to load settings.");
+      onError(presentFailure(error, "Settings could not be loaded. Close and reopen Settings to try again.", "settings load failed"));
     } finally {
       setIsLoadingSettings(false);
     }
@@ -88,9 +89,7 @@ export function useSettingsModal({
       }
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
-      setSettingsErrorMessage(
-        error instanceof Error ? error.message : "Failed to choose output directory.",
-      );
+      setSettingsErrorMessage(presentFailure(error, "The output folder could not be selected. The current folder is unchanged; try again.", "settings output folder selection failed"));
     } finally {
       setIsPickingSettingsOutputDirectory(false);
     }
@@ -112,9 +111,7 @@ export function useSettingsModal({
       }
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
-      setSettingsErrorMessage(
-        error instanceof Error ? error.message : "Failed to choose backup directory.",
-      );
+      setSettingsErrorMessage(presentFailure(error, "The backup folder could not be selected. The current folder is unchanged; try again.", "settings backup folder selection failed"));
     } finally {
       setIsPickingSettingsBackupDirectory(false);
     }
@@ -135,7 +132,7 @@ export function useSettingsModal({
       initialDraftRef.current = null;
       onNotice("Settings saved.");
     } catch (error: unknown) {
-      setSettingsErrorMessage(error instanceof Error ? error.message : "Failed to save settings.");
+      setSettingsErrorMessage(presentFailure(error, "Settings could not be saved. Your changes are still shown; try again.", "settings save failed"));
     } finally {
       setIsSavingSettings(false);
     }
@@ -166,9 +163,7 @@ export function useSettingsModal({
       setSettingsErrorMessage(null);
       onNotice("Gemini API key saved.");
     } catch (error: unknown) {
-      setSettingsErrorMessage(
-        error instanceof Error ? error.message : "Failed to save Gemini API key.",
-      );
+      setSettingsErrorMessage(presentFailure(error, "The Gemini API key could not be saved. The previous key remains in use; try again.", "Gemini API key save failed"));
     } finally {
       setIsSavingApiKey(false);
     }
@@ -189,9 +184,7 @@ export function useSettingsModal({
           : "Gemini API key removed.",
       );
     } catch (error: unknown) {
-      setSettingsErrorMessage(
-        error instanceof Error ? error.message : "Failed to remove Gemini API key.",
-      );
+      setSettingsErrorMessage(presentFailure(error, "The Gemini API key could not be removed. The saved key remains in use; try again.", "Gemini API key removal failed"));
     } finally {
       setIsSavingApiKey(false);
     }
@@ -212,9 +205,7 @@ export function useSettingsModal({
       );
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
-      setSettingsErrorMessage(
-        error instanceof Error ? error.message : "Failed to load default prompts.",
-      );
+      setSettingsErrorMessage(presentFailure(error, "Default prompts could not be loaded. Your current prompts are unchanged; try again.", "default prompts load failed"));
     }
   }
 
@@ -237,9 +228,7 @@ export function useSettingsModal({
       );
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
-      setSettingsErrorMessage(
-        error instanceof Error ? error.message : "Failed to load default models.",
-      );
+      setSettingsErrorMessage(presentFailure(error, "Default models could not be loaded. Your current model list is unchanged; try again.", "default models load failed"));
     }
   }
 

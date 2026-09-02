@@ -234,6 +234,9 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
   handle(APP_SHELL_CHANNELS.reportRendererError, (_event, report: RendererErrorReport) =>
     runtime.reportRendererError(report),
   );
+  handle(APP_SHELL_CHANNELS.reportRendererDiagnostic, (_event, report: RendererErrorReport) =>
+    runtime.reportRendererDiagnostic(report),
+  );
 
   handle(APP_SHELL_CHANNELS.dismissAppWideError, () => runtime.dismissAppWideError());
   handle(APP_SHELL_CHANNELS.resetState, () => runtime.resetState());
