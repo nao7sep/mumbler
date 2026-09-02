@@ -51,6 +51,7 @@ export const APP_SHELL_CHANNELS = {
   cancelCardProcessing: "app-shell:cancel-card-processing",
   pickOutputDirectory: "app-shell:pick-output-directory",
   openOutputDirectory: "app-shell:open-output-directory",
+  openExternal: "app-shell:open-external",
   saveSettingsDraft: "app-shell:save-settings-draft",
   setGeminiApiKey: "app-shell:set-gemini-api-key",
   clearGeminiApiKey: "app-shell:clear-gemini-api-key",
@@ -570,6 +571,7 @@ export interface MumblerShellApi {
   cancelCardProcessing(cardId: string): Promise<AppSnapshot>;
   pickOutputDirectory(): Promise<string | null>;
   openOutputDirectory(): Promise<void>;
+  openExternal(url: string): Promise<void>;
   saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot>;
   // Set/clear the Gemini API key. These go to the dedicated secrets file
   // (api-keys.json), separate from the settings JSON, and return a fresh snapshot

@@ -6,6 +6,7 @@ import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { ApplicationRuntime } from "./core/app-runtime";
 import { registerAppShellIpc } from "./ipc/app-shell";
 import { createMainWindow } from "./window";
+import { showStartupFailureDialog } from "./startup-failure-dialog";
 
 app.setName("Mumbler");
 
@@ -78,7 +79,7 @@ async function bootstrap(): Promise<void> {
   });
 
   registerAppShellIpc(runtime);
-  createMainWindow();
+  await createMainWindow();
 
   // The data backup is now write-through (data-backup conventions): every managed
   // text save records itself into ~/.mumbler/backups.sqlite3 the instant its atomic
@@ -123,9 +124,33 @@ async function bootstrap(): Promise<void> {
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
+      void createMainWindow().catch(handleBootstrapFailure);
     }
   });
+}
+
+let handlingBootstrapFailure = false;
+async function handleBootstrapFailure(error: unknown): Promise<void> {
+  if (handlingBootstrapFailure) return;
+  handlingBootstrapFailure = true;
+  console.error("[mumbler] Bootstrap failed:", error instanceof Error ? error.stack : String(error));
+  try {
+    await runtimeForShutdown?.currentLogger().error(
+      "startup.failed",
+      "Mumbler could not finish startup.",
+      error,
+    );
+  } catch (loggingError) {
+    console.error("[mumbler] Could not record bootstrap failure:", loggingError);
+  }
+  let choice: "close" | "restart" = "close";
+  try {
+    choice = await showStartupFailureDialog();
+  } catch (dialogError) {
+    console.error("[mumbler] Could not show the startup failure window:", dialogError);
+  }
+  if (choice === "restart") app.relaunch();
+  app.exit(1);
 }
 
 // Single-instance lock: a second launch must not run a parallel main process. It
@@ -145,9 +170,7 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(bootstrap).catch((error: unknown) => {
-    console.error("[mumbler] Bootstrap failed:", error instanceof Error ? error.stack : String(error));
-  });
+  app.whenReady().then(bootstrap).catch(handleBootstrapFailure);
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {

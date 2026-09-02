@@ -59,6 +59,8 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.pickOutputDirectory) as Promise<string | null>,
   openOutputDirectory: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.openOutputDirectory) as Promise<void>,
+  openExternal: (url: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.openExternal, url) as Promise<void>,
   saveSettingsDraft: (draft: SettingsDraft) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.saveSettingsDraft, draft) as Promise<AppSnapshot>,
   setGeminiApiKey: (apiKey: string) =>

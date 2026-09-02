@@ -1,17 +1,16 @@
-import { BrowserWindow, Menu, nativeTheme, shell } from "electron";
+import { BrowserWindow, Menu, nativeTheme } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from "@shared/layout";
+import { isAllowedExternalUrl, openExternalUrl } from "./external-url";
+
+export { isAllowedExternalUrl } from "./external-url";
 
 // Matches the renderer `--bg` (#edf4ec in styles.css) so the pre-paint window
 // background does not flash a different color before the page loads.
 const WINDOW_BACKGROUND = "#edf4ec";
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-// Schemes the app is willing to hand to the OS via shell.openExternal. Anything
-// else a renderer asks to open (file:, smb:, custom handlers, …) is ignored.
-const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
 
 // Production Content-Security-Policy (defense-in-depth on top of context
 // isolation + sandbox). Applied only to the packaged build, not the dev server,
@@ -31,16 +30,6 @@ const PRODUCTION_CSP = [
   "frame-ancestors 'none'",
 ].join("; ");
 
-// Whether a URL may be handed to the OS browser. Exported so the allowlist is
-// covered without driving a real BrowserWindow.
-export function isAllowedExternalUrl(rawUrl: string): boolean {
-  try {
-    return ALLOWED_EXTERNAL_PROTOCOLS.has(new URL(rawUrl).protocol);
-  } catch {
-    return false;
-  }
-}
-
 // The response-header transform applied in the packaged build: stamp the CSP on
 // without disturbing the headers already present. Exported so the exact policy is
 // verified in a unit test (the runtime path can't be exercised headlessly).
@@ -55,7 +44,9 @@ export function withContentSecurityPolicy(
 
 function openExternalIfAllowed(rawUrl: string): void {
   if (isAllowedExternalUrl(rawUrl)) {
-    void shell.openExternal(rawUrl);
+    void openExternalUrl(rawUrl).catch((error: unknown) => {
+      console.error("[mumbler] Unowned external navigation failed:", error);
+    });
   }
 }
 
@@ -85,7 +76,7 @@ export function buildWindowOptions(): Electron.BrowserWindowConstructorOptions {
   };
 }
 
-export function createMainWindow(): BrowserWindow {
+export async function createMainWindow(): Promise<BrowserWindow> {
   // Force the light theme so the host OS paints a light native title bar on this
   // light app — a dark-mode host would otherwise give it a dark bar that fights
   // the UI (window-chrome conventions: chrome colors match the app's theme).
@@ -153,14 +144,14 @@ export function createMainWindow(): BrowserWindow {
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    void window.loadURL(process.env.ELECTRON_RENDERER_URL);
+    await window.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
     // Packaged build only: enforce the CSP via a response header. (Re-registering
     // on a subsequent window replaces the single handler, which is harmless.)
     window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
       callback({ responseHeaders: withContentSecurityPolicy(details.responseHeaders) });
     });
-    void window.loadFile(join(__dirname, "../renderer/index.html"));
+    await window.loadFile(join(__dirname, "../renderer/index.html"));
   }
 
   return window;

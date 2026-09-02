@@ -11,6 +11,9 @@ import { ModalShell } from "./modal/ModalShell";
 import { useTablist } from "./useTablist";
 import { ExternalLinkIcon } from "./Icon";
 import { InlineError } from "./InlineResult";
+import { presentFailure } from "./presentFailure";
+
+const TIMEZONE_REFERENCE_URL = "https://en.wikipedia.org/wiki/List_of_tz_database_time_zones";
 
 function parseEntries(value: string): string[] {
   return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
@@ -149,6 +152,7 @@ export function SettingsModal({
   // Settings Save. The raw key is held only in this local state until then.
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [timezoneLinkError, setTimezoneLinkError] = useState<string | null>(null);
   const settingsTablist = useTablist<SettingsTab>({
     tabs: SETTINGS_TABS,
     selected: activeTab,
@@ -300,8 +304,27 @@ export function SettingsModal({
                   </select>
                 </label>
                 <p className="field-hint">
-                  <a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" rel="noopener noreferrer">Full timezone list on Wikipedia <ExternalLinkIcon /></a>
+                  <a
+                    href={TIMEZONE_REFERENCE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      void window.mumbler.openExternal(TIMEZONE_REFERENCE_URL)
+                        .then(() => setTimezoneLinkError(null))
+                        .catch((error: unknown) => setTimezoneLinkError(presentFailure(
+                          error,
+                          "The timezone reference could not be opened. Try again.",
+                          "settings timezone link failed",
+                        )));
+                    }}
+                  >Full timezone list on Wikipedia <ExternalLinkIcon /></a>
                 </p>
+                {timezoneLinkError ? (
+                  <InlineError onDismiss={() => setTimezoneLinkError(null)}>
+                    {timezoneLinkError}
+                  </InlineError>
+                ) : null}
                 <div className="field">
                   <span>Timestamp Patterns</span>
                   <p className="field-hint">Named groups: <code>year</code> (2 or 4 digits), <code>month</code>, <code>day</code>, <code>hour</code>, <code>minute</code>, <code>second</code> (optional).</p>

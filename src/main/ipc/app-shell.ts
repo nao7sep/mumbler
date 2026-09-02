@@ -13,6 +13,7 @@ import {
 
 import type { ApplicationRuntime } from "../core/app-runtime";
 import { OperationError } from "../core/operation-error";
+import { openExternalUrl } from "../external-url";
 
 function assertString(value: unknown, name: string): asserts value is string {
   if (typeof value !== "string") {
@@ -197,6 +198,10 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
   });
 
   handle(APP_SHELL_CHANNELS.openOutputDirectory, () => runtime.openOutputDirectory());
+  handle(APP_SHELL_CHANNELS.openExternal, (_event, url: string) => {
+    assertString(url, "url");
+    return openExternalUrl(url);
+  });
 
   handle(APP_SHELL_CHANNELS.saveSettingsDraft, (_event, draft: SettingsDraft) =>
     runtime.saveSettingsDraft(draft),

@@ -1,7 +1,9 @@
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 
 import { ModalShell } from "./modal/ModalShell";
 import { ExternalLinkIcon } from "./Icon";
+import { InlineError } from "./InlineResult";
+import { presentFailure } from "./presentFailure";
 
 const GITHUB_URL = "https://github.com/nao7sep/mumbler";
 
@@ -12,6 +14,27 @@ export function AboutModal({
   version: string;
   onClose: () => void;
 }): ReactElement {
+  const [linkFailures, setLinkFailures] = useState<Record<"repo" | "issues", string | undefined>>({
+    repo: undefined,
+    issues: undefined,
+  });
+
+  async function openLink(owner: "repo" | "issues", url: string): Promise<void> {
+    try {
+      await window.mumbler.openExternal(url);
+      setLinkFailures((current) => ({ ...current, [owner]: undefined }));
+    } catch (error) {
+      const message = owner === "repo"
+        ? "GitHub could not be opened. Try again."
+        : "Report Issue could not be opened. Try again.";
+      const presented = presentFailure(error, message, `about ${owner} link failed`);
+      setLinkFailures((current) => ({
+        ...current,
+        [owner]: presented,
+      }));
+    }
+  }
+
   return (
     <ModalShell
       title="About Mumbler"
@@ -31,13 +54,23 @@ export function AboutModal({
           Keep your voice recordings organized. Import, generate transcription, structure it, generate titles and slugs, and export — all in one place.
         </p>
         <div className="about-links">
-          <a href={GITHUB_URL} target="_blank" rel="noreferrer">
+          <a href={GITHUB_URL} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); void openLink("repo", GITHUB_URL); }}>
             GitHub <ExternalLinkIcon />
           </a>
-          <a href={`${GITHUB_URL}/issues`} target="_blank" rel="noreferrer">
+          <a href={`${GITHUB_URL}/issues`} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); void openLink("issues", `${GITHUB_URL}/issues`); }}>
             Report Issue <ExternalLinkIcon />
           </a>
         </div>
+        {linkFailures.repo ? (
+          <InlineError onDismiss={() => setLinkFailures((current) => ({ ...current, repo: undefined }))}>
+            {linkFailures.repo}
+          </InlineError>
+        ) : null}
+        {linkFailures.issues ? (
+          <InlineError onDismiss={() => setLinkFailures((current) => ({ ...current, issues: undefined }))}>
+            {linkFailures.issues}
+          </InlineError>
+        ) : null}
         <p className="about-meta">
           &copy; 2026 Yoshinao Inoguchi &mdash; MIT License
         </p>

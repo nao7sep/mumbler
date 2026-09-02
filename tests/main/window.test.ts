@@ -7,13 +7,18 @@ import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from "@shared/layout";
 // only to assert the forced theme, so the BrowserWindow stub is a no-op
 // constructor and nativeTheme is a writable holder for themeSource.
 const nativeThemeStub = { themeSource: "system" as string };
+let documentLoadFailure: Error | null = null;
 
 vi.mock("electron", () => ({
   BrowserWindow: class {
     on(): void {}
     once(): void {}
-    loadURL(): void {}
-    loadFile(): void {}
+    loadURL(): Promise<void> {
+      return documentLoadFailure ? Promise.reject(documentLoadFailure) : Promise.resolve();
+    }
+    loadFile(): Promise<void> {
+      return documentLoadFailure ? Promise.reject(documentLoadFailure) : Promise.resolve();
+    }
     webContents = {
       setWindowOpenHandler(): void {},
       on(): void {},
@@ -91,9 +96,16 @@ describe("buildWindowOptions", () => {
 });
 
 describe("createMainWindow", () => {
-  it("forces the light theme so a dark host paints a light title bar", () => {
+  it("forces the light theme so a dark host paints a light title bar", async () => {
     nativeThemeStub.themeSource = "system";
-    createMainWindow();
+    await createMainWindow();
     expect(nativeThemeStub.themeSource).toBe("light");
+  });
+
+  it("keeps a renderer document-load rejection observable to startup", async () => {
+    const hostile = new Error("EACCES /private/tmp/mumbler-renderer.html");
+    documentLoadFailure = hostile;
+    await expect(createMainWindow()).rejects.toBe(hostile);
+    documentLoadFailure = null;
   });
 });
