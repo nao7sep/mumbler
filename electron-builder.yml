@@ -52,4 +52,10 @@ win:
 # Clean, predictable installer filename (electron-builder's default is
 # "Mumbler Setup 0.1.0.exe", with a space). Portable zips keep their defaults.
 nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
   artifactName: ${productName}-${version}-setup.${ext}
