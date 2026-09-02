@@ -31,6 +31,16 @@ afterEach(async () => {
 });
 
 describe("AboutModal external results", () => {
+  function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
+  }
+
   it("retains hostile link failures independently and clears only matching success", async () => {
     const container = document.createElement("div");
     document.body.append(container);
@@ -51,5 +61,24 @@ describe("AboutModal external results", () => {
     await act(async () => links[0].click());
     expect(document.body.textContent).not.toContain("GitHub could not be opened. Try again.");
     expect(document.body.textContent).toContain("Report Issue could not be opened. Try again.");
+  });
+
+  it("does not let an older link settlement replace the current attempt", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(React.createElement(AboutModal, { version: "0.1.0", onClose: vi.fn() })));
+
+    const first = deferred<void>();
+    const second = deferred<void>();
+    openExternal.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const repo = document.querySelector<HTMLAnchorElement>(".about-links a");
+    await act(async () => { repo?.click(); repo?.click(); });
+    await act(async () => second.resolve());
+    await act(async () => first.reject(new Error("EACCES /private/tmp/STALE-ABOUT")));
+
+    expect(document.body.textContent).not.toContain("GitHub could not be opened");
+    expect(document.body.textContent).not.toContain("STALE-ABOUT");
+    expect(reportRendererDiagnostic).toHaveBeenCalledOnce();
   });
 });

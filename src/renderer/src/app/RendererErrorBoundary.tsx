@@ -1,4 +1,5 @@
 import React from "react";
+import { describeRendererError } from "./presentFailure";
 
 export class RendererErrorBoundary extends React.Component<React.PropsWithChildren, { failed: boolean }> {
   override state = { failed: false };
@@ -6,14 +7,13 @@ export class RendererErrorBoundary extends React.Component<React.PropsWithChildr
   static getDerivedStateFromError() { return { failed: true }; }
 
   override componentDidCatch(error: unknown, info: React.ErrorInfo): void {
-    const diagnostic = error instanceof Error
-      ? { message: error.message, stack: error.stack, componentStack: info.componentStack ?? "" }
-      : { message: String(error), componentStack: info.componentStack ?? "" };
+    const diagnostic = describeRendererError(error);
+    const stack = [diagnostic.stack, info.componentStack].filter(Boolean).join("\n");
     try {
       void window.mumbler.reportRendererError({
-        message: diagnostic.message,
+        ...diagnostic,
         source: "react error boundary",
-        stack: [diagnostic.stack, diagnostic.componentStack].filter(Boolean).join("\n"),
+        ...(stack ? { stack } : {}),
       }).catch((logError) => console.error("Failed to record renderer failure", logError));
     } catch (logError) {
       console.error("Failed to record renderer failure", logError);

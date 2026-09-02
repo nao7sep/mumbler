@@ -22,7 +22,7 @@ export function reportRendererDiagnostic(error: unknown, source: string): void {
   });
 }
 
-function describeRendererError(error: unknown, seen = new WeakSet<object>()): {
+export function describeRendererError(error: unknown, seen = new WeakSet<object>()): {
   name?: string;
   message: string;
   stack?: string;

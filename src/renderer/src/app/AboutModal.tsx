@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import { useRef, useState, type ReactElement } from "react";
 
 import { ModalShell } from "./modal/ModalShell";
 import { ExternalLinkIcon } from "./Icon";
@@ -18,16 +18,20 @@ export function AboutModal({
     repo: undefined,
     issues: undefined,
   });
+  const linkAttempts = useRef<Record<"repo" | "issues", number>>({ repo: 0, issues: 0 });
 
   async function openLink(owner: "repo" | "issues", url: string): Promise<void> {
+    const attempt = ++linkAttempts.current[owner];
     try {
       await window.mumbler.openExternal(url);
+      if (linkAttempts.current[owner] !== attempt) return;
       setLinkFailures((current) => ({ ...current, [owner]: undefined }));
     } catch (error) {
       const message = owner === "repo"
         ? "GitHub could not be opened. Try again."
         : "Report Issue could not be opened. Try again.";
       const presented = presentFailure(error, message, `about ${owner} link failed`);
+      if (linkAttempts.current[owner] !== attempt) return;
       setLinkFailures((current) => ({
         ...current,
         [owner]: presented,

@@ -153,6 +153,7 @@ export function SettingsModal({
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [timezoneLinkError, setTimezoneLinkError] = useState<string | null>(null);
+  const timezoneLinkAttempt = useRef(0);
   const settingsTablist = useTablist<SettingsTab>({
     tabs: SETTINGS_TABS,
     selected: activeTab,
@@ -310,13 +311,19 @@ export function SettingsModal({
                     rel="noopener noreferrer"
                     onClick={(event) => {
                       event.preventDefault();
+                      const attempt = ++timezoneLinkAttempt.current;
                       void window.mumbler.openExternal(TIMEZONE_REFERENCE_URL)
-                        .then(() => setTimezoneLinkError(null))
-                        .catch((error: unknown) => setTimezoneLinkError(presentFailure(
-                          error,
-                          "The timezone reference could not be opened. Try again.",
-                          "settings timezone link failed",
-                        )));
+                        .then(() => {
+                          if (timezoneLinkAttempt.current === attempt) setTimezoneLinkError(null);
+                        })
+                        .catch((error: unknown) => {
+                          const message = presentFailure(
+                            error,
+                            "The timezone reference could not be opened. Try again.",
+                            "settings timezone link failed",
+                          );
+                          if (timezoneLinkAttempt.current === attempt) setTimezoneLinkError(message);
+                        });
                     }}
                   >Full timezone list on Wikipedia <ExternalLinkIcon /></a>
                 </p>

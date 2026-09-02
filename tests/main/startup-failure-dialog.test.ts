@@ -34,4 +34,12 @@ describe("startup failure dialog", () => {
     expect(html).not.toContain("EACCES");
     expect(html).not.toMatch(/[⚠❌✅]/u);
   });
+
+  it("softens every button palette while preserving primary intent when inactive", () => {
+    const html = renderStartupFailureHtml();
+    expect(html).toContain("data-window-inactive");
+    expect(html).toMatch(/\[data-window-inactive\] \.button\{[^}]*background:#f2f5f2/);
+    expect(html).toMatch(/\[data-window-inactive\] \.primary\{[^}]*background:#789580/);
+    expect(html).toContain("toggleAttribute('data-window-inactive',!document.hasFocus())");
+  });
 });

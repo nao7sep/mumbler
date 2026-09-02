@@ -39,4 +39,22 @@ describe("RendererErrorBoundary", () => {
     expect(reload?.classList.contains("button--primary")).toBe(true);
     expect(reportRendererError).toHaveBeenCalledWith(expect.objectContaining({ message: HOSTILE }));
   });
+
+  it("preserves a hostile cause chain in diagnostics only", () => {
+    const reportRendererError = vi.fn().mockResolvedValue({});
+    Object.defineProperty(window, "mumbler", { configurable: true, value: { reportRendererError } });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const cause = new TypeError("EACCES /private/tmp/MUMBLER-CAUSE-SENTINEL");
+
+    function BrokenWithCause(): never {
+      throw new Error("renderer wrapper", { cause });
+    }
+    act(() => root.render(<RendererErrorBoundary><BrokenWithCause /></RendererErrorBoundary>));
+
+    expect(document.body.textContent).not.toContain("MUMBLER-CAUSE-SENTINEL");
+    expect(reportRendererError).toHaveBeenCalledWith(expect.objectContaining({
+      message: "renderer wrapper",
+      cause: expect.objectContaining({ name: "TypeError", message: expect.stringContaining("MUMBLER-CAUSE-SENTINEL") }),
+    }));
+  });
 });
