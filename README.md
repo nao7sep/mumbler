@@ -6,6 +6,7 @@ Mumbler is a desktop app for turning audio recordings into transcripts and publi
 
 - **Waveform editor** — set front/back trim markers to cut silence before generation
 - **AI pipeline** — transcription → structured transcription → title → slug, each a dependent step that regenerates downstream outputs when changed
+- **Separate model choices** — choose one Gemini model for transcription and structured transcription, and another for the shorter title and slug steps. Settings starts with Gemini 3.1 Pro, 3.7 Flash, and 3.5 Flash Lite suggestions; both choices default to 3.7 Flash.
 - **Queue** — import many files and process them concurrently, with a configurable limit
 - **Timestamp parsing** — pull the recording datetime from filenames via configurable regex, prompting when none matches
 - **Atomic save** — writes audio + JSON + Markdown together, with rollback on failure
@@ -35,6 +36,8 @@ npm run dev
 ```
 
 On first launch, open Settings and enter your Gemini API key. Saved files default to `~/.mumbler/output`.
+
+The Gemini model list is yours to edit: add or remove model IDs, select separate transcription and metadata models, or use **Reset models** to restore the built-in suggestions. Mumbler reports an invalid or retired model when a job calls Gemini rather than trying to validate the list against a changing online catalogue.
 
 ## License
 

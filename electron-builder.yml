@@ -10,6 +10,12 @@ directories:
 files:
   - out/**
   - package.json
+  # Runtime never consumes source maps or TypeScript declarations. Keep the
+  # packaged dependency tree focused on executable code and required metadata.
+  - "!**/*.map"
+  - "!**/*.d.ts"
+  - "!**/*.d.mts"
+  - "!**/*.d.cts"
 
 # asar stays at its default (enabled): mumbler bundles no executable native
 # binaries. ffmpeg and ffprobe are managed downloads fetched at runtime into the
@@ -50,7 +56,7 @@ win:
     - zip
 
 # Clean, predictable installer filename (electron-builder's default is
-# "Mumbler Setup 0.1.0.exe", with a space). Portable zips keep their defaults.
+# "Mumbler Setup X.Y.Z.exe", with a space). Portable zips keep their defaults.
 nsis:
   oneClick: false
   perMachine: false

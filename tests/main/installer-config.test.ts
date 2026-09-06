@@ -6,6 +6,14 @@ const config = readFileSync(
   "utf8",
 );
 
+describe("packaged development metadata", () => {
+  it("excludes source maps and TypeScript declarations", () => {
+    for (const exclusion of ["!**/*.map", "!**/*.d.ts", "!**/*.d.mts", "!**/*.d.cts"]) {
+      expect(config).toContain(`  - "${exclusion}"`);
+    }
+  });
+});
+
 describe("Windows installer configuration", () => {
   it("uses the assisted dual-scope NSIS contract", () => {
     for (const setting of [
