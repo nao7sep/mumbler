@@ -41,7 +41,7 @@ The Gemini model list is yours to edit: add or remove model IDs, select separate
 
 ## License
 
-MIT © 2026 Yoshinao Inoguchi
+[GNU GPL v3 or later](LICENSE) © 2026 Yoshinao Inoguchi
 
 ## Contact
 

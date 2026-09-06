@@ -76,7 +76,7 @@ export function AboutModal({
           </InlineError>
         ) : null}
         <p className="about-meta">
-          &copy; 2026 Yoshinao Inoguchi &mdash; MIT License
+          &copy; 2026 Yoshinao Inoguchi &mdash; GNU GPL v3 or later
         </p>
       </div>
     </ModalShell>
