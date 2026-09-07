@@ -131,7 +131,6 @@ describe("AudioToolsModal update check", () => {
     });
 
     expect(document.body.textContent).toContain("Managed tools");
-    expect(document.body.textContent).toContain("GPLv3-or-later builds from Martin Riedl");
     expect(document.body.textContent).toContain("2026-08-23 13:03");
     expect(document.body.textContent).toContain("2026-08-24 14:04");
     expect(document.body.textContent).not.toContain("Latest Auto-Build");

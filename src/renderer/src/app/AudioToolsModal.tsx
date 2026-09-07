@@ -107,8 +107,7 @@ export function AudioToolsModal({
       <div className="modal-card__body">
         <p id="audio-tools-description" className="tools-intro">
           Mumbler uses ffmpeg and ffprobe to read and trim audio. They are downloaded as native
-          GPLv3-or-later builds from Martin Riedl on macOS or BtbN on Windows, verified by checksum, and
-          kept in your app data folder. Both are required.
+          builds, verified by checksum, and kept in your app data folder. Both are required.
         </p>
 
         <div className="tools-toolbar">
