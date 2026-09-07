@@ -15,7 +15,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "npm run typecheck:node && npm run typecheck:web && electron-vite build",
-    "dist": "npm run build && electron-builder --publish never",
+    "dist": "npm run build && npm run prepare:electron && electron-builder --publish never",
+    "prepare:electron": "node node_modules/electron/install.js",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",

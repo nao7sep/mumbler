@@ -28,6 +28,12 @@ files:
 extraResources:
   - from: build/Assets.car
     to: Assets.car
+  - from: LICENSE
+    to: LICENSE.txt
+  - from: node_modules/electron/dist/LICENSE
+    to: electron/LICENSE
+  - from: node_modules/electron/dist/LICENSES.chromium.html
+    to: electron/LICENSES.chromium.html
 
 mac:
   category: public.app-category.productivity
