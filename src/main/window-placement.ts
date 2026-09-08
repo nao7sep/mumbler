@@ -135,7 +135,8 @@ export function configureWindowPlacement(
     flush: async () => {
       try {
         cancel();
-        if (enabled && win.isMaximized() && !win.isMinimized() && !win.isFullScreen()) mode = "maximized";
+        if (!enabled) return;
+        if (win.isMaximized() && !win.isMinimized() && !win.isFullScreen()) mode = "maximized";
         await save();
       } catch (error) { onError(error); }
     },
