@@ -31,6 +31,8 @@ describe("startup failure dialog", () => {
     expect(html).toContain("Mumbler could not start");
     expect(html).toContain("Restart Mumbler");
     expect(html).toContain("Your recordings and saved files were not changed");
+    expect(html).toContain('role="region" aria-label="Startup failure details" tabindex="0"');
+    expect(html).toContain("*::-webkit-scrollbar{width:16px;height:16px}");
     expect(html).not.toContain("EACCES");
     expect(html).not.toMatch(/[⚠❌✅]/u);
   });

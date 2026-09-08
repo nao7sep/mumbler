@@ -17,11 +17,17 @@ describe("styles.css window chrome", () => {
     expect(css).toContain("color-scheme: light");
   });
 
-  it("styles a thin, rounded, inset scroll bar", () => {
+  it("styles a reachable, rounded, inset scroll bar", () => {
     expect(css).toContain("::-webkit-scrollbar");
     expect(css).toContain("border-radius: 999px");
     expect(css).toContain("background-clip: padding-box");
-    expect(css).toContain("scrollbar-width: thin");
+    expect(css).toContain("scrollbar-width: auto");
+    expect(css).toContain("width: 16px");
+    expect(css).toContain("--scrollbar-thumb: var(--text-tertiary)");
+    expect(css).toContain("--scrollbar-thumb-active: var(--text-secondary)");
+    expect(css).toContain("*:hover::-webkit-scrollbar-thumb");
+    expect(css).toContain("*:focus-within::-webkit-scrollbar-thumb");
+    expect(css).toContain("scrollbar-gutter: stable");
   });
 
   it("gives the detail workspace track a real minimum, not a zero floor", () => {

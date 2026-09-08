@@ -18,12 +18,13 @@ const TEXT_INPUT_TYPES = new Set([
  * fires. Letters compare case-insensitively so a stray CapsLock cannot kill
  * the trim keys; Shift is still rejected as a held modifier.
  */
-export function findMatchingCommand(event: KeyboardEvent): CommandId | null {
+export function findMatchingGlobalCommand(event: KeyboardEvent): CommandId | null {
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
     return null;
   }
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   for (const command of COMMAND_DEFINITIONS) {
+    if (command.id === "select-previous" || command.id === "select-next") continue;
     if (command.key === key) {
       return command.id;
     }

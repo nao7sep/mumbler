@@ -32,7 +32,7 @@ import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
 import { HamburgerIcon } from "./Icon";
 import { Menu, MenuItem } from "./Menu";
 import { SettingsModal } from "./SettingsModal";
-import { findMatchingCommand, isActivationTarget, isTextEditingTarget, isTypingTarget } from "./shortcut-utils";
+import { findMatchingGlobalCommand, isActivationTarget, isTextEditingTarget, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
 import { QueueList, formatBytes, formatDuration, statusModifier } from "./QueueList";
 import { PaneSplitter } from "./PaneSplitter";
@@ -821,21 +821,6 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
           await handleSaveCard(selectedCard.id);
         }
         return;
-      case "select-previous":
-      case "select-next": {
-        const cards = snapshot?.state?.cards ?? [];
-        const currentIndex = cards.findIndex((card) => card.id === selectedCard.id);
-        if (currentIndex === -1) {
-          return;
-        }
-
-        const delta = commandId === "select-previous" ? -1 : 1;
-        const nextCard = cards[currentIndex + delta];
-        if (nextCard) {
-          await handleCardSelect(nextCard.id);
-        }
-        return;
-      }
       default:
         return;
     }
@@ -891,7 +876,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
         return;
       }
 
-      const commandId = findMatchingCommand(event);
+      const commandId = findMatchingGlobalCommand(event);
       if (commandId === null) {
         return;
       }

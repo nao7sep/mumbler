@@ -3,42 +3,42 @@ import { describe, expect, it } from "vitest";
 
 import type { CommandId } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
-import { findMatchingCommand, isTextEditingTarget, isTypingTarget } from "@renderer/app/shortcut-utils";
+import { findMatchingGlobalCommand, isTextEditingTarget, isTypingTarget } from "@renderer/app/shortcut-utils";
 
 function keydown(init: KeyboardEventInit): KeyboardEvent {
   return new KeyboardEvent("keydown", init);
 }
 
-describe("findMatchingCommand", () => {
-  it("matches the unmodified navigation and playback keys", () => {
-    expect(findMatchingCommand(keydown({ key: "ArrowUp" }))).toBe("select-previous");
-    expect(findMatchingCommand(keydown({ key: "ArrowDown" }))).toBe("select-next");
-    expect(findMatchingCommand(keydown({ key: " " }))).toBe("play-pause");
-    expect(findMatchingCommand(keydown({ key: "ArrowLeft" }))).toBe("skip-backward");
-    expect(findMatchingCommand(keydown({ key: "ArrowRight" }))).toBe("skip-forward");
+describe("findMatchingGlobalCommand", () => {
+  it("leaves queue navigation to the focused listbox and matches playback keys", () => {
+    expect(findMatchingGlobalCommand(keydown({ key: "ArrowUp" }))).toBeNull();
+    expect(findMatchingGlobalCommand(keydown({ key: "ArrowDown" }))).toBeNull();
+    expect(findMatchingGlobalCommand(keydown({ key: " " }))).toBe("play-pause");
+    expect(findMatchingGlobalCommand(keydown({ key: "ArrowLeft" }))).toBe("skip-backward");
+    expect(findMatchingGlobalCommand(keydown({ key: "ArrowRight" }))).toBe("skip-forward");
   });
 
   it("matches the single-letter trim and workflow keys", () => {
-    expect(findMatchingCommand(keydown({ key: "f" }))).toBe("set-front-marker");
-    expect(findMatchingCommand(keydown({ key: "b" }))).toBe("set-back-marker");
-    expect(findMatchingCommand(keydown({ key: "t" }))).toBe("transcribe-selected");
-    expect(findMatchingCommand(keydown({ key: "s" }))).toBe("save-selected");
+    expect(findMatchingGlobalCommand(keydown({ key: "f" }))).toBe("set-front-marker");
+    expect(findMatchingGlobalCommand(keydown({ key: "b" }))).toBe("set-back-marker");
+    expect(findMatchingGlobalCommand(keydown({ key: "t" }))).toBe("transcribe-selected");
+    expect(findMatchingGlobalCommand(keydown({ key: "s" }))).toBe("save-selected");
   });
 
   it("does not match when an unexpected modifier is held", () => {
-    expect(findMatchingCommand(keydown({ key: "s", ctrlKey: true }))).toBeNull();
-    expect(findMatchingCommand(keydown({ key: "s", metaKey: true }))).toBeNull();
-    expect(findMatchingCommand(keydown({ key: "f", altKey: true }))).toBeNull();
+    expect(findMatchingGlobalCommand(keydown({ key: "s", ctrlKey: true }))).toBeNull();
+    expect(findMatchingGlobalCommand(keydown({ key: "s", metaKey: true }))).toBeNull();
+    expect(findMatchingGlobalCommand(keydown({ key: "f", altKey: true }))).toBeNull();
   });
 
   it("returns null for keys with no bound command", () => {
-    expect(findMatchingCommand(keydown({ key: "z" }))).toBeNull();
-    expect(findMatchingCommand(keydown({ key: "Enter" }))).toBeNull();
+    expect(findMatchingGlobalCommand(keydown({ key: "z" }))).toBeNull();
+    expect(findMatchingGlobalCommand(keydown({ key: "Enter" }))).toBeNull();
   });
 
   it("matches the bracket keys to the snippet-preview commands", () => {
-    expect(findMatchingCommand(keydown({ key: "[" }))).toBe("play-first-snippet");
-    expect(findMatchingCommand(keydown({ key: "]" }))).toBe("play-last-snippet");
+    expect(findMatchingGlobalCommand(keydown({ key: "[" }))).toBe("play-first-snippet");
+    expect(findMatchingGlobalCommand(keydown({ key: "]" }))).toBe("play-last-snippet");
   });
 
   // Regression guard: every defined command must be reachable by the physical
@@ -61,7 +61,8 @@ describe("findMatchingCommand", () => {
     };
 
     for (const command of COMMAND_DEFINITIONS) {
-      expect(findMatchingCommand(keydown({ key: keyForCommand[command.id] }))).toBe(command.id);
+      const expected = command.group === "Queue" ? null : command.id;
+      expect(findMatchingGlobalCommand(keydown({ key: keyForCommand[command.id] }))).toBe(expected);
     }
 
     expect(Object.keys(keyForCommand).sort()).toEqual(

@@ -1,17 +1,10 @@
-// The queue's in-app listbox layer — a PROJECTION-ONLY composite per the
+// The queue's in-app listbox layer owns the listbox interaction per the
 // composite-control conventions. It projects the queue's single source of truth
 // (the backend `selectedCardId`) onto the DOM: `role="listbox"`/`role="option"`,
 // `aria-selected`, a roving tabindex (the selected row is the sole tab stop, every
-// other row is removed from the tab order), and click parity (a click selects,
-// mirroring the keyboard command layer).
-//
-// COMMAND LAYER OWNS NAVIGATION. This hook DELIBERATELY does NOT bind
-// Up/Down/Home/End. Queue navigation stays owned by the EXISTING window-level
-// command layer in App.tsx (the `select-previous` / `select-next` shortcuts on
-// Up/Down), which reads and advances `selectedCardId` through the backend. Folding
-// arrow handling into the listbox would duplicate that authority and create the
-// cross-control key bleed the conventions warn against; keeping it out is the
-// "command layer is separate" rule applied literally.
+// other row is removed from the tab order), click parity, and the conventional
+// Up/Down/PageUp/PageDown/Home/End navigation keys. Queue arrows deliberately do
+// not belong to the window command layer: the focused listbox is their owner.
 //
 // TYPE-AHEAD IS CONSCIOUSLY CEDED. The single-letter keys the conventions would
 // spend on type-ahead (F/B/T/S) are already app commands, so the list cannot also
@@ -21,7 +14,8 @@
 // `selectedCardId`; this hook simply re-projects, and follows focus to the new
 // selected row only when focus already lived in the list (never-steal-focus).
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
+import { currentCompositeIndex, nextIndex, type NavDirection } from "./composite-nav";
 
 export interface QueueListboxOptionProps {
   role: "option";
@@ -34,6 +28,8 @@ export interface QueueListboxContainerProps {
   role: "listbox";
   "aria-label": string;
   ref: React.RefObject<HTMLDivElement | null>;
+  tabIndex: 0 | -1;
+  onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
 }
 
 export interface UseQueueListboxResult {
@@ -49,10 +45,45 @@ export function useQueueListbox(params: {
   const { cardIds, selectedCardId, label } = params;
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  function focusCard(cardId: string): void {
+    const target = containerRef.current?.querySelector<HTMLElement>(
+      `[data-card-id="${CSS.escape(cardId)}"]`,
+    );
+    if (target === undefined || target === null) return;
+    target.focus();
+    target.scrollIntoView?.({ block: "nearest" });
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+
+    let direction: NavDirection | null = null;
+    if (event.key === "ArrowDown") direction = "next";
+    else if (event.key === "ArrowUp") direction = "prev";
+    else if (event.key === "PageDown") direction = "page-next";
+    else if (event.key === "PageUp") direction = "page-prev";
+    else if (event.key === "Home") direction = "first";
+    else if (event.key === "End") direction = "last";
+    if (direction === null) return;
+
+    event.preventDefault();
+    const focusedId = document.activeElement instanceof HTMLElement
+      ? document.activeElement.dataset.cardId
+      : undefined;
+    const current = currentCompositeIndex({ ids: cardIds, focusedId, selectedId: selectedCardId });
+    const scrollOwner = containerRef.current?.closest<HTMLElement>(".queue-pane");
+    const firstOption = containerRef.current?.querySelector<HTMLElement>("[data-card-id]");
+    const measuredPage = scrollOwner && firstOption?.offsetHeight
+      ? Math.floor(scrollOwner.clientHeight / firstOption.offsetHeight)
+      : 8;
+    const targetIndex = nextIndex(direction, current, cardIds.length, measuredPage);
+    if (targetIndex >= 0) focusCard(cardIds[targetIndex]!);
+  }
+
   // Follow the selection with DOM focus, but never steal it: only move focus to
   // the newly selected row when focus already lives somewhere in the list. The
-  // command layer drives the selection change (Up/Down) and the user is keyboard-
-  // navigating the list, so the focus move is expected; when focus is elsewhere
+  // listbox drives the selection change and the user is keyboard-navigating the
+  // list, so the focus move is expected; when focus is elsewhere
   // (a detail-pane field, a dialog) the projection updates silently.
   useEffect(() => {
     const container = containerRef.current;
@@ -71,6 +102,7 @@ export function useQueueListbox(params: {
     );
     if (target !== null && target !== active) {
       target.focus();
+      target.scrollIntoView?.({ block: "nearest" });
     }
   }, [selectedCardId, cardIds]);
 
@@ -79,6 +111,8 @@ export function useQueueListbox(params: {
       role: "listbox",
       "aria-label": label,
       ref: containerRef,
+      tabIndex: cardIds.length === 0 ? 0 : -1,
+      onKeyDown: handleKeyDown,
     },
     getOptionProps: (cardId: string): QueueListboxOptionProps => ({
       role: "option",

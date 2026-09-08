@@ -1,7 +1,9 @@
 import type { CommandDefinition } from "./app-shell";
 
 // `key` is the literal event.key the command matches (letters lowercase; the
-// dispatcher lowercases the event's letter so CapsLock cannot kill a command).
+// owning interaction layer lowercases the event's letter so CapsLock cannot kill
+// a command). Queue arrows are displayed here but dispatched by the listbox;
+// the remaining commands are dispatched by the window command layer.
 // The help modal derives the display word from it per the
 // keyboard-shortcut-conventions ("ArrowUp" → "Up", " " → "Space").
 export const COMMAND_DEFINITIONS: CommandDefinition[] = [

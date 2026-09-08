@@ -28,11 +28,20 @@ describe("nextIndex", () => {
     expect(nextIndex("last", -1, 4)).toBe(3);
   });
 
+  it("moves roughly one viewport for page navigation and stops at the ends", () => {
+    expect(nextIndex("page-next", 2, 20, 6)).toBe(8);
+    expect(nextIndex("page-prev", 8, 20, 6)).toBe(2);
+    expect(nextIndex("page-next", 18, 20, 6)).toBe(19);
+    expect(nextIndex("page-prev", 2, 20, 6)).toBe(0);
+  });
+
   it("stays on the only item in a single-item set", () => {
     expect(nextIndex("next", 0, 1)).toBe(0);
     expect(nextIndex("prev", 0, 1)).toBe(0);
     expect(nextIndex("first", 0, 1)).toBe(0);
     expect(nextIndex("last", 0, 1)).toBe(0);
+    expect(nextIndex("page-next", 0, 1, 8)).toBe(0);
+    expect(nextIndex("page-prev", 0, 1, 8)).toBe(0);
   });
 
   it("returns -1 for an empty set", () => {
@@ -40,6 +49,8 @@ describe("nextIndex", () => {
     expect(nextIndex("prev", -1, 0)).toBe(-1);
     expect(nextIndex("first", -1, 0)).toBe(-1);
     expect(nextIndex("last", -1, 0)).toBe(-1);
+    expect(nextIndex("page-next", -1, 0, 8)).toBe(-1);
+    expect(nextIndex("page-prev", -1, 0, 8)).toBe(-1);
   });
 });
 

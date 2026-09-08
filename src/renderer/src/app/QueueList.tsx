@@ -1,12 +1,8 @@
 // The queue is one composite listbox (per the composite-control conventions),
-// realized through the projection-only `useQueueListbox` hook: it supplies the
-// `role="listbox"`/`option`, `aria-selected`, roving tabindex, and focus-follow.
-//
-// Navigation is NOT handled here. Up/Down/Home/End are owned by the window-level
-// command layer in App.tsx (`select-previous` / `select-next`), which advances the
-// backend `selectedCardId`; this component only renders the projection of that
-// state and reports clicks back through `onSelect`. Type-ahead is consciously
-// ceded because the queue's single-letter keys (F/B/T/S) are app commands.
+// realized through `useQueueListbox`: it supplies the `role="listbox"`/`option`,
+// `aria-selected`, roving tabindex, focus-follow, and list-owned navigation.
+// Type-ahead is consciously ceded because the queue's single-letter keys
+// (F/B/T/S) are app commands.
 import type { ReactElement } from "react";
 
 import type { CardStatus, MumblerCard } from "@shared/app-shell";
@@ -72,6 +68,9 @@ export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): 
           {...getOptionProps(card.id)}
           className={`queue-row queue-row--${statusModifier(card.status)}${card.id === selectedCardId ? " queue-row--selected" : ""}`}
           onClick={() => onSelect(card.id)}
+          onFocus={() => {
+            if (card.id !== selectedCardId) onSelect(card.id);
+          }}
         >
           <strong className="queue-row__filename">{card.originalFilename}</strong>
           <div className="queue-row__meta">

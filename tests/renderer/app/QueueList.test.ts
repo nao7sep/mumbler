@@ -53,4 +53,38 @@ describe("QueueList card results", () => {
     expect(alerts[0]?.textContent).toBe("Pipeline failed");
     expect(document.body.textContent).toContain("AI work cancelled by user.");
   });
+
+  it("owns conventional listbox navigation and remains reachable when empty", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const onSelect = vi.fn();
+    const cards = Array.from({ length: 12 }, (_, index) => card(`card-${index + 1}`, "Imported"));
+
+    await act(async () => {
+      root?.render(React.createElement(QueueList, {
+        cards,
+        selectedCardId: "card-1",
+        onSelect,
+      }));
+    });
+
+    const first = document.querySelector<HTMLElement>('[data-card-id="card-1"]')!;
+    first.focus();
+    onSelect.mockClear();
+    await act(async () => {
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true }));
+    });
+    expect(document.activeElement?.getAttribute("data-card-id")).toBe("card-9");
+    expect(onSelect).toHaveBeenCalledWith("card-9");
+
+    await act(async () => {
+      root?.render(React.createElement(QueueList, {
+        cards: [],
+        selectedCardId: null,
+        onSelect,
+      }));
+    });
+    expect(document.querySelector('[role="listbox"]')?.getAttribute("tabindex")).toBe("0");
+  });
 });

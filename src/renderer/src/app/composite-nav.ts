@@ -1,4 +1,4 @@
-export type NavDirection = "next" | "prev" | "first" | "last";
+export type NavDirection = "next" | "prev" | "page-next" | "page-prev" | "first" | "last";
 
 /**
  * The roving-navigation index math shared by the app's in-app composite layers
@@ -10,13 +10,22 @@ export type NavDirection = "next" | "prev" | "first" | "last";
  * empty set. The consumers map their own keys onto a direction (e.g. the menu
  * uses Up/Down) and keep the DOM focus movement, which is verified by manual QA.
  */
-export function nextIndex(direction: NavDirection, current: number, length: number): number {
+export function nextIndex(
+  direction: NavDirection,
+  current: number,
+  length: number,
+  pageStep = 1,
+): number {
   if (length === 0) return -1;
   switch (direction) {
     case "next":
       return current < 0 ? 0 : Math.min(current + 1, length - 1);
     case "prev":
       return current < 0 ? length - 1 : Math.max(current - 1, 0);
+    case "page-next":
+      return current < 0 ? 0 : Math.min(current + Math.max(1, pageStep), length - 1);
+    case "page-prev":
+      return current < 0 ? length - 1 : Math.max(current - Math.max(1, pageStep), 0);
     case "first":
       return 0;
     case "last":
