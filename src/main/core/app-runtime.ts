@@ -24,6 +24,7 @@ import {
   type SaveConflictResolution,
   type SettingsDraft,
   type ToolName,
+  type WindowPlacementRecord,
 } from "@shared/app-shell";
 import { AUDIO_IMPORT_EXTENSIONS, isSupportedAudioImportName } from "@shared/audio-import";
 import { isCardBusy } from "@shared/card-status";
@@ -536,6 +537,25 @@ export class ApplicationRuntime {
       queueWidth: next.queueWidth,
     });
     return this.getSnapshot();
+  }
+
+  getWindowPlacement(): WindowPlacementRecord | null {
+    return this.runtime.layout?.windowPlacements.main ?? null;
+  }
+
+  async saveWindowPlacement(record: WindowPlacementRecord): Promise<void> {
+    this.ensureReady();
+    const next: MumblerLayout = {
+      ...(this.runtime.layout ?? createDefaultLayout()),
+      windowPlacements: {
+        main: {
+          normalBounds: record.normalBounds ? { ...record.normalBounds } : null,
+          mode: record.mode,
+        },
+      },
+    };
+    this.runtime.layout = next;
+    await this.runtime.layoutStore!.save(next);
   }
 
   async reportRendererError(report: RendererErrorReport): Promise<AppSnapshot> {

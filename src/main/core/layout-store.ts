@@ -1,4 +1,4 @@
-import type { MumblerLayout } from "@shared/app-shell";
+import type { MumblerLayout, WindowBounds } from "@shared/app-shell";
 import { QUEUE_WIDTH } from "@shared/layout";
 
 import { JsonStore } from "./json-store";
@@ -23,6 +23,7 @@ export function createDefaultLayout(): MumblerLayout {
     schemaVersion: LAYOUT_SCHEMA_VERSION,
     queueWidth: QUEUE_WIDTH.default,
     selectedCardId: null,
+    windowPlacements: { main: null },
   };
 }
 
@@ -31,6 +32,34 @@ export function normalizeLayout(raw: Record<string, unknown>): MumblerLayout {
     schemaVersion: LAYOUT_SCHEMA_VERSION,
     queueWidth: clampQueueWidth(raw.queueWidth),
     selectedCardId: typeof raw.selectedCardId === "string" ? raw.selectedCardId : null,
+    windowPlacements: normalizeWindowPlacements(raw.windowPlacements),
+  };
+}
+
+function normalizeWindowPlacements(raw: unknown): MumblerLayout["windowPlacements"] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { main: null };
+  const source = raw as Record<string, unknown>;
+  if (source.main === null || source.main === undefined) return { main: null };
+  if (!source.main || typeof source.main !== "object" || Array.isArray(source.main)) return { main: null };
+  const placement = source.main as Record<string, unknown>;
+  return {
+    main: {
+      normalBounds: normalizeWindowBounds(placement.normalBounds),
+      mode: placement.mode === "normal" || placement.mode === "maximized" ? placement.mode : "maximized",
+    },
+  };
+}
+
+function normalizeWindowBounds(raw: unknown): WindowBounds | null {
+  if (raw === null || !raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const source = raw as Record<string, unknown>;
+  const values = [source.x, source.y, source.width, source.height];
+  if (!values.every((value) => typeof value === "number" && Number.isFinite(value))) return null;
+  return {
+    x: source.x as number,
+    y: source.y as number,
+    width: source.width as number,
+    height: source.height as number,
   };
 }
 

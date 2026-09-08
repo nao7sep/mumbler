@@ -494,6 +494,19 @@ export interface MumblerLayout {
   schemaVersion: number;
   queueWidth: number;
   selectedCardId: string | null;
+  windowPlacements: { main: WindowPlacementRecord | null };
+}
+
+export type WindowPlacementMode = "normal" | "maximized";
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+export interface WindowPlacementRecord {
+  normalBounds: WindowBounds | null;
+  mode: WindowPlacementMode;
 }
 
 export interface AppSnapshot {

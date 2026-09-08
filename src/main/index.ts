@@ -5,7 +5,7 @@ import { extname } from "node:path";
 import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { ApplicationRuntime } from "./core/app-runtime";
 import { registerAppShellIpc } from "./ipc/app-shell";
-import { createMainWindow } from "./window";
+import { createMainWindow, flushMainWindowPlacement } from "./window";
 import { showStartupFailureDialog } from "./startup-failure-dialog";
 
 app.setName("Mumbler");
@@ -79,7 +79,7 @@ async function bootstrap(): Promise<void> {
   });
 
   registerAppShellIpc(runtime);
-  await createMainWindow();
+  await createMainWindow(runtime);
 
   // The data backup is now write-through (data-backup conventions): every managed
   // text save records itself into ~/.mumbler/backups.sqlite3 the instant its atomic
@@ -124,7 +124,7 @@ async function bootstrap(): Promise<void> {
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      void createMainWindow().catch(handleBootstrapFailure);
+      void createMainWindow(runtime).catch(handleBootstrapFailure);
     }
   });
 }
@@ -192,8 +192,8 @@ if (!app.requestSingleInstanceLock()) {
       app.exit(0);
       return;
     }
-    runtime
-      .shutdown()
+    flushMainWindowPlacement()
+      .then(() => runtime.shutdown())
       .catch((error: unknown) => {
         console.error("[mumbler] Shutdown error:", error instanceof Error ? error.stack : String(error));
       })

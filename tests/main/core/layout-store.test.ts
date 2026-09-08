@@ -33,6 +33,7 @@ describe("createDefaultLayout", () => {
       schemaVersion: LAYOUT_SCHEMA_VERSION,
       queueWidth: QUEUE_WIDTH.default,
       selectedCardId: null,
+      windowPlacements: { main: null },
     });
   });
 });
@@ -43,6 +44,7 @@ describe("normalizeLayout", () => {
       schemaVersion: LAYOUT_SCHEMA_VERSION,
       queueWidth: 640,
       selectedCardId: null,
+      windowPlacements: { main: null },
     });
   });
 
@@ -55,6 +57,17 @@ describe("normalizeLayout", () => {
     expect(normalizeLayout({ selectedCardId: "card-a" }).selectedCardId).toBe("card-a");
     expect(normalizeLayout({ selectedCardId: 42 }).selectedCardId).toBeNull();
     expect(normalizeLayout({}).selectedCardId).toBeNull();
+  });
+
+  it("normalizes placement geometry and mode independently", () => {
+    expect(normalizeLayout({
+      windowPlacements: {
+        main: {
+          normalBounds: { x: 10, y: 20, width: "wide", height: 800 },
+          mode: "maximized",
+        },
+      },
+    }).windowPlacements.main).toEqual({ normalBounds: null, mode: "maximized" });
   });
 });
 

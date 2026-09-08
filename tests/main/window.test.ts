@@ -11,8 +11,18 @@ let documentLoadFailure: Error | null = null;
 
 vi.mock("electron", () => ({
   BrowserWindow: class {
+    private bounds = { x: 20, y: 30, width: 1480, height: 940 };
     on(): void {}
     once(): void {}
+    getBounds() { return { ...this.bounds }; }
+    setBounds(bounds: typeof this.bounds) { this.bounds = { ...bounds }; }
+    isMaximized() { return false; }
+    isMinimized() { return false; }
+    isFullScreen() { return false; }
+    isDestroyed() { return false; }
+    maximize(): void {}
+    show(): void {}
+    close(): void {}
     loadURL(): Promise<void> {
       return documentLoadFailure ? Promise.reject(documentLoadFailure) : Promise.resolve();
     }
@@ -31,10 +41,16 @@ vi.mock("electron", () => ({
   Menu: { buildFromTemplate: () => ({ popup: () => {} }) },
   shell: { openExternal: vi.fn() },
   nativeTheme: nativeThemeStub,
+  screen: { getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 2560, height: 1440 } }] },
 }));
 
 const { buildWindowOptions, createMainWindow, isAllowedExternalUrl, withContentSecurityPolicy } =
   await import("@main/window");
+const runtime = {
+  getWindowPlacement: () => null,
+  saveWindowPlacement: vi.fn(async () => undefined),
+  currentLogger: () => ({ warn: vi.fn(async () => undefined) }),
+} as never;
 
 describe("isAllowedExternalUrl", () => {
   it("allows only http, https, and mailto", () => {
@@ -98,14 +114,14 @@ describe("buildWindowOptions", () => {
 describe("createMainWindow", () => {
   it("forces the light theme so a dark host paints a light title bar", async () => {
     nativeThemeStub.themeSource = "system";
-    await createMainWindow();
+    await createMainWindow(runtime);
     expect(nativeThemeStub.themeSource).toBe("light");
   });
 
   it("keeps a renderer document-load rejection observable to startup", async () => {
     const hostile = new Error("EACCES /private/tmp/mumbler-renderer.html");
     documentLoadFailure = hostile;
-    await expect(createMainWindow()).rejects.toBe(hostile);
+    await expect(createMainWindow(runtime)).rejects.toBe(hostile);
     documentLoadFailure = null;
   });
 });

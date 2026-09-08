@@ -1,9 +1,15 @@
-import { BrowserWindow, Menu, nativeTheme } from "electron";
+import { BrowserWindow, Menu, nativeTheme, screen } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from "@shared/layout";
 import { isAllowedExternalUrl, openExternalUrl } from "./external-url";
+import type { ApplicationRuntime } from "./core/app-runtime";
+import {
+  applyRestoredBounds,
+  configureWindowPlacement,
+  resolveWindowRestoration,
+} from "./window-placement";
 
 export { isAllowedExternalUrl } from "./external-url";
 
@@ -11,6 +17,11 @@ export { isAllowedExternalUrl } from "./external-url";
 // background does not flash a different color before the page loads.
 const WINDOW_BACKGROUND = "#edf4ec";
 const __dirname = dirname(fileURLToPath(import.meta.url));
+let currentPlacementFlush: (() => Promise<void>) | null = null;
+
+export async function flushMainWindowPlacement(): Promise<void> {
+  await currentPlacementFlush?.();
+}
 
 // Production Content-Security-Policy (defense-in-depth on top of context
 // isolation + sandbox). Applied only to the packaged build, not the dev server,
@@ -76,16 +87,84 @@ export function buildWindowOptions(): Electron.BrowserWindowConstructorOptions {
   };
 }
 
-export async function createMainWindow(): Promise<BrowserWindow> {
+export async function createMainWindow(runtime: ApplicationRuntime): Promise<BrowserWindow> {
   // Force the light theme so the host OS paints a light native title bar on this
   // light app — a dark-mode host would otherwise give it a dark bar that fights
   // the UI (window-chrome conventions: chrome colors match the app's theme).
   nativeTheme.themeSource = "light";
 
-  const window = new BrowserWindow(buildWindowOptions());
+  const options = buildWindowOptions();
+  const window = new BrowserWindow(options);
+  const reportPlacementError = (message: string, error?: unknown): void => {
+    void runtime.currentLogger().warn("window.placement", message, error === undefined ? undefined : {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  };
+  let workAreas: Electron.Rectangle[] = [];
+  try {
+    workAreas = screen.getAllDisplays().map((display) => display.workArea);
+  } catch (error) {
+    reportPlacementError("Display work areas unavailable; using opening window bounds.", error);
+  }
+  const restoration = resolveWindowRestoration(
+    runtime.getWindowPlacement(),
+    { width: options.minWidth ?? 0, height: options.minHeight ?? 0 },
+    workAreas,
+  );
+  if (restoration.normalBounds) {
+    applyRestoredBounds(window, restoration.normalBounds, (error) => {
+      reportPlacementError("Saved window bounds rejected; using opening bounds.", error);
+    });
+  }
+  const placement = configureWindowPlacement(
+    window,
+    { normalBounds: window.getBounds(), mode: restoration.mode },
+    (record) => runtime.saveWindowPlacement(record),
+    (error) => reportPlacementError("Window placement operation failed.", error),
+  );
+  const flushThisPlacement = () => placement.flush();
+  currentPlacementFlush = flushThisPlacement;
+
+  let closeAllowed = false;
+  let closePending = false;
+  let systemSessionEnding = false;
+  window.on("session-end", () => {
+    systemSessionEnding = true;
+    void placement.flush();
+  });
+  window.on("close", (event) => {
+    if (closeAllowed || systemSessionEnding) return;
+    event.preventDefault();
+    if (closePending) return;
+    closePending = true;
+    void placement.flush().finally(() => {
+      closeAllowed = true;
+      if (!window.isDestroyed()) window.close();
+    });
+  });
+  window.once("closed", () => {
+    placement.dispose();
+    if (currentPlacementFlush === flushThisPlacement) currentPlacementFlush = null;
+  });
 
   window.once("ready-to-show", () => {
+    if (restoration.mode === "maximized") {
+      try {
+        window.maximize();
+      } catch (error) {
+        placement.setInitialMode("normal");
+        reportPlacementError("Window could not be maximized during restoration.", error);
+      }
+    }
     window.show();
+    setTimeout(() => {
+      if (window.isDestroyed()) return;
+      if (restoration.mode === "maximized" && !window.isMaximized()) {
+        placement.setInitialMode("normal");
+        reportPlacementError("Window manager rejected maximized restoration.");
+      }
+      placement.start();
+    }, 500);
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
