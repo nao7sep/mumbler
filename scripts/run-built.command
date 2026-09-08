@@ -10,6 +10,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_NAME="Mumbler"
+RUNTIME_HELPER="$SCRIPT_DIR/launcher-runtime.mjs"
+RUNTIME_TOKEN="run-built-$$-$(date +%s)-$RANDOM"
 OUT_DIR="dist"
 
 log_step() {
@@ -18,7 +20,7 @@ log_step() {
 
 pause_on_failure() {
   local status="$1"
-  if [[ "$status" -ne 0 && "$status" -ne 130 ]]; then
+  if [[ "$status" -ne 0 && ( "$status" -lt 128 || "$status" -gt 143 ) ]]; then
     echo
     echo "mumbler run-built failed with exit code $status."
     read -r -p "Press Enter to close..."
@@ -26,6 +28,11 @@ pause_on_failure() {
 }
 
 trap 'pause_on_failure $?' EXIT
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Missing required command: node" >&2
+  exit 1
+fi
 
 cd "$REPO_DIR"
 
@@ -40,7 +47,10 @@ fi
 # Age tracks the actual build: packaging resets Contents/MacOS, but the .app dir's
 # own mtime can lag — stat the executable dir, not the bundle root.
 built_at="$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %Z' "$APP_BUNDLE/Contents/MacOS" 2>/dev/null || echo 'unknown')"
+node "$RUNTIME_HELPER" claim "$RUNTIME_TOKEN"
+node "$RUNTIME_HELPER" stop electron "Mumbler" "Mumbler"
 log_step "Launching the existing packaged app (built: $built_at)"
 echo "If you changed source since then, run rebuild instead."
 
-open "$APP_BUNDLE"
+open -n "$APP_BUNDLE"
+node "$RUNTIME_HELPER" wait-process "$APP_BUNDLE/Contents/MacOS/Mumbler" 30000

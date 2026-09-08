@@ -45,6 +45,11 @@ export default defineConfig({
   },
   renderer: {
     root: resolve("src/renderer"),
+    server: {
+      host: "127.0.0.1",
+      port: 27259,
+      strictPort: true,
+    },
     build: {
       outDir: resolve("out/renderer"),
       emptyOutDir: true,
@@ -58,4 +63,3 @@ export default defineConfig({
     plugins: [react()],
   },
 });
-
