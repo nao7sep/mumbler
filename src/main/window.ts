@@ -3,10 +3,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from "@shared/layout";
+import { configureWindowMinimum } from "./window-minimum";
 import { isAllowedExternalUrl, openExternalUrl } from "./external-url";
 import type { ApplicationRuntime } from "./core/app-runtime";
+import { serializeError } from "./core/logger";
 import {
-  applyRestoredBounds,
+  initializeWindowPlacement,
   configureWindowPlacement,
   resolveWindowRestoration,
 } from "./window-placement";
@@ -97,7 +99,7 @@ export async function createMainWindow(runtime: ApplicationRuntime): Promise<Bro
   const window = new BrowserWindow(options);
   const reportPlacementError = (message: string, error?: unknown): void => {
     void runtime.currentLogger().warn("window.placement", message, error === undefined ? undefined : {
-      error: error instanceof Error ? error.message : String(error),
+      error: serializeError(error),
     });
   };
   let workAreas: Electron.Rectangle[] = [];
@@ -106,21 +108,22 @@ export async function createMainWindow(runtime: ApplicationRuntime): Promise<Bro
   } catch (error) {
     reportPlacementError("Display work areas unavailable; using opening window bounds.", error);
   }
+  const savedPlacement = runtime.getWindowPlacement();
   const restoration = resolveWindowRestoration(
-    runtime.getWindowPlacement(),
+    savedPlacement,
     { width: options.minWidth ?? 0, height: options.minHeight ?? 0 },
     workAreas,
   );
-  if (restoration.normalBounds) {
-    applyRestoredBounds(window, restoration.normalBounds, (error) => {
-      reportPlacementError("Saved window bounds rejected; using opening bounds.", error);
-    });
-  }
+  configureWindowMinimum(window, () => ({ width: WINDOW_MIN_WIDTH, height: WINDOW_MIN_HEIGHT }),
+    (error) => reportPlacementError("Window minimum could not be updated.", error));
+  const initialized = initializeWindowPlacement(window, savedPlacement, restoration,
+    (error) => reportPlacementError("Window placement restoration failed; retaining useful opening geometry and mode.", error));
   const placement = configureWindowPlacement(
     window,
-    { normalBounds: window.getBounds(), mode: restoration.mode },
+    initialized.initial,
     (record) => runtime.saveWindowPlacement(record),
     (error) => reportPlacementError("Window placement operation failed.", error),
+    initialized.windows,
   );
   const flushThisPlacement = () => placement.flush();
   currentPlacementFlush = flushThisPlacement;
@@ -148,23 +151,16 @@ export async function createMainWindow(runtime: ApplicationRuntime): Promise<Bro
   });
 
   window.once("ready-to-show", () => {
-    if (restoration.mode === "maximized") {
-      try {
-        window.maximize();
-      } catch (error) {
-        placement.setInitialMode("normal");
-        reportPlacementError("Window could not be maximized during restoration.", error);
-      }
-    }
     window.show();
+    // Windows requires a native event-loop turn between show and maximize.
     setTimeout(() => {
       if (window.isDestroyed()) return;
-      if (restoration.mode === "maximized" && !window.isMaximized()) {
-        placement.setInitialMode("normal");
-        reportPlacementError("Window manager rejected maximized restoration.");
-      }
       placement.start();
-    }, 500);
+      if (restoration.mode === "maximized") {
+        try { window.maximize(); }
+        catch (error) { reportPlacementError("Window could not be maximized during restoration.", error); }
+      }
+    }, 0);
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {

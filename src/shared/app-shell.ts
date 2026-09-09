@@ -507,6 +507,7 @@ export interface WindowBounds {
 export interface WindowPlacementRecord {
   normalBounds: WindowBounds | null;
   mode: WindowPlacementMode;
+  windowsNormalBounds?: import("./windows-placement").WindowsNormalBounds | null;
 }
 
 export interface AppSnapshot {

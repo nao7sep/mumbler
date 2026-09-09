@@ -69,6 +69,16 @@ describe("normalizeLayout", () => {
       },
     }).windowPlacements.main).toEqual({ normalBounds: null, mode: "maximized" });
   });
+
+  it("preserves native bounds and discards malformed native data independently", () => {
+    const placement = { normalBounds: { x: 89, y: 81, width: 1201, height: 749 }, mode: "maximized",
+      windowsNormalBounds: { left: 111, top: 101, right: 1613, bottom: 1038 } };
+    const state = normalizeLayout({ selectedCardId: "kept", windowPlacements: { main: placement } });
+    expect(state.selectedCardId).toBe("kept");
+    expect(state.windowPlacements.main).toEqual(placement);
+    expect(normalizeLayout({ windowPlacements: { main: { ...placement, windowsNormalBounds: {} } } })
+      .windowPlacements.main).toEqual({ ...placement, windowsNormalBounds: null });
+  });
 });
 
 describe("selectExistingCardId", () => {

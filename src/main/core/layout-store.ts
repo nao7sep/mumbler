@@ -1,5 +1,6 @@
 import type { MumblerLayout, WindowBounds } from "@shared/app-shell";
 import { QUEUE_WIDTH } from "@shared/layout";
+import { normalizeWindowsNormalBounds } from "@shared/windows-placement";
 
 import { JsonStore } from "./json-store";
 
@@ -45,6 +46,9 @@ function normalizeWindowPlacements(raw: unknown): MumblerLayout["windowPlacement
   return {
     main: {
       normalBounds: normalizeWindowBounds(placement.normalBounds),
+      ...(placement.windowsNormalBounds === undefined ? {} : {
+        windowsNormalBounds: normalizeWindowsNormalBounds(placement.windowsNormalBounds),
+      }),
       mode: placement.mode === "normal" || placement.mode === "maximized" ? placement.mode : "maximized",
     },
   };

@@ -90,12 +90,16 @@ export function redactSecrets(value: unknown, seen: WeakSet<object> = new WeakSe
 export function serializeError(error: unknown, depth = 0): unknown {
   if (error instanceof Error) {
     const serialized: Record<string, unknown> = {
+      ...error,
       name: error.name,
       message: error.message,
       stack: error.stack,
     };
     if (error.cause !== undefined && depth < MAX_ERROR_CAUSE_DEPTH) {
       serialized.cause = serializeError(error.cause, depth + 1);
+    }
+    if (error instanceof AggregateError && depth < MAX_ERROR_CAUSE_DEPTH) {
+      serialized.errors = error.errors.map((entry: unknown) => serializeError(entry, depth + 1));
     }
     return serialized;
   }

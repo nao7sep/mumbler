@@ -18,7 +18,7 @@ import type {
   StatusRole,
   ToolName,
 } from "@shared/app-shell";
-import { DETAIL_MIN_WIDTH, QUEUE_WIDTH, WORKSPACE_GAP } from "@shared/layout";
+import { DETAIL_MIN_WIDTH, QUEUE_WIDTH, WORKSPACE_GAP, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT } from "@shared/layout";
 import { rollUpRole } from "@shared/dependency-status";
 import {
   formatUtcForDisplay,
@@ -940,7 +940,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" style={{ minWidth: WINDOW_MIN_WIDTH, minHeight: `max(100vh, ${WINDOW_MIN_HEIGHT}px)` }}>
       <header className="topbar">
         <div>
           <h1>Mumbler</h1>

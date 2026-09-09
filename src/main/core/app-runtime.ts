@@ -549,7 +549,11 @@ export class ApplicationRuntime {
       ...(this.runtime.layout ?? createDefaultLayout()),
       windowPlacements: {
         main: {
+          ...record,
           normalBounds: record.normalBounds ? { ...record.normalBounds } : null,
+          ...(record.windowsNormalBounds === undefined ? {} : {
+            windowsNormalBounds: record.windowsNormalBounds ? { ...record.windowsNormalBounds } : null,
+          }),
           mode: record.mode,
         },
       },

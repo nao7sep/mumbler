@@ -211,6 +211,30 @@ describe("redactSecrets", () => {
 });
 
 describe("serializeError", () => {
+  it("preserves both native recovery failures and a reused cause through JSON", () => {
+    const original = Object.assign(new Error("client query failed"), {
+      operation: "GetClientRect", nativeCode: 6,
+    });
+    const fallback = Object.assign(new Error("opening restore failed"), {
+      operation: "SetWindowPlacement", nativeCode: 5,
+    });
+    const aggregate = new AggregateError([original, fallback], "placement recovery failed", { cause: original });
+    const serialized = JSON.parse(JSON.stringify(serializeError(aggregate)));
+    expect(serialized).toMatchObject({
+      name: "AggregateError",
+      cause: { message: original.message, stack: original.stack, operation: "GetClientRect", nativeCode: 6 },
+      errors: [
+        { message: original.message, stack: original.stack, operation: "GetClientRect", nativeCode: 6 },
+        { message: fallback.message, stack: fallback.stack, operation: "SetWindowPlacement", nativeCode: 5 },
+      ],
+    });
+  });
+
+  it("contains a self-referential aggregate", () => {
+    const aggregate = new AggregateError([], "cycle");
+    aggregate.errors.push(aggregate);
+    expect(() => JSON.stringify(serializeError(aggregate))).not.toThrow();
+  });
   it("captures name, message, stack, and the wrapped cause chain", () => {
     const serialized = serializeError(
       new Error("outer", { cause: new Error("inner") }),
