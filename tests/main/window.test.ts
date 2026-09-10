@@ -101,6 +101,12 @@ describe("withContentSecurityPolicy", () => {
 });
 
 describe("buildWindowOptions", () => {
+  it("uses Electron-owned bounds persistence for the stable main window", () => {
+    const options = buildWindowOptions();
+    expect(options.name).toBe("main");
+    expect(options.windowStatePersistence).toEqual({ bounds: true, displayMode: false });
+  });
+
   it("derives the window minimums from the shared layout (no magic constants)", () => {
     const options = buildWindowOptions();
     expect(options.minWidth).toBe(WINDOW_MIN_WIDTH);
