@@ -23,7 +23,6 @@ class FakeWindow extends EventEmitter {
   getSize = () => this.size;
   setMinimumSize = vi.fn((width: number, height: number) => { this.minimum = [width, height]; });
   setSize = vi.fn((width: number, height: number) => { this.size = [width, height]; });
-  center = vi.fn();
 }
 const floor = { width: 1200, height: 900 };
 beforeEach(() => { monitor.workAreaSize = { width: 1920, height: 1040 }; vi.clearAllMocks(); });
@@ -35,21 +34,18 @@ describe("native content minimum", () => {
     expect(fitNativeMinimum(floor, { width: 1920, height: 1040 }, { width: 16, height: 39 }))
       .toEqual({ width: 1216, height: 939 });
   });
-  it("fits the designed opening to a constrained work area", () => {
+  it("caps the minimum without overriding the designed opening size", () => {
     monitor.workAreaSize = { width: 1000, height: 700 };
     const win = new FakeWindow();
     configureWindowMinimum(win as never, () => floor, vi.fn());
     expect(win.minimum).toEqual([1000, 700]);
-    expect(win.size).toEqual([1000, 700]);
-    expect(win.center).toHaveBeenCalledOnce();
+    expect(win.size).toEqual([1000, 800]);
   });
-  it("prepares useful opening bounds, then restores the full floor without recentering", () => {
+  it("restores the full floor when the window moves to a larger display", () => {
     monitor.workAreaSize = { width: 1000, height: 700 };
     const win = new FakeWindow();
     const refresh = configureWindowMinimum(win as never, () => floor, vi.fn());
-    expect(win.size).toEqual([1000, 700]);
-    expect(win.center).toHaveBeenCalledOnce();
-    win.center.mockClear();
+    expect(win.size).toEqual([1000, 800]);
     monitor.workAreaSize = { width: 1920, height: 1040 };
     refresh();
     expect(win.minimum).toEqual([1200, 900]);
@@ -58,7 +54,6 @@ describe("native content minimum", () => {
     refresh();
     expect(win.setMinimumSize).not.toHaveBeenCalled();
     win.emit("move");
-    expect(win.center).not.toHaveBeenCalled();
   });
   it.each(["maximized", "minimized", "fullScreen"] as const)("defers sizing while %s", (mode) => {
     const win = new FakeWindow();

@@ -5,7 +5,7 @@ import { extname } from "node:path";
 import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { ApplicationRuntime } from "./core/app-runtime";
 import { registerAppShellIpc } from "./ipc/app-shell";
-import { createMainWindow, flushMainWindowPlacement } from "./window";
+import { createMainWindow } from "./window";
 import { showStartupFailureDialog } from "./startup-failure-dialog";
 
 app.setName("Mumbler");
@@ -192,8 +192,7 @@ if (!app.requestSingleInstanceLock()) {
       app.exit(0);
       return;
     }
-    flushMainWindowPlacement()
-      .then(() => runtime.shutdown())
+    runtime.shutdown()
       .catch((error: unknown) => {
         console.error("[mumbler] Shutdown error:", error instanceof Error ? error.stack : String(error));
       })

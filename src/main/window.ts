@@ -1,4 +1,4 @@
-import { BrowserWindow, Menu, nativeTheme, screen } from "electron";
+import { BrowserWindow, Menu, nativeTheme } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,11 +7,6 @@ import { configureWindowMinimum } from "./window-minimum";
 import { isAllowedExternalUrl, openExternalUrl } from "./external-url";
 import type { ApplicationRuntime } from "./core/app-runtime";
 import { serializeError } from "./core/logger";
-import {
-  initializeWindowPlacement,
-  configureWindowPlacement,
-  resolveWindowRestoration,
-} from "./window-placement";
 
 export { isAllowedExternalUrl } from "./external-url";
 
@@ -19,11 +14,6 @@ export { isAllowedExternalUrl } from "./external-url";
 // background does not flash a different color before the page loads.
 const WINDOW_BACKGROUND = "#edf4ec";
 const __dirname = dirname(fileURLToPath(import.meta.url));
-let currentPlacementFlush: (() => Promise<void>) | null = null;
-
-export async function flushMainWindowPlacement(): Promise<void> {
-  await currentPlacementFlush?.();
-}
 
 // Production Content-Security-Policy (defense-in-depth on top of context
 // isolation + sandbox). Applied only to the packaged build, not the dev server,
@@ -64,8 +54,8 @@ function openExternalIfAllowed(rawUrl: string): void {
 }
 
 // The BrowserWindow construction options. Exported as a pure helper so the
-// derived minimums and the (deliberate, non-persisted) default size are verified
-// in a unit test without driving a real window — the same pattern the CSP helper
+// derived minimums and the default size are verified in a unit test without
+// driving a real window — the same pattern the CSP helper
 // above follows. The minimums are imported from the shared layout module, never
 // typed inline, so they can never disagree with the pane minimums.
 export function buildWindowOptions(): Electron.BrowserWindowConstructorOptions {
@@ -97,70 +87,13 @@ export async function createMainWindow(runtime: ApplicationRuntime): Promise<Bro
 
   const options = buildWindowOptions();
   const window = new BrowserWindow(options);
-  const reportPlacementError = (message: string, error?: unknown): void => {
-    void runtime.currentLogger().warn("window.placement", message, error === undefined ? undefined : {
-      error: serializeError(error),
-    });
-  };
-  let workAreas: Electron.Rectangle[] = [];
-  try {
-    workAreas = screen.getAllDisplays().map((display) => display.workArea);
-  } catch (error) {
-    reportPlacementError("Display work areas unavailable; using opening window bounds.", error);
-  }
-  const savedPlacement = runtime.getWindowPlacement();
-  const restoration = resolveWindowRestoration(
-    savedPlacement,
-    { width: options.minWidth ?? 0, height: options.minHeight ?? 0 },
-    workAreas,
-  );
   configureWindowMinimum(window, () => ({ width: WINDOW_MIN_WIDTH, height: WINDOW_MIN_HEIGHT }),
-    (error) => reportPlacementError("Window minimum could not be updated.", error));
-  const initialized = initializeWindowPlacement(window, savedPlacement, restoration,
-    (error) => reportPlacementError("Window placement restoration failed; retaining useful opening geometry and mode.", error));
-  const placement = configureWindowPlacement(
-    window,
-    initialized.initial,
-    (record) => runtime.saveWindowPlacement(record),
-    (error) => reportPlacementError("Window placement operation failed.", error),
-    initialized.windows,
-  );
-  const flushThisPlacement = () => placement.flush();
-  currentPlacementFlush = flushThisPlacement;
-
-  let closeAllowed = false;
-  let closePending = false;
-  let systemSessionEnding = false;
-  window.on("session-end", () => {
-    systemSessionEnding = true;
-    void placement.flush();
-  });
-  window.on("close", (event) => {
-    if (closeAllowed || systemSessionEnding) return;
-    event.preventDefault();
-    if (closePending) return;
-    closePending = true;
-    void placement.flush().finally(() => {
-      closeAllowed = true;
-      if (!window.isDestroyed()) window.close();
-    });
-  });
-  window.once("closed", () => {
-    placement.dispose();
-    if (currentPlacementFlush === flushThisPlacement) currentPlacementFlush = null;
-  });
+    (error) => void runtime.currentLogger().warn("window.minimum", "Window minimum could not be updated.", {
+      error: serializeError(error),
+    }));
 
   window.once("ready-to-show", () => {
     window.show();
-    // Windows requires a native event-loop turn between show and maximize.
-    setTimeout(() => {
-      if (window.isDestroyed()) return;
-      placement.start();
-      if (restoration.mode === "maximized") {
-        try { window.maximize(); }
-        catch (error) { reportPlacementError("Window could not be maximized during restoration.", error); }
-      }
-    }, 0);
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {

@@ -33,7 +33,6 @@ describe("createDefaultLayout", () => {
       schemaVersion: LAYOUT_SCHEMA_VERSION,
       queueWidth: QUEUE_WIDTH.default,
       selectedCardId: null,
-      windowPlacements: { main: null },
     });
   });
 });
@@ -44,7 +43,6 @@ describe("normalizeLayout", () => {
       schemaVersion: LAYOUT_SCHEMA_VERSION,
       queueWidth: 640,
       selectedCardId: null,
-      windowPlacements: { main: null },
     });
   });
 
@@ -57,27 +55,6 @@ describe("normalizeLayout", () => {
     expect(normalizeLayout({ selectedCardId: "card-a" }).selectedCardId).toBe("card-a");
     expect(normalizeLayout({ selectedCardId: 42 }).selectedCardId).toBeNull();
     expect(normalizeLayout({}).selectedCardId).toBeNull();
-  });
-
-  it("normalizes placement geometry and mode independently", () => {
-    expect(normalizeLayout({
-      windowPlacements: {
-        main: {
-          normalBounds: { x: 10, y: 20, width: "wide", height: 800 },
-          mode: "maximized",
-        },
-      },
-    }).windowPlacements.main).toEqual({ normalBounds: null, mode: "maximized" });
-  });
-
-  it("preserves native bounds and discards malformed native data independently", () => {
-    const placement = { normalBounds: { x: 89, y: 81, width: 1201, height: 749 }, mode: "maximized",
-      windowsNormalBounds: { left: 111, top: 101, right: 1613, bottom: 1038 } };
-    const state = normalizeLayout({ selectedCardId: "kept", windowPlacements: { main: placement } });
-    expect(state.selectedCardId).toBe("kept");
-    expect(state.windowPlacements.main).toEqual(placement);
-    expect(normalizeLayout({ windowPlacements: { main: { ...placement, windowsNormalBounds: {} } } })
-      .windowPlacements.main).toEqual({ ...placement, windowsNormalBounds: null });
   });
 });
 

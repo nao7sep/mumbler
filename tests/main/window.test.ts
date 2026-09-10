@@ -8,7 +8,6 @@ import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from "@shared/layout";
 // constructor and nativeTheme is a writable holder for themeSource.
 const nativeThemeStub = { themeSource: "system" as string };
 let documentLoadFailure: Error | null = null;
-let displayFailure: Error | null = null;
 
 vi.mock("electron", () => ({
   BrowserWindow: class {
@@ -17,19 +16,15 @@ vi.mock("electron", () => ({
     once(): void {}
     off(): void {}
     getBounds() { return { ...this.bounds }; }
-    getNormalBounds() { return { ...this.bounds }; }
     getContentBounds() { return { ...this.bounds }; }
     getSize() { return [this.bounds.width, this.bounds.height]; }
     getMinimumSize() { return [WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT]; }
     setMinimumSize(): void {}
     setSize(width: number, height: number) { this.bounds = { ...this.bounds, width, height }; }
-    center(): void {}
-    setBounds(bounds: typeof this.bounds) { this.bounds = { ...bounds }; }
     isMaximized() { return false; }
     isMinimized() { return false; }
     isFullScreen() { return false; }
     isDestroyed() { return false; }
-    maximize(): void {}
     show(): void {}
     close(): void {}
     loadURL(): Promise<void> {
@@ -51,10 +46,6 @@ vi.mock("electron", () => ({
   shell: { openExternal: vi.fn() },
   nativeTheme: nativeThemeStub,
   screen: {
-    getAllDisplays: () => {
-      if (displayFailure) throw displayFailure;
-      return [{ workArea: { x: 0, y: 0, width: 2560, height: 1440 } }];
-    },
     getDisplayMatching: () => ({ workAreaSize: { width: 2560, height: 1440 } }),
     on: vi.fn(), off: vi.fn(),
   },
@@ -62,11 +53,8 @@ vi.mock("electron", () => ({
 
 const { buildWindowOptions, createMainWindow, isAllowedExternalUrl, withContentSecurityPolicy } =
   await import("@main/window");
-const logWarning = vi.fn(async () => undefined);
 const runtime = {
-  getWindowPlacement: () => null,
-  saveWindowPlacement: vi.fn(async () => undefined),
-  currentLogger: () => ({ warn: logWarning }),
+  currentLogger: () => ({ warn: vi.fn(async () => undefined) }),
 } as never;
 
 describe("isAllowedExternalUrl", () => {
@@ -129,24 +117,6 @@ describe("buildWindowOptions", () => {
 });
 
 describe("createMainWindow", () => {
-  it("contains display failure while retaining its full diagnostic cause", async () => {
-    const cause = new Error("native display enumeration failed");
-    displayFailure = new Error("work areas unavailable", { cause });
-    logWarning.mockClear();
-    try {
-      await createMainWindow(runtime);
-      expect(logWarning).toHaveBeenCalledWith("window.placement",
-        "Display work areas unavailable; using opening window bounds.", {
-          error: {
-            name: "Error", message: displayFailure.message, stack: displayFailure.stack,
-            cause: { name: "Error", message: cause.message, stack: cause.stack },
-          },
-        });
-    } finally {
-      displayFailure = null;
-    }
-  });
-
   it("forces the light theme so a dark host paints a light title bar", async () => {
     nativeThemeStub.themeSource = "system";
     await createMainWindow(runtime);

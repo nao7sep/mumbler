@@ -17,19 +17,10 @@ files:
   - "!**/*.d.mts"
   - "!**/*.d.cts"
 
-asarUnpack:
-  - '**/node_modules/@koromix/koffi-*/**/*'
-
 # Tahoe "Liquid Glass" icon: the liquid-glass-icon tool deploys build/Assets.car (committed in
 # company/assets) here. macOS 26 reads CFBundleIconName below → this catalog; older macOS reads
 # CFBundleIconFile → build/icon.icns. Building does NOT need Xcode — the Assets.car is prebuilt.
 extraResources:
-  - from: node_modules/koffi/LICENSE.txt
-    to: koffi/LICENSE.txt
-  - from: node_modules/koffi/vendor/node-addon-api/LICENSE.md
-    to: koffi/node-addon-api-LICENSE.md
-  - from: node_modules/koffi/vendor/node-api-headers/LICENSE
-    to: koffi/node-api-headers-LICENSE
   - from: build/Assets.car
     to: Assets.car
   - from: LICENSE
