@@ -18,6 +18,18 @@ describe("launcher process identity", () => {
     expect(ownsProcess({
       pid: 11,
       parentPid: 1,
+      executablePath: `${REPO_ROOT}/dist/mac-arm64/Mumbler.app/Contents/MacOS/Mumbler`,
+      commandLine: "",
+    }, identity)).toBe(true);
+    expect(ownsProcess({
+      pid: 12,
+      parentPid: 1,
+      executablePath: `${REPO_ROOT}\\dist\\win-unpacked\\Mumbler.exe`,
+      commandLine: "",
+    }, identity)).toBe(true);
+    expect(ownsProcess({
+      pid: 13,
+      parentPid: 1,
       executablePath: "/another/repo/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
       commandLine: "",
     }, identity)).toBe(false);
