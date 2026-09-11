@@ -43,7 +43,7 @@ require_command npm
 cd "$REPO_DIR"
 
 log_step "Installing dependencies"
-npm install
+npm install --no-audit --no-fund
 
 # npm install skips the Electron binary if the package is already at the locked version.
 log_step "Verifying Electron binary"

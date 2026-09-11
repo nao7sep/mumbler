@@ -7,6 +7,7 @@ import { configureWindowMinimum } from "./window-minimum";
 import { isAllowedExternalUrl, openExternalUrl } from "./external-url";
 import type { ApplicationRuntime } from "./core/app-runtime";
 import { serializeError } from "./core/logger";
+import { createWindowWithUsablePersistedBounds } from "./window-state-recovery";
 
 export { isAllowedExternalUrl } from "./external-url";
 
@@ -88,7 +89,7 @@ export async function createMainWindow(runtime: ApplicationRuntime): Promise<Bro
   nativeTheme.themeSource = "light";
 
   const options = buildWindowOptions();
-  const window = new BrowserWindow(options);
+  const window = createWindowWithUsablePersistedBounds("main", () => new BrowserWindow(options));
   configureWindowMinimum(window, () => ({ width: WINDOW_MIN_WIDTH, height: WINDOW_MIN_HEIGHT }),
     (error) => void runtime.currentLogger().warn("window.minimum", "Window minimum could not be updated.", {
       error: serializeError(error),

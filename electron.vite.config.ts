@@ -53,6 +53,7 @@ export default defineConfig({
     build: {
       outDir: resolve("out/renderer"),
       emptyOutDir: true,
+      minify: true,
     },
     resolve: {
       alias: {

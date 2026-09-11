@@ -47,6 +47,7 @@ vi.mock("electron", () => ({
   nativeTheme: nativeThemeStub,
   screen: {
     getDisplayMatching: () => ({ workAreaSize: { width: 2560, height: 1440 } }),
+    getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 2560, height: 1440 } }],
     on: vi.fn(), off: vi.fn(),
   },
 }));
