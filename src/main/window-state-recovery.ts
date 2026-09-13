@@ -34,7 +34,7 @@ export function createWindowWithUsablePersistedBounds(
 ): BrowserWindow {
   const window = create();
   const workAreas = screen.getAllDisplays().map((display) => display.workArea);
-  if (hasUsableWindowBounds(window.getBounds(), workAreas)) return window;
+  if (hasUsableWindowBounds(window.getNormalBounds(), workAreas)) return window;
 
   // The first window is still hidden, so replacing it cannot flash. Clearing
   // Electron's state before recreating lets the existing constructor options

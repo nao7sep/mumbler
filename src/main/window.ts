@@ -62,7 +62,10 @@ function openExternalIfAllowed(rawUrl: string): void {
 export function buildWindowOptions(): Electron.BrowserWindowConstructorOptions {
   return {
     name: "main",
-    windowStatePersistence: { bounds: true, displayMode: false },
+    windowStatePersistence: {
+      bounds: true,
+      displayMode: process.platform === "win32",
+    },
     width: 1480,
     height: 940,
     // Derived — do not hand-edit. Sourced from @shared/layout, which sums the

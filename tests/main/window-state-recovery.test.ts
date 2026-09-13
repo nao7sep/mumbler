@@ -57,13 +57,17 @@ describe("persisted window recovery", () => {
     ).toBe(true);
   });
 
-  it("recreates a hidden unusable window from Electron's cleared defaults", () => {
+  it("recreates a hidden window whose normal bounds are unusable", () => {
     const invalid = {
-      getBounds: () => ({ x: 2460, y: 1292, width: 1200, height: 800 }),
+      // A maximized window's current bounds can be usable while Restore would
+      // return it to an unusable normal rectangle.
+      getBounds: () => ({ x: 0, y: 0, width: 2560, height: 1392 }),
+      getNormalBounds: () => ({ x: 2460, y: 1292, width: 1200, height: 800 }),
       destroy: vi.fn(),
     };
     const fallback = {
       getBounds: () => ({ x: 200, y: 100, width: 1200, height: 800 }),
+      getNormalBounds: () => ({ x: 200, y: 100, width: 1200, height: 800 }),
       destroy: vi.fn(),
     };
     const create = vi
@@ -82,6 +86,7 @@ describe("persisted window recovery", () => {
   it("leaves usable restored state entirely under Electron's ownership", () => {
     const restored = {
       getBounds: () => ({ x: 200, y: 100, width: 1200, height: 800 }),
+      getNormalBounds: () => ({ x: 200, y: 100, width: 1200, height: 800 }),
       destroy: vi.fn(),
     };
     const create = vi.fn(() => restored);

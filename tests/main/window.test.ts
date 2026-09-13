@@ -16,6 +16,7 @@ vi.mock("electron", () => ({
     once(): void {}
     off(): void {}
     getBounds() { return { ...this.bounds }; }
+    getNormalBounds() { return { ...this.bounds }; }
     getContentBounds() { return { ...this.bounds }; }
     getSize() { return [this.bounds.width, this.bounds.height]; }
     getMinimumSize() { return [WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT]; }
@@ -105,7 +106,10 @@ describe("buildWindowOptions", () => {
   it("uses Electron-owned bounds persistence for the stable main window", () => {
     const options = buildWindowOptions();
     expect(options.name).toBe("main");
-    expect(options.windowStatePersistence).toEqual({ bounds: true, displayMode: false });
+    expect(options.windowStatePersistence).toEqual({
+      bounds: true,
+      displayMode: process.platform === "win32",
+    });
   });
 
   it("derives the window minimums from the shared layout (no magic constants)", () => {
