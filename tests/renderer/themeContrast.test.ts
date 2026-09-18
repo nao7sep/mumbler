@@ -85,6 +85,23 @@ describe("theme token contrast", () => {
     });
   }
 
+  it("keeps the top bar's tools status capsule legible in both themes", () => {
+    // The capsule is its role hue at 16% over the top bar's gradient, so check
+    // its text against that blend at both ends of the gradient.
+    const blend = (base: Rgb, hue: Rgb, amount: number): Rgb =>
+      base.map((channel, index) => Math.round(channel * (1 - amount) + hue[index]! * amount)) as Rgb;
+    for (const theme of ["light", "dark"] as const) {
+      const block = themeBlock(theme);
+      for (const [hue, text] of [["--topbar-warning", "--topbar-warning-text"], ["--topbar-danger", "--topbar-danger-text"]]) {
+        for (const bar of ["--topbar", "--topbar-end"]) {
+          const background = blend(hexOf(block, bar), hexOf(block, hue!), 0.16);
+          expect(contrast(hexOf(block, text!), background), `${text} on ${hue} over ${bar} in ${theme}`)
+            .toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
+
   it("defines every waveform color in both themes", () => {
     for (const theme of ["light", "dark"] as const) {
       const block = themeBlock(theme);

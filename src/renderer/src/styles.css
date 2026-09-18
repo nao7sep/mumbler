@@ -54,6 +54,11 @@
   --topbar-end: #214b36;
   --topbar-text: #f4f8ef;
   --topbar-muted: #bfd0bd;
+  /* Status hues for the top bar, which stays dark in both themes. */
+  --topbar-warning: #f2c14e;
+  --topbar-warning-text: #f7d488;
+  --topbar-danger: #ff8a75;
+  --topbar-danger-text: #ffb8ab;
   --shadow-sm: 0 1px 2px rgba(31, 58, 42, 0.06);
   --shadow-md: 0 8px 24px rgba(31, 58, 42, 0.1);
   --shadow-lg: 0 20px 60px rgba(20, 38, 28, 0.16);
@@ -124,6 +129,10 @@
     --topbar-end: #12301f;
     --topbar-text: #f4f8ef;
     --topbar-muted: #a9bfa9;
+    --topbar-warning: #f2c14e;
+    --topbar-warning-text: #f7d488;
+    --topbar-danger: #ff8a75;
+    --topbar-danger-text: #ffb8ab;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -1995,46 +2004,57 @@ textarea:focus-visible,
   justify-content: flex-end;
 }
 
-/* Roll-up indicator in the top bar; coloured by the worst current role. */
 /* The topbar dependency roll-up reads as a status message, not a button: a
-   tinted pill (role-coloured, leading icon) that happens to be clickable. No
-   button border or ghost-button chrome — that was what made it look like a
-   regular action. */
+   rounded capsule tinted with its role's hue over the dark top bar, led by a
+   status dot. No button border or ghost-button chrome — that was what made it
+   look like a regular action. The hues are the top bar's own, because the bar
+   stays dark in both themes. */
 .tools-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0.2rem 0.55rem 0.2rem 0.45rem;
-  border: none;
-  border-radius: var(--radius-sm);
+  gap: 6px;
+  padding: 0.25rem 0.7rem 0.25rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 600;
   line-height: 1.4;
   cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
 }
-.tools-chip svg {
-  display: block;
-}
-.tools-chip:not(:disabled):hover {
-  filter: brightness(0.96);
+.tools-chip__mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--tools-chip-hue);
 }
 /* The informational state ("updates unchecked", "version unreadable") is calm by
-   design: normal muted topbar text, no tinted pill — a benign FYI must not wear a
-   colour that reads as a condition. Warning/error keep their tints below. */
+   design: normal muted topbar text, no capsule or dot — a benign FYI must not
+   wear a colour that reads as a condition. */
 .tools-chip--informational {
   background: transparent;
   color: var(--topbar-muted);
   font-weight: 400;
 }
 .tools-chip--informational:not(:disabled):hover {
-  filter: none;
   color: var(--topbar-text);
 }
 .tools-chip--warning {
-  background: var(--warning-subtle);
-  color: var(--warning);
+  --tools-chip-hue: var(--topbar-warning);
+  color: var(--topbar-warning-text);
 }
 .tools-chip--error {
-  background: var(--danger-subtle);
-  color: var(--danger);
+  --tools-chip-hue: var(--topbar-danger);
+  color: var(--topbar-danger-text);
+}
+.tools-chip--warning,
+.tools-chip--error {
+  background: color-mix(in srgb, var(--tools-chip-hue) 16%, transparent);
+  border-color: color-mix(in srgb, var(--tools-chip-hue) 40%, transparent);
+}
+.tools-chip--warning:not(:disabled):hover,
+.tools-chip--error:not(:disabled):hover {
+  background: color-mix(in srgb, var(--tools-chip-hue) 24%, transparent);
+  border-color: color-mix(in srgb, var(--tools-chip-hue) 60%, transparent);
 }
