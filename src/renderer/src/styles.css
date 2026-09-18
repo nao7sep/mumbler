@@ -2005,15 +2005,14 @@ textarea:focus-visible,
 }
 
 /* The topbar dependency roll-up reads as a status message, not a button: a
-   rounded capsule tinted with its role's hue over the dark top bar, led by a
-   status dot. No button border or ghost-button chrome — that was what made it
-   look like a regular action. The hues are the top bar's own, because the bar
-   stays dark in both themes. */
+   rounded capsule tinted with its role's hue over the dark top bar. No button
+   border or ghost-button chrome — that was what made it look like a regular
+   action. The hues are the top bar's own, because the bar stays dark in both
+   themes. */
 .tools-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0.25rem 0.7rem 0.25rem 0.55rem;
+  padding: 0.25rem 0.7rem;
   border: 1px solid transparent;
   border-radius: 999px;
   font-size: 0.75rem;
@@ -2022,15 +2021,8 @@ textarea:focus-visible,
   cursor: pointer;
   transition: background-color 120ms ease, border-color 120ms ease;
 }
-.tools-chip__mark {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--tools-chip-hue);
-}
 /* The informational state ("updates unchecked", "version unreadable") is calm by
-   design: normal muted topbar text, no capsule or dot — a benign FYI must not
+   design: normal muted topbar text, no capsule — a benign FYI must not
    wear a colour that reads as a condition. */
 .tools-chip--informational {
   background: transparent;

@@ -953,7 +953,6 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
               onClick={() => setShowAudioTools(true)}
               title="Open Managed tools"
             >
-              {toolsRollUp !== "informational" ? <span className="tools-chip__mark" aria-hidden="true" /> : null}
               {toolsChipMessage(toolsRollUp, dependencies)}
             </button>
           ) : null}
