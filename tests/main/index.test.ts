@@ -29,6 +29,7 @@ vi.mock("node:fs/promises", () => ({ readFile: vi.fn() }));
 
 const runtime = vi.hoisted(() => ({
   currentLogger: () => ({ error: (...args: unknown[]) => { state.loggerErrors.push(args); } }),
+  themePreference: () => "system",
 }));
 
 vi.mock("@main/core/app-runtime", () => ({
@@ -37,6 +38,7 @@ vi.mock("@main/core/app-runtime", () => ({
   },
 }));
 vi.mock("@main/ipc/app-shell", () => ({ registerAppShellIpc: vi.fn() }));
+vi.mock("@main/core/theme", () => ({ applyThemePreference: vi.fn(), followOsThemeChanges: vi.fn() }));
 vi.mock("@main/window", () => ({
   createMainWindow: () => state.windowLoadFailure ? Promise.reject(state.windowLoadFailure) : Promise.resolve({}),
 }));

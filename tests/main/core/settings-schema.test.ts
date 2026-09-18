@@ -88,6 +88,23 @@ describe("applySettingsDraft — happy path", () => {
   });
 });
 
+describe("applySettingsDraft — theme", () => {
+  it("starts on System and saves a chosen theme through the draft", () => {
+    const current = createDefaultSettings("Asia/Tokyo");
+    expect(current.theme).toBe("system");
+    const draft = { ...buildSettingsDraft(current, OUT, BACKUP, false), theme: "dark" as const };
+    const result = applySettingsDraft(current, draft);
+    expect(result.theme).toBe("dark");
+    expect(buildSettingsDraft(result, OUT, BACKUP, false).theme).toBe("dark");
+  });
+
+  it("rejects a theme that is not one of the three choices", () => {
+    const current = createDefaultSettings("Asia/Tokyo");
+    const draft = { ...buildSettingsDraft(current, OUT, BACKUP, false), theme: "sepia" } as never;
+    expect(() => applySettingsDraft(current, draft)).toThrow(/Theme must be/);
+  });
+});
+
 describe("applySettingsDraft — validation", () => {
   it("rejects an unset leading environment reference instead of targeting the drive root", () => {
     const variableName = "MUMBLER_TEST_UNSET_OUTPUT";

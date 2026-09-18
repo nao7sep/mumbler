@@ -4,9 +4,9 @@ import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from "@shared/layout";
 
 // window.ts imports electron at module load; stub it so the pure helpers can be
 // verified under the node test environment. createMainWindow is exercised here
-// only to assert the forced theme, so the BrowserWindow stub is a no-op
+// only to assert it leaves the theme alone, so the BrowserWindow stub is a no-op
 // constructor and nativeTheme is a writable holder for themeSource.
-const nativeThemeStub = { themeSource: "system" as string };
+const nativeThemeStub = { themeSource: "system" as string, shouldUseDarkColors: false };
 let documentLoadFailure: Error | null = null;
 
 vi.mock("electron", () => ({
@@ -128,10 +128,10 @@ describe("buildWindowOptions", () => {
 });
 
 describe("createMainWindow", () => {
-  it("forces the light theme so a dark host paints a light title bar", async () => {
-    nativeThemeStub.themeSource = "system";
+  it("leaves the theme to the saved choice applied before the window exists", async () => {
+    nativeThemeStub.themeSource = "dark";
     await createMainWindow(runtime);
-    expect(nativeThemeStub.themeSource).toBe("light");
+    expect(nativeThemeStub.themeSource).toBe("dark");
   });
 
   it("keeps a renderer document-load rejection observable to startup", async () => {

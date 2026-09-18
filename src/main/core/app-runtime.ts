@@ -23,6 +23,7 @@ import {
   type SaveCardResult,
   type SaveConflictResolution,
   type SettingsDraft,
+  type ThemePreference,
   type ToolName,
 } from "@shared/app-shell";
 import { AUDIO_IMPORT_EXTENSIONS, isSupportedAudioImportName } from "@shared/audio-import";
@@ -68,6 +69,7 @@ import {
 import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
 import { type AppLogger, createLogger, serializeError } from "./logger";
 import { OperationError } from "./operation-error";
+import { applyThemePreference } from "./theme";
 import { clearCardResultsFromStep, resolveGenerateStartStep } from "./card-pipeline";
 import { PipelineCoordinator } from "./pipeline-coordinator";
 
@@ -1091,6 +1093,11 @@ export class ApplicationRuntime {
     });
   }
 
+  /** The saved theme, or System when settings could not be loaded. */
+  themePreference(): ThemePreference {
+    return this.runtime.settings?.theme ?? "system";
+  }
+
   async saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
     this.ensureReady();
 
@@ -1098,6 +1105,7 @@ export class ApplicationRuntime {
     this.runtime.settings = nextSettings;
 
     await this.persistSettings();
+    applyThemePreference(nextSettings.theme);
     await this.runtime.logger.info("settings.save", "Updated application settings.", {
       outputDirectory: nextSettings.outputDirectory,
       backupDirectory: nextSettings.backupDirectory,

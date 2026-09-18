@@ -16,11 +16,7 @@ import type { CardTrim, MumblerCard } from "@shared/app-shell";
 import { InlineError } from "./InlineResult";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 import { presentFailure } from "./presentFailure";
-
-const REGION_COLOR = "rgba(61, 122, 90, 0.22)";
-const WAVE_COLOR = "rgba(72, 108, 88, 0.24)";
-const PROGRESS_COLOR = "rgba(47, 99, 74, 0.86)";
-const CURSOR_COLOR = "#2f634a";
+import { useWaveformPalette } from "./waveform-palette";
 const MARKER_EPSILON_SEC = 0.05;
 
 // Renders a symmetric waveform by merging all channels and centering bars.
@@ -108,6 +104,11 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const waveSurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const regionRef = useRef<Region | null>(null);
+  // Theme colors for the canvas; the ref lets the create-once effect and the
+  // region sync read the current palette without re-creating the player.
+  const palette = useWaveformPalette();
+  const paletteRef = useRef(palette);
+  paletteRef.current = palette;
   const cardIdRef = useRef(card.id);
   const onTrimCommitRef = useRef(onTrimCommit);
 
@@ -184,9 +185,9 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     const waveSurfer = WaveSurfer.create({
       container: containerRef.current,
       height: 184,
-      waveColor: WAVE_COLOR,
-      progressColor: PROGRESS_COLOR,
-      cursorColor: CURSOR_COLOR,
+      waveColor: paletteRef.current.wave,
+      progressColor: paletteRef.current.progress,
+      cursorColor: paletteRef.current.cursor,
       renderFunction: renderSymmetricWaveform,
       dragToSeek: true,
       autoScroll: true,
@@ -209,7 +210,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         // if resolvedDurationSec doesn't change (already matches card.durationSec),
         // React skips the re-render and the sync effect never runs after WaveSurfer loads.
         if (duration > 0) {
-          syncRegionToTrim(regions, regionRef, draftTrimRef.current, duration);
+          syncRegionToTrim(regions, regionRef, draftTrimRef.current, duration, paletteRef.current.region);
         }
       }),
       waveSurfer.on("decode", (duration) => {
@@ -286,8 +287,18 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       return;
     }
 
-    syncRegionToTrim(regions, regionRef, draftTrim, durationSec);
+    syncRegionToTrim(regions, regionRef, draftTrim, durationSec, paletteRef.current.region);
   }, [draftTrim.backMarkerSec, draftTrim.frontMarkerSec, resolvedDurationSec]);
+
+  // Repaint the canvas and the keep-range when the theme's palette changes.
+  useEffect(() => {
+    waveSurferRef.current?.setOptions({
+      waveColor: palette.wave,
+      progressColor: palette.progress,
+      cursorColor: palette.cursor,
+    });
+    regionRef.current?.setOptions({ color: palette.region });
+  }, [palette]);
 
   async function commitTrim(nextTrim: CardTrim): Promise<void> {
     const normalizedTrim = normalizeTrimDraft(nextTrim, resolvedDurationSec);
@@ -645,6 +656,7 @@ function syncRegionToTrim(
   regionRef: MutableRefObject<Region | null>,
   trim: CardTrim,
   durationSec: number,
+  regionColor: string,
 ): void {
   const hasTrim = trim.frontMarkerSec !== null || trim.backMarkerSec !== null;
   const startSec = trim.frontMarkerSec ?? 0;
@@ -668,7 +680,7 @@ function syncRegionToTrim(
       resize: true,
       resizeStart: true,
       resizeEnd: true,
-      color: REGION_COLOR,
+      color: regionColor,
     });
     return;
   }
@@ -680,7 +692,7 @@ function syncRegionToTrim(
     resize: true,
     resizeStart: true,
     resizeEnd: true,
-    color: REGION_COLOR,
+    color: regionColor,
   });
 }
 

@@ -1,4 +1,4 @@
-import { BrowserWindow, screen } from "electron";
+import { BrowserWindow, nativeTheme, screen } from "electron";
 
 export type StartupFailureChoice = "restart" | "close";
 
@@ -19,7 +19,9 @@ export async function showStartupFailureDialog(): Promise<StartupFailureChoice> 
     fullscreenable: false,
     autoHideMenuBar: true,
     title: "Mumbler could not start",
-    backgroundColor: "#edf4ec",
+    // The page follows prefers-color-scheme, which follows nativeTheme.themeSource
+    // (the OS when startup failed before settings were read).
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#111814" : "#edf4ec",
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
 
@@ -75,5 +77,6 @@ export function renderStartupFailureHtml(): string {
     .button:hover,.button:focus{outline:2px solid #477552;outline-offset:2px}.primary{color:white;background:#376d45;border-color:#2f5e3b}.primary:hover,.primary:focus{background:#2f5e3b}
     [data-window-inactive] .button{color:#69756b;border-color:#c0c9c1;background:#f2f5f2}[data-window-inactive] .button:focus{outline-color:#9aaba0}
     [data-window-inactive] .primary{color:#eef3ef;background:#789580;border-color:#6e8a76}[data-window-inactive] .primary:hover,[data-window-inactive] .primary:focus{background:#708c78}
+    @media (prefers-color-scheme:dark){:root{color-scheme:dark;background:#111814;color:#e4ede5}*{scrollbar-color:#94a596 transparent}*::-webkit-scrollbar-thumb{background:#94a596;background-clip:padding-box}.detail{color:#b0c0b2}.button{color:#e4ede5;border-color:#5f7563;background:#1c2821}.button:hover,.button:focus{outline-color:#94a596}[data-window-inactive] .button{color:#94a596;border-color:#33453a;background:#16201a}[data-window-inactive] .button:focus{outline-color:#5f7563}[data-window-inactive] .primary{color:#dfe8e0;background:#3f5a47;border-color:#4a6853}[data-window-inactive] .primary:hover,[data-window-inactive] .primary:focus{background:#3f5a47}}
   </style></head><body><main class="dialog"><header class="header" id="dialog-header"><h1>Mumbler could not start</h1></header><section class="body" id="dialog-body" role="region" aria-label="Startup failure details" tabindex="0"><p>Mumbler could not finish opening its saved state or window.</p><p class="detail">Your recordings and saved files were not changed. Restart Mumbler to try again, or close it and inspect the session log.</p></section><footer class="actions" id="dialog-footer"><button class="button" type="button" onclick="location.href='${CHOICE_ORIGIN}close'">Close</button><button id="choice-restart" class="button primary" type="button" onclick="location.href='${CHOICE_ORIGIN}restart'">Restart Mumbler</button></footer></main><script>const syncWindowState=()=>document.documentElement.toggleAttribute('data-window-inactive',!document.hasFocus());addEventListener('focus',syncWindowState);addEventListener('blur',syncWindowState);syncWindowState();</script></body></html>`;
 }

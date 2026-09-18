@@ -195,6 +195,17 @@ describe("settings store", () => {
     expect(value.skipIntervalSec).toBeGreaterThan(0);
   });
 
+  it("defaults the theme to System and keeps a saved Light or Dark", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 1 }), "utf8");
+    expect((await createSettingsStore(settingsPath()).load()).value.theme).toBe("system");
+
+    await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 1, theme: "dark" }), "utf8");
+    expect((await createSettingsStore(settingsPath()).load()).value.theme).toBe("dark");
+
+    await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 1, theme: "sepia" }), "utf8");
+    expect((await createSettingsStore(settingsPath()).load()).value.theme).toBe("system");
+  });
+
   it("defaults the launch update check on when absent, and preserves an explicit off", async () => {
     await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 1 }), "utf8");
     expect((await createSettingsStore(settingsPath()).load()).value.checkUpdatesAtLaunch).toBe(true);

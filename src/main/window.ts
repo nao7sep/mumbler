@@ -8,12 +8,10 @@ import { isAllowedExternalUrl, openExternalUrl } from "./external-url";
 import type { ApplicationRuntime } from "./core/app-runtime";
 import { serializeError } from "./core/logger";
 import { createWindowWithUsablePersistedBounds } from "./window-state-recovery";
+import { windowBackground } from "./core/theme";
 
 export { isAllowedExternalUrl } from "./external-url";
 
-// Matches the renderer `--bg` (#edf4ec in styles.css) so the pre-paint window
-// background does not flash a different color before the page loads.
-const WINDOW_BACKGROUND = "#edf4ec";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Production Content-Security-Policy (defense-in-depth on top of context
@@ -73,7 +71,9 @@ export function buildWindowOptions(): Electron.BrowserWindowConstructorOptions {
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
     show: false,
-    backgroundColor: WINDOW_BACKGROUND,
+    // The resolved theme's --bg, so the pre-paint window background does not
+    // flash a different color before the page loads.
+    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     titleBarStyle: "default",
     autoHideMenuBar: true,
     webPreferences: {
@@ -86,11 +86,6 @@ export function buildWindowOptions(): Electron.BrowserWindowConstructorOptions {
 }
 
 export async function createMainWindow(runtime: ApplicationRuntime): Promise<BrowserWindow> {
-  // Force the light theme so the host OS paints a light native title bar on this
-  // light app — a dark-mode host would otherwise give it a dark bar that fights
-  // the UI (window-chrome conventions: chrome colors match the app's theme).
-  nativeTheme.themeSource = "light";
-
   const options = buildWindowOptions();
   const window = createWindowWithUsablePersistedBounds("main", () => new BrowserWindow(options));
   configureWindowMinimum(window, () => ({ width: WINDOW_MIN_WIDTH, height: WINDOW_MIN_HEIGHT }),

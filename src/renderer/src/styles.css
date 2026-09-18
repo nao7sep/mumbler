@@ -10,10 +10,12 @@
   font-family: var(--font-ui);
   line-height: 1.5;
   font-weight: 400;
-  background: #edf4ec;
-  color: #17201a;
+  background: var(--bg);
+  color: var(--text);
 
   --bg: #edf4ec;
+  --bg-top: #f3f8f1;
+  --bg-bottom: #e6efe5;
   --surface: #f7faf4;
   --surface-raised: #ffffff;
   --surface-muted: #eef5ea;
@@ -22,29 +24,46 @@
   --field-bg: #fbfdf8;
   --border: #c7d7c4;
   --border-subtle: #dbe6d6;
+  /* A text field's outline is its only boundary, so it holds 3:1 against the
+     surfaces it sits on; the other borders are decorative dividers. */
+  --field-border: #7a8d77;
+  --field-highlight: rgba(255, 255, 255, 0.6);
   --text: #17201a;
   --text-secondary: #526255;
-  --text-tertiary: #788874;
+  /* Tertiary text still carries information (labels, counts, hints), so it
+     holds 4.5:1 on every surface, the active row included. */
+  --text-tertiary: #5b6a58;
   --scrollbar-thumb: var(--text-tertiary);
   --scrollbar-thumb-active: var(--text-secondary);
-  --accent: #3d7a5a;
-  --accent-hover: #2f634a;
+  /* The accent is both the Primary button fill (under --on-accent) and accent
+     text on surfaces; in dark it turns light, with dark text on the button. */
+  --accent: #326b4d;
+  --accent-hover: #285a40;
+  --on-accent: #ffffff;
   --accent-subtle: #e2f0e5;
   --danger: #a44335;
   --danger-subtle: #f8ebe8;
   --success: #24744f;
   --success-subtle: #e5f3eb;
-  --warning: #8a641d;
+  --warning: #7a5716;
   --warning-subtle: #fbf3df;
   --processing: #3f6684;
   --processing-subtle: #e8f0f5;
   --link: #2d6f62;
   --topbar: #173827;
+  --topbar-end: #214b36;
   --topbar-text: #f4f8ef;
   --topbar-muted: #bfd0bd;
   --shadow-sm: 0 1px 2px rgba(31, 58, 42, 0.06);
   --shadow-md: 0 8px 24px rgba(31, 58, 42, 0.1);
   --shadow-lg: 0 20px 60px rgba(20, 38, 28, 0.16);
+  --backdrop: rgba(18, 34, 24, 0.36);
+  /* The waveform canvas reads these through WaveformEditor's palette hook,
+     since a canvas cannot resolve CSS variables itself. */
+  --waveform-wave: rgba(72, 108, 88, 0.24);
+  --waveform-progress: rgba(47, 99, 74, 0.86);
+  --waveform-cursor: #2f634a;
+  --waveform-region: rgba(61, 122, 90, 0.22);
   --radius: 6px;
   --radius-lg: 8px;
   --radius-md: 6px;
@@ -62,6 +81,58 @@
      84). Mirrors VERTICAL_CHROME in @shared/layout. The sticky queue pane bounds
      its own scroll against this instead of a guessed offset. */
   --vertical-chrome: 124px;
+}
+
+/* The dark theme: deep green-black surfaces under the same green identity.
+   prefers-color-scheme follows Electron's nativeTheme.themeSource, which the
+   main process sets from the saved choice before the window exists and again
+   on Save, so this block, not page script, decides the palette from the first
+   frame (app-chrome conventions, Theme). */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #111814;
+    --bg-top: #141d17;
+    --bg-bottom: #0e1511;
+    --surface: #16201a;
+    --surface-raised: #1c2821;
+    --surface-muted: #141d17;
+    --surface-hover: #21302a;
+    --surface-active: #283a30;
+    --field-bg: #131b16;
+    --border: #33453a;
+    --border-subtle: #26352c;
+    --field-border: #5f7563;
+    --field-highlight: rgba(255, 255, 255, 0.03);
+    --text: #e4ede5;
+    --text-secondary: #b0c0b2;
+    --text-tertiary: #94a596;
+    --accent: #7dd1a3;
+    --accent-hover: #9adcb7;
+    --on-accent: #0c1a12;
+    --accent-subtle: #1b3326;
+    --danger: #f3907f;
+    --danger-subtle: #3a1f1b;
+    --success: #74d3a0;
+    --success-subtle: #17301f;
+    --warning: #e3b75e;
+    --warning-subtle: #33290f;
+    --processing: #93bde0;
+    --processing-subtle: #172735;
+    --link: #7fd4c0;
+    --topbar: #0c1c13;
+    --topbar-end: #12301f;
+    --topbar-text: #f4f8ef;
+    --topbar-muted: #a9bfa9;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.5);
+    --backdrop: rgba(0, 0, 0, 0.55);
+    --waveform-wave: rgba(148, 196, 168, 0.28);
+    --waveform-progress: rgba(125, 209, 163, 0.9);
+    --waveform-cursor: #9adcb7;
+    --waveform-region: rgba(125, 209, 163, 0.18);
+  }
 }
 
 * {
@@ -145,7 +216,7 @@ body {
   min-height: 100vh;
   font-size: 0.875rem;
   background:
-    linear-gradient(180deg, #f3f8f1 0%, var(--bg) 38%, #e6efe5 100%);
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 38%, var(--bg-bottom) 100%);
   color: var(--text);
 }
 
@@ -199,7 +270,7 @@ textarea:focus-visible,
   gap: 16px;
   margin-bottom: 20px;
   padding: 14px 20px;
-  background: linear-gradient(135deg, var(--topbar) 0%, #214b36 100%);
+  background: linear-gradient(135deg, var(--topbar) 0%, var(--topbar-end) 100%);
   border: 1px solid rgba(224, 237, 219, 0.16);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
@@ -654,7 +725,7 @@ textarea:focus-visible,
 
 .button--primary {
   background: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
@@ -1045,6 +1116,31 @@ textarea:focus-visible,
   gap: 4px;
 }
 
+/* A fieldset-based radio group laid out like the neighboring fields. */
+.radio-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.radio-field legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.radio-field__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+}
+
 .checkbox-field {
   display: flex;
   align-items: center;
@@ -1062,13 +1158,13 @@ textarea:focus-visible,
 .field select,
 .field textarea {
   width: 100%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--field-border);
   border-radius: var(--radius);
   padding: 0.5rem 0.625rem;
   font-size: 0.8125rem;
   background: var(--field-bg);
   color: var(--text);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 1px 0 var(--field-highlight);
   transition:
     background-color 120ms ease,
     border-color 120ms ease,
@@ -1406,7 +1502,7 @@ textarea:focus-visible,
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(18, 34, 24, 0.36);
+  background: var(--backdrop);
   backdrop-filter: blur(8px);
 }
 
@@ -1676,7 +1772,7 @@ textarea:focus-visible,
 
 .editable-list__add input {
   width: 100%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--field-border);
   border-radius: var(--radius);
   padding: 0.5rem 0.625rem;
   font-size: 0.8125rem;

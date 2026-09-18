@@ -27,6 +27,7 @@ beforeEach(() => {
 function draft(): SettingsDraft {
   return {
     schemaVersion: 1,
+    theme: "system",
     uiFontFamily: "",
     outputDirectory: "",
     defaultOutputDirectory: "/out",
@@ -183,5 +184,43 @@ describe("SettingsModal results", () => {
     expect(document.body.textContent).not.toContain("timezone reference could not be opened");
     expect(document.body.textContent).not.toContain("STALE-TIMEZONE");
     expect(reportRendererDiagnostic).toHaveBeenCalledOnce();
+  });
+});
+
+describe("SettingsModal theme", () => {
+  it("offers System, Light, and Dark as one radio group and edits only the draft", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const onChange = vi.fn();
+
+    await act(async () => {
+      root?.render(React.createElement(SettingsModal, {
+        draft: draft(),
+        isDirty: false,
+        isSaving: false,
+        isSavingApiKey: false,
+        isPickingOutputDirectory: false,
+        isPickingBackupDirectory: false,
+        errorMessage: null,
+        onChange,
+        onClose: vi.fn(),
+        onPickOutputDirectory: vi.fn(),
+        onPickBackupDirectory: vi.fn(),
+        onSetApiKey: vi.fn(),
+        onClearApiKey: vi.fn(),
+        onRestoreDefaultPrompts: vi.fn(),
+        onRestoreDefaultModels: vi.fn(),
+        onSave: vi.fn(),
+      }));
+    });
+
+    const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"][name="theme"]'));
+    expect(radios.map((radio) => radio.value)).toEqual(["system", "light", "dark"]);
+    expect(radios.find((radio) => radio.checked)?.value).toBe("system");
+    expect(radios[0]?.closest("fieldset")?.querySelector("legend")?.textContent).toBe("Theme");
+
+    await act(async () => radios[2]?.click());
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ theme: "dark" }));
   });
 });

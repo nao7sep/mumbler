@@ -11,6 +11,7 @@ Mumbler is a desktop app for turning audio recordings into transcripts and publi
 - **Timestamp parsing** — pull the recording datetime from filenames via configurable regex, prompting when none matches
 - **Atomic save** — writes audio + JSON + Markdown together, with rollback on failure
 - **IME-safe** — Japanese/Chinese/Korean input works in every text field
+- **Light and dark themes** — follows the system by default; pick Light or Dark in Settings
 
 ## Requirements
 

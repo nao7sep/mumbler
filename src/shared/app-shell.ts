@@ -134,8 +134,24 @@ export interface DefaultModels {
   metadataModel: string;
 }
 
+/** The saved appearance choice. System follows the OS appearance. */
+export type ThemePreference = "system" | "light" | "dark";
+
+export const THEME_PREFERENCES: ReadonlyArray<{ value: ThemePreference; label: string }> = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
+
+/** A missing or unrecognized theme follows the OS. */
+export function normalizeThemePreference(value: unknown): ThemePreference {
+  return value === "light" || value === "dark" ? value : "system";
+}
+
 export interface MumblerSettings {
   schemaVersion: 1;
+  // Appearance — the theme, applied app-wide through Electron's nativeTheme.themeSource.
+  theme: ThemePreference;
   // Appearance — the UI (chrome) font family. Family only; blank means the built-in default stack
   // (the renderer's `--font-ui` variable). The read-only transcription/structured/title/slug views
   // are display surfaces, so they follow this UI font rather than a separate content font.
@@ -341,6 +357,7 @@ export interface SettingsSummary {
 export interface SettingsDraft {
   schemaVersion: 1;
   // Appearance
+  theme: ThemePreference;
   uiFontFamily: string;
   // Files
   outputDirectory: string;

@@ -17,6 +17,7 @@ vi.mock("electron", () => ({
     show(): void {}
   },
   screen: { getPrimaryDisplay: () => ({ workArea: { height: 900 } }) },
+  nativeTheme: { shouldUseDarkColors: false },
 }));
 
 import { renderStartupFailureHtml, showStartupFailureDialog } from "@main/startup-failure-dialog";

@@ -6,6 +6,7 @@ import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { ApplicationRuntime } from "./core/app-runtime";
 import { registerAppShellIpc } from "./ipc/app-shell";
 import { createMainWindow } from "./window";
+import { applyThemePreference, followOsThemeChanges } from "./core/theme";
 import { showStartupFailureDialog } from "./startup-failure-dialog";
 
 app.setName("Mumbler");
@@ -79,6 +80,10 @@ async function bootstrap(): Promise<void> {
   });
 
   registerAppShellIpc(runtime);
+  // Before the window exists, so its first frame, title bar, and background
+  // already match the saved choice.
+  applyThemePreference(runtime.themePreference());
+  followOsThemeChanges();
   await createMainWindow(runtime);
 
   // The data backup is now write-through (data-backup conventions): every managed

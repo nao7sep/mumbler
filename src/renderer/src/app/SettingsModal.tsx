@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ReactElement } from "react";
 
-import { type SettingsDraft } from "@shared/app-shell";
+import { THEME_PREFERENCES, type SettingsDraft } from "@shared/app-shell";
 import {
   getSettingsNumberIssues,
   type NumericSettingField,
@@ -228,6 +228,26 @@ export function SettingsModal({
             <section className="settings-section">
               <h3>Appearance</h3>
               <div className="field-stack">
+                {/* A native radio group: one tab stop, arrow keys move and select
+                    (composite-control conventions). Applied on Save with the rest. */}
+                <fieldset className="radio-field">
+                  <legend>Theme</legend>
+                  <div className="radio-field__options">
+                    {THEME_PREFERENCES.map(({ value, label }) => (
+                      <label key={value} className="checkbox-field">
+                        <input
+                          type="radio"
+                          name="theme"
+                          value={value}
+                          checked={draft.theme === value}
+                          onChange={() => onChange({ ...draft, theme: value })}
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className="field-hint">System follows the OS appearance.</p>
+                </fieldset>
                 <label className="field">
                   <span>UI font</span>
                   <input

@@ -13,7 +13,7 @@ import {
   normalizeUtcMs,
 } from "@shared/timestamps";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
-import { DEFAULT_GEMINI_MODELS } from "@shared/app-shell";
+import { DEFAULT_GEMINI_MODELS, THEME_PREFERENCES, normalizeThemePreference } from "@shared/app-shell";
 import { JsonStore } from "./json-store";
 import { OperationError } from "./operation-error";
 import { resolvePathFromHome } from "./storage-root";
@@ -81,7 +81,9 @@ function normalizeSettings(
 
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
-    // Appearance — free text; blank resolves to the built-in default stack at apply time.
+    // Appearance
+    theme: normalizeThemePreference(raw.theme),
+    // Free text; blank resolves to the built-in default stack at apply time.
     uiFontFamily: asString(raw.uiFontFamily) ?? defaults.uiFontFamily,
     // Files
     outputDirectory: normalizeOptionalPath(raw.outputDirectory, homeDirectory),
@@ -362,6 +364,7 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     // Appearance
+    theme: "system",
     uiFontFamily: "",
     // Files
     outputDirectory: null,
@@ -488,6 +491,7 @@ export function buildSettingsDraft(
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     // Appearance
+    theme: settings.theme,
     uiFontFamily: settings.uiFontFamily,
     // Files
     outputDirectory: settings.outputDirectory ?? "",
@@ -539,6 +543,10 @@ export function applySettingsDraft(
   const titlePrompt = multiline(draft.titlePrompt);
   const slugPrompt = multiline(draft.slugPrompt);
 
+  if (!THEME_PREFERENCES.some(({ value }) => value === draft.theme)) {
+    throw new OperationError("Theme must be System, Light, or Dark.");
+  }
+
   if (!isValidTimezone(defaultTimezone)) {
     throw new OperationError("Default timezone must be a valid IANA timezone.");
   }
@@ -588,7 +596,9 @@ export function applySettingsDraft(
 
   return {
     ...current,
-    // Appearance — free text; blank means the built-in default stack.
+    // Appearance
+    theme: draft.theme,
+    // Free text; blank means the built-in default stack.
     uiFontFamily: draft.uiFontFamily.trim(),
     // Files
     outputDirectory:
