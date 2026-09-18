@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-// Every color pair the stylesheet draws must meet WCAG AA in both themes
-// (app-chrome conventions, Theme): 4.5:1 for text, 3:1 for a text field's
+// Every color pair the stylesheet draws keeps high contrast in both themes,
+// by this app's own floor: 4.5:1 for text, 3:1 for a text field's
 // outline. Light tokens live in the top-level :root block; dark tokens in the
 // :root block inside @media (prefers-color-scheme: dark).
 const css = readFileSync(resolve("src/renderer/src/styles.css"), "utf8");
