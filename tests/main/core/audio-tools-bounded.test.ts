@@ -39,7 +39,7 @@ describe("audio tools are bounded and cancellable", () => {
     await expect(runTool(process.execPath, [sleeperScript], { timeoutMs: 200 })).rejects.toThrow(
       /did not finish within/i,
     );
-  }, 30_000);
+  });
 
   // The reason the kill escalates: a tool that ignores SIGTERM would otherwise
   // outlive the bound it was given, and the await would hang exactly as before.
@@ -61,7 +61,7 @@ describe("audio tools are bounded and cancellable", () => {
     // by asking isCancelledError. Letting Node's raw abort error escape would
     // tell the user their audio broke when in fact they pressed Cancel.
     await expect(pending).rejects.toSatisfy(isCancelledError);
-  }, 30_000);
+  });
 
   it("rejects an already-aborted signal without leaving the tool running", async () => {
     const controller = new AbortController();
@@ -69,5 +69,5 @@ describe("audio tools are bounded and cancellable", () => {
     await expect(
       runTool(process.execPath, [sleeperScript], { timeoutMs: 30_000, signal: controller.signal }),
     ).rejects.toSatisfy(isCancelledError);
-  }, 30_000);
+  });
 });
