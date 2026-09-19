@@ -5,7 +5,7 @@ import { presentFailure } from "./presentFailure";
 
 interface UseSettingsModalOptions {
   onSnapshotUpdate: (snapshot: AppSnapshot) => void;
-  onError: (message: string | null) => void;
+  onError: (message: string) => void;
   onNotice: (message: string) => void;
 }
 

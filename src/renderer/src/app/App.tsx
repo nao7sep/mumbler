@@ -282,7 +282,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
 
   const settingsModal = useSettingsModal({
     onSnapshotUpdate: setSnapshot,
-    onError: (msg) => { if (msg !== null) addPersistent("settings-load", msg, "error"); },
+    onError: (msg) => addPersistent("settings-load", msg, "error"),
     onNotice: addToast,
   });
 
@@ -565,7 +565,9 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
       setSnapshot(nextSnapshot);
     } catch (error: unknown) {
       addPersistent(
-        `card-selection:${cardId}`,
+        // The message does not name the recording, so a later failed selection of any
+        // card supersedes this notice instead of stacking an identical one.
+        "card-selection",
         presentFailure(error, "The recording could not be selected. The current selection is unchanged; try again.", "card selection failed"),
         "error",
       );
