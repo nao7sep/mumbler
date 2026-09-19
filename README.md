@@ -40,6 +40,10 @@ On first launch, open Settings and enter your Gemini API key. Saved files defaul
 
 The Gemini model list is yours to edit: add or remove model IDs, select separate transcription and metadata models, or use **Reset models** to restore the built-in suggestions. Mumbler reports an invalid or retired model when a job calls Gemini rather than trying to validate the list against a changing online catalogue.
 
+## Tests
+
+`npm run check` runs the checks your uncommitted changes can affect. `npm run check:full` runs every test, then the live lane: the real app runtime against the real Gemini API and the managed ffmpeg and ffprobe, over the shared test-fixture corpus in the company repository, which must be checked out beside this one. Export `GEMINI_API_KEY` first; the lane makes a few paid Gemini calls, and the full check fails without the key. The first run downloads ffmpeg and ffprobe into `node_modules/.cache`, and later runs download them again only when a newer build is available.
+
 ## License
 
 [GNU GPL v3 or later](LICENSE) © 2026 Yoshinao Inoguchi

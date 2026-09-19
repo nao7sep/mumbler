@@ -10,14 +10,15 @@ function plan(changed: string[]) {
 
 describe("the default check plan", () => {
   it("runs nothing when nothing differs from HEAD or only documentation changed", () => {
-    expect(plan([])).toEqual({ typecheck: false, vitest: null });
-    expect(plan(["README.md", "CHANGELOG.md"])).toEqual({ typecheck: false, vitest: null });
+    expect(plan([])).toEqual({ typecheck: false, vitest: null, live: false });
+    expect(plan(["README.md", "CHANGELOG.md"])).toEqual({ typecheck: false, vitest: null, live: false });
   });
 
   it("typechecks and runs related tests for a TypeScript change", () => {
     expect(plan(["src/main/core/audio-tools.ts"])).toEqual({
       typecheck: true,
       vitest: ["src/main/core/audio-tools.ts"],
+      live: false,
     });
   });
 
@@ -25,7 +26,12 @@ describe("the default check plan", () => {
     expect(plan(["src/renderer/src/styles.css"])).toEqual({
       typecheck: false,
       vitest: ["src/renderer/src/styles.css", ...repositoryReaders],
+      live: false,
     });
+  });
+
+  it("typechecks a live test but never runs the live lane", () => {
+    expect(plan(["tests/live/main/core/app-runtime.test.ts"])).toMatchObject({ typecheck: true, live: false });
   });
 
   it("typechecks when the TypeScript configuration or dependencies change", () => {
@@ -35,10 +41,11 @@ describe("the default check plan", () => {
 });
 
 describe("the full check plan", () => {
-  it("typechecks and runs every test regardless of changes", () => {
+  it("typechecks, runs every test, and runs the live lane regardless of changes", () => {
     expect(planChecks({ changed: [], full: true, repositoryReaders })).toEqual({
       typecheck: true,
       vitest: "all",
+      live: true,
     });
   });
 });

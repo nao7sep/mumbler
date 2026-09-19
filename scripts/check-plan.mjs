@@ -31,7 +31,9 @@ export function readsRepository(testSource) {
  * @param {string[]} input.repositoryReaders test files for which readsRepository holds
  */
 export function planChecks({ changed, full, repositoryReaders }) {
-  if (full) return { typecheck: true, vitest: "all" };
+  // The live lane calls the real Gemini API and runs the real managed audio
+  // tools, so only the full check runs it; the default still typechecks it.
+  if (full) return { typecheck: true, vitest: "all", live: true };
 
   const code = changed.filter((path) => !isDocumentation(path));
   const outsideModuleGraph = code.some((path) => !TYPESCRIPT.test(path));
@@ -39,5 +41,6 @@ export function planChecks({ changed, full, repositoryReaders }) {
   return {
     typecheck: code.some((path) => TYPESCRIPT.test(path) || TYPESCRIPT_CONFIG.test(path)),
     vitest: related.length > 0 ? related : null,
+    live: false,
   };
 }

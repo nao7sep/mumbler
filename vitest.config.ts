@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 // Tests live under tests/, mirroring the src/ tree, and reach their subjects
 // through the same path aliases the app uses. The default node environment suits
@@ -18,6 +18,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.{ts,tsx}"],
+    // tests/live calls the real Gemini API and runs the real managed audio tools;
+    // only vitest.live.config.ts, run by npm run check:full, includes it.
+    exclude: [...configDefaults.exclude, "tests/live/**"],
     // Isolate the write-through backup store per test: point MUMBLER_HOME at a throwaway root and close the
     // store singleton after each test, so a recording save never touches the developer's real ~/.mumbler
     // and the store re-opens per root (data-backup conventions' test-migration). See the setup file.
