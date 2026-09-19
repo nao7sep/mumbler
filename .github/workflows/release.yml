@@ -40,10 +40,10 @@ jobs:
         run: npm run check:release-tag
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-      # The ordinary suites by name: npm run check selects from uncommitted
+      # The ordinary suites by name: npm test selects from uncommitted
       # changes, of which a fresh checkout has none.
       - run: npm run typecheck
-      - run: npm test
+      - run: npx vitest run
 
   build:
     needs: test

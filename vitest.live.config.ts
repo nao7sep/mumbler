@@ -3,7 +3,7 @@ import { configDefaults, defineConfig } from "vitest/config";
 import base from "./vitest.config";
 
 // The live lane: the real Gemini API and the real managed ffmpeg and ffprobe,
-// run only by npm run check:full. Files run one at a time because they share
+// run only by npm run test:full. Files run one at a time because they share
 // the tool cache, spend money, and wait on the network.
 export default defineConfig({
   resolve: base.resolve,

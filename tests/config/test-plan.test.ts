@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error The directly executed .mjs helper intentionally has no declaration file.
-import { planChecks, readsRepository } from "../../scripts/check-plan.mjs";
+import { planTests, readsRepository } from "../../scripts/test-plan.mjs";
 
 const repositoryReaders = ["tests/config/launcher-runtime.test.ts", "tests/main/core/json-store.test.ts"];
 
 function plan(changed: string[]) {
-  return planChecks({ changed, full: false, repositoryReaders });
+  return planTests({ changed, full: false, repositoryReaders });
 }
 
-describe("the default check plan", () => {
+describe("the default test plan", () => {
   it("runs nothing when nothing differs from HEAD or only documentation changed", () => {
     expect(plan([])).toEqual({ typecheck: false, vitest: null, live: false });
     expect(plan(["README.md", "CHANGELOG.md"])).toEqual({ typecheck: false, vitest: null, live: false });
@@ -40,9 +40,9 @@ describe("the default check plan", () => {
   });
 });
 
-describe("the full check plan", () => {
+describe("the full run plan", () => {
   it("typechecks, runs every test, and runs the live lane regardless of changes", () => {
-    expect(planChecks({ changed: [], full: true, repositoryReaders })).toEqual({
+    expect(planTests({ changed: [], full: true, repositoryReaders })).toEqual({
       typecheck: true,
       vitest: "all",
       live: true,

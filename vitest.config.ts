@@ -19,7 +19,7 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.{ts,tsx}"],
     // tests/live calls the real Gemini API and runs the real managed audio tools;
-    // only vitest.live.config.ts, run by npm run check:full, includes it.
+    // only vitest.live.config.ts, run by npm run test:full, includes it.
     exclude: [...configDefaults.exclude, "tests/live/**"],
     // Isolate the write-through backup store per test: point MUMBLER_HOME at a throwaway root and close the
     // store singleton after each test, so a recording save never touches the developer's real ~/.mumbler

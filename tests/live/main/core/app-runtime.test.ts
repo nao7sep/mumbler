@@ -1,7 +1,7 @@
 // The application runtime end to end with nothing substituted but Electron's
 // window, dialog, and shell glue: the managed ffmpeg and ffprobe, acquired
 // through the runtime's own tool manager, and the real Gemini API. Run only by
-// npm run check:full, through vitest.live.config.ts.
+// npm run test:full, through vitest.live.config.ts.
 //
 // The tools are acquired into a cache that persists between runs and follow the
 // app's own rule: install what is missing, and update only when the upstream
@@ -64,7 +64,7 @@ async function manifest(): Promise<ManifestEntry[]> {
 
 function requireKey(name: string): void {
   if (!process.env[name]?.trim()) {
-    throw new Error(`${name} is not set. The full check calls the real Gemini API; export ${name} and run it again.`);
+    throw new Error(`${name} is not set. The full run calls the real Gemini API; export ${name} and run it again.`);
   }
 }
 

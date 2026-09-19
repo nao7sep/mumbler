@@ -21,9 +21,8 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web && npm run typecheck:test",
-    "test": "vitest run",
-    "check": "node scripts/check.mjs",
-    "check:full": "node scripts/check.mjs --full",
+    "test": "node scripts/test.mjs",
+    "test:full": "node scripts/test.mjs --full",
     "check:release-tag": "node scripts/check-release-tag.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
