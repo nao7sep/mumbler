@@ -79,8 +79,22 @@ async function withRuntime<T>(home: string, body: (runtime: Runtime) => Promise<
     await runtime.shutdown();
     await closeBackupStore();
   }
-  expect(process.getActiveResourcesInfo(), "no child process outlives the runtime").not.toContain("ProcessWrap");
+  expect(await openAfterClosing(), "no child process outlives the runtime").not.toContain("ProcessWrap");
   return result;
+}
+
+/**
+ * The process's open resources once pending closes finish: an exited child
+ * releases its handle a turn of the event loop after its exit callback, so a
+ * handle still open after two seconds really outlived its owner.
+ */
+async function openAfterClosing(): Promise<string[]> {
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    const open = process.getActiveResourcesInfo();
+    if (!open.includes("ProcessWrap") || Date.now() > deadline) return open;
+    await delay(20);
+  }
 }
 
 /** A throwaway home whose managed tools are the cached ones. */
@@ -128,7 +142,7 @@ async function settled(runtime: Runtime, cardId: string): Promise<MumblerCard> {
 function words(text: string): string[] {
   return text
     .toLowerCase()
-    .replaceAll("’", "'")
+    .replaceAll("\u2019", "'")
     .split(/[^\p{L}\p{N}']+/u)
     .filter((word) => word.length > 0);
 }
