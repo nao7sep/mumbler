@@ -3,8 +3,9 @@
 // selection rules are tested directly; scripts/test.mjs gathers the inputs
 // and runs the lanes.
 
-const TYPESCRIPT = /\.(ts|tsx)$/;
-const TYPESCRIPT_CONFIG = /^(tsconfig[^/]*\.json|package(-lock)?\.json)$/;
+// What the type check reads: modules, including the JSON they import, and its
+// own configuration (tsconfig*.json, package.json and its lock file).
+const TYPE_CHECKED = /\.(?:[cm]?[jt]s|[jt]sx|json)$/;
 
 /** Markdown is documentation: no test or build reads it. */
 function isDocumentation(path) {
@@ -17,8 +18,8 @@ function unique(values) {
 
 /**
  * A test that reads files through Node instead of importing them. Import-based
- * selection cannot see what such a test depends on, so any change to a file
- * outside the TypeScript module graph runs every one of them.
+ * selection cannot see what such a test depends on, and many read source files
+ * as text, so every change but documentation runs every one of them.
  */
 export function readsRepository(testSource) {
   return /(?:from\s+|import\s*\(\s*)["'](?:node:)?(?:fs|child_process)(?:\/promises)?["']/.test(testSource);
@@ -36,10 +37,9 @@ export function planTests({ changed, full, repositoryReaders }) {
   if (full) return { typecheck: true, vitest: "all", live: true };
 
   const code = changed.filter((path) => !isDocumentation(path));
-  const outsideModuleGraph = code.some((path) => !TYPESCRIPT.test(path));
-  const related = unique([...code, ...(outsideModuleGraph ? repositoryReaders : [])]);
+  const related = unique([...code, ...(code.length > 0 ? repositoryReaders : [])]);
   return {
-    typecheck: code.some((path) => TYPESCRIPT.test(path) || TYPESCRIPT_CONFIG.test(path)),
+    typecheck: code.some((path) => TYPE_CHECKED.test(path)),
     vitest: related.length > 0 ? related : null,
     live: false,
   };
