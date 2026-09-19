@@ -5,7 +5,28 @@ import { CloseIcon } from "./Icon";
 
 export type AppNotification =
   | { id: string; message: string; kind: "toast" }
-  | { id: string; message: string; kind: "persistent"; variant: "info" | "error" };
+  | {
+      id: string;
+      owner: string;
+      message: string;
+      kind: "persistent";
+      variant: "info" | "error";
+    };
+
+export type PersistentNotification = Extract<AppNotification, { kind: "persistent" }>;
+
+export function upsertPersistentNotification(
+  notifications: AppNotification[],
+  next: PersistentNotification,
+): AppNotification[] {
+  return [
+    ...notifications.filter(
+      (notification) =>
+        notification.kind !== "persistent" || notification.owner !== next.owner,
+    ),
+    next,
+  ];
+}
 
 export type PipelineCompletionNotification =
   { message: string; kind: "toast" };
@@ -27,7 +48,7 @@ export function PersistentNotifications({
   onDismiss,
 }: NotificationProps): ReactElement | null {
   const persistent = notifications.filter(
-    (notification): notification is Extract<AppNotification, { kind: "persistent" }> =>
+    (notification): notification is PersistentNotification =>
       notification.kind === "persistent",
   );
   if (persistent.length === 0) return null;

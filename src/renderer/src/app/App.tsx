@@ -60,6 +60,7 @@ import {
   PersistentNotifications,
   ToastNotifications,
   pipelineCompletionNotification,
+  upsertPersistentNotification,
   type AppNotification,
 } from "./Notifications";
 import {
@@ -203,6 +204,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
     return recovered > 0
       ? [{
           id: nanoid(),
+          owner: "startup:recovered-interrupted",
           message: `${recovered} recording${recovered === 1 ? "" : "s"} recovered from an interrupted session — generate again to resume.`,
           kind: "persistent",
           variant: "info",
@@ -220,11 +222,15 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
   }, []);
 
   const addPersistent = useCallback((
+    owner: string,
     message: string,
     variant: Extract<AppNotification, { kind: "persistent" }>["variant"] = "info",
   ) => {
     const id = nanoid();
-    setNotifications(prev => [...prev, { id, message, kind: "persistent", variant }]);
+    setNotifications(prev => upsertPersistentNotification(
+      prev,
+      { id, owner, message, kind: "persistent", variant },
+    ));
   }, []);
 
   const dismissNotification = useCallback((id: string) => {
@@ -271,12 +277,12 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
   const importFlow = useImportFlow({
     snapshot,
     onSnapshotUpdate: setSnapshot,
-    onError: (msg) => { if (msg !== null) addPersistent(msg, "error"); },
+    onError: (owner, msg) => addPersistent(owner, msg, "error"),
   });
 
   const settingsModal = useSettingsModal({
     onSnapshotUpdate: setSnapshot,
-    onError: (msg) => { if (msg !== null) addPersistent(msg, "error"); },
+    onError: (msg) => { if (msg !== null) addPersistent("settings-load", msg, "error"); },
     onNotice: addToast,
   });
 
@@ -322,6 +328,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
         .catch((error: unknown) => {
           setQueueDragWidth(null);
           addPersistent(
+            "layout-save",
             presentFailure(error, "The pane layout wasn't saved. Your current layout is still in use.", "pane layout save failed"),
             "error",
           );
@@ -396,7 +403,11 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
           setSnapshot(nextSnapshot);
         })
         .catch((error: unknown) => {
-          addPersistent(presentFailure(error, "The recording state could not be refreshed. Reopen Mumbler to try again.", "card state refresh failed"), "error");
+          addPersistent(
+            "snapshot-refresh:pipeline",
+            presentFailure(error, "The recording state could not be refreshed. Reopen Mumbler to try again.", "card state refresh failed"),
+            "error",
+          );
         });
     });
   }, []);
@@ -410,6 +421,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
         })
         .catch((error: unknown) => {
           addPersistent(
+            "snapshot-refresh:app-wide-error",
             presentFailure(error, "The window state could not be refreshed. Reopen Mumbler to continue.", "app error state refresh failed"),
             "error",
           );
@@ -424,6 +436,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
         .then((nextSnapshot) => setSnapshot(nextSnapshot))
         .catch((error: unknown) => {
           addPersistent(
+            "snapshot-refresh:dependencies",
             presentFailure(error, "Audio tool status could not be refreshed. Reopen Audio Tools to try again.", "audio tools state refresh failed"),
             "error",
           );
@@ -465,6 +478,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
         })
         .catch(() => {
           addPersistent(
+            "renderer-error-report",
             "Mumbler could not record the unexpected window error. Restart the app to continue.",
             "error",
           );
@@ -550,7 +564,11 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
       const nextSnapshot = await window.mumbler.selectCard(cardId);
       setSnapshot(nextSnapshot);
     } catch (error: unknown) {
-      addPersistent(presentFailure(error, "The recording could not be selected. The current selection is unchanged; try again.", "card selection failed"), "error");
+      addPersistent(
+        `card-selection:${cardId}`,
+        presentFailure(error, "The recording could not be selected. The current selection is unchanged; try again.", "card selection failed"),
+        "error",
+      );
     }
   }
 
@@ -705,6 +723,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
       setSnapshot(nextSnapshot);
     } catch (error: unknown) {
       addPersistent(
+        "app-wide-error-dismissal",
         presentFailure(error, "The message could not be closed. Restart Mumbler to clear it.", "app error dismissal failed"),
         "error",
       );
@@ -718,7 +737,11 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
       setSnapshot(nextSnapshot);
       addToast("Reset to defaults.");
     } catch (error: unknown) {
-      addPersistent(presentFailure(error, "Mumbler could not reset its state. Existing files are unchanged; try again.", "state reset failed"), "error");
+      addPersistent(
+        "state-reset",
+        presentFailure(error, "Mumbler could not reset its state. Existing files are unchanged; try again.", "state reset failed"),
+        "error",
+      );
     } finally {
       setIsResettingState(false);
     }

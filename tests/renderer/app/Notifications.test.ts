@@ -8,6 +8,7 @@ import {
   PersistentNotifications,
   ToastNotifications,
   pipelineCompletionNotification,
+  upsertPersistentNotification,
   type AppNotification,
 } from "@renderer/app/Notifications";
 import type { MumblerCard } from "@shared/app-shell";
@@ -32,9 +33,9 @@ afterEach(async () => {
 });
 
 const notifications: AppNotification[] = [
-  { id: "error-1", message: "First failure", kind: "persistent", variant: "error" },
-  { id: "error-2", message: "Second failure", kind: "persistent", variant: "error" },
-  { id: "info", message: "Recovered recording", kind: "persistent", variant: "info" },
+  { id: "error-1", owner: "first", message: "First failure", kind: "persistent", variant: "error" },
+  { id: "error-2", owner: "second", message: "Second failure", kind: "persistent", variant: "error" },
+  { id: "info", owner: "recovery", message: "Recovered recording", kind: "persistent", variant: "info" },
   { id: "toast", message: "Recording duplicated", kind: "toast" },
 ];
 
@@ -50,6 +51,26 @@ function card(status: MumblerCard["status"]): MumblerCard {
 }
 
 describe("notification lifetime and severity surfaces", () => {
+  it("replaces a repeated persistent owner without clearing independent owners", () => {
+    const next = upsertPersistentNotification(notifications, {
+      id: "error-1-new",
+      owner: "first",
+      message: "First failure, retried",
+      kind: "persistent",
+      variant: "error",
+    });
+
+    expect(next.filter((notification) => notification.kind === "persistent"))
+      .toHaveLength(3);
+    expect(next.some((notification) => notification.id === "error-1")).toBe(false);
+    expect(next.some((notification) => notification.id === "error-2")).toBe(true);
+    expect(next.at(-1)).toMatchObject({
+      id: "error-1-new",
+      owner: "first",
+      message: "First failure, retried",
+    });
+  });
+
   it("routes pipeline success transiently and leaves pipeline failure on the card", () => {
     expect(pipelineCompletionNotification(card("Ready to Save"))).toEqual({
       message: "Ready to save: recording.wav",

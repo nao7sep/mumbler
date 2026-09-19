@@ -21,7 +21,7 @@ beforeEach(() => {
   });
 });
 
-function Harness({ onError }: { onError: (message: string | null) => void }): ReactElement {
+function Harness({ onError }: { onError: (owner: string, message: string) => void }): ReactElement {
   const flow = useImportFlow({
     snapshot: null,
     onSnapshotUpdate: vi.fn(),

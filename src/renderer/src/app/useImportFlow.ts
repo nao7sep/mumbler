@@ -24,7 +24,7 @@ import { presentFailure, reportRendererDiagnostic } from "./presentFailure";
 interface UseImportFlowOptions {
   snapshot: AppSnapshot | null;
   onSnapshotUpdate: (snapshot: AppSnapshot) => void;
-  onError: (message: string | null) => void;
+  onError: (owner: string, message: string) => void;
 }
 
 export interface ImportResultNotice {
@@ -88,7 +88,10 @@ export function useImportFlow({
       void window.mumbler
         .updatePendingImportDrafts(pendingReviewDrafts)
         .catch((error: unknown) => {
-          onError(presentFailure(error, "Timestamp review edits could not be saved. Your edits are still shown; try again.", "pending import review save failed"));
+          onError(
+            "import-review-save",
+            presentFailure(error, "Timestamp review edits could not be saved. Your edits are still shown; try again.", "pending import review save failed"),
+          );
         });
     }, 250);
 
@@ -181,7 +184,10 @@ export function useImportFlow({
       const nextSnapshot = await window.mumbler.confirmPendingImports(pendingReviewDrafts);
       onSnapshotUpdate(nextSnapshot);
     } catch (error: unknown) {
-      onError(presentFailure(error, "Imported timestamps could not be confirmed. The review is still open; try again.", "import timestamp confirmation failed"));
+      onError(
+        "import-review-confirm",
+        presentFailure(error, "Imported timestamps could not be confirmed. The review is still open; try again.", "import timestamp confirmation failed"),
+      );
     } finally {
       setIsConfirmingReview(false);
     }
@@ -192,7 +198,10 @@ export function useImportFlow({
       const nextSnapshot = await window.mumbler.cancelPendingImports();
       onSnapshotUpdate(nextSnapshot);
     } catch (error: unknown) {
-      onError(presentFailure(error, "The pending import could not be cancelled. The review remains open; try again.", "pending import cancellation failed"));
+      onError(
+        "import-review-cancel",
+        presentFailure(error, "The pending import could not be cancelled. The review remains open; try again.", "pending import cancellation failed"),
+      );
     }
     setPendingReviewDrafts([]);
   }
