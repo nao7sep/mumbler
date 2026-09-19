@@ -53,12 +53,12 @@ import { useSettingsModal } from "./useSettingsModal";
 import { formatCardStatusMessage, formatStepName, isCardBusy } from "./card-status";
 import { useTablist } from "./useTablist";
 import { CloseIcon } from "./Icon";
-import { InlineError } from "./InlineResult";
 import { presentFailure } from "./presentFailure";
 import { CardActionResults, type CardActionError } from "./CardActionResults";
 import {
   PersistentNotifications,
   ToastNotifications,
+  clearPersistentOwner,
   pipelineCompletionNotification,
   upsertPersistentNotification,
   type AppNotification,
@@ -233,12 +233,15 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
     ));
   }, []);
 
+  const clearPersistent = useCallback((owner: string) => {
+    setNotifications(prev => clearPersistentOwner(prev, owner));
+  }, []);
+
   const dismissNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
   const [activePipelineCards, setActivePipelineCards] = useState<string[]>([]);
   const [cardActionErrors, setCardActionErrors] = useState<CardActionError[]>([]);
-  const [menuActionError, setMenuActionError] = useState<string | null>(null);
   const [pendingSaveConflict, setPendingSaveConflict] = useState<{
     cardId: string;
     result: Extract<SaveCardResult, { kind: "conflict" }>;
@@ -1003,10 +1006,12 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
                 onSelect={() => {
                   void window.mumbler
                     .openOutputDirectory()
-                    .then(() => setMenuActionError(null))
+                    .then(() => clearPersistent("output-folder-open"))
                     .catch((error: unknown) =>
-                      setMenuActionError(
+                      addPersistent(
+                        "output-folder-open",
                         presentFailure(error, "The output folder could not be opened. Choose it in Settings or open it from Finder.", "output folder reveal failed"),
+                        "error",
                       ),
                     );
                 }}
@@ -1041,12 +1046,6 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
           </div>
         </div>
       </header>
-
-      {menuActionError ? (
-        <InlineError className="menu-action-result" onDismiss={() => setMenuActionError(null)}>
-          {menuActionError}
-        </InlineError>
-      ) : null}
 
       <PersistentNotifications
         notifications={notifications}

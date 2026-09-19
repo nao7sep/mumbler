@@ -520,10 +520,6 @@ textarea:focus-visible,
   outline-offset: 1px;
 }
 
-.menu-action-result {
-  margin-bottom: 16px;
-}
-
 .card-action-results {
   display: grid;
   gap: 8px;
@@ -1788,24 +1784,13 @@ textarea:focus-visible,
   color: var(--text);
 }
 
-.notification-strip {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.notification-strip:empty {
-  display: none;
-}
-
-/* Persistent strip */
+/* Persistent strip. Its bottom margin matches the top bar's, so the strip sits
+   evenly between the top bar and the workspace. */
 .persistent-strip {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .persistent-notice {

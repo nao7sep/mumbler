@@ -19,13 +19,16 @@ export function upsertPersistentNotification(
   notifications: AppNotification[],
   next: PersistentNotification,
 ): AppNotification[] {
-  return [
-    ...notifications.filter(
-      (notification) =>
-        notification.kind !== "persistent" || notification.owner !== next.owner,
-    ),
-    next,
-  ];
+  return [...clearPersistentOwner(notifications, next.owner), next];
+}
+
+export function clearPersistentOwner(
+  notifications: AppNotification[],
+  owner: string,
+): AppNotification[] {
+  return notifications.filter(
+    (notification) => notification.kind !== "persistent" || notification.owner !== owner,
+  );
 }
 
 export type PipelineCompletionNotification =

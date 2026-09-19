@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PersistentNotifications,
   ToastNotifications,
+  clearPersistentOwner,
   pipelineCompletionNotification,
   upsertPersistentNotification,
   type AppNotification,
@@ -69,6 +70,12 @@ describe("notification lifetime and severity surfaces", () => {
       owner: "first",
       message: "First failure, retried",
     });
+  });
+
+  it("clears one persistent owner and leaves other owners and toasts", () => {
+    const next = clearPersistentOwner(notifications, "first");
+
+    expect(next.map((notification) => notification.id)).toEqual(["error-2", "info", "toast"]);
   });
 
   it("routes pipeline success transiently and leaves pipeline failure on the card", () => {
