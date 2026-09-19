@@ -60,7 +60,7 @@ function EditableList({
       <div className="editable-list__items" ref={listRef}>
         {entries.map((entry, index) => (
           <div key={`${entry}-${index}`} className="editable-list__item">
-            <span style={monospace ? { fontFamily: "monospace", fontSize: "1.05em" } : undefined}>{entry}</span>
+            <span style={monospace ? { fontFamily: "var(--font-mono)", fontSize: "1.05em" } : undefined}>{entry}</span>
             <button
               type="button"
               className="button button--ghost button--compact"
@@ -73,7 +73,7 @@ function EditableList({
       </div>
       <div className="editable-list__add">
         <input
-          style={monospace ? { fontFamily: "monospace", fontSize: "1.05em" } : undefined}
+          style={monospace ? { fontFamily: "var(--font-mono)", fontSize: "1.05em" } : undefined}
           value={newValue}
           placeholder={placeholder}
           onChange={(event) => setNewValue(event.target.value)}
