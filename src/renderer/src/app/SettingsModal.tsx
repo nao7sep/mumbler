@@ -193,17 +193,19 @@ export function SettingsModal({
     >
       {/* Fixed chrome between the modal header and the scrolling body, like the
           other apps' settings tab strips — the tabs never scroll away. */}
-      <div className="app-tabs settings-tabs" {...settingsTablist.tablistProps} aria-label="Settings sections">
-        {SETTINGS_TABS.map((sectionTab) => (
-          <button
-            key={sectionTab}
-            type="button"
-            className={`app-tab${activeTab === sectionTab ? " app-tab--active" : ""}`}
-            {...settingsTablist.getTabProps(sectionTab)}
-          >
-            {SETTINGS_TAB_LABELS[sectionTab]}
-          </button>
-        ))}
+      <div className="modal-card__strip">
+        <div className="app-tabs settings-tabs" {...settingsTablist.tablistProps} aria-label="Settings sections">
+          {SETTINGS_TABS.map((sectionTab) => (
+            <button
+              key={sectionTab}
+              type="button"
+              className={`app-tab${activeTab === sectionTab ? " app-tab--active" : ""}`}
+              {...settingsTablist.getTabProps(sectionTab)}
+            >
+              {SETTINGS_TAB_LABELS[sectionTab]}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="modal-card__body">

@@ -1077,6 +1077,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
             </div>
           </div>
 
+          <div className="panel__body">
           {importFlow.importResult ? (
             <div
               className={`queue-import-result queue-import-result--${importFlow.importResult.severity}`}
@@ -1129,6 +1130,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
               </p>
             </section>
           )}
+          </div>
         </aside>
 
         <PaneSplitter
@@ -1151,6 +1153,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
 
           {selectedCard ? (
             <>
+              <div className="panel__strip">
               <div className="app-tabs" {...detailTablist.tablistProps} aria-label="Detail steps">
                 {DETAIL_TABS.map((tab) => (
                   <button
@@ -1163,6 +1166,8 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
                   </button>
                 ))}
               </div>
+              </div>
+              <div className="panel__body">
               <CardActionResults
                 cardId={selectedCard.id}
                 results={cardActionErrors}
@@ -1595,16 +1600,21 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
               </div>
 
               </div>
+              </div>
             </>
           ) : snapshot?.state?.cards.length ? (
-            <section className="panel panel--nested queue-empty">
-              <p className="empty-state__title">Select a recording</p>
-            </section>
+            <div className="panel__body">
+              <section className="panel panel--nested queue-empty">
+                <p className="empty-state__title">Select a recording</p>
+              </section>
+            </div>
           ) : (
-            <section className="panel panel--nested queue-empty">
-              <p className="empty-state__title">No selection</p>
-              <p className="empty-state__body">Import recordings to get started.</p>
-            </section>
+            <div className="panel__body">
+              <section className="panel panel--nested queue-empty">
+                <p className="empty-state__title">No selection</p>
+                <p className="empty-state__body">Import recordings to get started.</p>
+              </section>
+            </div>
           )}
         </section>
       </main>

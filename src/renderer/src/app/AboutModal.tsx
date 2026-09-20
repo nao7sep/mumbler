@@ -42,6 +42,7 @@ export function AboutModal({
   return (
     <ModalShell
       title="About Mumbler"
+      titleVisuallyHidden
       size="narrow"
       onRequestClose={onClose}
       describedById="about-description"
@@ -52,8 +53,10 @@ export function AboutModal({
       }
     >
       <div className="modal-card__body about-content">
-        <p className="about-title">Mumbler</p>
-        {version ? <p className="about-version">Version {version}</p> : null}
+        <div className="about-identity">
+          <p className="about-title">Mumbler</p>
+          {version ? <p className="about-version">Version {version}</p> : null}
+        </div>
         <p id="about-description" className="about-copy">
           Keep your voice recordings organized. Import, generate transcription, structure it, generate titles and slugs, and export — all in one place.
         </p>

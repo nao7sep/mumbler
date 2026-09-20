@@ -453,10 +453,36 @@ textarea:focus-visible,
   box-shadow: var(--shadow-sm);
 }
 
+/* A pane is banded like a dialog: a title bar, a line, the padded content, and
+   where a pane carries an action of its own, a line above it. */
 .panel {
-  padding: 16px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.panel__header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.panel__strip {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.panel__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+/* A nested panel is content, not a band: it keeps its own padding. */
+.panel--nested {
+  padding: 16px;
   gap: 16px;
 }
 
@@ -470,7 +496,7 @@ textarea:focus-visible,
 .panel__header,
 .detail-card__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
@@ -555,6 +581,10 @@ textarea:focus-visible,
   list-style: none;
 }
 
+.queue-pane > .panel__body {
+  overflow-y: auto;
+}
+
 .queue-pane {
   /* Stay in view while the page scrolls for the (taller) detail column, and
      scroll the pane's own overflow within the viewport. The max-height is
@@ -564,7 +594,6 @@ textarea:focus-visible,
   position: sticky;
   top: 20px;
   max-height: calc(100vh - var(--vertical-chrome));
-  overflow-y: auto;
   transition: background-color var(--motion) ease, border-color var(--motion) ease, box-shadow var(--motion) ease;
 }
 
@@ -951,7 +980,7 @@ textarea:focus-visible,
   color: var(--danger);
 }
 
-.detail-pane {
+.detail-pane .panel__body {
   gap: 12px;
 }
 
@@ -1000,16 +1029,21 @@ textarea:focus-visible,
 
 /* The Settings tab bar: fixed chrome between the modal header and the scrolling
    body (matches the fleet's settings tab strips), so the tabs never scroll
-   away. Horizontal padding mirrors .modal-card__body's. */
+   away. Its band, .modal-card__strip, carries the chrome's closing line. */
 .settings-tabs {
-  margin: 0 20px 14px;
+  margin: 0;
 }
 
-/* Each wizard step's forward affordance, right-aligned below the step's cards. */
+/* Each wizard step's forward affordance. The detail pane works like a dialog
+   inside the window, so its action sits in a band of its own, opened by a line
+   that runs the pane's full width. */
 .app-tabpanel__footer {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  margin-top: 12px;
+  margin: 16px -16px -16px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .detail-grid {
@@ -1208,8 +1242,9 @@ textarea:focus-visible,
   height: var(--control-md);
 }
 
-/* A button beside a field takes the field's height. */
-.inline-action-field .button {
+/* A button beside a field takes the field's height, wherever the pair sits. */
+.inline-action-field .button,
+.editable-list__add .button {
   height: var(--control-md);
 }
 
@@ -1580,7 +1615,7 @@ select:not([multiple]) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 20px 16px;
+  padding: 16px 20px;
 }
 
 .decision-modal__error {
@@ -1595,17 +1630,42 @@ select:not([multiple]) {
   width: min(1100px, calc(100vw - 48px));
 }
 
+/* A dialog is three bands: a fixed header, the scrolling body, and a fixed
+   action row. A line closes the chrome above and below the body, so the scroll
+   region is visibly bounded, and the body pads its content equally at both
+   ends — separator, padding, content, padding, separator. */
 .modal-card__header,
 .modal-toolbar {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 0 20px;
 }
 
 .modal-card__header {
-  padding-top: 20px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* A strip between the title bar and the body — the Settings tabs, a toolbar —
+   is its own band, closed by its own line. */
+.modal-card__strip {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* A hidden heading leaves the close button alone in the header: it keeps its
+   own corner, and the band closes with no line, since there is no title bar to
+   divide from the content. The body's own padding gives the content its room. */
+.modal-card__header h2.visually-hidden + .modal-close {
+  margin-left: auto;
+}
+
+.modal-card__header:has(> h2.visually-hidden) {
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 
 .modal-card__header h2 {
@@ -1649,12 +1709,17 @@ select:not([multiple]) {
   opacity: 0.45;
 }
 
+/* A note above the action row belongs to the footer band: the line opens the
+   band, the note and the buttons sit inside it. */
 .modal-footer-note {
-  margin-top: 16px;
-  padding: 12px 20px 0;
+  padding: 14px 20px 0;
   border-top: 1px solid var(--border-subtle);
   display: grid;
   gap: 4px;
+}
+
+.modal-card:has(.modal-footer-note) .modal-actions {
+  border-top: 0;
 }
 
 .modal-actions {
@@ -1663,12 +1728,15 @@ select:not([multiple]) {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 16px;
-  padding: 0 20px 20px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .modal-toolbar {
-  margin-top: 16px;
+  margin-top: 0;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .modal-toolbar__field {
@@ -1894,19 +1962,43 @@ select:not([multiple]) {
   color: var(--text);
 }
 
+/* Off the screen, still spoken: for a heading a surface names itself. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* With its heading hidden, the header is just the close button, and the body
+   below it opens with the app's name. */
 .about-content {
   display: grid;
-  gap: 12px;
+  gap: 16px;
+}
+
+/* The name and its version read as one block. */
+.about-identity {
+  display: grid;
+  gap: 2px;
 }
 
 .about-title {
   margin: 0;
+  font-size: 1.75rem;
   font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
 }
 
 .about-version {
   margin: 0;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--text-tertiary);
 }
 

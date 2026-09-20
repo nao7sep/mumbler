@@ -31,6 +31,12 @@ export type ModalSize = "narrow" | "default" | "settings";
 export interface ModalShellProps {
   /** Visible heading; also the accessible name via aria-labelledby. */
   title: string;
+  /**
+   * Keeps the title as the dialog's spoken name but takes it off the screen,
+   * for a surface whose own content already says what it is (About shows the
+   * app's name and version as its opening block).
+   */
+  titleVisuallyHidden?: boolean;
   size?: ModalSize;
   /**
    * Single close guard for every close path (Escape, backdrop, close button).
@@ -61,6 +67,7 @@ const SIZE_CLASS: Record<ModalSize, string> = {
 
 export function ModalShell({
   title,
+  titleVisuallyHidden = false,
   size = "default",
   onRequestClose,
   closeDisabled = false,
@@ -184,7 +191,7 @@ export function ModalShell({
         onCompositionEnd={composing.handlers.onCompositionEnd}
       >
         <div className="modal-card__header">
-          <h2 id={titleId}>{title}</h2>
+          <h2 id={titleId} className={titleVisuallyHidden ? "visually-hidden" : undefined}>{title}</h2>
           {showCloseButton ? (
             <button
               type="button"
