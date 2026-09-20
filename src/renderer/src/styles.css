@@ -40,7 +40,12 @@
   --accent-hover: #285a40;
   --on-accent: #ffffff;
   --accent-subtle: #e2f0e5;
+  /* Danger mirrors the accent: a fill (under --on-danger) for the confirming
+     button of a destructive dialog, and the same colour as letters on a surface.
+     In dark it turns light, so the ink on the button turns dark. */
   --danger: #a44335;
+  --danger-hover: #8e392d;
+  --on-danger: #ffffff;
   --danger-subtle: #f8ebe8;
   --success: #24744f;
   --success-subtle: #e5f3eb;
@@ -128,6 +133,8 @@
     --on-accent: #0c1a12;
     --accent-subtle: #1b3326;
     --danger: #f3907f;
+    --danger-hover: #f7a897;
+    --on-danger: #2a1310;
     --danger-subtle: #3a1f1b;
     --success: #74d3a0;
     --success-subtle: #17301f;
@@ -874,6 +881,8 @@ textarea:focus-visible,
   opacity: 0.5;
 }
 
+/* A destructive button that OPENS a destructive path — Remove a recording, Reset
+   state, Restore defaults — stays outlined and only deepens its own tint. */
 .button--danger {
   background: var(--danger-subtle);
   border-color: color-mix(in srgb, var(--danger) 24%, var(--border));
@@ -886,6 +895,20 @@ textarea:focus-visible,
 
 .button--danger:not(:disabled):active {
   background: color-mix(in srgb, var(--danger) 18%, var(--surface-raised));
+}
+
+/* The confirming action of the decision modal that asks — Discard, Overwrite,
+   Remove — is filled, so a solid red always means this is the last step. */
+.button--danger-confirm {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-danger);
+}
+
+.button--danger-confirm:not(:disabled):hover,
+.button--danger-confirm:not(:disabled):active {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
 }
 
 .queue-empty {

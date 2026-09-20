@@ -45,7 +45,9 @@ export function DecisionModal({
           key={action.label}
           type="button"
           data-modal-autofocus={index === safeIndex ? "" : undefined}
-          className={`button button--${action.variant ?? "ghost"}`}
+          // A decision modal IS the dialog that asks, so its destructive action is
+          // the confirming one: the filled role, never the outlined trigger.
+          className={`button button--${action.variant === "danger" ? "danger-confirm" : (action.variant ?? "ghost")}`}
           onClick={action.onClick}
         >
           {action.label}
