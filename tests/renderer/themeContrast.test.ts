@@ -57,8 +57,9 @@ const TEXT_PAIRS: ReadonlyArray<[string, string]> = [
   ["--on-accent", "--accent-hover"],
   // The confirming button of a destructive dialog is filled, so its ink is read
   // on the fill, not on a surface — in both its resting and hovered colour.
-  ["--on-danger", "--danger"],
-  ["--on-danger", "--danger-hover"],
+  ["--on-danger", "--danger-fill"],
+  ["--on-danger", "--danger-fill-hover"],
+  ["--on-danger", "--danger-fill-pressed"],
   ["--text", "--accent-subtle"],
   ["--accent", "--accent-subtle"],
   ["--danger", "--danger-subtle"],

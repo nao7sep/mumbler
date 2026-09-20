@@ -44,7 +44,14 @@
      button of a destructive dialog, and the same colour as letters on a surface.
      In dark it turns light, so the ink on the button turns dark. */
   --danger: #a44335;
-  --danger-hover: #8e392d;
+  /* The fill of a destructive CONFIRM button, named apart from the text red
+     above: a dark theme's --danger is pale because it is read as LETTERS on the
+     dark surface, and filling a button with it gives a pastel slab. The fill is
+     a real red in both themes under --on-danger, deepening under the pointer and
+     again under the finger. */
+  --danger-fill: #a44335;
+  --danger-fill-hover: #8e392d;
+  --danger-fill-pressed: #7a3026;
   --on-danger: #ffffff;
   --danger-subtle: #f8ebe8;
   --success: #24744f;
@@ -133,8 +140,10 @@
     --on-accent: #0c1a12;
     --accent-subtle: #1b3326;
     --danger: #f3907f;
-    --danger-hover: #f7a897;
-    --on-danger: #2a1310;
+    --danger-fill: #b04a3f;
+    --danger-fill-hover: #984036;
+    --danger-fill-pressed: #80352c;
+    --on-danger: #ffffff;
     --danger-subtle: #3a1f1b;
     --success: #74d3a0;
     --success-subtle: #17301f;
@@ -900,15 +909,20 @@ textarea:focus-visible,
 /* The confirming action of the decision modal that asks — Discard, Overwrite,
    Remove — is filled, so a solid red always means this is the last step. */
 .button--danger-confirm {
-  background: var(--danger);
-  border-color: var(--danger);
+  background: var(--danger-fill);
+  border-color: var(--danger-fill);
   color: var(--on-danger);
 }
 
-.button--danger-confirm:not(:disabled):hover,
+.button--danger-confirm:not(:disabled):hover {
+  background: var(--danger-fill-hover);
+  border-color: var(--danger-fill-hover);
+}
+
+/* The press goes one step further than the hover, in the same direction. */
 .button--danger-confirm:not(:disabled):active {
-  background: var(--danger-hover);
-  border-color: var(--danger-hover);
+  background: var(--danger-fill-pressed);
+  border-color: var(--danger-fill-pressed);
 }
 
 .queue-empty {
