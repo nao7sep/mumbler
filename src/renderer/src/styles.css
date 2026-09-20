@@ -64,7 +64,7 @@
   --backdrop: rgba(18, 34, 24, 0.36);
   /* The waveform canvas reads these through WaveformEditor's palette hook,
      since a canvas cannot resolve CSS variables itself. */
-  --waveform-wave: rgba(72, 108, 88, 0.24);
+  --waveform-wave: rgba(72, 108, 88, 0.46);
   --waveform-progress: rgba(47, 99, 74, 0.86);
   --waveform-cursor: #2f634a;
   --waveform-region: rgba(61, 122, 90, 0.22);
@@ -72,6 +72,18 @@
   --radius-lg: 8px;
   --radius-md: 6px;
   --radius-sm: 4px;
+
+  /* Control sizes. Every button, field and tab takes its height from these
+     rather than from padding, so a row of them lines up whatever it holds. */
+  --control-md: 36px;
+  --control-sm: 28px;
+  /* One duration for the colour fades, zeroed under reduced motion. */
+  --motion: 120ms;
+  /* A pressed control darkens a step instead of fading and shrinking. */
+  --pressed-filter: brightness(0.94);
+  /* A select draws this chevron instead of the platform's control. An image URL
+     cannot read a custom property, so the stroke repeats --text-secondary. */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%23526255' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
   /* Pane minimums. Kept in sync with @shared/layout (DETAIL_MIN_WIDTH /
      QUEUE_MIN_WIDTH), the single source of truth the window minimum derives
@@ -137,6 +149,8 @@
     --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.5);
     --backdrop: rgba(0, 0, 0, 0.55);
     --waveform-wave: rgba(148, 196, 168, 0.28);
+    --pressed-filter: brightness(1.16);
+    --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%23b0c0b2' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     --waveform-progress: rgba(125, 209, 163, 0.9);
     --waveform-cursor: #9adcb7;
     --waveform-region: rgba(125, 209, 163, 0.18);
@@ -226,6 +240,13 @@ body {
   background:
     linear-gradient(180deg, var(--bg-top) 0%, var(--bg) 38%, var(--bg-bottom) 100%);
   color: var(--text);
+}
+
+/* Reduced motion drops the colour fades; nothing here moves or resizes. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion: 0ms;
+  }
 }
 
 button,
@@ -544,7 +565,7 @@ textarea:focus-visible,
   top: 20px;
   max-height: calc(100vh - var(--vertical-chrome));
   overflow-y: auto;
-  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  transition: background-color var(--motion) ease, border-color var(--motion) ease, box-shadow var(--motion) ease;
 }
 
 .queue-pane--drag-delivery {
@@ -602,9 +623,9 @@ textarea:focus-visible,
   background: transparent;
   color: var(--text);
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    box-shadow 120ms ease;
+    background-color var(--motion) ease,
+    border-color var(--motion) ease,
+    box-shadow var(--motion) ease;
 }
 
 .queue-row:not(.queue-row--selected):hover {
@@ -634,7 +655,6 @@ textarea:focus-visible,
 .queue-row--selected {
   background: var(--accent-subtle);
   border-color: var(--accent);
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .queue-row__meta {
@@ -705,26 +725,34 @@ textarea:focus-visible,
 }
 
 .button {
+  height: var(--control-md);
   border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 0.5rem 0.875rem;
+  padding: 0 14px;
   font-size: 0.8125rem;
   font-weight: 500;
+  line-height: normal;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    box-shadow 120ms ease,
-    transform 120ms ease;
+    background-color var(--motion) ease,
+    border-color var(--motion) ease,
+    color var(--motion) ease,
+    box-shadow var(--motion) ease;
 }
 
-.button:not(:disabled):hover {
-  opacity: 0.9;
+/* A text button centres its own content, and the trim measures that content
+   from the capitals to the baseline, so the letters sit in the middle rather
+   than the font's taller box. The icon button keeps its flex centring. */
+.button:not(.button--icon),
+.app-tab {
+  display: inline-block;
+  vertical-align: middle;
+  text-box: trim-both cap alphabetic;
 }
 
+/* Hover and press step the control's own surface (below, per variant); nothing
+   fades or resizes. */
 .button:not(:disabled):active {
-  opacity: 0.75;
-  transform: scale(0.97);
+  filter: var(--pressed-filter);
 }
 
 .button--primary {
@@ -735,13 +763,10 @@ textarea:focus-visible,
 
 .button--primary:not(:disabled):hover {
   background: var(--accent-hover);
-  opacity: 1;
 }
 
 .button--primary:not(:disabled):active {
   background: var(--accent-hover);
-  opacity: 0.85;
-  transform: scale(0.97);
 }
 
 .button--ghost {
@@ -752,17 +777,15 @@ textarea:focus-visible,
 
 .button--ghost:not(:disabled):hover {
   background: var(--surface-hover);
-  opacity: 1;
 }
 
 .button--ghost:not(:disabled):active {
   background: var(--surface-active);
-  opacity: 1;
-  transform: scale(0.97);
 }
 
 .button--compact {
-  padding: 0.3rem 0.6rem;
+  height: var(--control-sm);
+  padding: 0 10px;
   font-size: 0.75rem;
 }
 
@@ -792,19 +815,23 @@ textarea:focus-visible,
   padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
 }
 
 .app-menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  min-height: 32px;
   width: 100%;
-  padding: 0.5rem 0.75rem;
+  padding: 0 10px;
   text-align: left;
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
   font: inherit;
   font-size: 0.8125rem;
+  /* After `font: inherit`, which would otherwise restore the page's 1.5. */
+  line-height: normal;
   color: var(--text);
   white-space: normal;
   overflow-wrap: anywhere;
@@ -826,7 +853,10 @@ textarea:focus-visible,
 
 .button--danger:not(:disabled):hover {
   background: color-mix(in srgb, var(--danger) 12%, var(--surface-raised));
-  opacity: 1;
+}
+
+.button--danger:not(:disabled):active {
+  background: color-mix(in srgb, var(--danger) 18%, var(--surface-raised));
 }
 
 .queue-empty {
@@ -932,21 +962,27 @@ textarea:focus-visible,
    platform :focus-visible ring. */
 .app-tabs {
   display: flex;
-  gap: 6px;
+  width: fit-content;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
 }
 
 .app-tab {
-  border: 1px solid var(--border);
+  height: calc(var(--control-md) - 6px);
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 0.4rem 0.9rem;
+  padding: 0 14px;
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--text-muted);
-  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
+  background: transparent;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+    background-color var(--motion) ease,
+    border-color var(--motion) ease,
+    color var(--motion) ease;
 }
 
 .app-tab:hover {
@@ -954,17 +990,19 @@ textarea:focus-visible,
   color: var(--text);
 }
 
-.app-tab--active {
-  background: var(--accent-subtle);
-  border-color: var(--accent);
+.app-tab--active,
+.app-tab--active:hover {
+  background: var(--surface-raised);
+  border-color: var(--border);
   color: var(--accent);
+  box-shadow: var(--shadow-sm);
 }
 
 /* The Settings tab bar: fixed chrome between the modal header and the scrolling
    body (matches the fleet's settings tab strips), so the tabs never scroll
    away. Horizontal padding mirrors .modal-card__body's. */
 .settings-tabs {
-  padding: 0 20px 14px;
+  margin: 0 20px 14px;
 }
 
 /* Each wizard step's forward affordance, right-aligned below the step's cards. */
@@ -993,33 +1031,20 @@ textarea:focus-visible,
   gap: 14px;
 }
 
-.detail-card--status {
-  position: relative;
-  overflow: hidden;
+/* A card's own edge carries its status, rather than a bar down one side. */
+.detail-card--queued,
+.detail-card--transcribing,
+.detail-card--generating-metadata {
+  border-color: color-mix(in srgb, var(--processing) 70%, var(--border));
 }
 
-.detail-card--status::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
-  background: var(--border);
+.detail-card--ready-to-save {
+  border-color: color-mix(in srgb, var(--success) 70%, var(--border));
 }
 
-.detail-card--queued::before,
-.detail-card--transcribing::before,
-.detail-card--generating-metadata::before {
-  background: var(--processing);
-}
-
-.detail-card--ready-to-save::before {
-  background: var(--success);
-}
-
-.detail-card--cancelled::before,
-.detail-card--error::before {
-  background: var(--danger);
+.detail-card--cancelled,
+.detail-card--error {
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--border));
 }
 
 .detail-card--nested {
@@ -1170,9 +1195,34 @@ textarea:focus-visible,
   color: var(--text);
   box-shadow: inset 0 1px 0 var(--field-highlight);
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    box-shadow 120ms ease;
+    background-color var(--motion) ease,
+    border-color var(--motion) ease,
+    box-shadow var(--motion) ease;
+}
+
+/* Every one-line field is the same height, whatever kind it is: a text box, a
+   number box and a select in one form must line up. A textarea grows instead. */
+.field input:not([type="checkbox"]):not([type="radio"]),
+.field select {
+  box-sizing: border-box;
+  height: var(--control-md);
+}
+
+/* A button beside a field takes the field's height. */
+.inline-action-field .button {
+  height: var(--control-md);
+}
+
+/* A select is the app's field with its own drawn chevron; the list it opens
+   stays the platform's. */
+select:not([multiple]) {
+  appearance: none;
+  padding-right: 30px;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+  cursor: pointer;
 }
 
 .field input:focus,
@@ -1468,7 +1518,7 @@ textarea:focus-visible,
 
 .shortcut-list {
   display: grid;
-  gap: 10px;
+  gap: 2px;
 }
 
 .shortcut-item {
@@ -1476,10 +1526,7 @@ textarea:focus-visible,
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0.5rem 0.625rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
-  background: var(--surface-muted);
+  padding: 6px 0;
 }
 
 .shortcut-item span {
@@ -2003,7 +2050,7 @@ textarea:focus-visible,
   font-weight: 600;
   line-height: 1.4;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  transition: background-color var(--motion) ease, border-color var(--motion) ease;
 }
 /* The informational state ("updates unchecked", "version unreadable") is calm by
    design: normal muted topbar text, no capsule — a benign FYI must not

@@ -22,6 +22,12 @@ function themeBlock(theme: "light" | "dark"): string {
   return css.slice(css.indexOf("{", start), css.indexOf("\n  }", start));
 }
 
+function rawOf(block: string, token: string): string {
+  const value = block.match(new RegExp(`${token.replaceAll("-", "\\-")}\\s*:\\s*(#[0-9a-f]{6})\\s*;`, "i"))?.[1];
+  expect(value, `${token} must be an opaque six-digit hex color`).toBeTruthy();
+  return value!;
+}
+
 function hexOf(block: string, token: string): Rgb {
   const value = block.match(new RegExp(`${token.replaceAll("-", "\\-")}\\s*:\\s*(#[0-9a-f]{6})\\s*;`, "i"))?.[1];
   expect(value, `${token} must be an opaque six-digit hex color`).toBeTruthy();
@@ -99,6 +105,33 @@ describe("theme token contrast", () => {
             .toBeGreaterThanOrEqual(4.5);
         }
       }
+    }
+  });
+
+  it("keeps a card's status edge visible against the card in both themes", () => {
+    // A status card carries its state as its own edge: the status hue at 70%
+    // over --border, which must still read as an edge on the card's surface.
+    const blend = (base: Rgb, hue: Rgb, amount: number): Rgb =>
+      base.map((channel, index) => Math.round(channel * (1 - amount) + hue[index]! * amount)) as Rgb;
+    for (const theme of ["light", "dark"] as const) {
+      const block = themeBlock(theme);
+      for (const status of ["--processing", "--success", "--danger"]) {
+        const edge = blend(hexOf(block, "--border"), hexOf(block, status), 0.7);
+        expect(contrast(edge, hexOf(block, "--surface-raised")), `${status} edge in ${theme}`)
+          .toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it("draws each theme's select chevron in that theme's secondary ink", () => {
+    // The chevron is an image URL, which cannot read a custom property, so its
+    // stroke repeats --text-secondary and has to be checked against it.
+    for (const theme of ["light", "dark"] as const) {
+      const block = themeBlock(theme);
+      const stroke = /stroke='%23([0-9a-fA-F]{6})'/.exec(block);
+      expect(stroke, `a drawn chevron in ${theme}`).not.toBeNull();
+      expect(`#${stroke![1]!.toLowerCase()}`, `the ${theme} chevron follows --text-secondary`)
+        .toBe(rawOf(block, "--text-secondary").toLowerCase());
     }
   });
 
