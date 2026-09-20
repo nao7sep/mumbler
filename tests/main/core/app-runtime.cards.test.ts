@@ -71,6 +71,7 @@ let root: string;
 let home: string;
 let sourceDir: string;
 let previousHome: string | undefined;
+let previousGeminiKey: string | undefined;
 let runtime: Runtime;
 
 /** The review the window sends back for a pending import, with edits applied. */
@@ -107,6 +108,10 @@ beforeEach(async () => {
   await mkdir(sourceDir, { recursive: true });
   previousHome = process.env.MUMBLER_HOME;
   process.env.MUMBLER_HOME = home;
+  // A key in the developer's own environment resolves ahead of the stored one,
+  // so these cases start from none; the rule itself is asserted below.
+  previousGeminiKey = process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
   runtime = await ApplicationRuntime.initialize();
 });
 
@@ -114,6 +119,8 @@ afterEach(async () => {
   await runtime.shutdown();
   if (previousHome === undefined) delete process.env.MUMBLER_HOME;
   else process.env.MUMBLER_HOME = previousHome;
+  if (previousGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+  else process.env.GEMINI_API_KEY = previousGeminiKey;
   await rm(root, { recursive: true, force: true });
 });
 
@@ -362,6 +369,20 @@ describe("settings, secrets and the window's own state", () => {
     expect((await runtime.clearGeminiApiKey()).settingsSummary?.hasGeminiApiKey).toBe(false);
     expect(JSON.parse(await readFile(join(home, "api-keys.json"), "utf8")).keys.gemini).toBeUndefined();
     await expect(runtime.setGeminiApiKey("   ")).rejects.toThrow(/Enter a Gemini API key/);
+  });
+
+  it("still reports a key when one comes from the environment, even after the stored one is cleared", async () => {
+    process.env.GEMINI_API_KEY = "AIza-from-the-environment";
+    try {
+      await runtime.setGeminiApiKey("AIza-stored-key");
+
+      const cleared = await runtime.clearGeminiApiKey();
+
+      expect(cleared.settingsSummary?.hasGeminiApiKey, "the environment still supplies one").toBe(true);
+      expect(JSON.parse(await readFile(join(home, "api-keys.json"), "utf8")).keys.gemini).toBeUndefined();
+    } finally {
+      delete process.env.GEMINI_API_KEY;
+    }
   });
 
   it("shows the window an app-wide error and lets the user dismiss it", async () => {
