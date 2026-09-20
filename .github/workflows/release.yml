@@ -40,10 +40,9 @@ jobs:
         run: npm run check:release-tag
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-      # The ordinary suites by name: npm test selects from uncommitted
-      # changes, of which a fresh checkout has none.
-      - run: npm run typecheck
-      - run: npx vitest run
+      # npm test is a fixed set, so it runs the same here as it does locally.
+      # The live lane stays out of CI: npm run test:full is a local gate.
+      - run: npm test
 
   build:
     needs: test

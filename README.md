@@ -42,7 +42,7 @@ The Gemini model list is yours to edit: add or remove model IDs, select separate
 
 ## Tests
 
-`npm test` runs the tests your uncommitted changes can affect. `npm run test:full` runs every test, then the live lane: the real app runtime against the real Gemini API and the managed ffmpeg and ffprobe, over the shared test-fixture corpus in the company repository, which must be checked out beside this one. Export `GEMINI_API_KEY` first; the lane makes a few paid Gemini calls, and the full run fails without the key. The first run downloads ffmpeg and ffprobe into `node_modules/.cache`, and later runs download them again only when a newer build is available.
+`npm test` runs the type check and the whole ordinary suite, the same set every time; [`tests/README.md`](tests/README.md) says which areas it covers. `npm run test:full` runs that, then the live lane: the real app runtime against the real Gemini API and the managed ffmpeg and ffprobe, over the shared test-fixture corpus in the company repository, which must be checked out beside this one. Export `GEMINI_API_KEY` first; the lane makes a few paid Gemini calls, and the full run fails without the key. The first run downloads ffmpeg and ffprobe into `node_modules/.cache`, and later runs download them again only when a newer build is available.
 
 ## License
 
