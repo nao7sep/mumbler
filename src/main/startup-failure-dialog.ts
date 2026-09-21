@@ -71,7 +71,7 @@ export function renderStartupFailureHtml(): string {
     :root{color-scheme:light;font:14px/1.5 system-ui,-apple-system,sans-serif;background:#edf4ec;color:#1f2a21}
     *{box-sizing:border-box;scrollbar-width:auto;scrollbar-color:#477552 transparent}*::-webkit-scrollbar{width:16px;height:16px}*::-webkit-scrollbar-thumb{background:#477552;background-clip:padding-box;border:3px solid transparent;border-radius:999px}
     body{margin:0;height:100vh;overflow:hidden}.dialog{height:100vh;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
-    .header{padding:24px 24px 12px}.body{min-height:0;overflow:auto;padding:0 24px;display:flex;flex-direction:column;gap:12px}
+    .header{padding:24px 24px 12px}.body{min-height:0;overflow:auto;padding:0 24px;display:flex;flex-direction:column;gap:12px}[role="region"]:focus-visible{outline:none}
     h1{font-size:18px;line-height:1.3;margin:0}p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.detail{color:#526356}
     .actions{display:flex;justify-content:flex-end;gap:8px;padding:12px 24px 24px}.button{color:#1f2a21;border:1px solid #9baa9e;border-radius:6px;padding:7px 14px;background:#f7faf7;font:inherit}
     .button:hover,.button:focus{outline:2px solid #477552;outline-offset:2px}.primary{color:white;background:#376d45;border-color:#2f5e3b}.primary:hover,.primary:focus{background:#2f5e3b}
