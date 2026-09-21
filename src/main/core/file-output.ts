@@ -1,4 +1,3 @@
-import { app } from "electron";
 import { chmod, copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { nanoid } from "nanoid";
@@ -174,7 +173,7 @@ export function buildOutputPayload(params: {
 }): Record<string, unknown> {
   return {
     schemaVersion: 1,
-    appVersion: app.getVersion(),
+    appVersion: __APP_VERSION__,
     originalFilename: params.card.originalFilename,
     importSource: params.card.importSource,
     timestamps: {

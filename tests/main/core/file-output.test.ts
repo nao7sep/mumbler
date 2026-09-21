@@ -19,9 +19,11 @@ vi.mock("@main/core/file-io", async (importOriginal) => {
   };
 });
 
-// buildOutputPayload reads app.getVersion(); stub electron so the module loads
+// The payload records the app's own version, injected at build as __APP_VERSION__
+// and mirrored into the test run by vitest.config.ts. Electron is still stubbed
+// because the module graph imports it, but its version is no longer consulted.
 // and that one field is deterministic under the node test environment.
-vi.mock("electron", () => ({ app: { getVersion: () => "9.9.9-test" } }));
+vi.mock("electron", () => ({ app: {} }));
 
 const {
   buildMarkdownContent,
@@ -159,7 +161,7 @@ describe("buildOutputPayload", () => {
     });
 
     expect(payload.schemaVersion).toBe(1);
-    expect(payload.appVersion).toBe("9.9.9-test");
+    expect(payload.appVersion).toBe(__APP_VERSION__);
     expect(payload.transcription).toEqual({
       raw: "raw text",
       structured: "## Outline\n\nBody.",

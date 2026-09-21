@@ -277,7 +277,7 @@ export class ApplicationRuntime {
       };
 
       await logger.info("app.startup", "Application runtime initialized.", {
-        appVersion: app.getVersion(),
+        appVersion: __APP_VERSION__,
         isPackaged: app.isPackaged,
         debugLogging: DEBUG_LOGGING_ENABLED,
         // Key effective configuration, secrets redacted: summarizeSettings reports
@@ -488,7 +488,7 @@ export class ApplicationRuntime {
 
     return {
       appName: app.getName(),
-      appVersion: app.getVersion(),
+      appVersion: __APP_VERSION__,
       platform: process.platform,
       isPackaged: app.isPackaged,
       shellReadyAtUtc: this.runtime.shellReadyAtUtc,

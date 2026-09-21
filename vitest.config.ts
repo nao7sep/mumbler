@@ -2,12 +2,19 @@ import { resolve } from "node:path";
 
 import { configDefaults, defineConfig } from "vitest/config";
 
+import { readFileSync } from "node:fs";
+
+// __APP_VERSION__ is injected from package.json by electron.vite.config.ts for the
+// build; mirrored here so the tests run against the same value.
+const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
+
 // Tests live under tests/, mirroring the src/ tree, and reach their subjects
 // through the same path aliases the app uses. The default node environment suits
 // the pure main/shared logic; the keyboard/DOM helpers under the renderer opt
 // into jsdom via a per-file `// @vitest-environment jsdom` pragma, so no
 // glob-based environment matching is needed here.
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(version) },
   resolve: {
     alias: {
       "@shared": resolve("src/shared"),
