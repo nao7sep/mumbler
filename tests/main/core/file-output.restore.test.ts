@@ -7,8 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // finalizeOutputsAtomically's module imports electron; stub it so the module loads.
 vi.mock("electron", () => ({ app: { getVersion: () => "9.9.9-test" } }));
 
-const { capturedRenames } = vi.hoisted(() => ({
+const { capturedRenames, linkRefusal } = vi.hoisted(() => ({
   capturedRenames: [] as Array<{ source: string; destination: string }>,
+  // When set, link() fails with this code, the way a filesystem without hard
+  // links (FAT, exFAT) refuses it.
+  linkRefusal: { code: null as string | null },
 }));
 
 // Inject exactly one rename failure: the markdown finalize step, identified as a
@@ -23,6 +26,12 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    link: (existing: string, created: string) => {
+      if (linkRefusal.code !== null) {
+        return Promise.reject(Object.assign(new Error(`link refused: ${linkRefusal.code}`), { code: linkRefusal.code }));
+      }
+      return actual.link(existing, created);
+    },
     rename: (source: string, destination: string) => {
       capturedRenames.push({ source: String(source), destination: String(destination) });
       if (String(source).includes(".tmp") && String(destination).endsWith(".md")) {
@@ -33,7 +42,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-const { finalizeOutputsAtomically } = await import("@main/core/file-output");
+const { finalizeOutputsAtomically, OutputConflictError } = await import("@main/core/file-output");
 
 let dir: string;
 let sourceAudio: string;
@@ -43,6 +52,7 @@ beforeEach(async () => {
   sourceAudio = join(dir, "source.m4a");
   await writeFile(sourceAudio, "AUDIO-BYTES");
   capturedRenames.length = 0;
+  linkRefusal.code = null;
 });
 
 afterEach(async () => {
@@ -102,5 +112,52 @@ describe("finalizeOutputsAtomically — restore from backup on failure", () => {
     // Same stem, same role extension, yet every name is distinct.
     expect(new Set(tempSources).size).toBe(tempSources.length);
     expect(new Set(backupDestinations).size).toBe(backupDestinations.length);
+  });
+});
+
+describe("finalizeOutputsAtomically — a filesystem without hard links", () => {
+  function targets() {
+    return {
+      audioPath: join(dir, "out.m4a"),
+      jsonPath: join(dir, "out.json"),
+      markdownPath: join(dir, "out.md"),
+    };
+  }
+
+  it("still publishes a new save, by exclusive copy", async () => {
+    linkRefusal.code = "ENOTSUP";
+    const t = targets();
+
+    await finalizeOutputsAtomically({
+      sourceAudioPath: sourceAudio,
+      targets: t,
+      overwrite: false,
+      jsonContent: "J",
+      markdownContent: "M",
+    });
+
+    expect(await readFile(t.audioPath, "utf8")).toBe("AUDIO-BYTES");
+    expect(await readFile(t.jsonPath, "utf8")).toBe("J");
+    expect(await readFile(t.markdownPath, "utf8")).toBe("M");
+    expect((await readdir(dir)).filter((name) => name.includes(".tmp"))).toEqual([]);
+  });
+
+  it("still refuses to replace a target that appeared after the check", async () => {
+    linkRefusal.code = "EPERM";
+    const t = targets();
+    await writeFile(t.jsonPath, "SOMEONE-ELSE");
+
+    await expect(
+      finalizeOutputsAtomically({
+        sourceAudioPath: sourceAudio,
+        targets: t,
+        overwrite: false,
+        jsonContent: "J",
+        markdownContent: "M",
+      }),
+    ).rejects.toBeInstanceOf(OutputConflictError);
+
+    expect(await readFile(t.jsonPath, "utf8")).toBe("SOMEONE-ELSE");
+    expect(await readdir(dir)).toEqual(["out.json", "source.m4a"]);
   });
 });

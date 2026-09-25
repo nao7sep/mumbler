@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -34,6 +34,7 @@ const {
 } = await import("@main/core/file-output");
 const { fileExists } = await import("@main/core/file-io");
 const { CancelledError } = await import("@main/core/cancellation");
+const { OutputConflictError } = await import("@main/core/file-output");
 
 function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
   return {
@@ -308,24 +309,24 @@ describe("finalizeOutputsAtomically", () => {
     expect(await readdir(dir)).toEqual(["source.m4a"]);
   });
 
-  it("rolls back already-finalized outputs and clears temp files when a rename fails", async () => {
+  it("keeps a target that appeared after the conflict check and rolls back its own outputs", async () => {
     const t = targets("out");
-    // Make the markdown target an existing directory: its rename fails only
-    // after the audio and json renames have already committed, exercising the
-    // rollback path. (overwrite:false, so there are no backups to restore.)
-    await mkdir(t.markdownPath);
+    // Something else took the markdown name after the save checked for
+    // conflicts: publishing the audio and JSON succeeds, the markdown is refused.
+    await writeFile(t.markdownPath, "SOMEONE-ELSE");
 
-    await expect(
-      finalizeOutputsAtomically({
-        sourceAudioPath: sourceAudio,
-        targets: t,
-        overwrite: false,
-        jsonContent: "J",
-        markdownContent: "M",
-      }),
-    ).rejects.toThrow(/finalize/i);
+    const attempt = finalizeOutputsAtomically({
+      sourceAudioPath: sourceAudio,
+      targets: t,
+      overwrite: false,
+      jsonContent: "J",
+      markdownContent: "M",
+    });
+    await expect(attempt).rejects.toBeInstanceOf(OutputConflictError);
+    await expect(attempt).rejects.toMatchObject({ targetPath: t.markdownPath });
 
-    // A failed save must not leave the audio or json half-committed.
+    expect(await readFile(t.markdownPath, "utf8"), "the other file is untouched").toBe("SOMEONE-ELSE");
+    // A refused save must not leave the audio or json half-committed.
     expect(await fileExists(t.audioPath)).toBe(false);
     expect(await fileExists(t.jsonPath)).toBe(false);
     expect(await leftoverTempsAndBackups()).toEqual([]);

@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppSnapshot, MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
+import { formatUtcMarker } from "@shared/timestamps";
 
 // The card list as the user builds it: confirm what was dropped in, duplicate a
 // card to trim it twice, move the markers, remove one, start over. This drives
@@ -46,7 +47,7 @@ const audioGate = vi.hoisted(() => ({
 }));
 // Confirming a review probes each recording; holding the probe keeps a confirm
 // in flight while something else reaches the import boundary.
-const probeGate = vi.hoisted(() => ({ held: null as Promise<void> | null }));
+const probeGate = vi.hoisted(() => ({ held: null as Promise<void> | null, entered: 0 }));
 vi.mock("@main/core/audio-tools", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@main/core/audio-tools")>();
   return {
@@ -62,6 +63,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
       return actual.prepareAudioForTranscription(params);
     },
     probeAudioProfile: async () => {
+      probeGate.entered += 1;
       if (probeGate.held !== null) await probeGate.held;
       return probed.profile;
     },
@@ -137,6 +139,7 @@ beforeEach(async () => {
   audioGate.held = null;
   audioGate.entered = 0;
   probeGate.held = null;
+  probeGate.entered = 0;
   runtime = await ApplicationRuntime.initialize();
 });
 
@@ -368,6 +371,31 @@ describe("working with a card", () => {
     expect(await exists(card.sourceFilePath), "the working audio is kept").toBe(true);
     expect(await readdir(join(home, "output")).catch(() => []), "nothing was published").toEqual([]);
     await expect(runtime.saveCard(card.id), "no save starts while closing").rejects.toThrow(/closing/);
+  });
+
+  it("keeps a file that took the save's name after its conflict check", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    const saved = cards(runtime.getSnapshot())[0];
+    const target = join(home, "output", `${formatUtcMarker(new Date(saved.timestamps.effectiveUtc))}-old-title.wav`);
+    let release!: () => void;
+    probeGate.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const probesBefore = probeGate.entered;
+
+    const saving = runtime.saveCard(card.id);
+    // The save probes its final audio only after it found the names free.
+    await vi.waitFor(() => expect(probeGate.entered).toBe(probesBefore + 1));
+    await writeFile(target, "another save's audio");
+    release();
+    const result = await saving;
+
+    expect(result.kind).toBe("conflict");
+    expect(await readFile(target, "utf8")).toBe("another save's audio");
+    expect(cards(result.snapshot)[0].status).toBe("Ready to Save");
+    expect(await exists(card.sourceFilePath), "the working audio is kept").toBe(true);
+    expect((await readdir(join(home, "output"))).sort()).toEqual([basename(target)]);
   });
 
   it("hands the card back as ready to save when a save stops at a conflict", async () => {

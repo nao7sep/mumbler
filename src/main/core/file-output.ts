@@ -1,4 +1,5 @@
-import { chmod, copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { chmod, copyFile, link, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { nanoid } from "nanoid";
 
@@ -6,6 +7,54 @@ import type { MumblerCard } from "@shared/app-shell";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 import { CancelledError, isCancelledError } from "./cancellation";
 import { fileExists, formatError, syncDirectory, syncFile } from "./file-io";
+
+// A save that must not overwrite found one of its targets already taken when
+// it came to publish: someone wrote that name after the conflict check.
+export class OutputConflictError extends Error {
+  constructor(readonly targetPath: string) {
+    super(`An output already exists at ${targetPath}.`);
+    this.name = "OutputConflictError";
+  }
+}
+
+// Filesystems without hard links (FAT, exFAT, some network shares) refuse
+// link() with one of these codes rather than EEXIST.
+const HARD_LINK_UNSUPPORTED_CODES = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"]);
+
+function errorCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : undefined;
+}
+
+// Publishes a staged file under a name only if that name is still free. link()
+// creates the name atomically and fails on an existing one; the staged copy is
+// then dropped. Where the filesystem has no hard links, an exclusive copy keeps
+// the refusal to replace, at the cost of the copy not being atomic.
+async function publishExclusive(tempPath: string, targetPath: string): Promise<void> {
+  try {
+    await link(tempPath, targetPath);
+  } catch (error: unknown) {
+    const code = errorCode(error);
+    if (code === "EEXIST") {
+      throw new OutputConflictError(targetPath);
+    }
+    if (code === undefined || !HARD_LINK_UNSUPPORTED_CODES.has(code)) {
+      throw error;
+    }
+    try {
+      await copyFile(tempPath, targetPath, fsConstants.COPYFILE_EXCL);
+    } catch (copyError: unknown) {
+      if (errorCode(copyError) === "EEXIST") {
+        throw new OutputConflictError(targetPath);
+      }
+      await rm(targetPath, { force: true }).catch(() => undefined);
+      throw copyError;
+    }
+    await syncFile(targetPath);
+  }
+  await rm(tempPath, { force: true });
+}
 
 export interface SaveTargetPaths {
   audioPath: string;
@@ -121,11 +170,14 @@ export async function finalizeOutputsAtomically(params: {
       await rename(params.targets.markdownPath, markdownBackupPath);
     }
 
-    await rename(audioTempPath, params.targets.audioPath);
+    // An overwrite replaces what it moved aside above; any other save claims each
+    // name exclusively, so a target written after the conflict check is kept.
+    const publish = params.overwrite ? rename : publishExclusive;
+    await publish(audioTempPath, params.targets.audioPath);
     audioFinalized = true;
-    await rename(jsonTempPath, params.targets.jsonPath);
+    await publish(jsonTempPath, params.targets.jsonPath);
     jsonFinalized = true;
-    await rename(markdownTempPath, params.targets.markdownPath);
+    await publish(markdownTempPath, params.targets.markdownPath);
     markdownFinalized = true;
 
     // The files were synced before publication; now make their directory entries
@@ -158,7 +210,7 @@ export async function finalizeOutputsAtomically(params: {
     await rm(jsonTempPath, { force: true }).catch(() => undefined);
     await rm(markdownTempPath, { force: true }).catch(() => undefined);
 
-    if (isCancelledError(error)) {
+    if (isCancelledError(error) || error instanceof OutputConflictError) {
       throw error;
     }
     throw new Error(`Failed to finalize output files: ${formatError(error)}`);

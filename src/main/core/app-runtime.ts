@@ -55,6 +55,7 @@ import {
   buildUniqueSuffixedTargets,
   computeFinalDuration,
   finalizeOutputsAtomically,
+  OutputConflictError,
   pathsConflict,
   type SaveTargetPaths,
 } from "./file-output";
@@ -1387,14 +1388,25 @@ export class ApplicationRuntime {
         finalDurationSec,
       });
 
-      await finalizeOutputsAtomically({
-        sourceAudioPath: finalAudio.filePath,
-        targets: targetPaths,
-        overwrite: resolution === "overwrite",
-        jsonContent: `${JSON.stringify(outputPayload, null, 2)}\n`,
-        markdownContent,
-        signal,
-      });
+      try {
+        await finalizeOutputsAtomically({
+          sourceAudioPath: finalAudio.filePath,
+          targets: targetPaths,
+          overwrite: resolution === "overwrite",
+          jsonContent: `${JSON.stringify(outputPayload, null, 2)}\n`,
+          markdownContent,
+          signal,
+        });
+      } catch (error: unknown) {
+        if (!(error instanceof OutputConflictError)) {
+          throw error;
+        }
+        await logger.info("save.conflict", "Output appeared while saving; nothing was replaced.", {
+          cardId,
+          takenPath: error.targetPath,
+        });
+        return { kind: "conflict", ...targetPaths };
+      }
 
       await logger.info("save.completed", "Saved finalized audio and metadata.", {
         cardId,
