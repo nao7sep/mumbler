@@ -245,7 +245,10 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
 
   handle(APP_SHELL_CHANNELS.dismissAppWideError, () => runtime.dismissAppWideError());
   handle(APP_SHELL_CHANNELS.resetState, () => runtime.resetState());
-  handle(APP_SHELL_CHANNELS.cancelPendingImports, () => runtime.cancelPendingImports());
+  handle(APP_SHELL_CHANNELS.cancelPendingImports, (_event, ids: string[]) => {
+    assertStringArray(ids, "ids");
+    return runtime.cancelPendingImports(ids);
+  });
 
   handle(APP_SHELL_CHANNELS.provisionTool, (_event, name: ToolName) => {
     assertToolName(name);

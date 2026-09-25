@@ -104,7 +104,7 @@ describe("the app-shell IPC boundary", () => {
     ["reportRendererDiagnostic", "reportRendererDiagnostic", [{ message: "note" }]],
     ["dismissAppWideError", "dismissAppWideError", []],
     ["resetState", "resetState", []],
-    ["cancelPendingImports", "cancelPendingImports", []],
+    ["cancelPendingImports", "cancelPendingImports", [["pending-1"]]],
     ["provisionTool", "provisionTool", ["ffmpeg"]],
     ["cancelToolProvision", "cancelToolProvision", ["ffprobe"]],
     ["checkTools", "checkTools", []],

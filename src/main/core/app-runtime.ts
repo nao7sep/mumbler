@@ -149,9 +149,9 @@ export class ApplicationRuntime {
   private shutdownPromise: Promise<void> | null = null;
   private onPipelineProgressCallback: (() => void) | null = null;
   private onDependenciesChangedCallback: (() => void) | null = null;
-  // Picker and drop are two entry paths into one mutable import boundary. Keep
-  // copy -> pending state -> persistence ordered here; renderer disabling is
-  // presentation and cannot own data safety.
+  // Picker, drop, review confirm and review cancel all change the pending
+  // imports. Keep copy -> pending state -> persistence, and settling a review,
+  // ordered here; renderer disabling is presentation and cannot own data safety.
   private importTail: Promise<void> = Promise.resolve();
 
   private constructor(runtime: AppRuntimeState) {
@@ -710,29 +710,38 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
+  // Confirm and cancel run on the same serialized import boundary as the copies
+  // that create pending imports, and each settles only the imports the review
+  // showed: an import that arrives meanwhile stays pending for its own review.
   async confirmPendingImports(items: PendingImportReviewItem[]): Promise<AppSnapshot> {
+    return this.runImportExclusive(() => this.confirmReviewedImports(items));
+  }
+
+  private async confirmReviewedImports(items: PendingImportReviewItem[]): Promise<AppSnapshot> {
     this.ensureReady();
     const state = this.runtime.state!;
     const paths = this.runtime.paths!;
 
     const byId = new Map(items.map((item) => [item.id, item]));
-    const pendingImports = [...state.pendingImports];
+    // Every reviewed import is validated before any file is touched, so a bad
+    // timestamp on one of them cannot leave another's original already deleted
+    // while its import is still pending.
+    const reviewed = state.pendingImports
+      .filter((pendingImport) => byId.has(pendingImport.id))
+      .map((pendingImport) => {
+        // Overlay only the review-editable fields onto the authoritative item; the
+        // working/original paths always come from server-side state.
+        const merged = applyPendingImportDraft(pendingImport, byId.get(pendingImport.id)!);
+        const timestamps = buildConfirmedTimestamps(
+          merged.localTimestampText,
+          merged.timezone,
+          merged.utcTimestampText,
+        );
+        return { pendingImport, merged, timestamps };
+      });
     const cardsToAdd: MumblerCard[] = [];
 
-    for (const pendingImport of pendingImports) {
-      const candidate = byId.get(pendingImport.id);
-      if (candidate === undefined) {
-        throw new OperationError(`Pending import ${pendingImport.originalFilename} is missing review data.`);
-      }
-
-      // Overlay only the review-editable fields onto the authoritative item; the
-      // working/original paths always come from server-side state below.
-      const merged = applyPendingImportDraft(pendingImport, candidate);
-      const timestamps = buildConfirmedTimestamps(
-        merged.localTimestampText,
-        merged.timezone,
-        merged.utcTimestampText,
-      );
+    for (const { pendingImport, merged, timestamps } of reviewed) {
       let probed: Awaited<ReturnType<typeof probeAudioProfile>>;
       try {
         probed = await probeAudioProfile(pendingImport.workingFilePath);
@@ -829,7 +838,8 @@ export class ApplicationRuntime {
       }
     }
 
-    state.pendingImports = [];
+    const confirmedIds = new Set(reviewed.map(({ pendingImport }) => pendingImport.id));
+    state.pendingImports = state.pendingImports.filter((item) => !confirmedIds.has(item.id));
     state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
       left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
     );
@@ -841,17 +851,23 @@ export class ApplicationRuntime {
     await this.runtime.logger.info(
       "import.confirm-review",
       "Confirmed pending imports into queue.",
-      { addedCards: cardsToAdd.length },
+      { addedCards: cardsToAdd.length, stillPending: state.pendingImports.length },
     );
 
     return this.getSnapshot();
   }
 
-  async cancelPendingImports(): Promise<AppSnapshot> {
-    this.ensureReady();
-    const pendingImports = [...this.runtime.state!.pendingImports];
+  async cancelPendingImports(ids: string[]): Promise<AppSnapshot> {
+    return this.runImportExclusive(() => this.cancelReviewedImports(ids));
+  }
 
-    for (const pendingImport of pendingImports) {
+  private async cancelReviewedImports(ids: string[]): Promise<AppSnapshot> {
+    this.ensureReady();
+    const state = this.runtime.state!;
+    const cancelIds = new Set(ids);
+    const cancelled = state.pendingImports.filter((item) => cancelIds.has(item.id));
+
+    for (const pendingImport of cancelled) {
       try {
         await rm(pendingImport.workingFilePath, { force: true });
       } catch (error: unknown) {
@@ -862,10 +878,10 @@ export class ApplicationRuntime {
       }
     }
 
-    this.runtime.state!.pendingImports = [];
+    state.pendingImports = state.pendingImports.filter((item) => !cancelIds.has(item.id));
     await this.persistState();
     await this.runtime.logger.info("import.cancelled", "Cancelled pending imports.", {
-      cancelledCount: pendingImports.length,
+      cancelledCount: cancelled.length,
     });
 
     return this.getSnapshot();
@@ -1401,9 +1417,14 @@ export class ApplicationRuntime {
     sourcePaths: string[],
     importSource: ImportSource,
   ): Promise<ImportOperationResult> {
-    const operation = this.importTail.then(() => this.importPathsExclusive(sourcePaths, importSource));
-    this.importTail = operation.then(() => undefined, () => undefined);
-    return operation;
+    return this.runImportExclusive(() => this.importPathsExclusive(sourcePaths, importSource));
+  }
+
+  // Runs one import-boundary operation after every earlier one has settled.
+  private runImportExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.importTail.then(operation);
+    this.importTail = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   private async importPathsExclusive(

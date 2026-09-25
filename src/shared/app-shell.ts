@@ -603,7 +603,7 @@ export interface MumblerShellApi {
   reportRendererDiagnostic(report: RendererErrorReport): Promise<void>;
   dismissAppWideError(): Promise<AppSnapshot>;
   resetState(): Promise<AppSnapshot>;
-  cancelPendingImports(): Promise<AppSnapshot>;
+  cancelPendingImports(ids: string[]): Promise<AppSnapshot>;
   // Managed audio-tool operations. Each returns a fresh snapshot so the surface
   // reflects the new state; live progress arrives via onDependenciesUpdated.
   // provisionTool is the single acquire operation (Install when absent, Update

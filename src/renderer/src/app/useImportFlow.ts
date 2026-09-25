@@ -195,7 +195,9 @@ export function useImportFlow({
 
   async function handleCancelPendingImports(): Promise<void> {
     try {
-      const nextSnapshot = await window.mumbler.cancelPendingImports();
+      const nextSnapshot = await window.mumbler.cancelPendingImports(
+        pendingReviewDrafts.map((item) => item.id),
+      );
       onSnapshotUpdate(nextSnapshot);
     } catch (error: unknown) {
       onError(

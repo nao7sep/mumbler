@@ -44,6 +44,9 @@ const audioGate = vi.hoisted(() => ({
   held: null as Promise<void> | null,
   entered: 0,
 }));
+// Confirming a review probes each recording; holding the probe keeps a confirm
+// in flight while something else reaches the import boundary.
+const probeGate = vi.hoisted(() => ({ held: null as Promise<void> | null }));
 vi.mock("@main/core/audio-tools", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@main/core/audio-tools")>();
   return {
@@ -58,7 +61,10 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
       }
       return actual.prepareAudioForTranscription(params);
     },
-    probeAudioProfile: async () => probed.profile,
+    probeAudioProfile: async () => {
+      if (probeGate.held !== null) await probeGate.held;
+      return probed.profile;
+    },
     analyzeTrimDecision: async (_path: string, trim: { frontMarkerSec: number | null; backMarkerSec: number | null }) => ({
       kind: "stream-copy" as const,
       toleranceSec: 3,
@@ -130,6 +136,7 @@ beforeEach(async () => {
   delete process.env.GEMINI_API_KEY;
   audioGate.held = null;
   audioGate.entered = 0;
+  probeGate.held = null;
   runtime = await ApplicationRuntime.initialize();
 });
 
@@ -215,10 +222,48 @@ describe("confirming what was dropped in", () => {
     expect(cards(runtime.getSnapshot()), "the card is still made").toHaveLength(1);
   });
 
-  it("refuses the whole batch when a pending import was left unreviewed", async () => {
+  it("confirms what was reviewed and leaves an import the review did not show pending", async () => {
     const pending = await dropIn("first.wav", "second.wav");
 
-    await expect(runtime.confirmPendingImports([review(pending[0])])).rejects.toThrow(/missing review data/);
+    const snapshot = await runtime.confirmPendingImports([review(pending[0])]);
+
+    expect(cards(snapshot).map((card) => card.originalFilename)).toEqual(["first.wav"]);
+    expect(snapshot.state?.pendingImports.map((item) => item.id)).toEqual([pending[1].id]);
+  });
+
+  it("keeps an import dropped in while the review is being confirmed", async () => {
+    const [first] = await dropIn("first.wav");
+    const laterPath = join(sourceDir, "later.wav");
+    await writeFile(laterPath, "audio for later.wav");
+
+    let release!: () => void;
+    probeGate.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const confirming = runtime.confirmPendingImports([review(first)]);
+    const importing = runtime.importDroppedPaths([laterPath]);
+    // Long enough for an unordered import to copy its file and land.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    release();
+    await Promise.all([confirming, importing]);
+
+    const snapshot = runtime.getSnapshot();
+    expect(cards(snapshot).map((card) => card.originalFilename)).toEqual(["first.wav"]);
+    expect(snapshot.state?.pendingImports.map((item) => item.originalFilename)).toEqual(["later.wav"]);
+  });
+
+  it("touches no original when one reviewed time cannot be used", async () => {
+    const pending = await dropIn("first.wav", "second.wav");
+
+    await expect(
+      runtime.confirmPendingImports([
+        review(pending[0], { deleteOriginalOnConfirm: true, copyToBackupOnConfirm: false }),
+        review(pending[1], { timezone: "Not/AZone" }),
+      ]),
+    ).rejects.toThrow(/Invalid timezone/);
+
+    expect(await exists(pending[0].originalSourcePath)).toBe(true);
     expect(runtime.getSnapshot().state?.pendingImports).toHaveLength(2);
     expect(cards(runtime.getSnapshot())).toEqual([]);
   });
@@ -226,11 +271,25 @@ describe("confirming what was dropped in", () => {
   it("throws away the working copies when the review is cancelled", async () => {
     const pending = await dropIn("first.wav", "second.wav");
 
-    const snapshot = await runtime.cancelPendingImports();
+    const snapshot = await runtime.cancelPendingImports(pending.map((item) => item.id));
 
     expect(snapshot.state?.pendingImports).toEqual([]);
     for (const item of pending) expect(await exists(item.workingFilePath)).toBe(false);
     expect(await exists(pending[0].originalSourcePath), "the user's own files are untouched").toBe(true);
+  });
+
+  it("cancels only the imports the review showed", async () => {
+    const [first] = await dropIn("first.wav");
+    const laterPath = join(sourceDir, "later.wav");
+    await writeFile(laterPath, "audio for later.wav");
+
+    const cancelling = runtime.cancelPendingImports([first.id]);
+    const importing = runtime.importDroppedPaths([laterPath]);
+    await Promise.all([cancelling, importing]);
+
+    const remaining = runtime.getSnapshot().state?.pendingImports ?? [];
+    expect(remaining.map((item) => item.originalFilename)).toEqual(["later.wav"]);
+    expect(await exists(remaining[0].workingFilePath)).toBe(true);
   });
 });
 

@@ -80,8 +80,8 @@ const api: MumblerShellApi = {
   dismissAppWideError: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.dismissAppWideError) as Promise<AppSnapshot>,
   resetState: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.resetState) as Promise<AppSnapshot>,
-  cancelPendingImports: () =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelPendingImports) as Promise<AppSnapshot>,
+  cancelPendingImports: (ids: string[]) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelPendingImports, ids) as Promise<AppSnapshot>,
   provisionTool: (name: ToolName) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.provisionTool, name) as Promise<AppSnapshot>,
   cancelToolProvision: (name: ToolName) =>
