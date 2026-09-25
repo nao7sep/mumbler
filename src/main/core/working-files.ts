@@ -187,7 +187,6 @@ export async function reconcileWorkingState(
           ...state,
           pendingImports: nextPendingImports,
           cards: nextCards,
-          updatedAtUtc: Date.now(),
         };
 
   return {

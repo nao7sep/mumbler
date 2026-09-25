@@ -106,13 +106,14 @@ export async function executeCardPipeline(
       clearCardResultsFromStep(card, "transcription");
       await setCardStepState(card, "Transcribing", "transcription", ctx);
 
-      const trimDecision =
-        card.trimDecision ??
-        (await analyzeTrimDecision(card.sourceFilePath, card.trim, card.durationSec, ctx.signal));
-      throwIfCancelled(ctx.signal);
-      card.trimDecision = trimDecision;
-      card.updatedAtUtc = Date.now();
-      await ctx.persistState();
+      let trimDecision = card.trimDecision;
+      if (trimDecision === null) {
+        trimDecision = await analyzeTrimDecision(card.sourceFilePath, card.trim, card.durationSec, ctx.signal);
+        throwIfCancelled(ctx.signal);
+        card.trimDecision = trimDecision;
+        card.updatedAtUtc = Date.now();
+        await ctx.persistState();
+      }
 
       // The signal the Gemini call already honours now reaches the audio
       // stage too: it was the one await in this pipeline that ignored Cancel,

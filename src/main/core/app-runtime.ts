@@ -48,6 +48,8 @@ import {
 import { closeBackupStore, setBackupStoreWarn } from "./backupStore";
 import { CorruptStateError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
+import { TranscriptStore } from "./transcript-store";
+import { preserveAside } from "./file-io";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState } from "./working-files";
 import {
   buildMarkdownContent,
@@ -127,6 +129,8 @@ interface AppRuntimeState {
   layout: MumblerLayout | null;
   settingsStore: JsonStore<MumblerSettings> | null;
   stateStore: JsonStore<MumblerState> | null;
+  // Each card's transcription and structured outline, in its own file.
+  transcriptStore: TranscriptStore | null;
   layoutStore: JsonStore<MumblerLayout> | null;
   logger: AppLogger;
   startupDiagnostic: AppSnapshot["startupDiagnostic"];
@@ -193,6 +197,7 @@ export class ApplicationRuntime {
         layout: null,
         settingsStore: null,
         stateStore: null,
+        transcriptStore: null,
         layoutStore: null,
         logger,
         startupDiagnostic: {
@@ -251,13 +256,28 @@ export class ApplicationRuntime {
       const recovered = recoverInterruptedCards(stateLoad.value);
       const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
 
-      // Persist startup fix-ups (interrupted-card recovery and working-file
-      // reconciliation) only. state.json holds precious queue/work data, so a
+      // Each card's text lives in its own file. Bodies a version-1 state.json
+      // still carries are written out to those files first, so the rewrite of
+      // state.json below never drops text that is not yet safe elsewhere.
+      const transcriptStore = new TranscriptStore(paths.transcriptsDir);
+      const transcripts = await transcriptStore.open(reconciliation.state.cards.map((card) => card.id));
+      for (const card of reconciliation.state.cards) {
+        const transcript = transcripts.get(card.id);
+        if (transcript !== undefined) {
+          card.transcription = { text: transcript.transcription };
+          card.metadata = { ...card.metadata, structured: transcript.structured };
+        }
+      }
+      const movedTranscripts = await transcriptStore.writeChanged(reconciliation.state.cards);
+
+      // Persist startup fix-ups (interrupted-card recovery, text moved out of a
+      // version-1 state.json, and working-file reconciliation) only. state.json holds precious queue/work data, so a
       // fresh empty queue has nothing to materialize and an unchanged existing
       // store is never rewritten.
       const stateChanged =
         recovered.recoveredInterruptedCards > 0 ||
         recovered.restoredSavingCards > 0 ||
+        movedTranscripts > 0 ||
         reconciliation.droppedPendingImports > 0 ||
         reconciliation.missingWorkingCards > 0;
       if (stateChanged) {
@@ -319,6 +339,7 @@ export class ApplicationRuntime {
         layout,
         settingsStore,
         stateStore,
+        transcriptStore,
         layoutStore,
         logger,
         startupDiagnostic: null,
@@ -387,6 +408,7 @@ export class ApplicationRuntime {
         layout: null,
         settingsStore: null,
         stateStore: null,
+        transcriptStore: null,
         layoutStore: null,
         logger,
         startupDiagnostic: {
@@ -604,6 +626,8 @@ export class ApplicationRuntime {
       // Preserve each store before the user-commanded reset writes defaults.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
       const preservedStateFiles = await stateStore.preserveExistingFiles();
+      // The preserved state.json keeps its cards' text beside it.
+      const preservedTranscripts = await preserveAside(paths.transcriptsDir);
       const preservedLayoutFiles = await layoutStore.preserveExistingFiles();
       await settingsStore.save(settings);
       await layoutStore.save(layout);
@@ -616,6 +640,7 @@ export class ApplicationRuntime {
         workingDir: paths.workingDir,
         preservedSettingsFiles,
         preservedStateFiles,
+        preservedTranscripts,
         preservedLayoutFiles,
         deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
         retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
@@ -627,6 +652,7 @@ export class ApplicationRuntime {
       this.runtime.layout = layout;
       this.runtime.settingsStore = settingsStore;
       this.runtime.stateStore = stateStore;
+      this.runtime.transcriptStore = new TranscriptStore(paths.transcriptsDir);
       this.runtime.layoutStore = layoutStore;
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
@@ -1226,6 +1252,7 @@ export class ApplicationRuntime {
         this.pipeline.shutdown(),
       ]);
       await this.runtime.stateStore?.flush();
+      await this.runtime.transcriptStore?.flush();
       await this.runtime.settingsStore?.flush();
       await this.runtime.layoutStore?.flush();
       await closeBackupStore();
@@ -1625,10 +1652,14 @@ export class ApplicationRuntime {
   // so swapping in a copy would detach their later writes from what is saved.
   private async persistState(): Promise<void> {
     const state = this.runtime.state!;
-    state.updatedAtUtc = Date.now();
-    // The store serializes writes, so overlapping persistState calls can never
-    // interleave on disk.
+    const cards = state.cards;
+    // Text reaches its own file before state.json stops needing it, and a file
+    // is deleted only after state.json no longer refers to it. Each store
+    // serializes its writes, so overlapping persistState calls never interleave
+    // on disk, and unchanged text is not written again.
+    await this.runtime.transcriptStore!.writeChanged(cards);
     await this.runtime.stateStore!.save(state);
+    await this.runtime.transcriptStore!.removeAbsent(cards);
     const selectedCardId = selectExistingCardId(
       state.cards.map((card) => card.id),
       this.runtime.layout?.selectedCardId ?? null,
@@ -1702,6 +1733,7 @@ export function getAppPaths(): AppPaths {
     homeDir,
     settingsPath: join(homeDir, "config.json"),
     statePath: join(homeDir, "state.json"),
+    transcriptsDir: join(homeDir, "transcripts"),
     layoutPath: join(homeDir, "layout.json"),
     apiKeysPath: join(homeDir, "api-keys.json"),
     logsDir: join(homeDir, "logs"),

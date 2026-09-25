@@ -17,6 +17,27 @@ vi.mock("@main/core/gemini-adapter", async (importOriginal) => {
   return { ...actual, generateTextWithGemini: mockGenerateText, transcribeWithGemini: mockTranscribe };
 });
 
+// The audio stage is replaced too, so a transcription run needs no ffmpeg: the
+// prepared audio is the source file itself.
+const { mockAnalyzeTrim } = vi.hoisted(() => ({ mockAnalyzeTrim: vi.fn() }));
+vi.mock("@main/core/audio-tools", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@main/core/audio-tools")>();
+  return {
+    ...actual,
+    analyzeTrimDecision: mockAnalyzeTrim,
+    prepareAudioForTranscription: async (params: { sourceFilePath: string }) => ({
+      filePath: params.sourceFilePath,
+      mimeType: "audio/mp4",
+      wasDerived: false,
+      cleanup: async () => undefined,
+    }),
+  };
+});
+
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { executeCardPipeline, type CardPipelineContext } from "@main/core/card-pipeline";
 import { createDefaultSettings, createEmptyState } from "@main/core/settings-schema";
 
@@ -67,6 +88,7 @@ function makePaths(): AppPaths {
     homeDir: "/tmp/.mumbler",
     settingsPath: "/tmp/.mumbler/config.json",
     statePath: "/tmp/.mumbler/state.json",
+    transcriptsDir: "/tmp/.mumbler/transcripts",
     layoutPath: "/tmp/.mumbler/layout.json",
     apiKeysPath: "/tmp/.mumbler/api-keys.json",
     logsDir: "/tmp/.mumbler/logs",
@@ -102,6 +124,37 @@ beforeEach(() => {
 });
 
 describe("executeCardPipeline", () => {
+  it("saves the queue only for real changes when the trim was already analyzed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mumbler-run-"));
+    try {
+      const source = join(dir, "rec.m4a");
+      await writeFile(source, "audio");
+      mockTranscribe.mockResolvedValue({ text: "words", modelVersion: "m", usageMetadata: null, transport: "inline" });
+      mockGenerateText.mockResolvedValue({ text: "result", modelVersion: "m", usageMetadata: null });
+      const analyzed = { kind: "not-needed" } as unknown as NonNullable<MumblerCard["trimDecision"]>;
+      mockAnalyzeTrim.mockResolvedValue(analyzed);
+
+      const fresh = makeCard({ sourceFilePath: source });
+      const freshCtx = makeContext(fresh, new AbortController().signal);
+      await executeCardPipeline(fresh.id, "transcription", "generate", freshCtx);
+
+      const known = makeCard({ sourceFilePath: source, trimDecision: analyzed });
+      const knownCtx = makeContext(known, new AbortController().signal);
+      await executeCardPipeline(known.id, "transcription", "generate", knownCtx);
+
+      expect(known.status).toBe("Ready to Save");
+      expect(mockAnalyzeTrim, "only the card without a decision is analyzed").toHaveBeenCalledOnce();
+      // Analyzing the trim is one real change the fresh card saves; the known card
+      // has nothing new to save there, so it saves once less.
+      expect(vi.mocked(knownCtx.persistState).mock.calls.length).toBe(
+        vi.mocked(freshCtx.persistState).mock.calls.length - 1,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+
   it("runs the structured -> title -> slug metadata chain and marks the card ready", async () => {
     mockGenerateText.mockResolvedValue({ text: "result", modelVersion: "m", usageMetadata: null });
     const card = makeCard();

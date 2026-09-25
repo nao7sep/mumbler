@@ -65,10 +65,9 @@ function card(overrides: Partial<MumblerCard> = {}): MumblerCard {
 
 function stateWith(cards: MumblerCard[]): MumblerState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     pendingImports: [],
     cards,
-    updatedAtUtc: 0,
   };
 }
 
@@ -92,6 +91,43 @@ describe("state store", () => {
     expect(origin).toBe("loaded");
     expect(value.cards.map((c) => c.id)).toEqual(["x"]);
     expect(value).not.toHaveProperty("selectedCardId");
+  });
+
+  it("keeps each card's transcription and outline out of state.json", async () => {
+    const store = createStateStore(statePath());
+    await store.save(
+      stateWith([
+        card({
+          id: "x",
+          transcription: { text: "every word of an hour" },
+          metadata: { structured: "## the outline", title: "Title", slug: "title" },
+        }),
+      ]),
+    );
+
+    const raw = JSON.parse(await readFile(statePath(), "utf8"));
+    expect(raw.schemaVersion).toBe(2);
+    expect(raw).not.toHaveProperty("updatedAtUtc");
+    expect(raw.cards[0]).not.toHaveProperty("transcription");
+    expect(raw.cards[0].metadata).toEqual({ title: "Title", slug: "title" });
+    const { value } = await store.load();
+    expect(value.cards[0].transcription).toEqual({ text: null });
+    expect(value.cards[0].metadata.structured).toBeNull();
+  });
+
+  it("still reads a version-1 file whose cards carry their text", async () => {
+    const legacy = {
+      schemaVersion: 1,
+      updatedAtUtc: "2026-04-22T00:00:00.000Z",
+      pendingImports: [],
+      cards: [{ ...card({ id: "old" }), transcription: { text: "old words" }, metadata: { structured: "old outline", title: "T", slug: "t" } }],
+    };
+    await writeFile(statePath(), JSON.stringify(legacy), "utf8");
+
+    const { value } = await createStateStore(statePath()).load();
+
+    expect(value.cards[0].transcription.text).toBe("old words");
+    expect(value.cards[0].metadata.structured).toBe("old outline");
   });
 
   it("writes UTC instants as canonical ISO strings and reads epoch-ms back", async () => {

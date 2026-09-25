@@ -300,16 +300,18 @@ export interface MumblerCard {
 }
 
 export interface MumblerState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   pendingImports: PendingImportReviewItem[];
   cards: MumblerCard[];
-  updatedAtUtc: number;
 }
 
 export interface AppPaths {
   homeDir: string;
   settingsPath: string;
   statePath: string;
+  // One file per card holding its transcription and structured outline, kept out
+  // of statePath so the queue's frequent saves stay small.
+  transcriptsDir: string;
   // Disposable presentation state (pane width and last selection). Its own file,
   // apart from settingsPath/statePath, so it self-heals independently.
   layoutPath: string;

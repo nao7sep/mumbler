@@ -105,7 +105,7 @@ function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
 }
 
 function makeState(overrides: Partial<MumblerState> = {}): MumblerState {
-  return { schemaVersion: 1, pendingImports: [], cards: [], updatedAtUtc: 1, ...overrides };
+  return { schemaVersion: 2, pendingImports: [], cards: [], ...overrides };
 }
 
 beforeEach(async () => {
@@ -274,7 +274,6 @@ describe("reconciling saved state with the working directory", () => {
     const state = makeState({
       pendingImports: [makePendingImport({ id: "pending-gone", workingFilePath: join(working, "gone.m4a") })],
       cards: [survivor, makeCard({ id: "card-gone", sourceFilePath: join(working, "also-gone.m4a") })],
-      updatedAtUtc: 1,
     });
     const logger = makeLogger();
 
@@ -287,7 +286,6 @@ describe("reconciling saved state with the working directory", () => {
       retainedOrphanedFiles: 0,
     });
     expect(result.state.pendingImports).toEqual([]);
-    expect(result.state.updatedAtUtc).toBeGreaterThan(state.updatedAtUtc);
     expect(result.state.cards[0], "the card whose audio is still there is untouched").toBe(survivor);
     expect(result.state.cards[1]).toMatchObject({
       id: "card-gone",

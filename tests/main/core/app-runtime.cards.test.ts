@@ -522,6 +522,67 @@ describe("working with a card", () => {
   });
 });
 
+describe("each card's text in its own file", () => {
+  it("moves the text a version-1 state.json carries into per-card files on first launch", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
+    await runtime.shutdown();
+    // The state.json an earlier build wrote: version 1, text inside each card.
+    const current = JSON.parse(await readFile(join(home, "state.json"), "utf8"));
+    const legacy = {
+      ...current,
+      schemaVersion: 1,
+      updatedAtUtc: current.cards[0].createdAtUtc,
+      cards: current.cards.map((entry: Record<string, unknown>) => ({
+        ...entry,
+        status: "Ready to Save",
+        transcription: { text: "every word that was said" },
+        metadata: { structured: "## what it was about", title: "A title", slug: "a-title" },
+      })),
+    };
+    await writeFile(join(home, "state.json"), JSON.stringify(legacy), "utf8");
+
+    runtime = await ApplicationRuntime.initialize();
+
+    const [loaded] = cards(runtime.getSnapshot());
+    expect(loaded).toMatchObject({
+      id: card.id,
+      transcription: { text: "every word that was said" },
+      metadata: { structured: "## what it was about", title: "A title", slug: "a-title" },
+    });
+    const onDisk = await readFile(join(home, "state.json"), "utf8");
+    expect(JSON.parse(onDisk).schemaVersion).toBe(2);
+    expect(onDisk, "state.json no longer carries the text").not.toContain("every word that was said");
+    const [file] = await readdir(join(home, "transcripts"));
+    expect(JSON.parse(await readFile(join(home, "transcripts", file), "utf8"))).toMatchObject({
+      cardId: card.id,
+      transcription: "every word that was said",
+      structured: "## what it was about",
+    });
+
+    // And the text survives the next launch from its own file alone.
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+    expect(cards(runtime.getSnapshot())[0].transcription.text).toBe("every word that was said");
+  });
+
+  it("drops a card's text file when the card is removed", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
+    await runtime.shutdown();
+    const current = JSON.parse(await readFile(join(home, "state.json"), "utf8"));
+    current.schemaVersion = 1;
+    current.cards[0].transcription = { text: "words" };
+    await writeFile(join(home, "state.json"), JSON.stringify(current), "utf8");
+    runtime = await ApplicationRuntime.initialize();
+    expect(await readdir(join(home, "transcripts"))).toHaveLength(1);
+
+    await runtime.removeCard(card.id);
+
+    expect(await readdir(join(home, "transcripts"))).toEqual([]);
+  });
+});
+
 describe("settings, secrets and the window's own state", () => {
   it("keeps the queue pane width the user dragged to, within what the window allows", async () => {
     expect((await runtime.saveLayout(420)).layout?.queueWidth).toBe(420);

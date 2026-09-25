@@ -20,7 +20,10 @@ import { resolvePathFromHome } from "./storage-root";
 import { multiline } from "./text-cleanup";
 
 const SETTINGS_SCHEMA_VERSION = 1;
-const STATE_SCHEMA_VERSION = 1;
+// Version 2 keeps each card's transcription and structured outline in the card's
+// own file under transcripts/ (TranscriptStore), not in state.json. Version 1
+// files still load: their bodies are read here and moved out on first launch.
+const STATE_SCHEMA_VERSION = 2;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -198,6 +201,7 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
   return {
     ...card,
     audioProfile: card.audioProfile ?? null,
+    transcription: { text: card.transcription?.text ?? null },
     timestamps: {
       ...card.timestamps,
       confirmedUtc,
@@ -232,7 +236,6 @@ function normalizeState(raw: Record<string, unknown>, defaults: MumblerState): M
     cards: Array.isArray(raw.cards)
       ? (raw.cards as MumblerCard[]).map(normalizeCardRecord)
       : defaults.cards,
-    updatedAtUtc: normalizeUtcMs(raw.updatedAtUtc, defaults.updatedAtUtc),
   };
 }
 
@@ -260,8 +263,17 @@ function serializeUtcInstants(value: unknown): unknown {
   return value;
 }
 
+// The transcription and structured outline are written by TranscriptStore into
+// each card's own file, so state.json stays small and its frequent saves record
+// small rows in the backup history.
 export function serializeState(state: MumblerState): unknown {
-  return serializeUtcInstants(state);
+  return serializeUtcInstants({
+    ...state,
+    cards: state.cards.map(({ transcription: _bodyInOwnFile, metadata, ...card }) => ({
+      ...card,
+      metadata: { title: metadata.title, slug: metadata.slug },
+    })),
+  });
 }
 
 export function recoverInterruptedCards(
@@ -300,7 +312,6 @@ export function recoverInterruptedCards(
     state: {
       ...state,
       cards,
-      updatedAtUtc: Date.now(),
     },
     recoveredInterruptedCards,
     restoredSavingCards,
@@ -454,7 +465,6 @@ export function createEmptyState(): MumblerState {
     schemaVersion: STATE_SCHEMA_VERSION,
     pendingImports: [],
     cards: [],
-    updatedAtUtc: Date.now(),
   };
 }
 
