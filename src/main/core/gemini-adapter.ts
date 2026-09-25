@@ -7,6 +7,7 @@ import { CancelledError } from "./cancellation";
 
 const INLINE_REQUEST_LIMIT_BYTES = 20 * 1024 * 1024;
 const INLINE_AUDIO_SAFETY_LIMIT_BYTES = 18 * 1024 * 1024;
+const FILES_API_CLEANUP_TIMEOUT_MS = 30_000;
 
 /**
  * Dynamic thinking — the model decides how much to reason. Stated rather than left
@@ -155,19 +156,29 @@ export async function transcribeWithGemini(
   } finally {
     abortState.cleanup();
     if (uploadedFileName !== null) {
-      try {
-        await ai.files.delete({ name: uploadedFileName });
-      } catch (cleanupError: unknown) {
-        await params.logger?.warn(
-          "gemini.upload-cleanup",
-          "Failed to delete uploaded file from Files API.",
-          {
-            uploadedFileName,
-            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-          },
-        );
-      }
+      void deleteUploadedFile(ai, uploadedFileName, params.logger);
     }
+  }
+}
+
+// Removing the upload is best-effort: Gemini expires uploads by itself. So the
+// delete runs beside the result instead of in front of it, and its own bound
+// ends it on a stalled connection rather than leaving it pending.
+async function deleteUploadedFile(ai: GoogleGenAI, name: string, logger: AppLogger | undefined): Promise<void> {
+  try {
+    await ai.files.delete({
+      name,
+      config: { abortSignal: AbortSignal.timeout(FILES_API_CLEANUP_TIMEOUT_MS) },
+    });
+  } catch (cleanupError: unknown) {
+    await logger?.warn(
+      "gemini.upload-cleanup",
+      "Failed to delete uploaded file from Files API.",
+      {
+        uploadedFileName: name,
+        error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+      },
+    );
   }
 }
 

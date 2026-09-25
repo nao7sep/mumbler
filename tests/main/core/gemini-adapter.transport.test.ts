@@ -135,7 +135,7 @@ describe("transcribeWithGemini transport selection", () => {
 
     expect(result.transport).toBe("files-api");
     expect(upload).toHaveBeenCalledTimes(1);
-    expect(deleteFile).toHaveBeenCalledWith({ name: "files/abc" });
+    expect(deleteFile).toHaveBeenCalledWith({ name: "files/abc", config: { abortSignal: expect.any(AbortSignal) } });
   });
 
   it("deletes the uploaded file even when generation fails", async () => {
@@ -144,7 +144,23 @@ describe("transcribeWithGemini transport selection", () => {
     generateContent.mockRejectedValue(new Error("boom"));
 
     await expect(transcribeWithGemini(baseParams())).rejects.toThrow("boom");
-    expect(deleteFile).toHaveBeenCalledWith({ name: "files/xyz" });
+    expect(deleteFile).toHaveBeenCalledWith({ name: "files/xyz", config: { abortSignal: expect.any(AbortSignal) } });
+  });
+
+  it("returns the transcript without waiting for a delete that stalls", async () => {
+    stat.mockResolvedValue({ size: SAFE + 1 });
+    upload.mockResolvedValue({ name: "files/slow", uri: "gs://u" });
+    generateContent.mockResolvedValue({ text: "kept", modelVersion: "v1", usageMetadata: null });
+    let deleteSignal: AbortSignal | undefined;
+    deleteFile.mockImplementation(({ config }: { config: { abortSignal: AbortSignal } }) => {
+      deleteSignal = config.abortSignal;
+      return new Promise(() => undefined);
+    });
+
+    const result = await transcribeWithGemini(baseParams());
+
+    expect(result.text).toBe("kept");
+    expect(deleteSignal?.aborted, "the delete carries its own bound").toBe(false);
   });
 });
 
