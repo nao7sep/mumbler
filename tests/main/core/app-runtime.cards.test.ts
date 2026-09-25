@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -350,6 +350,24 @@ describe("working with a card", () => {
     expect(result.kind).toBe("saved");
     expect(cards(result.snapshot)).toEqual([]);
     expect(audioGate.entered, "only one save ran").toBe(1);
+  });
+
+  it("cancels a save cut short by quitting and leaves the card ready to save", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    audioGate.held = new Promise<void>(() => undefined);
+
+    const saving = runtime.saveCard(card.id);
+    const outcome = saving.then(() => "saved", () => "stopped");
+    await vi.waitFor(() => expect(audioGate.entered).toBe(1));
+    await runtime.shutdown();
+
+    expect(await outcome).toBe("stopped");
+    const persisted = await createStateStore(join(home, "state.json")).load();
+    expect(persisted.value.cards.map((entry) => entry.status)).toEqual(["Ready to Save"]);
+    expect(await exists(card.sourceFilePath), "the working audio is kept").toBe(true);
+    expect(await readdir(join(home, "output")).catch(() => []), "nothing was published").toEqual([]);
+    await expect(runtime.saveCard(card.id), "no save starts while closing").rejects.toThrow(/closing/);
   });
 
   it("hands the card back as ready to save when a save stops at a conflict", async () => {

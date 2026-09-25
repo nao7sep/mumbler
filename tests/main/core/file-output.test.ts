@@ -33,6 +33,7 @@ const {
   yamlDoubleQuotedString,
 } = await import("@main/core/file-output");
 const { fileExists } = await import("@main/core/file-io");
+const { CancelledError } = await import("@main/core/cancellation");
 
 function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
   return {
@@ -264,6 +265,47 @@ describe("finalizeOutputsAtomically", () => {
     expect(await readFile(t.jsonPath, "utf8")).toBe("NEW-JSON");
     expect(await readFile(t.markdownPath, "utf8")).toBe("NEW-MD");
     expect(await leftoverTempsAndBackups()).toEqual([]);
+  });
+
+  it("publishes nothing and keeps the existing outputs when the save is cancelled", async () => {
+    const t = targets("out");
+    await writeFile(t.audioPath, "OLD-AUDIO");
+    await writeFile(t.jsonPath, "OLD-JSON");
+    await writeFile(t.markdownPath, "OLD-MD");
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      finalizeOutputsAtomically({
+        sourceAudioPath: sourceAudio,
+        targets: t,
+        overwrite: true,
+        jsonContent: "NEW-JSON",
+        markdownContent: "NEW-MD",
+        signal: controller.signal,
+      }),
+    ).rejects.toBeInstanceOf(CancelledError);
+
+    expect(await readFile(t.audioPath, "utf8")).toBe("OLD-AUDIO");
+    expect(await readFile(t.jsonPath, "utf8")).toBe("OLD-JSON");
+    expect(await readFile(t.markdownPath, "utf8")).toBe("OLD-MD");
+    expect(await leftoverTempsAndBackups()).toEqual([]);
+  });
+
+  it("leaves no temp file behind when staging the audio fails", async () => {
+    const t = targets("out");
+
+    await expect(
+      finalizeOutputsAtomically({
+        sourceAudioPath: join(dir, "missing.m4a"),
+        targets: t,
+        overwrite: false,
+        jsonContent: "J",
+        markdownContent: "M",
+      }),
+    ).rejects.toThrow(/finalize/i);
+
+    expect(await readdir(dir)).toEqual(["source.m4a"]);
   });
 
   it("rolls back already-finalized outputs and clears temp files when a rename fails", async () => {

@@ -153,6 +153,9 @@ export class ApplicationRuntime {
   // imports. Keep copy -> pending state -> persistence, and settling a review,
   // ordered here; renderer disabling is presentation and cannot own data safety.
   private importTail: Promise<void> = Promise.resolve();
+  // In-flight saves, so shutdown can cancel each one and wait for it to roll
+  // back (or finish publishing) before the stores are flushed.
+  private readonly activeSaves = new Map<AbortController, Promise<unknown>>();
 
   private constructor(runtime: AppRuntimeState) {
     this.runtime = runtime;
@@ -1204,7 +1207,8 @@ export class ApplicationRuntime {
   }
 
   // Idempotent graceful shutdown, called from the app's before-quit handler.
-  // Stops new pipelines, aborts in-flight ones and lets them unwind, then drains
+  // Stops new pipelines and saves, aborts in-flight ones and lets them unwind (a
+  // cancelled save rolls back and leaves its card Ready to Save), then drains
   // the store write-queues so the canonical files are current before the process
   // exits. Cards aborted mid-step are left for startup recovery to mark as
   // resumable Errors, so no work is silently lost or half-written.
@@ -1213,7 +1217,13 @@ export class ApplicationRuntime {
       return this.shutdownPromise;
     }
     this.shutdownPromise = (async () => {
-      await this.pipeline.shutdown();
+      for (const controller of this.activeSaves.keys()) {
+        controller.abort();
+      }
+      await Promise.all([
+        Promise.allSettled([...this.activeSaves.values()]),
+        this.pipeline.shutdown(),
+      ]);
       await this.runtime.stateStore?.flush();
       await this.runtime.settingsStore?.flush();
       await this.runtime.layoutStore?.flush();
@@ -1258,28 +1268,48 @@ export class ApplicationRuntime {
     if (card.status !== "Ready to Save") {
       throw new OperationError("Only cards in Ready to Save state can be finalized.");
     }
+    if (this.shutdownPromise !== null) {
+      throw new OperationError("Mumbler is closing; the recording was not saved.");
+    }
 
     // Claim the card before the first await: "Saving" is busy, so no generation,
     // trim, removal or second save can start while this one reads the card and
     // then deletes its working audio. Any outcome other than a completed save
     // hands the card back as Ready to Save.
     card.status = "Saving";
+    const controller = new AbortController();
+    const run = this.runSave(card, resolution, controller.signal);
+    this.activeSaves.set(controller, run);
+    try {
+      const outcome = await run;
+      return { ...outcome, snapshot: this.getSnapshot() };
+    } finally {
+      this.activeSaves.delete(controller);
+    }
+  }
+
+  private async runSave(
+    card: MumblerCard,
+    resolution: SaveConflictResolution | undefined,
+    signal: AbortSignal,
+  ): Promise<SaveOutcome> {
     let outcome: SaveOutcome | null = null;
     try {
       await this.persistState();
-      outcome = await this.writeCardOutputs(card, resolution);
+      outcome = await this.writeCardOutputs(card, resolution, signal);
+      return outcome;
     } finally {
       if (outcome?.kind !== "saved") {
         card.status = "Ready to Save";
         await this.persistState();
       }
     }
-    return { ...outcome, snapshot: this.getSnapshot() };
   }
 
   private async writeCardOutputs(
     card: MumblerCard,
     resolution: SaveConflictResolution | undefined,
+    signal: AbortSignal,
   ): Promise<SaveOutcome> {
     const cardId = card.id;
     const settings = this.runtime.settings!;
@@ -1300,6 +1330,7 @@ export class ApplicationRuntime {
       durationSec: card.durationSec,
       audioProfile: card.audioProfile,
       logger,
+      signal,
     });
 
     try {
@@ -1332,7 +1363,7 @@ export class ApplicationRuntime {
           ? await buildUniqueSuffixedTargets(outputDirectory, baseName, extension)
           : initialTargets;
 
-      const finalProfile = await probeAudioProfile(finalAudio.filePath);
+      const finalProfile = await probeAudioProfile(finalAudio.filePath, signal);
       const finalDurationSec = computeFinalDuration(card, finalProfile.durationSec);
       await logger.debug("audio.probe-final", "Probed final audio profile before save.", {
         cardId,
@@ -1362,6 +1393,7 @@ export class ApplicationRuntime {
         overwrite: resolution === "overwrite",
         jsonContent: `${JSON.stringify(outputPayload, null, 2)}\n`,
         markdownContent,
+        signal,
       });
 
       await logger.info("save.completed", "Saved finalized audio and metadata.", {

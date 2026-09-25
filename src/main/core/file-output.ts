@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 
 import type { MumblerCard } from "@shared/app-shell";
 import { formatUtcIsoCompact } from "@shared/timestamps";
+import { CancelledError, isCancelledError } from "./cancellation";
 import { fileExists, formatError, syncDirectory, syncFile } from "./file-io";
 
 export interface SaveTargetPaths {
@@ -45,6 +46,9 @@ export async function finalizeOutputsAtomically(params: {
   overwrite: boolean;
   jsonContent: string;
   markdownContent: string;
+  // Cancels the save up to the moment it starts publishing; after that the
+  // renames run to completion or roll back, so nothing is left half-published.
+  signal?: AbortSignal;
 }): Promise<void> {
   await mkdir(dirname(params.targets.audioPath), { recursive: true });
 
@@ -74,30 +78,39 @@ export async function finalizeOutputsAtomically(params: {
     }
   };
 
-  await copyFile(params.sourceAudioPath, audioTempPath);
-  // A copied recording can inherit a read-only mode from removable media or the
-  // source file. The staged output is user-owned and must be writable both for
-  // the durability sync below and after it is published.
-  await chmod(audioTempPath, 0o600);
-  await syncFile(audioTempPath);
-  await writeFile(jsonTempPath, params.jsonContent, "utf8");
-  await syncFile(jsonTempPath);
-  await writeFile(markdownTempPath, params.markdownContent, "utf8");
-  await syncFile(markdownTempPath);
-
   const audioBackupPath = backupPathFor(params.targets.audioPath);
   const jsonBackupPath = backupPathFor(params.targets.jsonPath);
   const markdownBackupPath = backupPathFor(params.targets.markdownPath);
 
-  const audioHadExisting = params.overwrite && (await fileExists(params.targets.audioPath));
-  const jsonHadExisting = params.overwrite && (await fileExists(params.targets.jsonPath));
-  const markdownHadExisting = params.overwrite && (await fileExists(params.targets.markdownPath));
-
+  let audioHadExisting = false;
+  let jsonHadExisting = false;
+  let markdownHadExisting = false;
   let audioFinalized = false;
   let jsonFinalized = false;
   let markdownFinalized = false;
 
+  // Staging sits inside the rollback too: a copy that fails or is cancelled
+  // part-way must not leave its temp file in the user's output folder.
   try {
+    await copyFile(params.sourceAudioPath, audioTempPath);
+    // A copied recording can inherit a read-only mode from removable media or the
+    // source file. The staged output is user-owned and must be writable both for
+    // the durability sync below and after it is published.
+    await chmod(audioTempPath, 0o600);
+    await syncFile(audioTempPath);
+    await writeFile(jsonTempPath, params.jsonContent, "utf8");
+    await syncFile(jsonTempPath);
+    await writeFile(markdownTempPath, params.markdownContent, "utf8");
+    await syncFile(markdownTempPath);
+
+    if (params.signal?.aborted) {
+      throw new CancelledError("Save cancelled.");
+    }
+
+    audioHadExisting = params.overwrite && (await fileExists(params.targets.audioPath));
+    jsonHadExisting = params.overwrite && (await fileExists(params.targets.jsonPath));
+    markdownHadExisting = params.overwrite && (await fileExists(params.targets.markdownPath));
+
     if (audioHadExisting) {
       await rename(params.targets.audioPath, audioBackupPath);
     }
@@ -145,6 +158,9 @@ export async function finalizeOutputsAtomically(params: {
     await rm(jsonTempPath, { force: true }).catch(() => undefined);
     await rm(markdownTempPath, { force: true }).catch(() => undefined);
 
+    if (isCancelledError(error)) {
+      throw error;
+    }
     throw new Error(`Failed to finalize output files: ${formatError(error)}`);
   }
 
