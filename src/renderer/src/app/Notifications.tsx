@@ -34,8 +34,13 @@ export function clearPersistentOwner(
 export type PipelineCompletionNotification =
   { message: string; kind: "toast" };
 
-export function pipelineCompletionNotification(card: MumblerCard): PipelineCompletionNotification | null {
-  if (card.status === "Ready to Save") {
+// Only a finished generation announces itself; a save handing its card back as
+// Ready to Save (a conflict, a cancel, a failure) is reported by the save itself.
+export function pipelineCompletionNotification(
+  previous: MumblerCard,
+  card: MumblerCard,
+): PipelineCompletionNotification | null {
+  if (card.status === "Ready to Save" && previous.status !== "Saving") {
     return { message: `Ready to save: ${card.originalFilename}`, kind: "toast" };
   }
   return null;

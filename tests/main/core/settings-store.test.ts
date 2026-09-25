@@ -255,6 +255,16 @@ describe("recoverInterruptedCards", () => {
     expect(state.cards.find((c) => c.id === "done")!.status).toBe("Ready to Save");
   });
 
+  it("hands a card whose save was cut short back as ready to save", () => {
+    const { state, recoveredInterruptedCards, restoredSavingCards } = recoverInterruptedCards(
+      stateWith([card({ id: "saving", status: "Saving" })]),
+    );
+
+    expect(restoredSavingCards).toBe(1);
+    expect(recoveredInterruptedCards, "no AI work was interrupted").toBe(0);
+    expect(state.cards[0]).toMatchObject({ status: "Ready to Save", lastError: null });
+  });
+
   it("is a no-op for already-settled cards", () => {
     const { recoveredInterruptedCards } = recoverInterruptedCards(
       stateWith([card({ id: "done", status: "Ready to Save" })]),

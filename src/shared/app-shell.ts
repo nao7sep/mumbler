@@ -84,6 +84,7 @@ export type CardStatus =
   | "Transcribing"
   | "Generating Metadata"
   | "Ready to Save"
+  | "Saving"
   | "Cancelled"
   | "Error";
 

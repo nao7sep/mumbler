@@ -38,10 +38,26 @@ vi.mock("@main/core/binaries/manager", () => ({
 const probed = vi.hoisted(() => ({
   profile: { durationSec: 300, audioProfile: { formatName: "wav", codecName: "pcm_s16le", bitRateKbps: 1411, sampleRateHz: 44100, channels: 2 } },
 }));
+// A save's audio preparation can be held open, so a test can act while a save
+// is still running, the way a long trim of an hour-long recording leaves it.
+const audioGate = vi.hoisted(() => ({
+  held: null as Promise<void> | null,
+  entered: 0,
+}));
 vi.mock("@main/core/audio-tools", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@main/core/audio-tools")>();
   return {
     ...actual,
+    prepareAudioForTranscription: async (params: Parameters<typeof actual.prepareAudioForTranscription>[0]) => {
+      audioGate.entered += 1;
+      if (audioGate.held !== null) {
+        const aborted = new Promise<never>((_resolve, reject) => {
+          params.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+        await Promise.race([audioGate.held, aborted]);
+      }
+      return actual.prepareAudioForTranscription(params);
+    },
     probeAudioProfile: async () => probed.profile,
     analyzeTrimDecision: async (_path: string, trim: { frontMarkerSec: number | null; backMarkerSec: number | null }) => ({
       kind: "stream-copy" as const,
@@ -112,6 +128,8 @@ beforeEach(async () => {
   // so these cases start from none; the rule itself is asserted below.
   previousGeminiKey = process.env.GEMINI_API_KEY;
   delete process.env.GEMINI_API_KEY;
+  audioGate.held = null;
+  audioGate.entered = 0;
   runtime = await ApplicationRuntime.initialize();
 });
 
@@ -245,6 +263,49 @@ describe("working with a card", () => {
     const snapshot = await runtime.confirmPendingImports([review(pending)]);
     return cards(snapshot)[0];
   }
+
+  it("holds a card that is being saved against every other change until the save ends", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    let release!: () => void;
+    audioGate.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const saving = runtime.saveCard(card.id);
+    await vi.waitFor(() => expect(audioGate.entered).toBe(1));
+
+    expect(cards(runtime.getSnapshot())[0].status).toBe("Saving");
+    await expect(runtime.saveCard(card.id), "a second save").rejects.toThrow(/Ready to Save/);
+    await expect(runtime.updateCardTrim(card.id, { frontMarkerSec: 1, backMarkerSec: null })).rejects.toThrow(
+      /being processed/,
+    );
+    await expect(runtime.removeCard(card.id)).rejects.toThrow(/being processed/);
+    await expect(runtime.duplicateCard(card.id)).rejects.toThrow(/being processed/);
+    await runtime.setGeminiApiKey("AIza-test-key");
+    await expect(runtime.generateCardStep(card.id, "title")).rejects.toThrow(/already being processed/);
+
+    release();
+    const result = await saving;
+
+    expect(result.kind).toBe("saved");
+    expect(cards(result.snapshot)).toEqual([]);
+    expect(audioGate.entered, "only one save ran").toBe(1);
+  });
+
+  it("hands the card back as ready to save when a save stops at a conflict", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    const first = await runtime.duplicateCard(card.id);
+    const copy = cards(first).find((entry) => entry.id !== card.id)!;
+    await transcribedOnDisk(copy.id);
+
+    expect((await runtime.saveCard(card.id)).kind).toBe("saved");
+    const result = await runtime.saveCard(copy.id);
+
+    expect(result.kind).toBe("conflict");
+    expect(cards(result.snapshot)[0].status).toBe("Ready to Save");
+  });
 
   it("selects a card, and refuses one that is gone", async () => {
     const card = await confirmed();

@@ -17,6 +17,7 @@ describe("isCardBusy", () => {
     expect(isCardBusy(card("Queued"))).toBe(true);
     expect(isCardBusy(card("Transcribing"))).toBe(true);
     expect(isCardBusy(card("Generating Metadata"))).toBe(true);
+    expect(isCardBusy(card("Saving")), "a save in progress owns its card").toBe(true);
     expect(isCardBusy(card("Imported"))).toBe(false);
     expect(isCardBusy(card("Ready to Save"))).toBe(false);
     expect(isCardBusy(card("Error"))).toBe(false);

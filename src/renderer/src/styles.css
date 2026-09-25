@@ -712,7 +712,8 @@ textarea:focus-visible,
 
 .queue-row--queued,
 .queue-row--transcribing,
-.queue-row--generating-metadata {
+.queue-row--generating-metadata,
+.queue-row--saving {
   background: var(--processing-subtle);
 }
 
@@ -778,7 +779,8 @@ textarea:focus-visible,
 
 .status-text--queued,
 .status-text--transcribing,
-.status-text--generating-metadata {
+.status-text--generating-metadata,
+.status-text--saving {
   color: var(--processing);
 }
 
@@ -1029,7 +1031,8 @@ textarea:focus-visible,
 
 .status-chip--queued,
 .status-chip--transcribing,
-.status-chip--generating-metadata {
+.status-chip--generating-metadata,
+.status-chip--saving {
   background: var(--processing-subtle);
   color: var(--processing);
 }
@@ -1133,7 +1136,8 @@ textarea:focus-visible,
 /* A card's own edge carries its status, rather than a bar down one side. */
 .detail-card--queued,
 .detail-card--transcribing,
-.detail-card--generating-metadata {
+.detail-card--generating-metadata,
+.detail-card--saving {
   border-color: color-mix(in srgb, var(--processing) 70%, var(--border));
 }
 
@@ -1183,7 +1187,8 @@ textarea:focus-visible,
 
 .status-summary--queued,
 .status-summary--transcribing,
-.status-summary--generating-metadata {
+.status-summary--generating-metadata,
+.status-summary--saving {
   background: var(--processing-subtle);
 }
 

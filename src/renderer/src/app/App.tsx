@@ -396,7 +396,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
             for (const card of nextSnapshot.state?.cards ?? []) {
               const prevCard = prevSnapshot.state.cards.find((c) => c.id === card.id);
               if (prevCard && prevCard.status !== card.status) {
-                const notification = pipelineCompletionNotification(card);
+                const notification = pipelineCompletionNotification(prevCard, card);
                 if (notification?.kind === "toast") {
                   addToast(notification.message);
                 }
@@ -1400,7 +1400,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
                       type="button"
                       className="button button--ghost"
                       onClick={() => handleCancelCardProcessing(selectedCard.id)}
-                      disabled={!selectedCardIsBusy}
+                      disabled={!selectedCardIsBusy || selectedCard.status === "Saving"}
                     >
                       Cancel
                     </button>

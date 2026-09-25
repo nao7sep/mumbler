@@ -266,10 +266,18 @@ export function serializeState(state: MumblerState): unknown {
 
 export function recoverInterruptedCards(
   state: MumblerState,
-): { state: MumblerState; recoveredInterruptedCards: number } {
+): { state: MumblerState; recoveredInterruptedCards: number; restoredSavingCards: number } {
   let recoveredInterruptedCards = 0;
+  let restoredSavingCards = 0;
 
   const cards = state.cards.map((card) => {
+    // A save that did not finish published nothing it kept (its output is staged
+    // and rolled back), so the card is simply ready to save again.
+    if (card.status === "Saving") {
+      restoredSavingCards += 1;
+      return { ...card, status: "Ready to Save" as const };
+    }
+
     if (card.status !== "Transcribing" && card.status !== "Generating Metadata") {
       return card;
     }
@@ -295,6 +303,7 @@ export function recoverInterruptedCards(
       updatedAtUtc: Date.now(),
     },
     recoveredInterruptedCards,
+    restoredSavingCards,
   };
 }
 

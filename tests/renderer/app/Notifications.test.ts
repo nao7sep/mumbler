@@ -79,11 +79,15 @@ describe("notification lifetime and severity surfaces", () => {
   });
 
   it("routes pipeline success transiently and leaves pipeline failure on the card", () => {
-    expect(pipelineCompletionNotification(card("Ready to Save"))).toEqual({
+    expect(pipelineCompletionNotification(card("Generating Metadata"), card("Ready to Save"))).toEqual({
       message: "Ready to save: recording.wav",
       kind: "toast",
     });
-    expect(pipelineCompletionNotification(card("Error"))).toBeNull();
+    expect(pipelineCompletionNotification(card("Transcribing"), card("Error"))).toBeNull();
+  });
+
+  it("stays quiet when a save hands its card back as ready to save", () => {
+    expect(pipelineCompletionNotification(card("Saving"), card("Ready to Save"))).toBeNull();
   });
 
   it("stacks persistent results independently from the transient success", async () => {

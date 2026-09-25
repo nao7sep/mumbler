@@ -48,6 +48,8 @@ export function formatCardStatusMessage(card: MumblerCard): string {
       return formatActiveStepMessage(card.activeStep);
     case "Ready to Save":
       return "Ready to save";
+    case "Saving":
+      return "Saving";
     case "Cancelled":
       return card.lastError?.failedStep
         ? `Cancelled while working on ${formatStepName(card.lastError.failedStep)}`

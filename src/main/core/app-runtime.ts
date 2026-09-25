@@ -110,6 +110,13 @@ export function resetFailureDiagnostic(_error: unknown): NonNullable<AppSnapshot
 
 class ImportAdmissionError extends Error {}
 
+// What a save produced, before the snapshot that reports it is taken: the
+// snapshot is built only after the card's status has settled.
+type SaveOutcome =
+  | ({ kind: "saved" } & SaveTargetPaths)
+  | ({ kind: "conflict" } & SaveTargetPaths)
+  | { kind: "cancelled" };
+
 interface AppRuntimeState {
   paths: AppPaths | null;
   settings: MumblerSettings | null;
@@ -246,6 +253,7 @@ export class ApplicationRuntime {
       // store is never rewritten.
       const stateChanged =
         recovered.recoveredInterruptedCards > 0 ||
+        recovered.restoredSavingCards > 0 ||
         reconciliation.droppedPendingImports > 0 ||
         reconciliation.missingWorkingCards > 0;
       if (stateChanged) {
@@ -1229,14 +1237,37 @@ export class ApplicationRuntime {
     resolution?: SaveConflictResolution,
   ): Promise<SaveCardResult> {
     this.ensureReady();
-
-    const settings = this.runtime.settings!;
-    const logger = this.runtime.logger;
     const card = this.requireCard(cardId, "Card to save does not exist.");
 
     if (card.status !== "Ready to Save") {
       throw new OperationError("Only cards in Ready to Save state can be finalized.");
     }
+
+    // Claim the card before the first await: "Saving" is busy, so no generation,
+    // trim, removal or second save can start while this one reads the card and
+    // then deletes its working audio. Any outcome other than a completed save
+    // hands the card back as Ready to Save.
+    card.status = "Saving";
+    let outcome: SaveOutcome | null = null;
+    try {
+      await this.persistState();
+      outcome = await this.writeCardOutputs(card, resolution);
+    } finally {
+      if (outcome?.kind !== "saved") {
+        card.status = "Ready to Save";
+        await this.persistState();
+      }
+    }
+    return { ...outcome, snapshot: this.getSnapshot() };
+  }
+
+  private async writeCardOutputs(
+    card: MumblerCard,
+    resolution: SaveConflictResolution | undefined,
+  ): Promise<SaveOutcome> {
+    const cardId = card.id;
+    const settings = this.runtime.settings!;
+    const logger = this.runtime.logger;
 
     const configuredOutputDirectory = settings.outputDirectory?.trim() ?? "";
     const outputDirectory =
@@ -1272,21 +1303,12 @@ export class ApplicationRuntime {
           jsonPath: initialTargets.jsonPath,
           markdownPath: initialTargets.markdownPath,
         });
-        return {
-          kind: "conflict",
-          snapshot: this.getSnapshot(),
-          audioPath: initialTargets.audioPath,
-          jsonPath: initialTargets.jsonPath,
-          markdownPath: initialTargets.markdownPath,
-        };
+        return { kind: "conflict", ...initialTargets };
       }
 
       if (resolution === "cancel") {
         await logger.info("save.cancelled", "Save cancelled by user.", { cardId });
-        return {
-          kind: "cancelled",
-          snapshot: this.getSnapshot(),
-        };
+        return { kind: "cancelled" };
       }
 
       const targetPaths: SaveTargetPaths =
@@ -1335,13 +1357,7 @@ export class ApplicationRuntime {
       });
 
       await this.discardWorkingCard(card);
-      return {
-        kind: "saved",
-        snapshot: this.getSnapshot(),
-        audioPath: targetPaths.audioPath,
-        jsonPath: targetPaths.jsonPath,
-        markdownPath: targetPaths.markdownPath,
-      };
+      return { kind: "saved", ...targetPaths };
     } finally {
       await finalAudio.cleanup();
     }
