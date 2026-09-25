@@ -268,6 +268,25 @@ describe("working with a card", () => {
     await expect(runtime.duplicateCard("not-a-card")).rejects.toThrow(/does not exist/);
   });
 
+  it("keeps a duplicate made while another card's change is saved", async () => {
+    const pending = await dropIn("first.wav", "second.wav");
+    const [first, second] = cards(
+      await runtime.confirmPendingImports(pending.map((item) => review(item))),
+    );
+
+    // The duplicate waits on a file copy; the trim on the other card saves the
+    // queue in the meantime. Both changes have to survive.
+    const duplicating = runtime.duplicateCard(first.id);
+    const trimming = runtime.updateCardTrim(second.id, { frontMarkerSec: 1, backMarkerSec: null });
+    await Promise.all([duplicating, trimming]);
+
+    expect(cards(runtime.getSnapshot())).toHaveLength(3);
+    await runtime.shutdown();
+    const persisted = await createStateStore(join(home, "state.json")).load();
+    expect(persisted.value.cards).toHaveLength(3);
+    expect(persisted.value.cards.find((card) => card.id === second.id)?.trim.frontMarkerSec).toBe(1);
+  });
+
   it("moves the recorded time forward by the front marker and clears what no longer applies", async () => {
     const card = await confirmed();
     // A card that has already been through the pipeline: its text and metadata

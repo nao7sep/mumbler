@@ -1539,22 +1539,17 @@ export class ApplicationRuntime {
     return card;
   }
 
+  // The live state object is never replaced here: handlers and pipelines hold
+  // `this.runtime.state` (and its cards) across awaits and mutate it afterwards,
+  // so swapping in a copy would detach their later writes from what is saved.
   private async persistState(): Promise<void> {
     const state = this.runtime.state!;
-    const normalized =
-      state.cards.length === 0 && state.pendingImports.length === 0
-        ? createEmptyState()
-        : {
-            ...state,
-            updatedAtUtc: Date.now(),
-          };
-
-    this.runtime.state = normalized;
+    state.updatedAtUtc = Date.now();
     // The store serializes writes, so overlapping persistState calls can never
     // interleave on disk.
-    await this.runtime.stateStore!.save(normalized);
+    await this.runtime.stateStore!.save(state);
     const selectedCardId = selectExistingCardId(
-      normalized.cards.map((card) => card.id),
+      state.cards.map((card) => card.id),
       this.runtime.layout?.selectedCardId ?? null,
     );
     if (selectedCardId !== (this.runtime.layout?.selectedCardId ?? null)) {
