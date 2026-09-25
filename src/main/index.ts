@@ -1,11 +1,11 @@
 import { app, BrowserWindow, protocol } from "electron";
-import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 
 import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { ApplicationRuntime } from "./core/app-runtime";
 import { registerAppShellIpc } from "./ipc/app-shell";
 import { createMainWindow } from "./window";
+import { createMediaResponse } from "./media-response";
 import { applyThemePreference, followOsThemeChanges } from "./core/theme";
 import { showStartupFailureDialog } from "./startup-failure-dialog";
 
@@ -58,14 +58,11 @@ async function bootstrap(): Promise<void> {
       return new Response("Not found", { status: 404 });
     }
     try {
-      const data = await readFile(filePath);
-      return new Response(data, {
-        status: 200,
-        headers: {
-          "Content-Type": AUDIO_MIME_TYPES[extname(filePath).toLowerCase()] ?? "application/octet-stream",
-          "Content-Length": String(data.byteLength),
-        },
-      });
+      return await createMediaResponse(
+        filePath,
+        request.headers.get("Range"),
+        AUDIO_MIME_TYPES[extname(filePath).toLowerCase()] ?? "application/octet-stream",
+      );
     } catch (error: unknown) {
       // A resolved card pointed at a file we could not read — unexpected at this
       // boundary, so log it rather than silently 404. Earlier 404s above (bad URL

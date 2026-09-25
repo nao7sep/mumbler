@@ -25,7 +25,6 @@ vi.mock("electron", () => ({
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
 }));
 
-vi.mock("node:fs/promises", () => ({ readFile: vi.fn() }));
 
 const runtime = vi.hoisted(() => ({
   currentLogger: () => ({ error: (...args: unknown[]) => { state.loggerErrors.push(args); } }),
