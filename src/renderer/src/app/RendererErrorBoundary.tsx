@@ -1,5 +1,6 @@
 import React from "react";
 import { describeRendererError } from "./presentFailure";
+import { documentTranslator } from "../i18n/I18nContext";
 
 export class RendererErrorBoundary extends React.Component<React.PropsWithChildren, { failed: boolean }> {
   override state = { failed: false };
@@ -22,12 +23,14 @@ export class RendererErrorBoundary extends React.Component<React.PropsWithChildr
 
   override render(): React.ReactNode {
     if (!this.state.failed) return this.props.children;
+    // Outside the language provider: speak the language the document last declared.
+    const { t } = documentTranslator();
     return (
       <main className="renderer-failure" role="alert">
         <div className="renderer-failure__card">
-          <h1>Mumbler could not keep this window open.</h1>
-          <p>Reload the window to recover. Your recordings and saved files are unchanged.</p>
-          <button className="button button--primary" type="button" onClick={() => window.location.reload()}>Reload window</button>
+          <h1>{t("boundary.title")}</h1>
+          <p>{t("boundary.body")}</p>
+          <button className="button button--primary" type="button" onClick={() => window.location.reload()}>{t("boundary.reload")}</button>
         </div>
       </main>
     );

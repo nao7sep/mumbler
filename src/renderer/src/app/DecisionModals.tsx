@@ -1,11 +1,16 @@
 import type { ReactElement } from "react";
 
+import type { MessageKey } from "@shared/i18n/catalogues";
+import type { Message } from "@shared/i18n/translate";
+
 import { DecisionModal } from "./DecisionModal";
+import { useI18n } from "../i18n/I18nContext";
 
 // The concrete confirm/alert surfaces, each a named wrapper over the generic
 // DecisionModal so it is findable by name (and greppable) rather than living as
 // anonymous inline JSX in App.tsx. Each owns its title, action labels/variants,
-// and safe-dismiss wiring; dynamic text and handlers arrive as props.
+// and safe-dismiss wiring; dynamic text and handlers arrive as props, dynamic
+// text as messages rendered here in the interface language.
 
 export function DiscardSettingsModal({
   onKeepEditing,
@@ -14,13 +19,14 @@ export function DiscardSettingsModal({
   onKeepEditing: () => void;
   onDiscard: () => void;
 }): ReactElement {
+  const { t } = useI18n();
   return (
     <DecisionModal
-      title="Discard Changes?"
-      body="You have unsaved changes. Discard them and close settings?"
+      title={t("decision.discardTitle")}
+      body={t("decision.discardSettingsBody")}
       actions={[
-        { label: "Keep Editing", onClick: onKeepEditing },
-        { label: "Discard", variant: "danger", onClick: onDiscard },
+        { label: t("decision.keepEditing"), onClick: onKeepEditing },
+        { label: t("decision.discard"), variant: "danger", onClick: onDiscard },
       ]}
       onRequestClose={onKeepEditing}
     />
@@ -34,13 +40,14 @@ export function DiscardReviewModal({
   onKeepEditing: () => void;
   onDiscard: () => void;
 }): ReactElement {
+  const { t } = useI18n();
   return (
     <DecisionModal
-      title="Discard Changes?"
-      body="You have unsaved timestamp edits. Discard them and cancel the import?"
+      title={t("decision.discardTitle")}
+      body={t("decision.discardReviewBody")}
       actions={[
-        { label: "Keep Editing", onClick: onKeepEditing },
-        { label: "Discard", variant: "danger", onClick: onDiscard },
+        { label: t("decision.keepEditing"), onClick: onKeepEditing },
+        { label: t("decision.discard"), variant: "danger", onClick: onDiscard },
       ]}
       onRequestClose={onKeepEditing}
     />
@@ -62,16 +69,17 @@ export function SaveConflictModal({
   onCancel: () => void;
   onOverwrite: () => void;
   onAddSuffix: () => void;
-  errorMessage?: string | null;
+  errorMessage?: Message | null;
 }): ReactElement {
+  const { t } = useI18n();
   return (
     <DecisionModal
-      title="File Exists"
-      body={`One or more output files already exist: ${audioPath}, ${jsonPath}, ${markdownPath}.`}
+      title={t("decision.fileExistsTitle")}
+      body={t("decision.fileExistsBody", { paths: [audioPath, jsonPath, markdownPath] })}
       actions={[
-        { label: "Cancel", onClick: onCancel },
-        { label: "Overwrite", variant: "danger", onClick: onOverwrite },
-        { label: "Add Suffix", variant: "primary", onClick: onAddSuffix },
+        { label: t("common.cancel"), onClick: onCancel },
+        { label: t("decision.overwrite"), variant: "danger", onClick: onOverwrite },
+        { label: t("decision.addSuffix"), variant: "primary", onClick: onAddSuffix },
       ]}
       onRequestClose={onCancel}
       errorMessage={errorMessage}
@@ -80,23 +88,24 @@ export function SaveConflictModal({
 }
 
 export function GenerateConfirmModal({
-  targetLabel,
+  title,
   body,
   onCancel,
   onGenerate,
 }: {
-  targetLabel: string;
-  body: string;
+  title: MessageKey;
+  body: Message;
   onCancel: () => void;
   onGenerate: () => void;
 }): ReactElement {
+  const { t, text } = useI18n();
   return (
     <DecisionModal
-      title={`Generate ${targetLabel}?`}
-      body={body}
+      title={t(title)}
+      body={text(body)}
       actions={[
-        { label: "Cancel", onClick: onCancel },
-        { label: "Generate", variant: "danger", onClick: onGenerate },
+        { label: t("common.cancel"), onClick: onCancel },
+        { label: t("transcribe.generate"), variant: "danger", onClick: onGenerate },
       ]}
       onRequestClose={onCancel}
     />
@@ -108,15 +117,16 @@ export function AppWideErrorModal({
   message,
   onDismiss,
 }: {
-  title: string;
-  message: string;
+  title: Message;
+  message: Message;
   onDismiss: () => void;
 }): ReactElement {
+  const { t, text } = useI18n();
   return (
     <DecisionModal
-      title={title}
-      body={message}
-      actions={[{ label: "Close", variant: "primary", onClick: onDismiss }]}
+      title={text(title)}
+      body={text(message)}
+      actions={[{ label: t("common.close"), variant: "primary", onClick: onDismiss }]}
       onRequestClose={onDismiss}
     />
   );
@@ -128,18 +138,19 @@ export function RemoveRecordingModal({
   onRemove,
   errorMessage,
 }: {
-  body: string;
+  body: Message;
   onCancel: () => void;
   onRemove: () => void;
-  errorMessage?: string | null;
+  errorMessage?: Message | null;
 }): ReactElement {
+  const { t, text } = useI18n();
   return (
     <DecisionModal
-      title="Remove Recording?"
-      body={body}
+      title={t("decision.removeTitle")}
+      body={text(body)}
       actions={[
-        { label: "Cancel", onClick: onCancel },
-        { label: "Remove", variant: "danger", onClick: onRemove },
+        { label: t("common.cancel"), onClick: onCancel },
+        { label: t("common.remove"), variant: "danger", onClick: onRemove },
       ]}
       onRequestClose={onCancel}
       errorMessage={errorMessage}

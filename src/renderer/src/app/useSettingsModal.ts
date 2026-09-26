@@ -2,11 +2,12 @@ import { useMemo, useState, useRef, type Dispatch, type SetStateAction } from "r
 
 import type { AppSnapshot, SettingsDraft } from "@shared/app-shell";
 import { presentFailure } from "./presentFailure";
+import { message, type Message } from "@shared/i18n/translate";
 
 interface UseSettingsModalOptions {
   onSnapshotUpdate: (snapshot: AppSnapshot) => void;
-  onError: (message: string) => void;
-  onNotice: (message: string) => void;
+  onError: (message: Message) => void;
+  onNotice: (message: Message) => void;
 }
 
 interface UseSettingsModalResult {
@@ -17,10 +18,10 @@ interface UseSettingsModalResult {
   isSavingApiKey: boolean;
   isPickingSettingsOutputDirectory: boolean;
   isPickingSettingsBackupDirectory: boolean;
-  settingsErrorMessage: string | null;
+  settingsErrorMessage: Message | null;
   showDiscardConfirm: boolean;
   setSettingsDraft: Dispatch<SetStateAction<SettingsDraft | null>>;
-  setSettingsErrorMessage: Dispatch<SetStateAction<string | null>>;
+  setSettingsErrorMessage: Dispatch<SetStateAction<Message | null>>;
   handleOpenSettings: () => Promise<void>;
   handlePickSettingsOutputDirectory: () => Promise<void>;
   handlePickSettingsBackupDirectory: () => Promise<void>;
@@ -45,7 +46,7 @@ export function useSettingsModal({
   const [isSavingApiKey, setIsSavingApiKey] = useState(false);
   const [isPickingSettingsOutputDirectory, setIsPickingSettingsOutputDirectory] = useState(false);
   const [isPickingSettingsBackupDirectory, setIsPickingSettingsBackupDirectory] = useState(false);
-  const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null);
+  const [settingsErrorMessage, setSettingsErrorMessage] = useState<Message | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const initialDraftRef = useRef<SettingsDraft | null>(null);
 
@@ -67,7 +68,7 @@ export function useSettingsModal({
       initialDraftRef.current = draft;
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
-      onError(presentFailure(error, "Settings could not be loaded. Close and reopen Settings to try again.", "settings load failed"));
+      onError(presentFailure(error, message("error.settingsLoad"), "settings load failed"));
     } finally {
       setIsLoadingSettings(false);
     }
@@ -89,7 +90,7 @@ export function useSettingsModal({
       }
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
-      setSettingsErrorMessage(presentFailure(error, "The output folder could not be selected. The current folder is unchanged; try again.", "settings output folder selection failed"));
+      setSettingsErrorMessage(presentFailure(error, message("error.chooseOutputFolder"), "settings output folder selection failed"));
     } finally {
       setIsPickingSettingsOutputDirectory(false);
     }
@@ -111,7 +112,7 @@ export function useSettingsModal({
       }
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
-      setSettingsErrorMessage(presentFailure(error, "The backup folder could not be selected. The current folder is unchanged; try again.", "settings backup folder selection failed"));
+      setSettingsErrorMessage(presentFailure(error, message("error.chooseBackupFolder"), "settings backup folder selection failed"));
     } finally {
       setIsPickingSettingsBackupDirectory(false);
     }
@@ -130,9 +131,9 @@ export function useSettingsModal({
       setSettingsErrorMessage(null);
       setShowDiscardConfirm(false);
       initialDraftRef.current = null;
-      onNotice("Settings saved.");
+      onNotice(message("notice.settingsSaved"));
     } catch (error: unknown) {
-      setSettingsErrorMessage(presentFailure(error, "Settings could not be saved. Your changes are still shown; try again.", "settings save failed"));
+      setSettingsErrorMessage(presentFailure(error, message("error.settingsSave"), "settings save failed"));
     } finally {
       setIsSavingSettings(false);
     }
@@ -161,9 +162,9 @@ export function useSettingsModal({
       onSnapshotUpdate(nextSnapshot);
       applyHasKey(nextSnapshot.settingsSummary?.hasGeminiApiKey ?? true);
       setSettingsErrorMessage(null);
-      onNotice("Gemini API key saved.");
+      onNotice(message("notice.apiKeySaved"));
     } catch (error: unknown) {
-      setSettingsErrorMessage(presentFailure(error, "The Gemini API key could not be saved. The previous key remains in use; try again.", "Gemini API key save failed"));
+      setSettingsErrorMessage(presentFailure(error, message("error.apiKeySave"), "Gemini API key save failed"));
     } finally {
       setIsSavingApiKey(false);
     }
@@ -180,11 +181,11 @@ export function useSettingsModal({
       // the message reflects what actually happened rather than assuming removal.
       onNotice(
         nextSnapshot.settingsSummary?.hasGeminiApiKey
-          ? "Stored key removed; an environment key is still in use."
-          : "Gemini API key removed.",
+          ? message("notice.apiKeyRemovedEnvRemains")
+          : message("notice.apiKeyRemoved"),
       );
     } catch (error: unknown) {
-      setSettingsErrorMessage(presentFailure(error, "The Gemini API key could not be removed. The saved key remains in use; try again.", "Gemini API key removal failed"));
+      setSettingsErrorMessage(presentFailure(error, message("error.apiKeyRemove"), "Gemini API key removal failed"));
     } finally {
       setIsSavingApiKey(false);
     }
@@ -205,7 +206,7 @@ export function useSettingsModal({
       );
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
-      setSettingsErrorMessage(presentFailure(error, "Default prompts could not be loaded. Your current prompts are unchanged; try again.", "default prompts load failed"));
+      setSettingsErrorMessage(presentFailure(error, message("error.defaultPromptsLoad"), "default prompts load failed"));
     }
   }
 
@@ -228,7 +229,7 @@ export function useSettingsModal({
       );
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
-      setSettingsErrorMessage(presentFailure(error, "Default models could not be loaded. Your current model list is unchanged; try again.", "default models load failed"));
+      setSettingsErrorMessage(presentFailure(error, message("error.defaultModelsLoad"), "default models load failed"));
     }
   }
 

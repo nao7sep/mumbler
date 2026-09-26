@@ -110,13 +110,13 @@ describe("recomputeUtcFromLocal / recomputeLocalFromUtc", () => {
   it("reports an error for malformed local input", () => {
     const result = recomputeUtcFromLocal("2026/04/22 09:44", "Asia/Tokyo");
     expect(result.utcMs).toBeNull();
-    expect(result.error).toMatch(/local time/i);
+    expect(result.error).toBe("timestamp.localFormat");
   });
 
   it("reports an error for an unsupported timezone", () => {
     const result = recomputeUtcFromLocal("2026-04-22 09:44:00", "Mars/Olympus");
     expect(result.utcMs).toBeNull();
-    expect(result.error).toMatch(/timezone/i);
+    expect(result.error).toBe("timestamp.invalidZone");
   });
 
   it("accepts a numeric UTC input for recomputeLocalFromUtc", () => {
@@ -194,11 +194,11 @@ describe("validation helpers", () => {
 
   it("getLocalTimestampError accepts valid and rejects invalid", () => {
     expect(getLocalTimestampError("2026-04-22 09:44:00")).toBeNull();
-    expect(getLocalTimestampError("2026-04-22 9:44")).toMatch(/local time/i);
+    expect(getLocalTimestampError("2026-04-22 9:44")).toBe("timestamp.localFormat");
   });
 
   it("getUtcTimestampError accepts valid and rejects invalid", () => {
     expect(getUtcTimestampError("2026-04-22 09:44:00")).toBeNull();
-    expect(getUtcTimestampError("garbage")).toMatch(/UTC/i);
+    expect(getUtcTimestampError("garbage")).toBe("timestamp.utcFormat");
   });
 });

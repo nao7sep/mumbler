@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppWideErrorModal } from "@renderer/app/DecisionModals";
+import { message } from "@shared/i18n/translate";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -26,8 +27,8 @@ describe("AppWideErrorModal", () => {
 
     await act(async () => {
       root?.render(React.createElement(AppWideErrorModal, {
-        title: "Mumbler could not continue",
-        message: "Restart Mumbler to continue.",
+        title: message("diagnostic.unexpectedTitle"),
+        message: message("diagnostic.mainBody"),
         onDismiss: vi.fn(),
       }));
     });

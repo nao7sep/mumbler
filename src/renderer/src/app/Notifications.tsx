@@ -1,14 +1,17 @@
 import type { ReactElement } from "react";
 import type { MumblerCard } from "@shared/app-shell";
 
+import { message, type Message } from "@shared/i18n/translate";
+
 import { CloseIcon } from "./Icon";
+import { useI18n } from "../i18n/I18nContext";
 
 export type AppNotification =
-  | { id: string; message: string; kind: "toast" }
+  | { id: string; message: Message; kind: "toast" }
   | {
       id: string;
       owner: string;
-      message: string;
+      message: Message;
       kind: "persistent";
       variant: "info" | "error";
     };
@@ -32,7 +35,7 @@ export function clearPersistentOwner(
 }
 
 export type PipelineCompletionNotification =
-  { message: string; kind: "toast" };
+  { message: Message; kind: "toast" };
 
 // Only a finished generation announces itself; a save handing its card back as
 // Ready to Save (a conflict, a cancel, a failure) is reported by the save itself.
@@ -41,7 +44,7 @@ export function pipelineCompletionNotification(
   card: MumblerCard,
 ): PipelineCompletionNotification | null {
   if (card.status === "Ready to Save" && previous.status !== "Saving") {
-    return { message: `Ready to save: ${card.originalFilename}`, kind: "toast" };
+    return { message: message("notice.readyToSave", { file: card.originalFilename }), kind: "toast" };
   }
   return null;
 }
@@ -55,6 +58,7 @@ export function PersistentNotifications({
   notifications,
   onDismiss,
 }: NotificationProps): ReactElement | null {
+  const i18n = useI18n();
   const persistent = notifications.filter(
     (notification): notification is PersistentNotification =>
       notification.kind === "persistent",
@@ -70,12 +74,12 @@ export function PersistentNotifications({
           aria-atomic="true"
           className={`persistent-notice persistent-notice--${notification.variant}`}
         >
-          <span className="persistent-notice__message">{notification.message}</span>
+          <span className="persistent-notice__message">{i18n.text(notification.message)}</span>
           <button
             type="button"
             className="result-close"
             onClick={() => onDismiss(notification.id)}
-            aria-label="Close notification"
+            aria-label={i18n.t("notice.close")}
           >
             <CloseIcon />
           </button>
@@ -89,6 +93,7 @@ export function ToastNotifications({
   notifications,
   onDismiss,
 }: NotificationProps): ReactElement | null {
+  const i18n = useI18n();
   const toasts = notifications.filter(
     (notification): notification is Extract<AppNotification, { kind: "toast" }> =>
       notification.kind === "toast",
@@ -105,7 +110,7 @@ export function ToastNotifications({
           className="toast toast--info"
           onClick={() => onDismiss(notification.id)}
         >
-          {notification.message}
+          {i18n.text(notification.message)}
         </div>
       ))}
     </div>

@@ -339,13 +339,13 @@ describe("ApplicationRuntime dropped-path import authority", () => {
       expect(mixed.duplicateImports).toEqual([firstAudio]);
       expect(mixed.failedImports).toEqual([
         {
-          sourcePath: "Empty path",
-          message: "No usable local file path was available.",
+          sourcePath: "",
+          message: { key: "import.noLocalPath" },
           kind: "invalid",
         },
         {
           sourcePath: unsupported,
-          message: "Unsupported audio file type.",
+          message: { key: "import.unsupportedType" },
           kind: "invalid",
         },
         expect.objectContaining({ sourcePath: unavailable, kind: "failure" }),

@@ -1,4 +1,6 @@
 import type { SettingsDraft } from "./app-shell";
+import type { MessageKey } from "./i18n/catalogues";
+import { message, type Message } from "./i18n/translate";
 
 // Single source of truth for what makes a numeric setting valid, shared by the
 // main-process commit validation (settings-schema) and the renderer's Settings
@@ -26,26 +28,27 @@ export type NumericSettingField =
 
 interface NumericSettingRule {
   field: NumericSettingField;
-  label: string;
   isValid: (value: number) => boolean;
-  requirement: string;
+  // The whole sentence for this field, so no language has to build it from a
+  // label and a requirement.
+  issue: MessageKey;
 }
 
 export interface NumericSettingIssue {
   field: NumericSettingField;
-  message: string;
+  message: Message;
 }
 
 const NUMERIC_SETTING_RULES: NumericSettingRule[] = [
-  { field: "skipIntervalSec", label: "Skip interval", isValid: isPositiveIntegerSetting, requirement: "a positive integer" },
-  { field: "previewSnippetSeconds", label: "Preview duration", isValid: isPositiveIntegerSetting, requirement: "a positive integer" },
-  { field: "concurrencyLimit", label: "Concurrent transcriptions", isValid: isPositiveIntegerSetting, requirement: "a positive integer" },
-  { field: "retryMaxRetries", label: "Max retries", isValid: isPositiveIntegerSetting, requirement: "a positive integer" },
-  { field: "retryInitialDelayMs", label: "Initial retry delay", isValid: isPositiveIntegerSetting, requirement: "a positive integer" },
-  { field: "retryMaxDelayMs", label: "Max retry delay", isValid: isPositiveIntegerSetting, requirement: "a positive integer" },
-  { field: "transcriptionTimeoutMs", label: "Transcription timeout", isValid: isPositiveIntegerSetting, requirement: "a positive integer" },
-  { field: "metadataTimeoutMs", label: "Metadata generation timeout", isValid: isPositiveIntegerSetting, requirement: "a positive integer" },
-  { field: "retryJitterRatio", label: "Retry jitter", isValid: isRatioSetting, requirement: "between 0 and 1" },
+  { field: "skipIntervalSec", isValid: isPositiveIntegerSetting, issue: "settingsIssue.skipIntervalSec" },
+  { field: "previewSnippetSeconds", isValid: isPositiveIntegerSetting, issue: "settingsIssue.previewSnippetSeconds" },
+  { field: "concurrencyLimit", isValid: isPositiveIntegerSetting, issue: "settingsIssue.concurrencyLimit" },
+  { field: "retryMaxRetries", isValid: isPositiveIntegerSetting, issue: "settingsIssue.retryMaxRetries" },
+  { field: "retryInitialDelayMs", isValid: isPositiveIntegerSetting, issue: "settingsIssue.retryInitialDelayMs" },
+  { field: "retryMaxDelayMs", isValid: isPositiveIntegerSetting, issue: "settingsIssue.retryMaxDelayMs" },
+  { field: "transcriptionTimeoutMs", isValid: isPositiveIntegerSetting, issue: "settingsIssue.transcriptionTimeoutMs" },
+  { field: "metadataTimeoutMs", isValid: isPositiveIntegerSetting, issue: "settingsIssue.metadataTimeoutMs" },
+  { field: "retryJitterRatio", isValid: isRatioSetting, issue: "settingsIssue.retryJitterRatio" },
 ];
 
 // One field-addressable issue per invalid numeric setting, in form order. The
@@ -53,13 +56,6 @@ const NUMERIC_SETTING_RULES: NumericSettingRule[] = [
 // message remains the same validation truth shown to the user.
 export function getSettingsNumberIssues(draft: SettingsDraft): NumericSettingIssue[] {
   return NUMERIC_SETTING_RULES.filter((rule) => !rule.isValid(draft[rule.field])).map(
-    (rule) => ({
-      field: rule.field,
-      message: `${rule.label} must be ${rule.requirement}.`,
-    }),
+    (rule) => ({ field: rule.field, message: message(rule.issue) }),
   );
-}
-
-export function getSettingsNumberErrors(draft: SettingsDraft): string[] {
-  return getSettingsNumberIssues(draft).map((issue) => issue.message);
 }

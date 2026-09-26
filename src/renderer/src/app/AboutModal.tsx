@@ -4,6 +4,8 @@ import { ModalShell } from "./modal/ModalShell";
 import { ExternalLinkIcon } from "./Icon";
 import { InlineError } from "./InlineResult";
 import { presentFailure } from "./presentFailure";
+import { useI18n } from "../i18n/I18nContext";
+import { message, type Message } from "@shared/i18n/translate";
 
 const GITHUB_URL = "https://github.com/nao7sep/mumbler";
 
@@ -14,7 +16,8 @@ export function AboutModal({
   version: string;
   onClose: () => void;
 }): ReactElement {
-  const [linkFailures, setLinkFailures] = useState<Record<"repo" | "issues", string | undefined>>({
+  const { t, text } = useI18n();
+  const [linkFailures, setLinkFailures] = useState<Record<"repo" | "issues", Message | undefined>>({
     repo: undefined,
     issues: undefined,
   });
@@ -27,10 +30,10 @@ export function AboutModal({
       if (linkAttempts.current[owner] !== attempt) return;
       setLinkFailures((current) => ({ ...current, [owner]: undefined }));
     } catch (error) {
-      const message = owner === "repo"
-        ? "GitHub could not be opened. Try again."
-        : "Report Issue could not be opened. Try again.";
-      const presented = presentFailure(error, message, `about ${owner} link failed`);
+      const failure = owner === "repo"
+        ? message("about.repoLinkFailed")
+        : message("about.issuesLinkFailed");
+      const presented = presentFailure(error, failure, `about ${owner} link failed`);
       if (linkAttempts.current[owner] !== attempt) return;
       setLinkFailures((current) => ({
         ...current,
@@ -41,45 +44,45 @@ export function AboutModal({
 
   return (
     <ModalShell
-      title="About Mumbler"
+      title={t("about.title")}
       titleVisuallyHidden
       size="narrow"
       onRequestClose={onClose}
       describedById="about-description"
       footer={
         <button type="button" className="button button--ghost" onClick={onClose}>
-          Close
+          {t("common.close")}
         </button>
       }
     >
       <div className="modal-card__body about-content">
         <div className="about-identity">
           <p className="about-title">Mumbler</p>
-          {version ? <p className="about-version">Version {version}</p> : null}
+          {version ? <p className="about-version">{t("about.version", { version })}</p> : null}
         </div>
         <p id="about-description" className="about-copy">
-          Keep your voice recordings organized. Import, generate transcription, structure it, generate titles and slugs, and export — all in one place.
+          {t("about.description")}
         </p>
         <div className="about-links">
           <a href={GITHUB_URL} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); void openLink("repo", GITHUB_URL); }}>
             GitHub <ExternalLinkIcon />
           </a>
           <a href={`${GITHUB_URL}/issues`} target="_blank" rel="noreferrer" onClick={(event) => { event.preventDefault(); void openLink("issues", `${GITHUB_URL}/issues`); }}>
-            Report Issue <ExternalLinkIcon />
+            {t("about.reportIssue")} <ExternalLinkIcon />
           </a>
         </div>
         {linkFailures.repo ? (
           <InlineError onDismiss={() => setLinkFailures((current) => ({ ...current, repo: undefined }))}>
-            {linkFailures.repo}
+            {text(linkFailures.repo)}
           </InlineError>
         ) : null}
         {linkFailures.issues ? (
           <InlineError onDismiss={() => setLinkFailures((current) => ({ ...current, issues: undefined }))}>
-            {linkFailures.issues}
+            {text(linkFailures.issues)}
           </InlineError>
         ) : null}
         <p className="about-meta">
-          &copy; 2026 Yoshinao Inoguchi &mdash; GNU GPL v3 or later
+          {t("about.copyright", { year: "2026", author: "Yoshinao Inoguchi" })}
         </p>
       </div>
     </ModalShell>

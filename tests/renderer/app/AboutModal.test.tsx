@@ -53,14 +53,14 @@ describe("AboutModal external results", () => {
     await act(async () => { links[0].click(); links[1].click(); });
 
     expect(document.body.textContent).toContain("GitHub could not be opened. Try again.");
-    expect(document.body.textContent).toContain("Report Issue could not be opened. Try again.");
+    expect(document.body.textContent).toContain("The issue tracker could not be opened. Try again.");
     expect(document.body.textContent).not.toContain("EACCES");
     expect(reportRendererDiagnostic).toHaveBeenCalledTimes(2);
 
     openExternal.mockResolvedValueOnce();
     await act(async () => links[0].click());
     expect(document.body.textContent).not.toContain("GitHub could not be opened. Try again.");
-    expect(document.body.textContent).toContain("Report Issue could not be opened. Try again.");
+    expect(document.body.textContent).toContain("The issue tracker could not be opened. Try again.");
   });
 
   it("does not let an older link settlement replace the current attempt", async () => {

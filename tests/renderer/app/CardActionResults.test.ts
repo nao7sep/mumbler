@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CardActionResults } from "@renderer/app/CardActionResults";
+import { message } from "@shared/i18n/translate";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,9 +30,9 @@ describe("CardActionResults", () => {
       root?.render(React.createElement(CardActionResults, {
         cardId: "card-a",
         results: [
-          { cardId: "card-a", operation: "save", message: "Save failed" },
-          { cardId: "card-a", operation: "copy", message: "Copy failed" },
-          { cardId: "card-b", operation: "save", message: "Other card failed" },
+          { cardId: "card-a", operation: "save", message: message("error.saveRecording") },
+          { cardId: "card-a", operation: "copy", message: message("error.copy.title") },
+          { cardId: "card-b", operation: "save", message: message("error.removeRecording") },
         ],
         onDismiss,
       }));
@@ -39,9 +40,9 @@ describe("CardActionResults", () => {
 
     const alerts = Array.from(document.querySelectorAll<HTMLElement>('[role="alert"]'));
     expect(alerts).toHaveLength(2);
-    expect(document.body.textContent).toContain("Save failed");
-    expect(document.body.textContent).toContain("Copy failed");
-    expect(document.body.textContent).not.toContain("Other card failed");
+    expect(document.body.textContent).toContain("The recording could not be saved.");
+    expect(document.body.textContent).toContain("The title could not be copied.");
+    expect(document.body.textContent).not.toContain("The recording could not be removed.");
 
     await act(async () => {
       document.querySelector<HTMLButtonElement>('button[aria-label="Close result"]')?.click();

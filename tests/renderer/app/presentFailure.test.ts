@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { presentFailure } from "@renderer/app/presentFailure";
+import { message } from "@shared/i18n/translate";
 
 afterEach(() => {
   delete (window as unknown as { mumbler?: unknown }).mumbler;
@@ -17,10 +18,10 @@ describe("presentFailure", () => {
     const cause = new TypeError("EACCES /private/tmp/MUMBLER_CAUSE_SENTINEL");
     const error = new RangeError("Error invoking remote method MUMBLER_SENTINEL", { cause });
 
-    const result = presentFailure(error, "The recording could not be saved. Try again.", "recording save failed");
+    const result = presentFailure(error, message("error.saveRecording"), "recording save failed");
 
-    expect(result).toBe("The recording could not be saved. Try again.");
-    expect(result).not.toMatch(/EACCES|private\/tmp|SENTINEL|invoking remote method/i);
+    expect(result).toEqual(message("error.saveRecording"));
+    expect(JSON.stringify(result)).not.toMatch(/EACCES|private\/tmp|SENTINEL|invoking remote method/i);
     expect(reportRendererDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
       name: "RangeError",
       message: expect.stringContaining("MUMBLER_SENTINEL"),
@@ -33,7 +34,7 @@ describe("presentFailure", () => {
     const reportRendererDiagnostic = vi.fn().mockRejectedValue(new Error("bridge rejected"));
     Object.defineProperty(window, "mumbler", { configurable: true, value: { reportRendererDiagnostic } });
 
-    presentFailure(new Error("original diagnostic"), "Authored copy", "test source");
+    presentFailure(new Error("original diagnostic"), message("error.saveRecording"), "test source");
     await Promise.resolve();
 
     expect(consoleError).toHaveBeenCalledWith(

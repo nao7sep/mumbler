@@ -66,7 +66,7 @@ describe("findMatchingGlobalCommand", () => {
     };
 
     for (const command of COMMAND_DEFINITIONS) {
-      const expected = command.group === "Queue" ? null : command.id;
+      const expected = command.groupKey === "commandGroup.queue" ? null : command.id;
       expect(findMatchingGlobalCommand(keydown({ key: keyForCommand[command.id] }))).toBe(expected);
     }
 

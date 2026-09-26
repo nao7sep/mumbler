@@ -21,11 +21,15 @@ const translations = LANGUAGES.filter((language) => language !== "en");
 
 // Keys whose text is the same word in that language as in English.
 const SAME_AS_ENGLISH: Partial<Record<Language, readonly string[]>> = {
-  de: ["settings.languageSystem", "settings.timezoneSystem"],
-  es: ["nativeMenu.zoom"],
-  fr: ["nativeMenu.services"],
-  it: ["nativeMenu.file"],
-  "pt-BR": ["nativeMenu.zoom"],
+  de: ["settings.languageSystem", "settings.timezoneSystem", "settings.themeSystem", "step.slug", "result.slug", "detail.tabInfo", "audio.title", "audio.format", "audio.bitrate", "units.hertz", "settings.tabPrompts", "settings.import", "settings.gemini", "about.version", "tools.columnStatus", "player.cursor", "player.pause"],
+  es: ["nativeMenu.zoom", "step.slug", "result.slug", "audio.title", "units.hertz", "settings.tabGeneral", "settings.gemini", "player.cursor"],
+  fr: ["nativeMenu.services", "step.transcription", "step.slug", "result.transcription", "result.slug", "audio.title", "audio.format", "units.hertz", "options.title", "settings.tabPrompts", "settings.gemini", "about.version", "tools.columnActions", "player.pause"],
+  it: ["nativeMenu.file", "step.slug", "result.slug", "detail.tabInfo", "detail.tabOutput", "audio.title", "audio.bitrate", "units.hertz", "settings.gemini"],
+  "pt-BR": ["nativeMenu.zoom", "step.slug", "result.slug", "units.hertz", "settings.tabPrompts", "settings.gemini", "tools.columnStatus", "player.cursor"],
+  ru: ["settings.gemini"],
+  ja: ["units.kbps", "units.hertz", "settings.tabAi", "settings.gemini"],
+  ko: ["units.kbps", "units.hertz", "settings.tabAi", "settings.gemini"],
+  "zh-Hans": ["units.kbps", "units.hertz", "settings.tabAi", "settings.gemini"],
 };
 
 // The hidden-character-conventions set, plus the no-break spaces, figure space,

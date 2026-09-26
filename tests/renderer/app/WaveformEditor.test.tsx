@@ -302,7 +302,7 @@ describe("setting the markers", () => {
     expect(markerInput("front").disabled).toBe(true);
     expect(button("Set Front at Cursor").disabled).toBe(true);
     expect(button("Clear Markers").disabled).toBe(true);
-    expect(button("Duplicate Card").disabled).toBe(true);
+    expect(button("Duplicate Recording").disabled).toBe(true);
   });
 });
 
@@ -401,11 +401,11 @@ describe("duplicating the recording", () => {
   it("asks for a duplicate, and says so when that fails", async () => {
     await mountEditor();
 
-    await click("Duplicate Card");
+    await click("Duplicate Recording");
     expect(onDuplicateCard).toHaveBeenCalledExactlyOnceWith("card-1");
 
     onDuplicateCard.mockRejectedValue(new Error("no space"));
-    await click("Duplicate Card");
+    await click("Duplicate Recording");
     expect(text()).toContain("The recording could not be duplicated");
   });
 });

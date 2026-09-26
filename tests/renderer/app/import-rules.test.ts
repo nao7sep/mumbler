@@ -7,6 +7,7 @@ import {
   parseDroppedPaths,
   reconcilePendingReviewDrafts,
 } from "@renderer/app/import-rules";
+import { message } from "@shared/i18n/translate";
 
 const item = (id: string): PendingImportReviewItem => ({ id }) as unknown as PendingImportReviewItem;
 
@@ -25,7 +26,7 @@ describe("parseDroppedPaths", () => {
       paths: ["/abs/audio.wav", "/abs/audio.wav"],
       unavailable: [{
         sourcePath: "b",
-        message: "The local file path could not be read.",
+        message: message("import.pathUnreadable"),
       }],
     });
     expect(JSON.stringify(paths)).not.toMatch(/EACCES|private\/tmp|MUMBLER_SENTINEL|invoking remote method/i);
@@ -41,7 +42,7 @@ describe("parseDroppedPaths", () => {
       paths: [],
       unavailable: [{
         sourcePath: "a",
-        message: "No usable local file path was available.",
+        message: message("import.noLocalPath"),
       }],
     });
   });

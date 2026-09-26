@@ -6,6 +6,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useImportFlow } from "@renderer/app/useImportFlow";
+import { createTranslator, message, type Message } from "@shared/i18n/translate";
+
+const english = createTranslator("en");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -21,7 +24,7 @@ beforeEach(() => {
   });
 });
 
-function Harness({ onError }: { onError: (owner: string, message: string) => void }): ReactElement {
+function Harness({ onError }: { onError: (owner: string, message: Message) => void }): ReactElement {
   const flow = useImportFlow({
     snapshot: null,
     onSnapshotUpdate: vi.fn(),
@@ -44,7 +47,7 @@ function Harness({ onError }: { onError: (owner: string, message: string) => voi
     flow.importResult
       ? React.createElement("p", {
           "data-result": flow.importResult.severity,
-          children: flow.importResult.message,
+          children: english.text(flow.importResult.message),
         })
       : null,
   );
@@ -155,7 +158,7 @@ describe("useImportFlow drag acceptance", () => {
       snapshot: {},
       attemptedPaths: ["/fixtures/sample.wav", "/fixtures/notes.txt"],
       importedCount: 1,
-      failedImports: [{ sourcePath: "/fixtures/notes.txt", message: "Unsupported audio file type.", kind: "invalid" }],
+      failedImports: [{ sourcePath: "/fixtures/notes.txt", message: message("import.unsupportedType"), kind: "invalid" }],
       duplicateImports: [],
     });
     const container = document.createElement("div");
@@ -177,7 +180,7 @@ describe("useImportFlow drag acceptance", () => {
       "/fixtures/notes.txt",
     ]);
     expect(container.querySelector('[data-result="warning"]')?.textContent).toContain(
-      "Imported 1 file; 1 item could not be imported",
+      "Imported 1 file. 1 item could not be imported.",
     );
   });
 
@@ -187,7 +190,7 @@ describe("useImportFlow drag acceptance", () => {
         snapshot: {},
         attemptedPaths: ["/fixtures/notes.txt"],
         importedCount: 0,
-        failedImports: [{ sourcePath: "/fixtures/notes.txt", message: "Unsupported audio file type.", kind: "invalid" }],
+        failedImports: [{ sourcePath: "/fixtures/notes.txt", message: message("import.unsupportedType"), kind: "invalid" }],
         duplicateImports: [],
       })
       .mockResolvedValueOnce({
@@ -222,7 +225,7 @@ describe("useImportFlow drag acceptance", () => {
         snapshot: {},
         attemptedPaths: ["/fixtures/sample.wav"],
         importedCount: 0,
-        failedImports: [{ sourcePath: "/fixtures/sample.wav", message: "Copy failed.", kind: "failure" }],
+        failedImports: [{ sourcePath: "/fixtures/sample.wav", message: message("import.failed"), kind: "failure" }],
         duplicateImports: [],
       })
       .mockResolvedValueOnce({
@@ -279,7 +282,7 @@ describe("useImportFlow drag acceptance", () => {
 
     expect(importDroppedPaths).toHaveBeenCalledWith(["/fixtures/sample.wav"]);
     expect(container.querySelector('[data-result="warning"]')?.textContent).toContain(
-      "unavailable.wav — The local file path could not be read.",
+      "unavailable.wav: The local file path could not be read.",
     );
   });
 
@@ -318,7 +321,7 @@ describe("useImportFlow drag acceptance", () => {
       snapshot: {},
       attemptedPaths: ["/fixtures/notes.txt"],
       importedCount: 0,
-      failedImports: [{ sourcePath: "/fixtures/notes.txt", message: "Unsupported audio file type.", kind: "invalid" }],
+      failedImports: [{ sourcePath: "/fixtures/notes.txt", message: message("import.unsupportedType"), kind: "invalid" }],
       duplicateImports: [],
     });
     const container = document.createElement("div");
@@ -332,7 +335,7 @@ describe("useImportFlow drag acceptance", () => {
     });
 
     expect(container.querySelector('[data-result="warning"]')?.textContent).toContain(
-      "/fixtures/notes.txt — Unsupported audio file type.",
+      "/fixtures/notes.txt: Unsupported audio file type.",
     );
   });
 
@@ -356,7 +359,7 @@ describe("useImportFlow drag acceptance", () => {
       snapshot: {},
       attemptedPaths: ["/fixtures/sample.wav"],
       importedCount: 0,
-      failedImports: [{ sourcePath: "/fixtures/sample.wav", message: "Copy failed.", kind: "failure" }],
+      failedImports: [{ sourcePath: "/fixtures/sample.wav", message: message("import.failed"), kind: "failure" }],
       duplicateImports: [],
     });
     const container = document.createElement("div");
@@ -370,7 +373,7 @@ describe("useImportFlow drag acceptance", () => {
       await Promise.resolve();
     });
 
-    expect(container.querySelector('[data-result="error"]')?.textContent).toContain("Copy failed.");
+    expect(container.querySelector('[data-result="error"]')?.textContent).toContain("Mumbler could not import this file.");
   });
 });
 
@@ -397,7 +400,7 @@ describe("useImportFlow review cancel", () => {
     typeof useImportFlow
   >[0]["snapshot"];
 
-  function ReviewHarness({ onError }: { onError: (owner: string, message: string) => void }): ReactElement {
+  function ReviewHarness({ onError }: { onError: (owner: string, message: Message) => void }): ReactElement {
     const flow = useImportFlow({
       snapshot,
       onSnapshotUpdate: vi.fn(),
@@ -438,7 +441,8 @@ describe("useImportFlow review cancel", () => {
     });
 
     expect(cancelPendingImports).toHaveBeenCalledWith(["pending-1"]);
-    expect(onError).toHaveBeenCalledWith("import-review-cancel", expect.stringContaining("The review remains open"));
+    expect(onError).toHaveBeenCalledWith("import-review-cancel", message("error.reviewCancel"));
+    expect(english.text(message("error.reviewCancel"))).toContain("The review remains open");
     expect(button?.dataset.drafts, "the review is still shown").toBe("1");
   });
 });

@@ -1,5 +1,7 @@
 import { type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
 
+import { useI18n } from "../i18n/I18nContext";
+
 /**
  * The vertical drag handle between the queue and detail panes. It owns only the
  * pointer gesture: on pointer-down it captures the start, streams the new width
@@ -24,6 +26,7 @@ export function PaneSplitter({
   onResize: (width: number) => void;
   onCommit: (width: number) => void;
 }): ReactElement {
+  const { t } = useI18n();
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
     event.preventDefault();
     const startX = event.clientX;
@@ -54,7 +57,7 @@ export function PaneSplitter({
       className="workspace-splitter"
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize queue pane"
+      aria-label={t("queue.resizePane")}
       onPointerDown={onPointerDown}
     >
       <span className="workspace-splitter__grip" aria-hidden="true" />

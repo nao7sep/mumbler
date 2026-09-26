@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import { useComposing, isComposingKeyboardEvent } from "../useComposing";
 import { getFocusableElements, trapTabFocus } from "./focusTrap";
 import { CloseIcon } from "../Icon";
+import { useI18n } from "../../i18n/I18nContext";
 import {
   MODAL_BASE_Z_INDEX,
   getModalLayer,
@@ -77,6 +78,7 @@ export function ModalShell({
   footer,
   children,
 }: ModalShellProps): ReactElement {
+  const { t } = useI18n();
   const titleId = useId();
   const cardRef = useRef<HTMLElement>(null);
   const composing = useComposing();
@@ -198,7 +200,7 @@ export function ModalShell({
               className="modal-close"
               onClick={onRequestClose}
               disabled={closeDisabled}
-              aria-label="Close"
+              aria-label={t("common.close")}
             >
               <CloseIcon />
             </button>

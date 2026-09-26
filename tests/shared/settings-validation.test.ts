@@ -1,8 +1,9 @@
+import { createTranslator } from "@shared/i18n/translate";
 import { describe, expect, it } from "vitest";
 
 import type { SettingsDraft } from "@shared/app-shell";
 import {
-  getSettingsNumberErrors,
+  getSettingsNumberIssues,
   isPositiveIntegerSetting,
   isRatioSetting,
 } from "@shared/settings-validation";
@@ -67,7 +68,12 @@ describe("isRatioSetting", () => {
   });
 });
 
-describe("getSettingsNumberErrors", () => {
+const english = createTranslator("en");
+function getSettingsNumberErrors(draft: SettingsDraft): string[] {
+  return getSettingsNumberIssues(draft).map((issue) => english.text(issue.message));
+}
+
+describe("getSettingsNumberIssues", () => {
   it("returns no errors for a fully valid draft", () => {
     expect(getSettingsNumberErrors(validDraft())).toEqual([]);
   });

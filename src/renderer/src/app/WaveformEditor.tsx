@@ -13,6 +13,8 @@ import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
 
 import type { CardTrim, MumblerCard } from "@shared/app-shell";
+import { useI18n } from "../i18n/I18nContext";
+import { message, type Message } from "@shared/i18n/translate";
 import { InlineError } from "./InlineResult";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 import { presentFailure } from "./presentFailure";
@@ -116,7 +118,9 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   onTrimCommitRef.current = onTrimCommit;
 
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
-  const [playerError, setPlayerError] = useState<string | null>(null);
+  const i18n = useI18n();
+  const { t, text } = i18n;
+  const [playerError, setPlayerError] = useState<Message | null>(null);
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeSnippet, setActiveSnippet] = useState<"first" | "last" | null>(null);
@@ -163,7 +167,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           return;
         }
 
-        setPlayerError(presentFailure(error, "The working audio could not be loaded for playback. Check that the file is still available, then reopen the recording.", "working audio load failed"));
+        setPlayerError(presentFailure(error, message("player.loadFailed"), "working audio load failed"));
       })
       .finally(() => {
         if (!cancelled) {
@@ -234,7 +238,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         setCursorSec(nextTime);
       }),
       waveSurfer.on("error", (error) => {
-        setPlayerError(presentFailure(error, "The working audio could not be played. Reload the recording to try again.", "audio playback failed"));
+        setPlayerError(presentFailure(error, message("player.playFailed"), "audio playback failed"));
       }),
       // region-update / region-updated fire only from a user drag or resize:
       // WaveSurfer's programmatic setOptions emits "render", not "update", so
@@ -248,7 +252,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       regions.on("region-updated", (region) => {
         const nextTrim = regionToTrim(region, waveSurfer.getDuration());
         void commitTrim(nextTrim).catch((error: unknown) => {
-          setPlayerError(presentFailure(error, "The trim markers are outside this recording's duration. Reset them and try again.", "trim region validation failed"));
+          setPlayerError(presentFailure(error, message("player.markersOutOfRange"), "trim region validation failed"));
         });
       }),
       regions.on("region-removed", () => {
@@ -309,7 +313,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     try {
       await onTrimCommitRef.current(cardIdRef.current, normalizedTrim);
     } catch (error: unknown) {
-      setPlayerError(presentFailure(error, "The trim markers could not be saved. The previous markers remain in effect; try again.", "trim marker save failed"));
+      setPlayerError(presentFailure(error, message("player.markersSaveFailed"), "trim marker save failed"));
       setDraftTrim(card.trim);
       setFrontInput(formatMarkerInput(card.trim.frontMarkerSec));
       setBackInput(formatMarkerInput(card.trim.backMarkerSec));
@@ -370,7 +374,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
       await commitTrim(nextTrim);
     } catch (error: unknown) {
-      setPlayerError(presentFailure(error, "Enter a marker within the recording's duration, then try again.", "trim marker validation failed"));
+      setPlayerError(presentFailure(error, message("player.markerInvalid"), "trim marker validation failed"));
     }
   }
 
@@ -429,7 +433,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     try {
       await onDuplicateCard(card.id);
     } catch (error: unknown) {
-      setPlayerError(presentFailure(error, "The recording could not be duplicated. The original is unchanged; try again.", "recording duplication failed"));
+      setPlayerError(presentFailure(error, message("player.duplicateFailed"), "recording duplication failed"));
     }
   }
 
@@ -463,27 +467,27 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     [cursorSec, draftTrim.backMarkerSec, draftTrim.frontMarkerSec, previewSnippetSeconds, skipIntervalSec, resolvedDurationSec],
   );
 
-  const durationLabel = formatDurationLabel(resolvedDurationSec);
-  const trimSummary = describeTrim(draftTrim);
+  const durationLabel = resolvedDurationSec === null ? t("common.unknown") : formatMarkerInput(resolvedDurationSec);
+  const trimSummary = text(describeTrim(draftTrim));
 
   return (
     <div className="waveform-editor">
       <div className="waveform-editor__info">
-        <span className="waveform-editor__info-item">Cursor: {formatMarkerInput(cursorSec)}</span>
-        <span className="waveform-editor__info-item">Duration: {durationLabel}</span>
+        <span className="waveform-editor__info-item">{t("player.cursor", { time: formatMarkerInput(cursorSec) })}</span>
+        <span className="waveform-editor__info-item">{t("player.duration", { time: durationLabel })}</span>
         <span className="waveform-editor__info-item">{trimSummary}</span>
       </div>
 
       <div className="waveform-canvas" ref={containerRef} />
 
       {isLoadingMedia ? (
-        <p className="panel__note">Loading working audio…</p>
+        <p className="panel__note">{t("player.loading")}</p>
       ) : null}
-      {playerError ? <InlineError>{playerError}</InlineError> : null}
+      {playerError ? <InlineError>{text(playerError)}</InlineError> : null}
 
       <div className="control-row control-row--five">
         <button type="button" className="button button--ghost" onClick={() => void playPause()}>
-          {isPlaying ? "Pause" : "Play"}
+          {isPlaying ? t("player.pause") : t("player.play")}
         </button>
         <button
           type="button"
@@ -491,7 +495,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           onClick={() => void setMarkerAtCursor("front")}
           disabled={disabled}
         >
-          Set Front at Cursor
+          {t("player.setFrontAtCursor")}
         </button>
         <button
           type="button"
@@ -499,7 +503,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           onClick={() => void setMarkerAtCursor("back")}
           disabled={disabled}
         >
-          Set Back at Cursor
+          {t("player.setBackAtCursor")}
         </button>
         <button
           type="button"
@@ -507,7 +511,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           onClick={() => void clearMarkers()}
           disabled={disabled || (draftTrim.frontMarkerSec === null && draftTrim.backMarkerSec === null)}
         >
-          Clear Markers
+          {t("player.clearMarkers")}
         </button>
         <button
           type="button"
@@ -515,7 +519,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           onClick={() => void duplicateCard()}
           disabled={disabled}
         >
-          Duplicate Card
+          {t("player.duplicate")}
         </button>
       </div>
 
@@ -526,7 +530,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           aria-pressed={activeSnippet === "first" && isPlaying}
           onClick={() => void playSnippet("first")}
         >
-          Play First {previewSnippetSeconds}s
+          {t("player.playFirst", { count: previewSnippetSeconds })}
         </button>
         <button
           type="button"
@@ -534,15 +538,15 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           aria-pressed={activeSnippet === "last" && isPlaying}
           onClick={() => void playSnippet("last")}
         >
-          Play Last {previewSnippetSeconds}s
+          {t("player.playLast", { count: previewSnippetSeconds })}
         </button>
       </div>
 
       <div className="trim-editor-grid">
         <section className="trim-editor-card">
-          <h4>Front Marker</h4>
+          <h4>{t("player.frontMarker")}</h4>
           <label className="field">
-            <span>Keep audio from</span>
+            <span>{t("player.keepFrom")}</span>
             <input
               value={frontInput}
               onChange={(event) => setFrontInput(event.target.value)}
@@ -561,7 +565,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               onClick={() => void nudgeMarker("front", -1)}
               disabled={disabled}
             >
-              -1.0s
+              {i18n.seconds(-1, { fractionDigits: 1, signed: true })}
             </button>
             <button
               type="button"
@@ -569,7 +573,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               onClick={() => void nudgeMarker("front", -0.1)}
               disabled={disabled}
             >
-              -0.1s
+              {i18n.seconds(-0.1, { fractionDigits: 1, signed: true })}
             </button>
             <button
               type="button"
@@ -577,7 +581,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               onClick={() => void nudgeMarker("front", 0.1)}
               disabled={disabled}
             >
-              +0.1s
+              {i18n.seconds(0.1, { fractionDigits: 1, signed: true })}
             </button>
             <button
               type="button"
@@ -585,15 +589,15 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               onClick={() => void nudgeMarker("front", 1)}
               disabled={disabled}
             >
-              +1.0s
+              {i18n.seconds(1, { fractionDigits: 1, signed: true })}
             </button>
           </div>
         </section>
 
         <section className="trim-editor-card">
-          <h4>Back Marker</h4>
+          <h4>{t("player.backMarker")}</h4>
           <label className="field">
-            <span>Discard audio after</span>
+            <span>{t("player.discardAfter")}</span>
             <input
               value={backInput}
               onChange={(event) => setBackInput(event.target.value)}
@@ -612,7 +616,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               onClick={() => void nudgeMarker("back", -1)}
               disabled={disabled}
             >
-              -1.0s
+              {i18n.seconds(-1, { fractionDigits: 1, signed: true })}
             </button>
             <button
               type="button"
@@ -620,7 +624,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               onClick={() => void nudgeMarker("back", -0.1)}
               disabled={disabled}
             >
-              -0.1s
+              {i18n.seconds(-0.1, { fractionDigits: 1, signed: true })}
             </button>
             <button
               type="button"
@@ -628,7 +632,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               onClick={() => void nudgeMarker("back", 0.1)}
               disabled={disabled}
             >
-              +0.1s
+              {i18n.seconds(0.1, { fractionDigits: 1, signed: true })}
             </button>
             <button
               type="button"
@@ -636,7 +640,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               onClick={() => void nudgeMarker("back", 1)}
               disabled={disabled}
             >
-              +1.0s
+              {i18n.seconds(1, { fractionDigits: 1, signed: true })}
             </button>
           </div>
         </section>
@@ -797,22 +801,15 @@ function formatMarkerInput(value: number | null): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}.${tenths}`;
 }
 
-function formatDurationLabel(value: number | null): string {
-  if (value === null) {
-    return "Unknown";
-  }
-
-  return formatMarkerInput(value);
-}
-
-function describeTrim(trim: CardTrim): string {
+function describeTrim(trim: CardTrim): Message {
   if (trim.frontMarkerSec === null && trim.backMarkerSec === null) {
-    return "No trim markers";
+    return message("player.noTrimMarkers");
   }
 
   const front = trim.frontMarkerSec === null ? "0:00.0" : formatMarkerInput(trim.frontMarkerSec);
-  const back = trim.backMarkerSec === null ? "end" : formatMarkerInput(trim.backMarkerSec);
-  return `Keep ${front} to ${back}`;
+  return trim.backMarkerSec === null
+    ? message("player.keepToEnd", { from: front })
+    : message("player.keepRange", { from: front, to: formatMarkerInput(trim.backMarkerSec) });
 }
 
 function roundTenths(value: number): number {

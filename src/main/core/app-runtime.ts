@@ -78,6 +78,7 @@ import { applyThemePreference } from "./theme";
 import { mainTranslator, resolveInterfaceLanguage } from "../i18n";
 import type { InterfaceLanguage, LanguagePreference } from "@shared/i18n/languages";
 import { createTranslator, message, type Message, type Translator } from "@shared/i18n/translate";
+import type { MessageKey } from "@shared/i18n/catalogues";
 import { clearCardResultsFromStep, resolveGenerateStartStep } from "./card-pipeline";
 import { PipelineCoordinator } from "./pipeline-coordinator";
 
@@ -116,7 +117,13 @@ export function resetFailureDiagnostic(_error: unknown): NonNullable<AppSnapshot
   };
 }
 
-class ImportAdmissionError extends Error {}
+// A source that is not importable, with the reason the interface shows (in the
+// reader's language) and English for the log.
+class ImportAdmissionError extends Error {
+  constructor(readonly reason: MessageKey) {
+    super(createTranslator("en").t(reason));
+  }
+}
 
 // What a save produced, before the snapshot that reports it is taken: the
 // snapshot is built only after the card's status has settled.
@@ -1577,8 +1584,8 @@ export class ApplicationRuntime {
     for (const sourcePath of sourcePaths) {
       if (sourcePath.trim().length === 0) {
         failedImports.push({
-          sourcePath: "Empty path",
-          message: "No usable local file path was available.",
+          sourcePath: "",
+          message: message("import.noLocalPath"),
           kind: "invalid",
         });
         continue;
@@ -1596,8 +1603,8 @@ export class ApplicationRuntime {
         failedImports.push({
           sourcePath,
           message: error instanceof ImportAdmissionError
-            ? error.message
-            : "Mumbler could not import this file. Check that it is still available and try again.",
+            ? message(error.reason)
+            : message("import.failed"),
           kind,
         });
         if (kind === "invalid") {
@@ -1640,12 +1647,12 @@ export class ApplicationRuntime {
     const paths = this.runtime.paths!;
     const settings = this.runtime.settings!;
     if (!isSupportedAudioImportName(sourcePath)) {
-      throw new ImportAdmissionError("Unsupported audio file type.");
+      throw new ImportAdmissionError("import.unsupportedType");
     }
     const sourceStats = await stat(sourcePath);
 
     if (!sourceStats.isFile()) {
-      throw new ImportAdmissionError("Only files can be imported.");
+      throw new ImportAdmissionError("import.notAFile");
     }
 
     const originalFilename = basename(sourcePath);
@@ -1873,7 +1880,7 @@ export function buildConfirmedTimestamps(
   if (utcResult.error === null) {
     const normalizedUtc = recomputeUtcFromLocal(utcResult.localTimestampText, timezone);
     if (normalizedUtc.error !== null) {
-      throw new OperationError(normalizedUtc.error);
+      throw new OperationError(createTranslator("en").t(normalizedUtc.error));
     }
 
     return {

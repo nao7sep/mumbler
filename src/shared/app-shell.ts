@@ -1,4 +1,5 @@
 import type { InterfaceLanguage, LanguagePreference } from "./i18n/languages";
+import type { MessageKey } from "./i18n/catalogues";
 import type { Message } from "./i18n/translate";
 
 // Built-in default Gemini model suggestions, seeded into the user-owned, editable
@@ -107,8 +108,8 @@ export type CommandId =
 
 export interface CommandDefinition {
   id: CommandId;
-  label: string;
-  group: string;
+  labelKey: MessageKey;
+  groupKey: MessageKey;
   /** The literal event.key this command matches (letters lowercase). */
   key: string;
 }
@@ -142,10 +143,10 @@ export interface DefaultModels {
 /** The saved appearance choice. System follows the OS appearance. */
 export type ThemePreference = "system" | "light" | "dark";
 
-export const THEME_PREFERENCES: ReadonlyArray<{ value: ThemePreference; label: string }> = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
+export const THEME_PREFERENCES: ReadonlyArray<{ value: ThemePreference; labelKey: MessageKey }> = [
+  { value: "system", labelKey: "settings.themeSystem" },
+  { value: "light", labelKey: "settings.themeLight" },
+  { value: "dark", labelKey: "settings.themeDark" },
 ];
 
 /** A missing or unrecognized theme follows the OS. */
@@ -505,7 +506,7 @@ export interface ToolFacts {
 export type ToolTransient =
   | { kind: "idle" }
   | { kind: "running"; operation: ToolOperationKind; percent: number | null }
-  | { kind: "failed"; operation: ToolOperationKind; error: string };
+  | { kind: "failed"; operation: ToolOperationKind; error: Message };
 
 // The derived row the surface renders — the output of deriveStatus(). Rendering
 // reads this and nothing else (no filesystem probe, no --version call).
@@ -555,8 +556,9 @@ export interface AppSnapshot {
 }
 
 export interface FailedImport {
+  // Empty when the delivered item had no usable path or name.
   sourcePath: string;
-  message: string;
+  message: Message;
   kind: "invalid" | "failure";
 }
 

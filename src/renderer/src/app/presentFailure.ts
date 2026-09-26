@@ -1,8 +1,11 @@
+import type { Message } from "@shared/i18n/translate";
+
 /**
  * Preserve a recovered renderer failure in the session log while returning
- * stable operation copy that cannot contain an IPC wrapper, errno, or path.
+ * stable operation copy that cannot contain an IPC wrapper, errno, or path. The
+ * copy is a message, rendered in the interface language where it is shown.
  */
-export function presentFailure(error: unknown, userMessage: string, source: string): string {
+export function presentFailure(error: unknown, userMessage: Message, source: string): Message {
   reportRendererDiagnostic(error, source);
   return userMessage;
 }

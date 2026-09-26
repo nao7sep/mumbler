@@ -34,7 +34,7 @@ import { Menu, MenuItem } from "./Menu";
 import { SettingsModal } from "./SettingsModal";
 import { findMatchingGlobalCommand, isActivationTarget, isShortcutsHelpChord, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
-import { QueueList, formatBytes, formatDuration, statusModifier } from "./QueueList";
+import { QueueList, formatDuration, statusModifier } from "./QueueList";
 import { PaneSplitter } from "./PaneSplitter";
 import { usePaneSize } from "./usePaneSize";
 import {
@@ -56,6 +56,8 @@ import { CloseIcon } from "./Icon";
 import { presentFailure, reportRendererDiagnostic } from "./presentFailure";
 import { I18nProvider, useI18n } from "../i18n/I18nContext";
 import { isLanguage, type InterfaceLanguage } from "@shared/i18n/languages";
+import type { MessageKey } from "@shared/i18n/catalogues";
+import { message, type Message } from "@shared/i18n/translate";
 import { CardActionResults, type CardActionError } from "./CardActionResults";
 import {
   PersistentNotifications,
@@ -72,7 +74,8 @@ import {
   getGenerateDisabledReason,
   getRemoveConfirmBody,
   getSaveDisabledReason,
-  resultLabels,
+  generateConfirmTitles,
+  trimDecisionReason,
 } from "./generate-rules";
 
 async function copyTextToClipboard(value: string): Promise<void> {
@@ -106,15 +109,29 @@ async function copyTextToClipboard(value: string): Promise<void> {
 // them apart, so it does: a tool whose own version could not be read needs the
 // user to re-acquire it (the modal's Update), where a merely-unchecked one only
 // needs a check.
-function toolsChipMessage(role: StatusRole, dependencies: DependencyStatus[] | null): string {
+function toolsChipMessage(role: StatusRole, dependencies: DependencyStatus[] | null): MessageKey {
   if (role !== "informational") {
-    return "Audio tools need attention";
+    return "tools.chipAttention";
   }
   const unreadable = dependencies?.some(
     (dep) => dep.state === "installed-unchecked" && dep.installedVersion === null,
   );
-  return unreadable ? "Audio tools: version unreadable" : "Audio tools: updates unchecked";
+  return unreadable ? "tools.chipVersionUnreadable" : "tools.chipUpdatesUnchecked";
 }
+
+const COPIED: Record<GenerateTarget, MessageKey> = {
+  transcription: "notice.copied.transcription",
+  structured: "notice.copied.structured",
+  title: "notice.copied.title",
+  slug: "notice.copied.slug",
+};
+
+const COPY_FAILED: Record<GenerateTarget, MessageKey> = {
+  transcription: "error.copy.transcription",
+  structured: "error.copy.structured",
+  title: "error.copy.title",
+  slug: "error.copy.slug",
+};
 
 // The detail pane's wizard tabs, in workflow order: check the loaded info,
 // trim the audio, transcribe and review the metadata, then save. Every tab is
@@ -122,11 +139,11 @@ function toolsChipMessage(role: StatusRole, dependencies: DependencyStatus[] | n
 // flow forward, not a gate.
 const DETAIL_TABS = ["info", "trim", "transcribe", "output"] as const;
 type DetailTab = (typeof DETAIL_TABS)[number];
-const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
-  info: "Info",
-  trim: "Trim",
-  transcribe: "Transcribe",
-  output: "Output",
+const DETAIL_TAB_LABELS: Record<DetailTab, MessageKey> = {
+  info: "detail.tabInfo",
+  trim: "detail.tabTrim",
+  transcribe: "detail.tabTranscribe",
+  output: "detail.tabOutput",
 };
 
 // The first text on screen is already in the interface language, so nothing is
@@ -164,9 +181,10 @@ export function App(): ReactElement {
 const ENGLISH: InterfaceLanguage = { language: "en", locale: "en" };
 
 function StartupGate(): ReactElement {
+  const { t, text } = useI18n();
   const [startupLoad, setStartupLoad] = useState<
     | { status: "loading" }
-    | { status: "failed"; retrying: boolean; message: string }
+    | { status: "failed"; retrying: boolean; message: Message }
     | { status: "ready"; snapshot: AppSnapshot }
   >({ status: "loading" });
   const startupAttemptRef = useRef(0);
@@ -190,7 +208,7 @@ function StartupGate(): ReactElement {
           retrying: false,
           message: presentFailure(
             error,
-            "Mumbler could not load the current queue. No recordings or saved files were changed. Check that Mumbler’s data folder is available, then try again.",
+            message("startup.loadFailed"),
             "app snapshot load failed",
           ),
         });
@@ -213,8 +231,8 @@ function StartupGate(): ReactElement {
         aria-busy={startupLoad.status === "loading" || startupLoad.retrying ? "true" : undefined}
       >
         <div className="renderer-failure__card">
-          <h1>{startupLoad.status === "failed" ? "Mumbler could not load its queue" : "Opening Mumbler…"}</h1>
-          {startupLoad.status === "failed" ? <p>{startupLoad.message}</p> : null}
+          <h1>{startupLoad.status === "failed" ? t("startup.loadFailedTitle") : t("startup.opening")}</h1>
+          {startupLoad.status === "failed" ? <p>{text(startupLoad.message)}</p> : null}
           {startupLoad.status === "failed" ? (
             <button
               className="button button--primary"
@@ -222,7 +240,7 @@ function StartupGate(): ReactElement {
               disabled={startupLoad.retrying}
               onClick={() => void loadStartupSnapshot()}
             >
-              {startupLoad.retrying ? "Retrying…" : "Retry"}
+              {startupLoad.retrying ? t("startup.retrying") : t("common.retry")}
             </button>
           ) : null}
         </div>
@@ -254,13 +272,14 @@ function LoadedShell({
 }): ReactElement {
   const initialSnapshot = snapshot;
   const i18n = useI18n();
+  const { t, text } = i18n;
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     const recovered = initialSnapshot.queueSummary?.recoveredInterruptedCards ?? 0;
     return recovered > 0
       ? [{
           id: nanoid(),
           owner: "startup:recovered-interrupted",
-          message: `${recovered} recording${recovered === 1 ? "" : "s"} recovered from an interrupted session — generate again to resume.`,
+          message: message("notice.recovered", { count: recovered }),
           kind: "persistent",
           variant: "info",
         }]
@@ -268,9 +287,9 @@ function LoadedShell({
   });
   const snapshotRef = useRef<AppSnapshot | null>(initialSnapshot);
 
-  const addToast = useCallback((message: string) => {
+  const addToast = useCallback((toast: Message) => {
     const id = nanoid();
-    setNotifications(prev => [...prev, { id, message, kind: "toast" }]);
+    setNotifications(prev => [...prev, { id, message: toast, kind: "toast" }]);
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 4000);
@@ -278,13 +297,13 @@ function LoadedShell({
 
   const addPersistent = useCallback((
     owner: string,
-    message: string,
+    notice: Message,
     variant: Extract<AppNotification, { kind: "persistent" }>["variant"] = "info",
   ) => {
     const id = nanoid();
     setNotifications(prev => upsertPersistentNotification(
       prev,
-      { id, owner, message, kind: "persistent", variant },
+      { id, owner, message: notice, kind: "persistent", variant },
     ));
   }, []);
 
@@ -301,9 +320,9 @@ function LoadedShell({
     cardId: string;
     result: Extract<SaveCardResult, { kind: "conflict" }>;
   } | null>(null);
-  const [saveConflictError, setSaveConflictError] = useState<string | null>(null);
+  const [saveConflictError, setSaveConflictError] = useState<Message | null>(null);
   const [pendingRemoveCardId, setPendingRemoveCardId] = useState<string | null>(null);
-  const [removeCardError, setRemoveCardError] = useState<string | null>(null);
+  const [removeCardError, setRemoveCardError] = useState<Message | null>(null);
   // Sticky across card switches: reviewing several cards on the same step (e.g.
   // arrowing through the queue on the Transcribe tab) should not snap back to
   // Info. Ephemeral UI state, deliberately not persisted.
@@ -317,7 +336,7 @@ function LoadedShell({
   const [pendingGenerate, setPendingGenerate] = useState<{
     cardId: string;
     target: GenerateTarget;
-    body: string;
+    body: Message;
   } | null>(null);
   const [isResettingState, setIsResettingState] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -325,8 +344,8 @@ function LoadedShell({
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showAudioTools, setShowAudioTools] = useState(false);
   const [isCheckingTools, setIsCheckingTools] = useState(false);
-  const [toolCheckNotice, setToolCheckNotice] = useState<string | null>(null);
-  const [toolOperationError, setToolOperationError] = useState<string | null>(null);
+  const [toolCheckNotice, setToolCheckNotice] = useState<Message | null>(null);
+  const [toolOperationError, setToolOperationError] = useState<Message | null>(null);
   const autoOpenedAudioToolsRef = useRef(false);
   const [showReviewDiscardConfirm, setShowReviewDiscardConfirm] = useState(false);
   const initialReviewDraftsRef = useRef<PendingImportReviewItem[] | null>(null);
@@ -387,7 +406,7 @@ function LoadedShell({
           setQueueDragWidth(null);
           addPersistent(
             "layout-save",
-            presentFailure(error, "The pane layout wasn't saved. Your current layout is still in use.", "pane layout save failed"),
+            presentFailure(error, message("error.layoutSave"), "pane layout save failed"),
             "error",
           );
         });
@@ -463,7 +482,7 @@ function LoadedShell({
         .catch((error: unknown) => {
           addPersistent(
             "snapshot-refresh:pipeline",
-            presentFailure(error, "The recording state could not be refreshed. Reopen Mumbler to try again.", "card state refresh failed"),
+            presentFailure(error, message("error.refreshRecordings"), "card state refresh failed"),
             "error",
           );
         });
@@ -480,7 +499,7 @@ function LoadedShell({
         .catch((error: unknown) => {
           addPersistent(
             "snapshot-refresh:app-wide-error",
-            presentFailure(error, "The window state could not be refreshed. Reopen Mumbler to continue.", "app error state refresh failed"),
+            presentFailure(error, message("error.refreshWindow"), "app error state refresh failed"),
             "error",
           );
         });
@@ -495,7 +514,7 @@ function LoadedShell({
         .catch((error: unknown) => {
           addPersistent(
             "snapshot-refresh:dependencies",
-            presentFailure(error, "Audio tool status could not be refreshed. Reopen Audio Tools to try again.", "audio tools state refresh failed"),
+            presentFailure(error, message("error.refreshTools"), "audio tools state refresh failed"),
             "error",
           );
         });
@@ -528,16 +547,16 @@ function LoadedShell({
   }, [snapshot]);
 
   useEffect(() => {
-    function reportRendererFault(message: string, source: string, stack?: string): void {
+    function reportRendererFault(detail: string, source: string, stack?: string): void {
       void window.mumbler
-        .reportRendererError({ message, source, stack })
+        .reportRendererError({ message: detail, source, stack })
         .then((nextSnapshot) => {
           setSnapshot(nextSnapshot);
         })
         .catch(() => {
           addPersistent(
             "renderer-error-report",
-            "Mumbler could not record the unexpected window error. Restart the app to continue.",
+            message("error.recordWindowError"),
             "error",
           );
         });
@@ -600,10 +619,10 @@ function LoadedShell({
     snapshot?.startupDiagnostic != null ||
     snapshot?.appWideError != null;
 
-  function setCardActionError(cardId: string, operation: string, message: string): void {
+  function setCardActionError(cardId: string, operation: string, result: Message): void {
     setCardActionErrors((current) => [
-      ...current.filter((result) => result.cardId !== cardId || result.operation !== operation),
-      { cardId, operation, message },
+      ...current.filter((entry) => entry.cardId !== cardId || entry.operation !== operation),
+      { cardId, operation, message: result },
     ]);
   }
 
@@ -626,7 +645,7 @@ function LoadedShell({
         // The message does not name the recording, so a later failed selection of any
         // card supersedes this notice instead of stacking an identical one.
         "card-selection",
-        presentFailure(error, "The recording could not be selected. The current selection is unchanged; try again.", "card selection failed"),
+        presentFailure(error, message("error.selectRecording"), "card selection failed"),
         "error",
       );
     }
@@ -635,7 +654,7 @@ function LoadedShell({
   async function handleDuplicateCard(cardId: string): Promise<void> {
     const nextSnapshot = await window.mumbler.duplicateCard(cardId);
     setSnapshot(nextSnapshot);
-    addToast("Recording duplicated.");
+    addToast(message("notice.duplicated"));
   }
 
   async function handleTrimCommit(cardId: string, trim: MumblerCard["trim"]): Promise<void> {
@@ -665,7 +684,7 @@ function LoadedShell({
         setCardActionError(
           cardId,
           `generate-${target}`,
-          presentFailure(error, "AI output could not be generated. Existing transcript and metadata are unchanged; check the Gemini settings and try again.", "AI generation failed"),
+          presentFailure(error, message("error.generate"), "AI generation failed"),
         );
       })
       .finally(() => {
@@ -684,7 +703,7 @@ function LoadedShell({
         setCardActionError(
           cardId,
           "cancel-processing",
-          presentFailure(error, "The AI operation could not be cancelled yet. Wait for it to finish, then try again.", "AI cancellation failed"),
+          presentFailure(error, message("error.cancelGeneration"), "AI cancellation failed"),
         );
       });
   }
@@ -721,13 +740,13 @@ function LoadedShell({
       if (cardId !== null) {
         clearCardActionError(cardId, "choose-output-directory");
       }
-      addToast("Output directory set.");
+      addToast(message("notice.outputDirectorySet"));
     } catch (error: unknown) {
       if (cardId !== null) {
         setCardActionError(
           cardId,
           "choose-output-directory",
-          presentFailure(error, "The output folder could not be selected. The current folder is unchanged; try again.", "output folder selection failed"),
+          presentFailure(error, message("error.chooseOutputFolder"), "output folder selection failed"),
         );
       }
     }
@@ -742,19 +761,19 @@ function LoadedShell({
       if (cardId !== null) {
         clearCardActionError(cardId, `model-${field}`);
       }
-      addToast("Model updated.");
+      addToast(message("notice.modelUpdated"));
     } catch (error: unknown) {
       if (cardId !== null) {
         setCardActionError(
           cardId,
           `model-${field}`,
-          presentFailure(error, "The model selection could not be saved. The previous model remains in use; try again.", "model update failed"),
+          presentFailure(error, message("error.modelUpdate"), "model update failed"),
         );
       }
     }
   }
 
-  async function handleCopyResult(label: string, value: string | null): Promise<void> {
+  async function handleCopyResult(target: GenerateTarget, value: string | null): Promise<void> {
     if (value === null || value.trim().length === 0) {
       return;
     }
@@ -763,15 +782,15 @@ function LoadedShell({
     try {
       await copyTextToClipboard(value);
       if (cardId !== null) {
-        clearCardActionError(cardId, `copy-${label}`);
+        clearCardActionError(cardId, `copy-${target}`);
       }
-      addToast(`${label} copied.`);
+      addToast(message(COPIED[target]));
     } catch (error: unknown) {
       if (cardId !== null) {
         setCardActionError(
           cardId,
-          `copy-${label}`,
-          presentFailure(error, `${label} could not be copied. Select the text and copy it manually.`, "clipboard copy failed"),
+          `copy-${target}`,
+          presentFailure(error, message(COPY_FAILED[target]), "clipboard copy failed"),
         );
       }
     }
@@ -784,7 +803,7 @@ function LoadedShell({
     } catch (error: unknown) {
       addPersistent(
         "app-wide-error-dismissal",
-        presentFailure(error, "The message could not be closed. Restart Mumbler to clear it.", "app error dismissal failed"),
+        presentFailure(error, message("error.dismissMessage"), "app error dismissal failed"),
         "error",
       );
     }
@@ -795,11 +814,11 @@ function LoadedShell({
     try {
       const nextSnapshot = await window.mumbler.resetState();
       setSnapshot(nextSnapshot);
-      addToast("Reset to defaults.");
+      addToast(message("notice.reset"));
     } catch (error: unknown) {
       addPersistent(
         "state-reset",
-        presentFailure(error, "Mumbler could not reset its state. Existing files are unchanged; try again.", "state reset failed"),
+        presentFailure(error, message("error.resetState"), "state reset failed"),
         "error",
       );
     } finally {
@@ -812,7 +831,7 @@ function LoadedShell({
   // example an operation already in flight) belongs to the still-open modal that
   // initiated it. Keeping that error here leaves it above the backdrop and next
   // to the retry action instead of sending it to app chrome behind the modal.
-  function applyToolSnapshot(promise: Promise<AppSnapshot>, failMessage: string): void {
+  function applyToolSnapshot(promise: Promise<AppSnapshot>, failMessage: Message): void {
     setToolOperationError(null);
     void promise
       .then((nextSnapshot) => setSnapshot(nextSnapshot))
@@ -825,13 +844,13 @@ function LoadedShell({
   // is known — the same provision path, which always fetches and verifies the
   // latest build.
   function handleProvisionTool(name: ToolName): void {
-    applyToolSnapshot(window.mumbler.provisionTool(name), "Failed to install audio tool.");
+    applyToolSnapshot(window.mumbler.provisionTool(name), message("tools.installFailed"));
   }
 
   function handleCancelToolProvision(name: ToolName): void {
     applyToolSnapshot(
       window.mumbler.cancelToolProvision(name),
-      "Failed to cancel audio tool installation.",
+      message("tools.cancelInstallFailed"),
     );
   }
 
@@ -846,20 +865,20 @@ function LoadedShell({
       .then((nextSnapshot) => setSnapshot(nextSnapshot))
       .catch((error: unknown) => {
         setToolCheckNotice(
-          presentFailure(error, "Updates could not be checked. Installed audio tools are unchanged; try again later.", "audio tool update check failed"),
+          presentFailure(error, message("tools.checkFailed"), "audio tool update check failed"),
         );
       })
       .finally(() => setIsCheckingTools(false));
   }
 
   function handleCancelToolCheck(): void {
-    applyToolSnapshot(window.mumbler.cancelToolCheck(), "Failed to cancel audio tool update check.");
+    applyToolSnapshot(window.mumbler.cancelToolCheck(), message("tools.cancelCheckFailed"));
   }
 
   function handleToggleCheckUpdates(checkUpdatesAtLaunch: boolean): void {
     applyToolSnapshot(
       window.mumbler.saveToolSettings(checkUpdatesAtLaunch),
-      "Failed to save audio tool settings.",
+      message("tools.saveSettingsFailed"),
     );
   }
 
@@ -983,14 +1002,14 @@ function LoadedShell({
       setPendingSaveConflict(null);
       setSaveConflictError(null);
       clearCardActionErrors(cardId);
-      addToast(`Saved to ${result.audioPath}`);
+      addToast(message("notice.saved", { path: result.audioPath }));
       window.scrollTo({ top: 0 });
     } catch (error: unknown) {
-      const message = presentFailure(error, "The recording could not be saved. The working copy remains in the queue; check the output folder and try again.", "recording save failed");
+      const failure = presentFailure(error, message("error.saveRecording"), "recording save failed");
       if (pendingSaveConflict?.cardId === cardId) {
-        setSaveConflictError(message);
+        setSaveConflictError(failure);
       } else {
-        setCardActionError(cardId, "save-card", message);
+        setCardActionError(cardId, "save-card", failure);
       }
     }
   }
@@ -1002,10 +1021,10 @@ function LoadedShell({
       clearCardActionErrors(cardId);
       setPendingRemoveCardId(null);
       setRemoveCardError(null);
-      addToast("Recording removed.");
+      addToast(message("notice.removed"));
       window.scrollTo({ top: 0 });
     } catch (error: unknown) {
-      setRemoveCardError(presentFailure(error, "The recording could not be removed. It remains in the queue; try again.", "recording removal failed"));
+      setRemoveCardError(presentFailure(error, message("error.removeRecording"), "recording removal failed"));
     }
   }
 
@@ -1021,23 +1040,23 @@ function LoadedShell({
               type="button"
               className={`tools-chip tools-chip--${toolsRollUp}`}
               onClick={() => setShowAudioTools(true)}
-              title="Open Managed tools"
+              title={t("tools.openTitle")}
             >
-              {toolsChipMessage(toolsRollUp, dependencies)}
+              {t(toolsChipMessage(toolsRollUp, dependencies))}
             </button>
           ) : null}
           <div className="app-menu-anchor">
             <Menu
               open={isMenuOpen}
               onOpenChange={setIsMenuOpen}
-              label="Application menu"
+              label={t("menu.label")}
               className="app-menu"
               trigger={(props) => (
                 <button
                   {...props}
                   type="button"
                   className="button button--ghost button--icon"
-                  aria-label="Open menu"
+                  aria-label={t("menu.open")}
                 >
                   <HamburgerIcon />
                 </button>
@@ -1052,37 +1071,37 @@ function LoadedShell({
                     .catch((error: unknown) =>
                       addPersistent(
                         "output-folder-open",
-                        presentFailure(error, "The output folder could not be opened. Choose it in Settings or open it from Finder.", "output folder reveal failed"),
+                        presentFailure(error, message("error.openOutputFolder"), "output folder reveal failed"),
                         "error",
                       ),
                     );
                 }}
               >
-                Open Output Directory
+                {t("menu.openOutputDirectory")}
               </MenuItem>
               <MenuItem
                 className="app-menu-item"
                 disabled={importFlow.isImporting || settingsModal.isLoadingSettings}
                 onSelect={() => void settingsModal.handleOpenSettings()}
               >
-                Settings
+                {t("menu.settings")}
               </MenuItem>
               <MenuItem
                 className="app-menu-item"
                 disabled={snapshot === null || snapshot.dependencies === null}
                 onSelect={() => setShowAudioTools(true)}
               >
-                Managed tools
+                {t("menu.managedTools")}
               </MenuItem>
               <MenuItem
                 className="app-menu-item"
                 disabled={snapshot === null}
                 onSelect={() => setShowShortcutsHelp(true)}
               >
-                Keyboard Shortcuts
+                {t("menu.keyboardShortcuts")}
               </MenuItem>
               <MenuItem className="app-menu-item" onSelect={() => setShowAbout(true)}>
-                About
+                {t("menu.about")}
               </MenuItem>
             </Menu>
           </div>
@@ -1106,7 +1125,7 @@ function LoadedShell({
           onDrop={importFlow.onDrop}
         >
           <div className="panel__header">
-            <h2>Queue</h2>
+            <h2>{t("queue.title")}</h2>
             <div className="toolbar">
               <button
                 type="button"
@@ -1114,7 +1133,7 @@ function LoadedShell({
                 onClick={() => void importFlow.handleImportClick()}
                 disabled={importFlow.isImporting}
               >
-                {importFlow.isImporting ? "Importing..." : "Import"}
+                {importFlow.isImporting ? t("queue.importing") : t("queue.import")}
               </button>
             </div>
           </div>
@@ -1125,12 +1144,12 @@ function LoadedShell({
               className={`queue-import-result queue-import-result--${importFlow.importResult.severity}`}
               role={importFlow.importResult.severity === "error" ? "alert" : "status"}
             >
-              <span>{importFlow.importResult.message}</span>
+              <span>{text(importFlow.importResult.message)}</span>
               <button
                 type="button"
                 className="result-close"
                 onClick={importFlow.dismissImportResult}
-                aria-label="Close import result"
+                aria-label={t("import.closeResult")}
               >
                 <CloseIcon />
               </button>
@@ -1148,7 +1167,7 @@ function LoadedShell({
                   onClick={() => void handleResetState()}
                   disabled={isResettingState}
                 >
-                  {isResettingState ? "Resetting..." : "Reset State"}
+                  {isResettingState ? t("queue.resetting") : t("queue.resetState")}
                 </button>
               </div>
             </section>
@@ -1162,13 +1181,13 @@ function LoadedShell({
             <section className="panel panel--nested queue-empty">
               <p className="empty-state__title">
                 {snapshot?.state?.pendingImports.length
-                  ? "Pending review"
-                  : "Empty queue"}
+                  ? t("queue.pendingTitle")
+                  : t("queue.emptyTitle")}
               </p>
               <p className="empty-state__body">
                 {snapshot?.state?.pendingImports.length
-                  ? "Confirm timestamps to add files to the queue."
-                  : "Import audio files or drop them into Queue to get started."}
+                  ? t("queue.pendingBody")
+                  : t("queue.emptyBody")}
               </p>
             </section>
           )}
@@ -1190,13 +1209,13 @@ function LoadedShell({
 
         <section className="detail-pane panel">
           <div className="panel__header">
-            <h2>Detail</h2>
+            <h2>{t("detail.title")}</h2>
           </div>
 
           {selectedCard ? (
             <>
               <div className="panel__strip">
-              <div className="app-tabs" {...detailTablist.tablistProps} aria-label="Detail steps">
+              <div className="app-tabs" {...detailTablist.tablistProps} aria-label={t("detail.steps")}>
                 {DETAIL_TABS.map((tab) => (
                   <button
                     key={tab}
@@ -1204,7 +1223,7 @@ function LoadedShell({
                     className={`app-tab${detailTab === tab ? " app-tab--active" : ""}`}
                     {...detailTablist.getTabProps(tab)}
                   >
-                    {DETAIL_TAB_LABELS[tab]}
+                    {t(DETAIL_TAB_LABELS[tab])}
                   </button>
                 ))}
               </div>
@@ -1222,29 +1241,29 @@ function LoadedShell({
                 <div className="detail-row">
                   <section className={`detail-card detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
                     <div className="detail-card__header">
-                      <h3>Timestamps</h3>
+                      <h3>{t("info.timestamps")}</h3>
                     </div>
                     <dl className="meta-list">
                       <div>
-                        <dt>Original filename</dt>
+                        <dt>{t("info.originalFilename")}</dt>
                         <dd>{selectedCard.originalFilename}</dd>
                       </div>
                       <div>
-                        <dt>Confirmed local</dt>
+                        <dt>{t("info.confirmedLocal")}</dt>
                         <dd>{selectedCard.timestamps.confirmedLocal}</dd>
                       </div>
                       {selectedCard.timestamps.frontTrimOffsetSec > 0 && (
                         <div>
-                          <dt>Effective local</dt>
+                          <dt>{t("info.effectiveLocal")}</dt>
                           <dd>{selectedCard.timestamps.effectiveLocal}</dd>
                         </div>
                       )}
                       <div>
-                        <dt>Timezone</dt>
+                        <dt>{t("info.timezone")}</dt>
                         <dd>{selectedCard.timestamps.timezone}</dd>
                       </div>
                       <div>
-                        <dt>Effective UTC</dt>
+                        <dt>{t("info.effectiveUtc")}</dt>
                         <dd>{formatUtcForDisplay(selectedCard.timestamps.effectiveUtc)}</dd>
                       </div>
                     </dl>
@@ -1252,58 +1271,58 @@ function LoadedShell({
 
                   <section className="detail-card">
                     <div className="detail-card__header">
-                      <h3>Audio</h3>
+                      <h3>{t("audio.title")}</h3>
                     </div>
                     <dl className="meta-list">
                       <div>
-                        <dt>Duration</dt>
-                        <dd>{formatDuration(selectedCard.durationSec)}</dd>
+                        <dt>{t("audio.duration")}</dt>
+                        <dd>{selectedCard.durationSec === null ? t("common.unknown") : formatDuration(selectedCard.durationSec)}</dd>
                       </div>
                       <div>
-                        <dt>Format</dt>
+                        <dt>{t("audio.format")}</dt>
                         <dd>{(() => {
                           const codec = selectedCard.audioProfile?.codecName ?? null;
                           const container = selectedCard.audioProfile?.formatName ?? null;
-                          if (!codec && !container) return "Unknown";
-                          if (codec === container || !container) return codec ?? "Unknown";
-                          if (!codec) return container ?? "Unknown";
-                          return `${codec} (${container})`;
+                          if (!codec && !container) return t("common.unknown");
+                          if (codec === container || !container) return codec ?? t("common.unknown");
+                          if (!codec) return container ?? t("common.unknown");
+                          return t("audio.codecInContainer", { codec, container });
                         })()}</dd>
                       </div>
                       <div>
-                        <dt>Bitrate</dt>
+                        <dt>{t("audio.bitrate")}</dt>
                         <dd>
                           {selectedCard.audioProfile?.bitRateKbps == null
-                            ? "Unknown"
-                            : `${selectedCard.audioProfile.bitRateKbps} kbps`}
+                            ? t("common.unknown")
+                            : t("units.kbps", { value: selectedCard.audioProfile.bitRateKbps })}
                         </dd>
                       </div>
                       <div>
-                        <dt>Sample rate</dt>
+                        <dt>{t("audio.sampleRate")}</dt>
                         <dd>
                           {selectedCard.audioProfile?.sampleRateHz == null
-                            ? "Unknown"
-                            : `${selectedCard.audioProfile.sampleRateHz} Hz`}
+                            ? t("common.unknown")
+                            : t("units.hertz", { value: selectedCard.audioProfile.sampleRateHz })}
                         </dd>
                       </div>
                       <div>
-                        <dt>Channels</dt>
-                        <dd>{selectedCard.audioProfile?.channels ?? "Unknown"}</dd>
+                        <dt>{t("audio.channels")}</dt>
+                        <dd>{selectedCard.audioProfile?.channels == null ? t("common.unknown") : i18n.number(selectedCard.audioProfile.channels)}</dd>
                       </div>
                       <div>
-                        <dt>File size</dt>
-                        <dd>{formatBytes(selectedCard.fileSizeBytes)}</dd>
+                        <dt>{t("audio.fileSize")}</dt>
+                        <dd>{i18n.bytes(selectedCard.fileSizeBytes)}</dd>
                       </div>
                     </dl>
                   </section>
 
                   <section className="detail-card">
                     <div className="detail-card__header">
-                      <h3>Options</h3>
+                      <h3>{t("options.title")}</h3>
                     </div>
                     <div className="field-stack">
                       <label className="field">
-                        <span>Transcription Model</span>
+                        <span>{t("options.transcriptionModel")}</span>
                         <select
                           value={snapshot?.settingsSummary?.transcriptionModel ?? ""}
                           disabled={selectedCardIsBusy}
@@ -1321,7 +1340,7 @@ function LoadedShell({
                         </select>
                       </label>
                       <label className="field">
-                        <span>Metadata Model</span>
+                        <span>{t("options.metadataModel")}</span>
                         <select
                           value={snapshot?.settingsSummary?.metadataModel ?? ""}
                           disabled={selectedCardIsBusy}
@@ -1343,7 +1362,7 @@ function LoadedShell({
                 </div>
                 <div className="app-tabpanel__footer">
                   <button type="button" className="button button--ghost" onClick={() => setDetailTab("trim")}>
-                    Next
+                    {t("common.next")}
                   </button>
                 </div>
               </div>
@@ -1352,7 +1371,7 @@ function LoadedShell({
                 {/* ── Group 2: Player and Trim ─────────────────────────── */}
                 <section className="detail-card detail-card--wide">
                   <div className="detail-card__header">
-                    <h3>Player and Trim</h3>
+                    <h3>{t("trim.title")}</h3>
                   </div>
                   <WaveformEditor
                     ref={waveformEditorRef}
@@ -1365,60 +1384,60 @@ function LoadedShell({
                   />
                   <div className="trim-analysis">
                     <div className="trim-analysis__header">
-                      <span className="trim-analysis__label">Trim Analysis</span>
+                      <span className="trim-analysis__label">{t("trim.analysis")}</span>
                     </div>
-                    <p className="panel__note">{describeTrimDecision(selectedCard.trimDecision)}</p>
+                    <p className="panel__note">{text(describeTrimDecision(selectedCard.trimDecision))}</p>
                     <dl className="trim-analysis-grid">
                       <div>
-                        <dt>Requested start</dt>
-                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedStartSec ?? null)}</dd>
+                        <dt>{t("trim.requestedStart")}</dt>
+                        <dd>{formatOptionalSeconds(i18n, selectedCard.trimDecision?.requestedStartSec ?? null)}</dd>
                       </div>
                       <div>
-                        <dt>Requested end</dt>
-                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.requestedEndSec ?? null)}</dd>
+                        <dt>{t("trim.requestedEnd")}</dt>
+                        <dd>{formatOptionalSeconds(i18n, selectedCard.trimDecision?.requestedEndSec ?? null)}</dd>
                       </div>
                       <div>
-                        <dt>Start search window</dt>
+                        <dt>{t("trim.startSearchWindow")}</dt>
                         <dd>
                           {selectedCard.trimDecision?.searchStartFromSec === null || selectedCard.trimDecision?.searchStartFromSec === undefined
                             ? "—"
-                            : `${formatOptionalSeconds(selectedCard.trimDecision.searchStartFromSec)} – ${formatOptionalSeconds(selectedCard.trimDecision.searchStartToSec ?? null)}`}
+                            : `${formatOptionalSeconds(i18n, selectedCard.trimDecision.searchStartFromSec)} – ${formatOptionalSeconds(i18n, selectedCard.trimDecision.searchStartToSec ?? null)}`}
                         </dd>
                       </div>
                       <div>
-                        <dt>End search window</dt>
+                        <dt>{t("trim.endSearchWindow")}</dt>
                         <dd>
                           {selectedCard.trimDecision?.searchEndFromSec === null || selectedCard.trimDecision?.searchEndFromSec === undefined
                             ? "—"
-                            : `${formatOptionalSeconds(selectedCard.trimDecision.searchEndFromSec)} – ${formatOptionalSeconds(selectedCard.trimDecision.searchEndToSec ?? null)}`}
+                            : `${formatOptionalSeconds(i18n, selectedCard.trimDecision.searchEndFromSec)} – ${formatOptionalSeconds(i18n, selectedCard.trimDecision.searchEndToSec ?? null)}`}
                         </dd>
                       </div>
                       <div>
-                        <dt>Chosen start boundary</dt>
-                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenStartBoundarySec ?? null)}</dd>
+                        <dt>{t("trim.chosenStartBoundary")}</dt>
+                        <dd>{formatOptionalSeconds(i18n, selectedCard.trimDecision?.chosenStartBoundarySec ?? null)}</dd>
                       </div>
                       <div>
-                        <dt>Chosen end boundary</dt>
-                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.chosenEndBoundarySec ?? null)}</dd>
+                        <dt>{t("trim.chosenEndBoundary")}</dt>
+                        <dd>{formatOptionalSeconds(i18n, selectedCard.trimDecision?.chosenEndBoundarySec ?? null)}</dd>
                       </div>
                       <div>
-                        <dt>Start delta</dt>
-                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.startDeltaSec ?? null)}</dd>
+                        <dt>{t("trim.startDelta")}</dt>
+                        <dd>{formatOptionalSeconds(i18n, selectedCard.trimDecision?.startDeltaSec ?? null)}</dd>
                       </div>
                       <div>
-                        <dt>End delta</dt>
-                        <dd>{formatOptionalSeconds(selectedCard.trimDecision?.endDeltaSec ?? null)}</dd>
+                        <dt>{t("trim.endDelta")}</dt>
+                        <dd>{formatOptionalSeconds(i18n, selectedCard.trimDecision?.endDeltaSec ?? null)}</dd>
                       </div>
                       <div className="trim-analysis-grid__reason">
-                        <dt>Reason</dt>
-                        <dd>{selectedCard.trimDecision?.reason ?? "No markers set yet."}</dd>
+                        <dt>{t("trim.reason")}</dt>
+                        <dd>{text(trimDecisionReason(selectedCard.trimDecision))}</dd>
                       </div>
                     </dl>
                   </div>
                 </section>
                 <div className="app-tabpanel__footer">
                   <button type="button" className="button button--ghost" onClick={() => setDetailTab("transcribe")}>
-                    Next
+                    {t("common.next")}
                   </button>
                 </div>
               </div>
@@ -1427,7 +1446,7 @@ function LoadedShell({
                 {/* ── Group 3: Transcription and Metadata ──────────────── */}
                 <section className={`detail-card detail-card--wide detail-card--status detail-card--${statusModifier(selectedCard.status)}`}>
                   <div className="detail-card__header">
-                    <h3>Transcription and Metadata</h3>
+                    <h3>{t("transcribe.title")}</h3>
                   </div>
                   <div className="action-toolbar">
                     <button
@@ -1436,7 +1455,7 @@ function LoadedShell({
                       onClick={() => executeGenerate(selectedCard.id, "slug")}
                       disabled={selectedCardIsBusy || generateDisabledReason !== null}
                     >
-                      Generate All
+                      {t("command.generateAll")}
                     </button>
                     <button
                       type="button"
@@ -1444,20 +1463,20 @@ function LoadedShell({
                       onClick={() => handleCancelCardProcessing(selectedCard.id)}
                       disabled={!selectedCardIsBusy || selectedCard.status === "Saving"}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                   </div>
                   {generateDisabledReason ? (
-                    <p className="panel__note">{generateDisabledReason}</p>
+                    <p className="panel__note">{text(generateDisabledReason)}</p>
                   ) : null}
                   <p className={`panel__note status-text status-text--${statusModifier(selectedCard.status)}`}>
-                    {formatCardStatusMessage(selectedCard)}
+                    {text(formatCardStatusMessage(selectedCard))}
                   </p>
-                  {hasStaleResults(selectedCard) ? <p className="panel__note">{staleResultsNote}</p> : null}
+                  {hasStaleResults(selectedCard) ? <p className="panel__note">{text(staleResultsNote)}</p> : null}
                   <div className="result-grid">
                     <label className="field field--tall">
                       <span className="field-label-with-action">
-                        <span>Transcription</span>
+                        <span>{t("result.transcription")}</span>
                         <span className="field-actions">
                           <button
                             type="button"
@@ -1465,15 +1484,15 @@ function LoadedShell({
                             onClick={() => handleRequestGenerate(selectedCard, "transcription")}
                             disabled={selectedCardIsBusy}
                           >
-                            Generate
+                            {t("transcribe.generate")}
                           </button>
                           <button
                             type="button"
                             className="button button--ghost button--compact"
-                            onClick={() => void handleCopyResult("Transcription", selectedCard.transcription.text)}
+                            onClick={() => void handleCopyResult("transcription", selectedCard.transcription.text)}
                             disabled={(selectedCard.transcription.text ?? "").trim().length === 0}
                           >
-                            Copy
+                            {t("transcribe.copy")}
                           </button>
                         </span>
                       </span>
@@ -1487,7 +1506,7 @@ function LoadedShell({
                     <div className="result-secondary">
                       <label className="field field--tall">
                         <span className="field-label-with-action">
-                          <span>Structured transcription</span>
+                          <span>{t("result.structured")}</span>
                           <span className="field-actions">
                             <button
                               type="button"
@@ -1495,15 +1514,15 @@ function LoadedShell({
                               onClick={() => handleRequestGenerate(selectedCard, "structured")}
                               disabled={selectedCardIsBusy}
                             >
-                              Generate
+                              {t("transcribe.generate")}
                             </button>
                             <button
                               type="button"
                               className="button button--ghost button--compact"
-                              onClick={() => void handleCopyResult("Structured transcription", selectedCard.metadata.structured)}
+                              onClick={() => void handleCopyResult("structured", selectedCard.metadata.structured)}
                               disabled={(selectedCard.metadata.structured ?? "").trim().length === 0}
                             >
-                              Copy
+                              {t("transcribe.copy")}
                             </button>
                           </span>
                         </span>
@@ -1516,7 +1535,7 @@ function LoadedShell({
                       </label>
                       <label className="field">
                         <span className="field-label-with-action">
-                          <span>Title</span>
+                          <span>{t("result.title")}</span>
                           <span className="field-actions">
                             <button
                               type="button"
@@ -1524,15 +1543,15 @@ function LoadedShell({
                               onClick={() => handleRequestGenerate(selectedCard, "title")}
                               disabled={selectedCardIsBusy}
                             >
-                              Generate
+                              {t("transcribe.generate")}
                             </button>
                             <button
                               type="button"
                               className="button button--ghost button--compact"
-                              onClick={() => void handleCopyResult("Title", selectedCard.metadata.title)}
+                              onClick={() => void handleCopyResult("title", selectedCard.metadata.title)}
                               disabled={(selectedCard.metadata.title ?? "").trim().length === 0}
                             >
-                              Copy
+                              {t("transcribe.copy")}
                             </button>
                           </span>
                         </span>
@@ -1545,7 +1564,7 @@ function LoadedShell({
                       </label>
                       <label className="field">
                         <span className="field-label-with-action">
-                          <span>Slug</span>
+                          <span>{t("result.slug")}</span>
                           <span className="field-actions">
                             <button
                               type="button"
@@ -1553,15 +1572,15 @@ function LoadedShell({
                               onClick={() => handleRequestGenerate(selectedCard, "slug")}
                               disabled={selectedCardIsBusy}
                             >
-                              Generate
+                              {t("transcribe.generate")}
                             </button>
                             <button
                               type="button"
                               className="button button--ghost button--compact"
-                              onClick={() => void handleCopyResult("Slug", selectedCard.metadata.slug)}
+                              onClick={() => void handleCopyResult("slug", selectedCard.metadata.slug)}
                               disabled={(selectedCard.metadata.slug ?? "").trim().length === 0}
                             >
-                              Copy
+                              {t("transcribe.copy")}
                             </button>
                           </span>
                         </span>
@@ -1577,7 +1596,7 @@ function LoadedShell({
                 </section>
                 <div className="app-tabpanel__footer">
                   <button type="button" className="button button--ghost" onClick={() => setDetailTab("output")}>
-                    Next
+                    {t("common.next")}
                   </button>
                 </div>
               </div>
@@ -1586,11 +1605,11 @@ function LoadedShell({
                 {/* ── Group 4: Output and Save ──────────────────────────── */}
                 <section className="detail-card detail-card--wide">
                   <div className="detail-card__header">
-                    <h3>Output and Save</h3>
+                    <h3>{t("output.title")}</h3>
                   </div>
                   <dl className="meta-list compact-meta-list">
                     <div>
-                      <dt>Output directory</dt>
+                      <dt>{t("output.directory")}</dt>
                       <dd>
                         {snapshot?.settingsSummary?.outputDirectory ??
                           snapshot?.settingsSummary?.defaultOutputDirectory ??
@@ -1599,8 +1618,8 @@ function LoadedShell({
                     </div>
                     {selectedCard.lastError ? (
                       <div>
-                        <dt>Last stopped step</dt>
-                        <dd>{formatStepName(selectedCard.lastError.failedStep)}</dd>
+                        <dt>{t("output.lastStoppedStep")}</dt>
+                        <dd>{text(formatStepName(selectedCard.lastError.failedStep))}</dd>
                       </div>
                     ) : null}
                   </dl>
@@ -1611,7 +1630,7 @@ function LoadedShell({
                       onClick={() => void handleChooseOutputDirectory()}
                       disabled={selectedCardIsBusy}
                     >
-                      Change Output Directory
+                      {t("output.changeDirectory")}
                     </button>
                   </div>
                   <div className="action-toolbar">
@@ -1621,7 +1640,7 @@ function LoadedShell({
                       onClick={() => void handleSaveCard(selectedCard.id)}
                       disabled={saveDisabledReason !== null}
                     >
-                      Save and Remove
+                      {t("output.saveAndRemove")}
                     </button>
                     <button
                       type="button"
@@ -1632,13 +1651,13 @@ function LoadedShell({
                       }}
                       disabled={selectedCardIsBusy}
                     >
-                      Remove
+                      {t("common.remove")}
                     </button>
                   </div>
-                  <p className="field-hint">Saving exports audio and metadata, then removes this recording from the queue.</p>
-                  {hasStaleResults(selectedCard) ? <p className="panel__note">{staleResultsNote}</p> : null}
+                  <p className="field-hint">{t("output.hint")}</p>
+                  {hasStaleResults(selectedCard) ? <p className="panel__note">{text(staleResultsNote)}</p> : null}
                   {saveDisabledReason && !selectedCardIsBusy ? (
-                    <p className="panel__note">{saveDisabledReason}</p>
+                    <p className="panel__note">{text(saveDisabledReason)}</p>
                   ) : null}
                 </section>
               </div>
@@ -1649,14 +1668,14 @@ function LoadedShell({
           ) : snapshot?.state?.cards.length ? (
             <div className="panel__body">
               <section className="panel panel--nested queue-empty">
-                <p className="empty-state__title">Select a recording</p>
+                <p className="empty-state__title">{t("detail.selectRecording")}</p>
               </section>
             </div>
           ) : (
             <div className="panel__body">
               <section className="panel panel--nested queue-empty">
-                <p className="empty-state__title">No selection</p>
-                <p className="empty-state__body">Import recordings to get started.</p>
+                <p className="empty-state__title">{t("detail.noSelection")}</p>
+                <p className="empty-state__body">{t("detail.noSelectionBody")}</p>
               </section>
             </div>
           )}
@@ -1775,7 +1794,7 @@ function LoadedShell({
 
       {pendingGenerate ? (
         <GenerateConfirmModal
-          targetLabel={resultLabels[pendingGenerate.target]}
+          title={generateConfirmTitles[pendingGenerate.target]}
           body={pendingGenerate.body}
           onCancel={() => setPendingGenerate(null)}
           onGenerate={handleConfirmGenerate}
@@ -1784,8 +1803,8 @@ function LoadedShell({
 
       {snapshot?.appWideError ? (
         <AppWideErrorModal
-          title={i18n.text(snapshot.appWideError.title)}
-          message={i18n.text(snapshot.appWideError.message)}
+          title={snapshot.appWideError.title}
+          message={snapshot.appWideError.message}
           onDismiss={() => void handleDismissAppWideError()}
         />
       ) : null}

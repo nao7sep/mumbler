@@ -2,7 +2,11 @@ import type { ReactElement } from "react";
 
 import type { DependencyState, DependencyStatus, StatusRole, ToolName } from "@shared/app-shell";
 
+import type { MessageKey } from "@shared/i18n/catalogues";
+import type { Message, Translator } from "@shared/i18n/translate";
+
 import { ModalShell } from "./modal/ModalShell";
+import { useI18n } from "../i18n/I18nContext";
 
 // The management surface for mumbler's audio tools (ffmpeg/ffprobe), per the
 // managed-runtime-dependencies-conventions: one named, dismissible surface listing
@@ -22,8 +26,8 @@ export interface AudioToolsModalProps {
   // A non-persisted terminal notice when an explicit check just failed (offline,
   // rate-limited). The application owner retains it across view replacement until
   // the next matching check supersedes it.
-  checkNotice: string | null;
-  operationError: string | null;
+  checkNotice: Message | null;
+  operationError: Message | null;
   onProvision: (name: ToolName) => void;
   onCancelProvision: (name: ToolName) => void;
   onCheck: () => void;
@@ -39,11 +43,11 @@ const ROLE_CLASS: Record<StatusRole, string> = {
   error: "tools-role--error",
 };
 
-const STATUS_LABEL: Record<DependencyState, string> = {
-  "not-installed": "Not installed",
-  "update-available": "Update available",
-  "up-to-date": "Up to date",
-  "installed-unchecked": "Installed (not checked)",
+const STATUS_LABEL: Record<DependencyState, MessageKey> = {
+  "not-installed": "tools.stateNotInstalled",
+  "update-available": "tools.stateUpdateAvailable",
+  "up-to-date": "tools.stateUpToDate",
+  "installed-unchecked": "tools.stateUnchecked",
 };
 
 // The one per-row action: Install when missing, Update when a newer version is
@@ -52,28 +56,29 @@ const STATUS_LABEL: Record<DependencyState, string> = {
 // so it can never clear an unreadable INSTALLED version, and re-acquiring is what
 // replaces the copy that would not answer. Up to date, and installed-but-unchecked
 // with a version in hand, offer no row action — the set-wide Check is that move.
-function acquireLabel(state: DependencyState, installedVersion: string | null): string | null {
-  if (state === "not-installed") return "Install";
-  if (state === "update-available") return "Update";
-  if (state === "installed-unchecked" && installedVersion === null) return "Update";
+function acquireLabel(state: DependencyState, installedVersion: string | null): MessageKey | null {
+  if (state === "not-installed") return "tools.install";
+  if (state === "update-available") return "tools.update";
+  if (state === "installed-unchecked" && installedVersion === null) return "tools.update";
   return null;
 }
 
-function relativeTime(utcMs: number): string {
+// How long ago, through the platform's relative-time formatting.
+function relativeTime(i18n: Translator, utcMs: number): string {
   const diffSec = Math.max(0, Math.floor((Date.now() - utcMs) / 1000));
-  if (diffSec < 60) return "just now";
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} h ago`;
-  return `${Math.floor(diffSec / 86400)} days ago`;
+  if (diffSec < 60) return i18n.t("tools.justNow");
+  if (diffSec < 3600) return i18n.relativeTime(-Math.floor(diffSec / 60), "minute");
+  if (diffSec < 86400) return i18n.relativeTime(-Math.floor(diffSec / 3600), "hour");
+  return i18n.relativeTime(-Math.floor(diffSec / 86400), "day");
 }
 
-function lastCheckedHint(dependencies: DependencyStatus[], isChecking: boolean): string {
-  if (isChecking) return "Checking…";
+function lastCheckedHint(i18n: Translator, dependencies: DependencyStatus[], isChecking: boolean): string {
+  if (isChecking) return i18n.t("tools.checking");
   const stamps = dependencies
     .map((dep) => dep.lastCheckedAtUtc)
     .filter((value): value is number => value !== null);
-  if (stamps.length === 0) return "Never checked for updates.";
-  return `Last checked ${relativeTime(Math.max(...stamps))}.`;
+  if (stamps.length === 0) return i18n.t("tools.neverChecked");
+  return i18n.t("tools.lastChecked", { when: relativeTime(i18n, Math.max(...stamps)) });
 }
 
 function displayArtifactIdentity(identity: string | null): string | null {
@@ -93,52 +98,53 @@ export function AudioToolsModal({
   onToggleCheckUpdates,
   onClose,
 }: AudioToolsModalProps): ReactElement {
+  const i18n = useI18n();
+  const { t, text } = i18n;
   return (
     <ModalShell
-      title="Managed tools"
+      title={t("tools.title")}
       onRequestClose={onClose}
       describedById="audio-tools-description"
       footer={
         <button type="button" className="button button--ghost" onClick={onClose}>
-          Close
+          {t("common.close")}
         </button>
       }
     >
       <div className="modal-card__body">
         <p id="audio-tools-description" className="tools-intro">
-          Mumbler uses ffmpeg and ffprobe to read and trim audio. They are downloaded as native
-          builds, verified by checksum, and kept in your app data folder. Both are required.
+          {t("tools.intro")}
         </p>
 
         <div className="tools-toolbar">
-          <span className="field-hint">{lastCheckedHint(dependencies, isChecking)}</span>
+          <span className="field-hint">{lastCheckedHint(i18n, dependencies, isChecking)}</span>
           <button
             type="button"
             className="button button--ghost button--compact"
             onClick={isChecking ? onCancelCheck : onCheck}
           >
-            {isChecking ? "Cancel check" : "Check for updates"}
+            {isChecking ? t("tools.cancelCheck") : t("tools.checkForUpdates")}
           </button>
         </div>
 
         {checkNotice !== null && (
-          <p className="banner banner--warning tools-error">{checkNotice}</p>
+          <p className="banner banner--warning tools-error">{text(checkNotice)}</p>
         )}
 
         {operationError !== null && (
           <p className="banner banner--error tools-error" role="alert">
-            {operationError}
+            {text(operationError)}
           </p>
         )}
 
         <table className="tools-table">
           <thead>
             <tr>
-              <th>Tool</th>
-              <th>Status</th>
-              <th>Installed</th>
-              <th>Latest</th>
-              <th aria-label="Actions" />
+              <th>{t("tools.columnTool")}</th>
+              <th>{t("tools.columnStatus")}</th>
+              <th>{t("tools.columnInstalled")}</th>
+              <th>{t("tools.columnLatest")}</th>
+              <th aria-label={t("tools.columnActions")} />
             </tr>
           </thead>
           <tbody>
@@ -150,20 +156,20 @@ export function AudioToolsModal({
                 <tr key={status.name}>
                   <td className="tools-table__name">{status.name}</td>
                   <td>
-                    <span className={ROLE_CLASS[status.role]}>{STATUS_LABEL[status.state]}</span>
+                    <span className={ROLE_CLASS[status.role]}>{t(STATUS_LABEL[status.state])}</span>
                   </td>
                   <td>
                     {displayArtifactIdentity(status.installedVersion) ??
-                      (status.state === "not-installed" ? "—" : "Version unreadable")}
+                      (status.state === "not-installed" ? "—" : t("tools.versionUnreadable"))}
                   </td>
-                  <td>{displayArtifactIdentity(status.desiredVersion) ?? (isChecking ? "…" : "Unknown")}</td>
+                  <td>{displayArtifactIdentity(status.desiredVersion) ?? (isChecking ? "…" : t("common.unknown"))}</td>
                   <td className="tools-table__action">
                     {running ? (
                       <span className="tools-table__actions">
                         <span className="field-hint">
                           {status.transient.kind === "running" && status.transient.percent !== null
-                            ? `${status.transient.percent}%`
-                            : "Working…"}
+                            ? i18n.percent(status.transient.percent / 100)
+                            : t("tools.working")}
                         </span>
                         {status.transient.kind === "running" &&
                         status.transient.operation === "provision" ? (
@@ -172,7 +178,7 @@ export function AudioToolsModal({
                             className="button button--compact button--ghost"
                             onClick={() => onCancelProvision(status.name)}
                           >
-                            Cancel
+                            {t("common.cancel")}
                           </button>
                         ) : null}
                       </span>
@@ -181,9 +187,9 @@ export function AudioToolsModal({
                         type="button"
                         className={`button button--compact ${needsAttention ? "button--primary" : "button--ghost"}`}
                         onClick={() => onProvision(status.name)}
-                        title="Download and install the latest build"
+                        title={t("tools.acquireTitle")}
                       >
-                        {action}
+                        {t(action)}
                       </button>
                     )}
                   </td>
@@ -196,10 +202,10 @@ export function AudioToolsModal({
         {dependencies
           .filter((status) => status.transient.kind === "failed")
           .map((status) => {
-            const message = status.transient.kind === "failed" ? status.transient.error : null;
-            return message === null ? null : (
+            const failure = status.transient.kind === "failed" ? status.transient.error : null;
+            return failure === null ? null : (
               <p key={status.name} className="banner banner--error tools-error" role="alert">
-                {status.name}: {message}
+                {text(failure)}
               </p>
             );
           })}
@@ -211,7 +217,7 @@ export function AudioToolsModal({
               checked={checkUpdatesAtLaunch}
               onChange={(event) => onToggleCheckUpdates(event.target.checked)}
             />
-            <span>Check for tool updates on launch</span>
+            <span>{t("tools.checkOnLaunch")}</span>
           </label>
         </div>
       </div>

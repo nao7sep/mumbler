@@ -1,4 +1,5 @@
 import type { TimestampParseStatus } from "./app-shell";
+import type { MessageKey } from "./i18n/catalogues";
 
 interface TimestampParts {
   year: number;
@@ -90,19 +91,19 @@ export function parseTimestampFromFilename(
 export function recomputeUtcFromLocal(
   localTimestampText: string,
   timezone: string,
-): { utcMs: number | null; error: string | null } {
+): { utcMs: number | null; error: MessageKey | null } {
   const localParts = parseLocalTimestamp(localTimestampText);
   if (localParts === null) {
-    return { utcMs: null, error: "Enter local time as YYYY-MM-DD HH:MM:SS." };
+    return { utcMs: null, error: "timestamp.localFormat" };
   }
 
   if (!isValidTimezone(timezone)) {
-    return { utcMs: null, error: "Enter a valid IANA timezone." };
+    return { utcMs: null, error: "timestamp.invalidZone" };
   }
 
   const utcDate = zonedLocalToUtcDate(localParts, timezone);
   if (utcDate === null) {
-    return { utcMs: null, error: "Could not convert local time to UTC." };
+    return { utcMs: null, error: "timestamp.conversionFailed" };
   }
 
   return { utcMs: utcDate.getTime(), error: null };
@@ -111,7 +112,7 @@ export function recomputeUtcFromLocal(
 export function recomputeLocalFromUtc(
   utcInput: string | number,
   timezone: string,
-): { localTimestampText: string; error: string | null } {
+): { localTimestampText: string; error: MessageKey | null } {
   let utcDate: Date | null;
   if (typeof utcInput === "number") {
     utcDate = new Date(utcInput);
@@ -121,11 +122,11 @@ export function recomputeLocalFromUtc(
   }
 
   if (utcDate === null) {
-    return { localTimestampText: "", error: "Enter UTC as YYYY-MM-DD HH:MM:SS." };
+    return { localTimestampText: "", error: "timestamp.utcFormat" };
   }
 
   if (!isValidTimezone(timezone)) {
-    return { localTimestampText: "", error: "Enter a valid IANA timezone." };
+    return { localTimestampText: "", error: "timestamp.invalidZone" };
   }
 
   return {
@@ -134,15 +135,15 @@ export function recomputeLocalFromUtc(
   };
 }
 
-export function getLocalTimestampError(localTimestampText: string): string | null {
+export function getLocalTimestampError(localTimestampText: string): MessageKey | null {
   return parseLocalTimestamp(localTimestampText) === null
-    ? "Enter local time as YYYY-MM-DD HH:MM:SS."
+    ? "timestamp.localFormat"
     : null;
 }
 
-export function getUtcTimestampError(utcTimestampText: string): string | null {
+export function getUtcTimestampError(utcTimestampText: string): MessageKey | null {
   return parseUtcFromDisplay(utcTimestampText) === null
-    ? "Enter UTC as YYYY-MM-DD HH:MM:SS."
+    ? "timestamp.utcFormat"
     : null;
 }
 

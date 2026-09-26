@@ -13,6 +13,7 @@ import {
 } from "@shared/timestamps";
 
 import { ModalShell } from "./modal/ModalShell";
+import { useI18n } from "../i18n/I18nContext";
 
 export interface TimestampReviewModalProps {
   items: PendingImportReviewItem[];
@@ -39,6 +40,8 @@ export function TimestampReviewModal({
   onCancel,
   isSubmitting,
 }: TimestampReviewModalProps): ReactElement {
+  const i18n = useI18n();
+  const { t } = i18n;
   const [bulkTimezone, setBulkTimezone] = useState(defaultTimezone ?? "");
 
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
@@ -48,7 +51,7 @@ export function TimestampReviewModal({
       items.map((item) => {
         const timezoneError = isValidTimezone(item.timezone)
           ? null
-          : "Enter a valid IANA timezone.";
+          : "timestamp.invalidZone";
         return (
           timezoneError ??
           getLocalTimestampError(item.localTimestampText) ??
@@ -62,7 +65,7 @@ export function TimestampReviewModal({
 
   return (
     <ModalShell
-      title="Import Recordings"
+      title={t("review.title")}
       size="default"
       onRequestClose={onCancel}
       closeDisabled={isSubmitting}
@@ -74,7 +77,7 @@ export function TimestampReviewModal({
             onClick={onCancel}
             disabled={isSubmitting}
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -82,21 +85,21 @@ export function TimestampReviewModal({
             onClick={onConfirm}
             disabled={isConfirmDisabled || isSubmitting}
           >
-            {isSubmitting ? "Confirming…" : "Confirm"}
+            {isSubmitting ? t("review.confirming") : t("review.confirm")}
           </button>
         </>
       }
     >
         <div className="modal-toolbar">
           <div className="field modal-toolbar__field">
-            <span id="bulk-timezone-label">Set all timezones to</span>
+            <span id="bulk-timezone-label">{t("review.setAllZones")}</span>
             <div className="bulk-timezone-controls">
               <select
                 aria-labelledby="bulk-timezone-label"
                 value={bulkTimezone}
                 onChange={(event) => setBulkTimezone(event.target.value)}
               >
-                <option value="">— select —</option>
+                <option value="">{t("review.selectZone")}</option>
                 {timezoneOptions.map((tz) => (
                   <option key={tz} value={tz}>{tz}</option>
                 ))}
@@ -107,7 +110,7 @@ export function TimestampReviewModal({
                 onClick={() => onApplyTimezoneToAll(bulkTimezone)}
                 disabled={bulkTimezone.trim().length === 0}
               >
-                Apply to All
+                {t("review.applyToAll")}
               </button>
             </div>
           </div>
@@ -118,7 +121,7 @@ export function TimestampReviewModal({
           {items.map((item) => {
             const timezoneError = isValidTimezone(item.timezone)
               ? null
-              : "Enter a valid IANA timezone.";
+              : "timestamp.invalidZone";
             const localError = getLocalTimestampError(item.localTimestampText);
             const utcError = getUtcTimestampError(item.utcTimestampText);
             const rowError = timezoneError ?? localError ?? utcError;
@@ -130,7 +133,7 @@ export function TimestampReviewModal({
                 </div>
                 <div className="review-row__fields">
                   <label className="field">
-                    <span>Local timestamp</span>
+                    <span>{t("review.localTimestamp")}</span>
                     <input
                       value={item.localTimestampText}
                       onChange={(event) => {
@@ -146,7 +149,7 @@ export function TimestampReviewModal({
                     />
                   </label>
                   <label className="field">
-                    <span>Timezone</span>
+                    <span>{t("info.timezone")}</span>
                     <select
                       value={item.timezone}
                       onChange={(event) => {
@@ -183,7 +186,7 @@ export function TimestampReviewModal({
                     </select>
                   </label>
                   <label className="field">
-                    <span>UTC timestamp</span>
+                    <span>{t("review.utcTimestamp")}</span>
                     <input
                       value={item.utcTimestampText}
                       onChange={(event) => {
@@ -191,7 +194,7 @@ export function TimestampReviewModal({
                         const nextMs = parseUtcFromDisplay(nextDisplay);
                         const localResult = nextMs !== null
                           ? recomputeLocalFromUtc(nextMs, item.timezone)
-                          : { localTimestampText: item.localTimestampText, error: "invalid" };
+                          : { localTimestampText: item.localTimestampText, error: "timestamp.utcFormat" as const };
                         onChange({
                           ...item,
                           // Keep the user's raw keystrokes in the field they are
@@ -206,7 +209,7 @@ export function TimestampReviewModal({
                   </label>
                 </div>
                 <div className="review-row__footer">
-                  {rowError ? <span className="row-error">{rowError}</span> : null}
+                  {rowError ? <span className="row-error">{t(rowError)}</span> : null}
                 </div>
               </div>
             );
@@ -222,10 +225,10 @@ export function TimestampReviewModal({
               checked={items.length > 0 && items.every((i) => i.copyToBackupOnConfirm)}
               onChange={(e) => onSetCopyToBackupForAll(e.target.checked)}
             />
-            Copy originals to backup folder
+            {t("review.copyToBackup")}
           </label>
           <p className="field-hint">
-            Backups are saved to <code>{backupDirectoryLabel}</code>. Configure the location in Settings.
+            {i18n.rich("review.backupHint", { path: <code>{backupDirectoryLabel}</code> })}
           </p>
           <label className="modal-checkbox">
             <input
@@ -233,10 +236,10 @@ export function TimestampReviewModal({
               checked={items.length > 0 && items.every((i) => i.deleteOriginalOnConfirm)}
               onChange={(e) => onSetDeleteOriginalForAll(e.target.checked)}
             />
-            Permanently delete originals after import
+            {t("review.deleteOriginals")}
           </label>
           <p className="field-hint">
-            If both options are selected, the backup is made before the original is deleted. A failed backup cancels the deletion for that file.
+            {t("review.bothOptionsHint")}
           </p>
         </div>
     </ModalShell>

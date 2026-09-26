@@ -1,3 +1,4 @@
+import { message } from "@shared/i18n/translate";
 import { execFile } from "node:child_process";
 import { access, chmod, constants, mkdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -302,7 +303,7 @@ export class ToolManager {
       });
       this.setTransient(name, { kind: "idle" });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      const detail = error instanceof Error ? error.message : String(error);
       if (userController.signal.aborted && !published) {
         await this.deps.logger.info("tools.install-cancelled", "Cancelled audio tool install.", {
           tool: name,
@@ -316,12 +317,12 @@ export class ToolManager {
       // overlay, never the persisted facts. setTransient notifies the renderer.
       await this.deps.logger.warn("tools.install-failed", "Audio tool install failed.", {
         tool: name,
-        error: message,
+        error: detail,
       });
       this.setTransient(name, {
         kind: "failed",
         operation: "provision",
-        error: `${name} could not be installed or updated. The existing tool, if any, is unchanged; try again.`,
+        error: message("tools.provisionFailed", { tool: name }),
       });
     } finally {
       clearTimeout(deadline);

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AudioToolsModal } from "@renderer/app/AudioToolsModal";
 import type { DependencyStatus } from "@shared/app-shell";
+import { message } from "@shared/i18n/translate";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -148,7 +149,7 @@ describe("AudioToolsModal update check", () => {
           checkUpdatesAtLaunch: true,
           isChecking: false,
           checkNotice: null,
-          operationError: "Another tool operation is already running.",
+          operationError: message("tools.installFailed"),
           onProvision: vi.fn(),
           onCancelProvision: vi.fn(),
           onCheck: vi.fn(),
@@ -160,6 +161,6 @@ describe("AudioToolsModal update check", () => {
     });
 
     const alert = document.querySelector('[role="dialog"] [role="alert"]');
-    expect(alert?.textContent).toBe("Another tool operation is already running.");
+    expect(alert?.textContent).toBe("Failed to install audio tool.");
   });
 });

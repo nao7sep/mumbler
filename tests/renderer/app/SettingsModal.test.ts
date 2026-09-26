@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsModal } from "@renderer/app/SettingsModal";
+import { message } from "@shared/i18n/translate";
 import type { MumblerShellApi, SettingsDraft } from "@shared/app-shell";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -87,7 +88,7 @@ describe("SettingsModal results", () => {
         isSavingApiKey: false,
         isPickingOutputDirectory: false,
         isPickingBackupDirectory: false,
-        errorMessage: "Settings could not be saved.",
+        errorMessage: message("error.settingsSave"),
         onChange: vi.fn(),
         onClose: vi.fn(),
         onPickOutputDirectory: vi.fn(),
@@ -140,13 +141,13 @@ describe("SettingsModal results", () => {
 
     const link = document.querySelector<HTMLAnchorElement>('a[href*="time_zones"]');
     await act(async () => link?.click());
-    expect(document.body.textContent).toContain("The timezone reference could not be opened. Try again.");
+    expect(document.body.textContent).toContain("The time zone reference could not be opened. Try again.");
     expect(document.body.textContent).not.toContain("EACCES");
     expect(reportRendererDiagnostic).toHaveBeenCalledOnce();
 
     openExternal.mockResolvedValueOnce();
     await act(async () => link?.click());
-    expect(document.body.textContent).not.toContain("The timezone reference could not be opened. Try again.");
+    expect(document.body.textContent).not.toContain("The time zone reference could not be opened. Try again.");
   });
 
   it("ignores an older timezone-link settlement after a newer success", async () => {
@@ -182,7 +183,7 @@ describe("SettingsModal results", () => {
     await act(async () => second.resolve());
     await act(async () => first.reject(new Error("EACCES /private/tmp/STALE-TIMEZONE")));
 
-    expect(document.body.textContent).not.toContain("timezone reference could not be opened");
+    expect(document.body.textContent).not.toContain("time zone reference could not be opened");
     expect(document.body.textContent).not.toContain("STALE-TIMEZONE");
     expect(reportRendererDiagnostic).toHaveBeenCalledOnce();
   });

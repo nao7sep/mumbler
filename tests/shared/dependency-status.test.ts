@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DependencyStatus, ToolFacts, ToolTransient } from "@shared/app-shell";
 import { deriveStatus, rollUpRole } from "@shared/dependency-status";
+import { message } from "@shared/i18n/translate";
 
 const idle: ToolTransient = { kind: "idle" };
 
@@ -44,7 +45,7 @@ describe("I1 — derivation is pure and total", () => {
       idle,
       { kind: "running", operation: "provision", percent: 40 },
       { kind: "running", operation: "check", percent: null },
-      { kind: "failed", operation: "provision", error: "boom" },
+      { kind: "failed", operation: "provision", error: message("tools.provisionFailed", { tool: "ffmpeg" }) },
     ];
     for (const f of cases) {
       for (const t of transients) {
@@ -112,7 +113,7 @@ describe("state → role mapping", () => {
 // I5 — Operations are transient: a failed operation never persists as a state.
 describe("I5 — a failed operation is transient over persisted state", () => {
   it("a failed provision leaves the tool not-installed, shown as error via the overlay", () => {
-    const status = derive(facts(), { kind: "failed", operation: "provision", error: "network down" });
+    const status = derive(facts(), { kind: "failed", operation: "provision", error: message("tools.provisionFailed", { tool: "ffmpeg" }) });
     expect(status.state).toBe("not-installed"); // persisted state unchanged
     expect(status.role).toBe("error"); // transient overlay
   });

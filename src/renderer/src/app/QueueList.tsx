@@ -6,7 +6,8 @@
 import type { ReactElement } from "react";
 
 import type { CardStatus, MumblerCard } from "@shared/app-shell";
-import { formatCardStatusMessage } from "./card-status";
+import { cardErrorMessage, formatCardStatusMessage } from "./card-status";
+import { useI18n } from "../i18n/I18nContext";
 import { useQueueListbox } from "./useQueueListbox";
 
 export function slugify(value: string): string {
@@ -17,28 +18,9 @@ export function statusModifier(status: CardStatus): string {
   return slugify(status);
 }
 
-export function formatBytes(value: number): string {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-
-  const units = ["KB", "MB", "GB"];
-  let size = value / 1024;
-  let unitIndex = 0;
-
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-
-  return `${size.toFixed(size >= 100 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
-export function formatDuration(value: number | null): string {
-  if (value === null) {
-    return "Unknown";
-  }
-
+// A recording's length as a timecode (m:ss.t), the same form the trim markers
+// are typed in.
+export function formatDuration(value: number): string {
   const totalTenths = Math.round(value * 10);
   const totalSeconds = Math.floor(totalTenths / 10);
   const tenths = totalTenths % 10;
@@ -54,10 +36,11 @@ export interface QueueListProps {
 }
 
 export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): ReactElement {
+  const { t, text } = useI18n();
   const { containerProps, getOptionProps } = useQueueListbox({
     cardIds: cards.map((card) => card.id),
     selectedCardId,
-    label: "Queue",
+    label: t("queue.title"),
   });
 
   return (
@@ -83,7 +66,7 @@ export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): 
             ) : null}
           </div>
           <div className={`queue-row__status status-text status-text--${slugify(card.status)}`}>
-            {formatCardStatusMessage(card)}
+            {text(formatCardStatusMessage(card))}
           </div>
           {card.lastError ? (
             <div
@@ -91,7 +74,7 @@ export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): 
               role={card.status === "Error" ? "alert" : undefined}
               aria-atomic={card.status === "Error" ? "true" : undefined}
             >
-              {card.lastError.message}
+              {text(cardErrorMessage(card)!)}
             </div>
           ) : null}
         </div>

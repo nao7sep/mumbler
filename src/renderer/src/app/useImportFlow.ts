@@ -20,15 +20,16 @@ import {
 } from "./import-rules";
 import { isTextEditingTarget } from "./shortcut-utils";
 import { presentFailure, reportRendererDiagnostic } from "./presentFailure";
+import { message, type Message } from "@shared/i18n/translate";
 
 interface UseImportFlowOptions {
   snapshot: AppSnapshot | null;
   onSnapshotUpdate: (snapshot: AppSnapshot) => void;
-  onError: (owner: string, message: string) => void;
+  onError: (owner: string, message: Message) => void;
 }
 
 export interface ImportResultNotice {
-  message: string;
+  message: Message;
   severity: "information" | "warning" | "error";
   issueKeys: string[];
 }
@@ -47,6 +48,10 @@ interface UseImportFlowResult {
   onDragOver: (event: DragEvent<HTMLElement>) => void;
   onDragLeave: (event: DragEvent<HTMLElement>) => void;
   onDrop: (event: DragEvent<HTMLElement>) => void;
+}
+
+function joinSentences(parts: Message[]): Message {
+  return parts.reduceRight((rest, first) => message("common.sentences", { first, rest }));
 }
 
 export function useImportFlow({
@@ -90,7 +95,7 @@ export function useImportFlow({
         .catch((error: unknown) => {
           onError(
             "import-review-save",
-            presentFailure(error, "Timestamp review edits could not be saved. Your edits are still shown; try again.", "pending import review save failed"),
+            presentFailure(error, message("error.reviewSave"), "pending import review save failed"),
           );
         });
     }, 250);
@@ -115,7 +120,7 @@ export function useImportFlow({
       ImportOperationResult,
       "attemptedPaths" | "importedCount" | "failedImports" | "duplicateImports"
     >,
-    unavailable: Array<{ sourcePath: string; message: string }> = [],
+    unavailable: Array<{ sourcePath: string; message: Message }> = [],
   ): void {
     const failures = [...result.failedImports, ...unavailable.map((failure) => ({
       ...failure,
@@ -134,18 +139,21 @@ export function useImportFlow({
       return;
     }
     const imported = result.importedCount;
-    const failureText = failures
-      .map((failure) => `${failure.sourcePath} — ${failure.message}`)
-      .join("; ");
-    const parts: string[] = [];
-    if (imported > 0) parts.push(`Imported ${imported} file${imported === 1 ? "" : "s"}`);
+    // Each part is its own sentence, joined through one catalogue entry, so
+    // every count keeps its own plural form and each language sets the spacing.
+    const parts: Message[] = [];
+    if (imported > 0) parts.push(message("import.imported", { count: imported }));
     if (result.duplicateImports.length > 0) {
-      parts.push(`Repeated in this import: ${result.duplicateImports.join(", ")}`);
+      parts.push(message("import.repeated", { files: result.duplicateImports }));
     }
     if (failures.length > 0) {
-      parts.push(
-        `${failures.length} item${failures.length === 1 ? "" : "s"} could not be imported: ${failureText}`,
-      );
+      parts.push(message("import.failedCount", { count: failures.length }));
+      for (const failure of failures) {
+        parts.push(message("import.failureItem", {
+          file: failure.sourcePath === "" ? message("import.unnamedItem") : failure.sourcePath,
+          reason: failure.message,
+        }));
+      }
     }
     setImportResult({
       severity: failures.some((failure) => failure.kind === "failure")
@@ -153,7 +161,7 @@ export function useImportFlow({
         : failures.length > 0
           ? "warning"
           : "information",
-      message: `${parts.join("; ")}.`,
+      message: joinSentences(parts),
       issueKeys: [
         ...failures.map((failure) => resultKey(failure.sourcePath)),
         ...result.duplicateImports.map(resultKey),
@@ -170,7 +178,7 @@ export function useImportFlow({
     } catch (error: unknown) {
       setImportResult({
         severity: "error",
-        message: presentFailure(error, "Files could not be imported. The queue is unchanged; check that the files are still available and try again.", "file picker import failed"),
+        message: presentFailure(error, message("error.importPicker"), "file picker import failed"),
         issueKeys: ["operation:file-picker"],
       });
     } finally {
@@ -186,7 +194,7 @@ export function useImportFlow({
     } catch (error: unknown) {
       onError(
         "import-review-confirm",
-        presentFailure(error, "Imported timestamps could not be confirmed. The review is still open; try again.", "import timestamp confirmation failed"),
+        presentFailure(error, message("error.reviewConfirm"), "import timestamp confirmation failed"),
       );
     } finally {
       setIsConfirmingReview(false);
@@ -204,14 +212,14 @@ export function useImportFlow({
       // The drafts stay, so the review stays open for the retry the message offers.
       onError(
         "import-review-cancel",
-        presentFailure(error, "The pending import could not be cancelled. The review remains open; try again.", "pending import cancellation failed"),
+        presentFailure(error, message("error.reviewCancel"), "pending import cancellation failed"),
       );
     }
   }
 
   async function handleDroppedPaths(
     paths: string[],
-    unavailable: Array<{ sourcePath: string; message: string }> = [],
+    unavailable: Array<{ sourcePath: string; message: Message }> = [],
   ): Promise<void> {
     if (paths.length === 0) {
       return;
@@ -225,7 +233,7 @@ export function useImportFlow({
     } catch (error: unknown) {
       setImportResult({
         severity: "error",
-        message: presentFailure(error, "The dropped files could not be imported. The queue is unchanged; check that the files are still available and try again.", "dropped import failed"),
+        message: presentFailure(error, message("error.importDrop"), "dropped import failed"),
         issueKeys: paths.map(resultKey),
       });
     } finally {
@@ -271,7 +279,7 @@ export function useImportFlow({
     if (!acceptsDrop) {
       setImportResult({
         severity: "warning",
-        message: "Queue accepts local audio files from Finder or Import.",
+        message: message("import.nonFileDrop"),
         issueKeys: ["offer:non-file"],
       });
       return;

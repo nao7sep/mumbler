@@ -9,6 +9,8 @@ import { SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shar
 import { CATALOGUES } from "@shared/i18n/catalogues";
 import { LANGUAGES, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { useI18n } from "../i18n/I18nContext";
+import type { MessageKey } from "@shared/i18n/catalogues";
+import { message, type Message } from "@shared/i18n/translate";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 import { ModalShell } from "./modal/ModalShell";
 import { useTablist } from "./useTablist";
@@ -37,6 +39,7 @@ function EditableList({
   placeholder: string;
   monospace?: boolean;
 }): ReactElement {
+  const { t } = useI18n();
   const [newValue, setNewValue] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const composing = useComposing();
@@ -69,7 +72,7 @@ function EditableList({
               className="button button--ghost button--compact"
               onClick={() => handleRemove(index)}
             >
-              Remove
+              {t("common.remove")}
             </button>
           </div>
         ))}
@@ -96,7 +99,7 @@ function EditableList({
           onClick={handleAdd}
           disabled={newValue.trim().length === 0}
         >
-          Add
+          {t("common.add")}
         </button>
       </div>
     </div>
@@ -108,11 +111,11 @@ function EditableList({
 // prompt texts, and the retry/timeout pipeline knobs.
 const SETTINGS_TABS = ["general", "ai", "prompts", "pipeline"] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
-const SETTINGS_TAB_LABELS: Record<SettingsTab, string> = {
-  general: "General",
-  ai: "AI",
-  prompts: "Prompts",
-  pipeline: "Pipeline",
+const SETTINGS_TAB_LABELS: Record<SettingsTab, MessageKey> = {
+  general: "settings.tabGeneral",
+  ai: "settings.tabAi",
+  prompts: "settings.tabPrompts",
+  pipeline: "settings.tabPipeline",
 };
 
 export function SettingsModal({
@@ -139,7 +142,7 @@ export function SettingsModal({
   isSavingApiKey: boolean;
   isPickingOutputDirectory: boolean;
   isPickingBackupDirectory: boolean;
-  errorMessage: string | null;
+  errorMessage: Message | null;
   onChange: (draft: SettingsDraft) => void;
   onClose: () => void;
   onPickOutputDirectory: () => void;
@@ -155,7 +158,7 @@ export function SettingsModal({
   // Settings Save. The raw key is held only in this local state until then.
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
-  const [timezoneLinkError, setTimezoneLinkError] = useState<string | null>(null);
+  const [timezoneLinkError, setTimezoneLinkError] = useState<Message | null>(null);
   const timezoneLinkAttempt = useRef(0);
   const settingsTablist = useTablist<SettingsTab>({
     tabs: SETTINGS_TABS,
@@ -167,7 +170,8 @@ export function SettingsModal({
   const geminiModelEntries = useMemo(() => parseEntries(draft.geminiModelsText), [draft.geminiModelsText]);
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
   const systemTimezone = useMemo(() => getSystemTimezone(), []);
-  const t = useI18n().t;
+  const i18n = useI18n();
+  const { t, text } = i18n;
   const numberIssues = useMemo(() => getSettingsNumberIssues(draft), [draft]);
   const canSave = isDirty && numberIssues.length === 0 && !isSaving;
   const numberIssueByField = new Map(numberIssues.map((issue) => [issue.field, issue]));
@@ -181,17 +185,17 @@ export function SettingsModal({
 
   return (
     <ModalShell
-      title="Settings"
+      title={t("settings.title")}
       size="settings"
       onRequestClose={onClose}
       closeDisabled={isSaving}
       footer={
         <>
           <button type="button" className="button button--ghost" onClick={onClose} disabled={isSaving}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="button" className="button button--primary" onClick={onSave} disabled={!canSave}>
-            {isSaving ? "Saving…" : "Save"}
+            {isSaving ? t("common.saving") : t("common.save")}
           </button>
         </>
       }
@@ -199,7 +203,7 @@ export function SettingsModal({
       {/* Fixed chrome between the modal header and the scrolling body, like the
           other apps' settings tab strips — the tabs never scroll away. */}
       <div className="modal-card__strip">
-        <div className="app-tabs settings-tabs" {...settingsTablist.tablistProps} aria-label="Settings sections">
+        <div className="app-tabs settings-tabs" {...settingsTablist.tablistProps} aria-label={t("settings.sections")}>
           {SETTINGS_TABS.map((sectionTab) => (
             <button
               key={sectionTab}
@@ -207,7 +211,7 @@ export function SettingsModal({
               className={`app-tab${activeTab === sectionTab ? " app-tab--active" : ""}`}
               {...settingsTablist.getTabProps(sectionTab)}
             >
-              {SETTINGS_TAB_LABELS[sectionTab]}
+              {t(SETTINGS_TAB_LABELS[sectionTab])}
             </button>
           ))}
         </div>
@@ -215,14 +219,14 @@ export function SettingsModal({
 
       <div className="modal-card__body">
 
-        {errorMessage ? <InlineError>{errorMessage}</InlineError> : null}
+        {errorMessage ? <InlineError>{text(errorMessage)}</InlineError> : null}
 
         {numberIssues.length > 0 ? (
           <InlineError>
             <ul className="settings-number-errors">
               {numberIssues.map((issue) => (
                 <li id={`settings-number-error-${issue.field}`} key={issue.field}>
-                  {issue.message}
+                  {text(issue.message)}
                 </li>
               ))}
             </ul>
@@ -255,14 +259,14 @@ export function SettingsModal({
             </section>
 
             <section className="settings-section">
-              <h3>Appearance</h3>
+              <h3>{t("settings.appearance")}</h3>
               <div className="field-stack">
                 {/* A native radio group: one tab stop, arrow keys move and select
                     (composite-control conventions). Applied on Save with the rest. */}
                 <fieldset className="radio-field">
-                  <legend>Theme</legend>
+                  <legend>{t("settings.theme")}</legend>
                   <div className="radio-field__options">
-                    {THEME_PREFERENCES.map(({ value, label }) => (
+                    {THEME_PREFERENCES.map(({ value, labelKey }) => (
                       <label key={value} className="checkbox-field">
                         <input
                           type="radio"
@@ -271,31 +275,31 @@ export function SettingsModal({
                           checked={draft.theme === value}
                           onChange={() => onChange({ ...draft, theme: value })}
                         />
-                        <span>{label}</span>
+                        <span>{t(labelKey)}</span>
                       </label>
                     ))}
                   </div>
-                  <p className="field-hint">System follows the OS appearance.</p>
+                  <p className="field-hint">{t("settings.themeHint")}</p>
                 </fieldset>
                 <label className="field">
-                  <span>UI font</span>
+                  <span>{t("settings.uiFont")}</span>
                   <input
                     value={draft.uiFontFamily}
-                    placeholder="Default"
+                    placeholder={t("settings.uiFontPlaceholder")}
                     onChange={(event) => onChange({ ...draft, uiFontFamily: event.target.value })}
                   />
                 </label>
                 <p className="field-hint">
-                  The app interface font. Comma-separated families; the first one your system has is used. Blank uses the built-in default.
+                  {t("settings.uiFontHint")}
                 </p>
               </div>
             </section>
 
             <section className="settings-section">
-              <h3>Files</h3>
+              <h3>{t("settings.files")}</h3>
               <div className="field-stack">
                 <label className="field">
-                  <span>Output Directory</span>
+                  <span>{t("settings.outputDirectory")}</span>
                   <div className="inline-action-field">
                     <input
                       value={draft.outputDirectory}
@@ -308,15 +312,15 @@ export function SettingsModal({
                       onClick={onPickOutputDirectory}
                       disabled={isPickingOutputDirectory}
                     >
-                      Browse
+                      {t("common.browse")}
                     </button>
                   </div>
                 </label>
                 <p className="field-hint">
-                  Where exported files are saved. Leave blank to use the default ({draft.defaultOutputDirectory}).
+                  {t("settings.outputDirectoryHint", { path: draft.defaultOutputDirectory })}
                 </p>
                 <label className="field">
-                  <span>Backup Directory</span>
+                  <span>{t("settings.backupDirectory")}</span>
                   <div className="inline-action-field">
                     <input
                       value={draft.backupDirectory}
@@ -329,21 +333,21 @@ export function SettingsModal({
                       onClick={onPickBackupDirectory}
                       disabled={isPickingBackupDirectory}
                     >
-                      Browse
+                      {t("common.browse")}
                     </button>
                   </div>
                 </label>
                 <p className="field-hint">
-                  Used when "Copy originals to backup folder" is selected during import. Leave blank to use the default ({draft.defaultBackupDirectory}).
+                  {t("settings.backupDirectoryHint", { option: t("review.copyToBackup"), path: draft.defaultBackupDirectory })}
                 </p>
               </div>
             </section>
 
             <section className="settings-section">
-              <h3>Import</h3>
+              <h3>{t("settings.import")}</h3>
               <div className="field-stack">
                 <label className="field">
-                  <span>Default Timezone</span>
+                  <span>{t("settings.defaultTimezone")}</span>
                   <select
                     value={draft.defaultTimezone}
                     onChange={(event) => onChange({ ...draft, defaultTimezone: event.target.value })}
@@ -367,40 +371,47 @@ export function SettingsModal({
                           if (timezoneLinkAttempt.current === attempt) setTimezoneLinkError(null);
                         })
                         .catch((error: unknown) => {
-                          const message = presentFailure(
+                          const failure = presentFailure(
                             error,
-                            "The timezone reference could not be opened. Try again.",
+                            message("error.timezoneLink"),
                             "settings timezone link failed",
                           );
-                          if (timezoneLinkAttempt.current === attempt) setTimezoneLinkError(message);
+                          if (timezoneLinkAttempt.current === attempt) setTimezoneLinkError(failure);
                         });
                     }}
-                  >Full timezone list on Wikipedia <ExternalLinkIcon /></a>
+                  >{t("settings.timezoneLink")} <ExternalLinkIcon /></a>
                 </p>
                 {timezoneLinkError ? (
                   <InlineError onDismiss={() => setTimezoneLinkError(null)}>
-                    {timezoneLinkError}
+                    {text(timezoneLinkError)}
                   </InlineError>
                 ) : null}
                 <div className="field">
-                  <span>Timestamp Patterns</span>
-                  <p className="field-hint">Named groups: <code>year</code> (2 or 4 digits), <code>month</code>, <code>day</code>, <code>hour</code>, <code>minute</code>, <code>second</code> (optional).</p>
+                  <span>{t("settings.timestampPatterns")}</span>
+                  <p className="field-hint">{i18n.rich("settings.timestampPatternsHint", {
+                    year: <code>year</code>,
+                    month: <code>month</code>,
+                    day: <code>day</code>,
+                    hour: <code>hour</code>,
+                    minute: <code>minute</code>,
+                    second: <code>second</code>,
+                  })}</p>
                   <EditableList
                     monospace
                     entries={patternEntries}
                     onChange={(entries) => onChange({ ...draft, timestampPatternsText: entriesToText(entries) })}
-                    placeholder="Add regex pattern..."
+                    placeholder={t("settings.addPattern")}
                   />
                 </div>
               </div>
             </section>
 
             <section className="settings-section">
-              <h3>Player</h3>
+              <h3>{t("settings.player")}</h3>
               <div className="settings-number-grid">
                 <div>
                   <label className="field">
-                    <span>Skip Interval (seconds)</span>
+                    <span>{t("settings.skipInterval")}</span>
                     <input
                       type="number"
                       min={1}
@@ -410,11 +421,11 @@ export function SettingsModal({
                       onChange={(e) => onChange({ ...draft, skipIntervalSec: Number.parseInt(e.target.value, 10) })}
                     />
                   </label>
-                  <p className="field-hint">Seconds jumped by the Left / Right keys.</p>
+                  <p className="field-hint">{t("settings.skipIntervalHint")}</p>
                 </div>
                 <div>
                   <label className="field">
-                    <span>Preview Duration (seconds)</span>
+                    <span>{t("settings.previewDuration")}</span>
                     <input
                       type="number"
                       min={1}
@@ -424,7 +435,7 @@ export function SettingsModal({
                       onChange={(e) => onChange({ ...draft, previewSnippetSeconds: Number.parseInt(e.target.value, 10) })}
                     />
                   </label>
-                  <p className="field-hint">Seconds played by the Play First/Last buttons.</p>
+                  <p className="field-hint">{t("settings.previewDurationHint")}</p>
                 </div>
               </div>
             </section>
@@ -434,29 +445,29 @@ export function SettingsModal({
             {/* The tab already says AI, so the sections carry only their own
                 names — no heading that repeats the tab label. */}
             <section className="settings-section">
-              <h3>Gemini</h3>
-              <p className="field-hint">Gemini is the only supported AI provider at this time.</p>
+              <h3>{t("settings.gemini")}</h3>
+              <p className="field-hint">{t("settings.geminiHint")}</p>
               <div className="field-stack">
                 {draft.hasGeminiApiKey ? (
                   <div className="api-key-status">
-                    <span className="api-key-status__label">A Gemini API key is configured.</span>
+                    <span className="api-key-status__label">{t("settings.apiKeyConfigured")}</span>
                     <button
                       type="button"
                       className="button button--ghost button--compact"
                       onClick={() => onClearApiKey()}
                       disabled={isSavingApiKey}
                     >
-                      Remove key
+                      {t("settings.removeKey")}
                     </button>
                   </div>
                 ) : null}
                 <label className="field">
-                  <span>{draft.hasGeminiApiKey ? "Replace key" : "Gemini API Key"}</span>
+                  <span>{draft.hasGeminiApiKey ? t("settings.replaceKey") : t("settings.apiKey")}</span>
                   <div className="inline-action-field">
                     <input
                       type="password"
                       value={apiKeyInput}
-                      placeholder={draft.hasGeminiApiKey ? "Enter new key to replace" : "Enter Gemini API key"}
+                      placeholder={draft.hasGeminiApiKey ? t("settings.replaceKeyPlaceholder") : t("settings.apiKeyPlaceholder")}
                       onChange={(event) => setApiKeyInput(event.target.value)}
                     />
                     <button
@@ -468,21 +479,21 @@ export function SettingsModal({
                       }}
                       disabled={isSavingApiKey || apiKeyInput.trim().length === 0}
                     >
-                      {isSavingApiKey ? "Saving…" : "Save key"}
+                      {isSavingApiKey ? t("common.saving") : t("settings.saveKey")}
                     </button>
                   </div>
                 </label>
                 <p className="field-hint">
-                  Stored in its own secured file, not in settings. A <code>GEMINI_API_KEY</code> environment variable, if set, takes precedence over the saved key.
+                  {i18n.rich("settings.apiKeyHint", { variable: <code>GEMINI_API_KEY</code> })}
                 </p>
                 <div className="field">
-                  <span>Gemini Models</span>
-                  <p className="field-hint">Your model list — add any Gemini model id here, remove ones you don't use. The two selectors below pick from this list; to use a new model, add it here first. An invalid or retired id is reported when a job runs, not here.</p>
+                  <span>{t("settings.geminiModels")}</span>
+                  <p className="field-hint">{t("settings.geminiModelsHint")}</p>
                   <EditableList
                     monospace
                     entries={geminiModelEntries}
                     onChange={(entries) => onChange({ ...draft, geminiModelsText: entriesToText(entries) })}
-                    placeholder="Add model id, e.g. gemini-3.5-flash"
+                    placeholder={t("settings.addModel", { example: "gemini-3.5-flash" })}
                   />
                 </div>
                 <div>
@@ -492,11 +503,11 @@ export function SettingsModal({
                     onClick={onRestoreDefaultModels}
                     disabled={isSaving}
                   >
-                    Reset models
+                    {t("settings.resetModels")}
                   </button>
                 </div>
                 <label className="field">
-                  <span>Transcription Model</span>
+                  <span>{t("options.transcriptionModel")}</span>
                   <select
                     value={draft.transcriptionModel}
                     onChange={(event) => onChange({ ...draft, transcriptionModel: event.target.value })}
@@ -509,9 +520,9 @@ export function SettingsModal({
                     )}
                   </select>
                 </label>
-                <p className="field-hint">Used for transcription and structured transcription. Choose a capable model for long audio.</p>
+                <p className="field-hint">{t("settings.transcriptionModelHint")}</p>
                 <label className="field">
-                  <span>Metadata Model</span>
+                  <span>{t("options.metadataModel")}</span>
                   <select
                     value={draft.metadataModel}
                     onChange={(event) => onChange({ ...draft, metadataModel: event.target.value })}
@@ -524,15 +535,15 @@ export function SettingsModal({
                     )}
                   </select>
                 </label>
-                <p className="field-hint">Used for title and slug generation. A lighter model is fine for short text tasks.</p>
+                <p className="field-hint">{t("settings.metadataModelHint")}</p>
               </div>
             </section>
 
             <section className="settings-section">
-              <h3>Concurrency</h3>
+              <h3>{t("settings.concurrency")}</h3>
               <div className="field-stack">
                 <label className="field">
-                  <span>Concurrent Transcriptions</span>
+                  <span>{t("settings.concurrentTranscriptions")}</span>
                   <input
                     type="number"
                     min={1}
@@ -542,7 +553,7 @@ export function SettingsModal({
                     onChange={(e) => onChange({ ...draft, concurrencyLimit: Number.parseInt(e.target.value, 10) })}
                   />
                 </label>
-                <p className="field-hint">Maximum number of audio transcription jobs that can run at once. Each job loads a full audio file into the AI context, so keep this low unless you have a high API quota.</p>
+                <p className="field-hint">{t("settings.concurrentTranscriptionsHint")}</p>
               </div>
             </section>
           </div>
@@ -551,7 +562,7 @@ export function SettingsModal({
             <section className="settings-section">
               <div className="field-stack">
                 <label className="field">
-                  <span>Structured Prompt</span>
+                  <span>{t("settings.structuredPrompt")}</span>
                   <textarea
                     rows={6}
                     value={draft.structuredPrompt}
@@ -559,7 +570,7 @@ export function SettingsModal({
                   />
                 </label>
                 <label className="field">
-                  <span>Title Prompt</span>
+                  <span>{t("settings.titlePrompt")}</span>
                   <textarea
                     rows={5}
                     value={draft.titlePrompt}
@@ -567,7 +578,7 @@ export function SettingsModal({
                   />
                 </label>
                 <label className="field">
-                  <span>Slug Prompt</span>
+                  <span>{t("settings.slugPrompt")}</span>
                   <textarea
                     rows={4}
                     value={draft.slugPrompt}
@@ -581,7 +592,7 @@ export function SettingsModal({
                     onClick={onRestoreDefaultPrompts}
                     disabled={isSaving}
                   >
-                    Reset prompts
+                    {t("settings.resetPrompts")}
                   </button>
                 </div>
               </div>
@@ -593,7 +604,7 @@ export function SettingsModal({
               <div className="settings-number-grid">
                 <div>
                   <label className="field">
-                    <span>Max Retries</span>
+                    <span>{t("settings.maxRetries")}</span>
                     <input
                       type="number"
                       min={1}
@@ -603,11 +614,11 @@ export function SettingsModal({
                       onChange={(event) => onChange({ ...draft, retryMaxRetries: Number.parseInt(event.target.value, 10) })}
                     />
                   </label>
-                  <p className="field-hint">Maximum number of retry attempts per AI call.</p>
+                  <p className="field-hint">{t("settings.maxRetriesHint")}</p>
                 </div>
                 <div>
                   <label className="field">
-                    <span>Initial Retry Delay (ms)</span>
+                    <span>{t("settings.initialRetryDelay")}</span>
                     <input
                       type="number"
                       min={1}
@@ -617,11 +628,11 @@ export function SettingsModal({
                       onChange={(event) => onChange({ ...draft, retryInitialDelayMs: Number.parseInt(event.target.value, 10) })}
                     />
                   </label>
-                  <p className="field-hint">Wait time before the first retry.</p>
+                  <p className="field-hint">{t("settings.initialRetryDelayHint")}</p>
                 </div>
                 <div>
                   <label className="field">
-                    <span>Max Retry Delay (ms)</span>
+                    <span>{t("settings.maxRetryDelay")}</span>
                     <input
                       type="number"
                       min={1}
@@ -631,11 +642,11 @@ export function SettingsModal({
                       onChange={(event) => onChange({ ...draft, retryMaxDelayMs: Number.parseInt(event.target.value, 10) })}
                     />
                   </label>
-                  <p className="field-hint">Upper bound on retry wait time.</p>
+                  <p className="field-hint">{t("settings.maxRetryDelayHint")}</p>
                 </div>
                 <div>
                   <label className="field">
-                    <span>Retry Jitter (0–1)</span>
+                    <span>{t("settings.retryJitter")}</span>
                     <input
                       type="number"
                       min={0}
@@ -646,11 +657,11 @@ export function SettingsModal({
                       onChange={(event) => onChange({ ...draft, retryJitterRatio: Number.parseFloat(event.target.value) })}
                     />
                   </label>
-                  <p className="field-hint">Randomness added to retry delays to avoid thundering herd.</p>
+                  <p className="field-hint">{t("settings.retryJitterHint")}</p>
                 </div>
                 <div>
                   <label className="field">
-                    <span>Transcription Timeout (ms)</span>
+                    <span>{t("settings.transcriptionTimeout")}</span>
                     <input
                       type="number"
                       min={1}
@@ -660,11 +671,11 @@ export function SettingsModal({
                       onChange={(event) => onChange({ ...draft, transcriptionTimeoutMs: Number.parseInt(event.target.value, 10) })}
                     />
                   </label>
-                  <p className="field-hint">Time allowed per transcription or structured transcription request.</p>
+                  <p className="field-hint">{t("settings.transcriptionTimeoutHint")}</p>
                 </div>
                 <div>
                   <label className="field">
-                    <span>Metadata Generation Timeout (ms)</span>
+                    <span>{t("settings.metadataTimeout")}</span>
                     <input
                       type="number"
                       min={1}
@@ -674,7 +685,7 @@ export function SettingsModal({
                       onChange={(event) => onChange({ ...draft, metadataTimeoutMs: Number.parseInt(event.target.value, 10) })}
                     />
                   </label>
-                  <p className="field-hint">Time allowed for each title or slug generation request.</p>
+                  <p className="field-hint">{t("settings.metadataTimeoutHint")}</p>
                 </div>
               </div>
             </section>

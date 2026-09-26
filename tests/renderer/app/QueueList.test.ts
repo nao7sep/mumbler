@@ -50,7 +50,11 @@ describe("QueueList card results", () => {
 
     const alerts = document.querySelectorAll<HTMLElement>('[role="alert"]');
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]?.textContent).toBe("Pipeline failed");
+    // The interface says why from the step, not from the English the main
+    // process recorded with the card.
+    expect(alerts[0]?.textContent).toBe(
+      "The recording could not be transcribed. Check the audio tools and Gemini settings, then try again.",
+    );
     expect(document.body.textContent).toContain("AI work cancelled by user.");
   });
 

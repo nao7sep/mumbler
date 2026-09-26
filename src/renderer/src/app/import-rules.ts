@@ -1,12 +1,14 @@
 import type { PendingImportReviewItem } from "@shared/app-shell";
 import { isSupportedAudioImportName } from "@shared/audio-import";
+import { message, type Message } from "@shared/i18n/translate";
 
 // The pure decisions behind useImportFlow, lifted out of the hook so they are
 // testable without a DOM drag event or a React effect.
 
 export interface DroppedPathAdmission {
   paths: string[];
-  unavailable: Array<{ sourcePath: string; message: string }>;
+  // An item with no name keeps an empty sourcePath, named when it is shown.
+  unavailable: Array<{ sourcePath: string; message: Message }>;
 }
 
 /** Resolve every delivered file once, preserving unavailable members for the
@@ -24,14 +26,14 @@ export function parseDroppedPaths(
       const path = getPathForFile(file);
       if (path) paths.push(path);
       else unavailable.push({
-        sourcePath: file.name || "Unavailable dropped item",
-        message: "No usable local file path was available.",
+        sourcePath: file.name,
+        message: message("import.noLocalPath"),
       });
     } catch (error: unknown) {
       onDiagnostic?.(error, "dropped file path resolution failed");
       unavailable.push({
-        sourcePath: file.name || "Unavailable dropped item",
-        message: "The local file path could not be read.",
+        sourcePath: file.name,
+        message: message("import.pathUnreadable"),
       });
     }
   }

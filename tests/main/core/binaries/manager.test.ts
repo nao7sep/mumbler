@@ -311,7 +311,7 @@ describe("installTool", () => {
     expect(ffmpeg?.state).toBe("not-installed");
     expect(ffmpeg?.transient).toMatchObject({
       kind: "failed",
-      error: "ffmpeg could not be installed or updated. The existing tool, if any, is unchanged; try again.",
+      error: { key: "tools.provisionFailed", values: { tool: "ffmpeg" } },
     });
   });
 
@@ -356,7 +356,7 @@ describe("installTool", () => {
     expect(ffmpeg?.state).toBe("not-installed");
     expect(ffmpeg?.transient).toMatchObject({
       kind: "failed",
-      error: "ffmpeg could not be installed or updated. The existing tool, if any, is unchanged; try again.",
+      error: { key: "tools.provisionFailed", values: { tool: "ffmpeg" } },
     });
     expect(await readdir(binDir)).toEqual([]); // never made it out of staging
     expect(await readdir(tempDir)).toEqual([]); // staged archive cleaned on failure
@@ -375,7 +375,7 @@ describe("installTool", () => {
     expect(ffmpeg?.state).toBe("not-installed");
     expect(ffmpeg?.transient).toMatchObject({
       kind: "failed",
-      error: "ffmpeg could not be installed or updated. The existing tool, if any, is unchanged; try again.",
+      error: { key: "tools.provisionFailed", values: { tool: "ffmpeg" } },
     });
     expect(await readdir(binDir)).toEqual([]);
     expect(await readdir(tempDir)).toEqual([]);

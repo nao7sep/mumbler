@@ -13,6 +13,9 @@ import {
   type AppNotification,
 } from "@renderer/app/Notifications";
 import type { MumblerCard } from "@shared/app-shell";
+import { createTranslator, message } from "@shared/i18n/translate";
+
+const english = createTranslator("en");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -34,10 +37,10 @@ afterEach(async () => {
 });
 
 const notifications: AppNotification[] = [
-  { id: "error-1", owner: "first", message: "First failure", kind: "persistent", variant: "error" },
-  { id: "error-2", owner: "second", message: "Second failure", kind: "persistent", variant: "error" },
-  { id: "info", owner: "recovery", message: "Recovered recording", kind: "persistent", variant: "info" },
-  { id: "toast", message: "Recording duplicated", kind: "toast" },
+  { id: "error-1", owner: "first", message: message("error.selectRecording"), kind: "persistent", variant: "error" },
+  { id: "error-2", owner: "second", message: message("error.removeRecording"), kind: "persistent", variant: "error" },
+  { id: "info", owner: "recovery", message: message("notice.recovered", { count: 1 }), kind: "persistent", variant: "info" },
+  { id: "toast", message: message("notice.duplicated"), kind: "toast" },
 ];
 
 function card(status: MumblerCard["status"]): MumblerCard {
@@ -56,7 +59,7 @@ describe("notification lifetime and severity surfaces", () => {
     const next = upsertPersistentNotification(notifications, {
       id: "error-1-new",
       owner: "first",
-      message: "First failure, retried",
+      message: message("error.generate"),
       kind: "persistent",
       variant: "error",
     });
@@ -68,7 +71,7 @@ describe("notification lifetime and severity surfaces", () => {
     expect(next.at(-1)).toMatchObject({
       id: "error-1-new",
       owner: "first",
-      message: "First failure, retried",
+      message: message("error.generate"),
     });
   });
 
@@ -79,10 +82,9 @@ describe("notification lifetime and severity surfaces", () => {
   });
 
   it("routes pipeline success transiently and leaves pipeline failure on the card", () => {
-    expect(pipelineCompletionNotification(card("Generating Metadata"), card("Ready to Save"))).toEqual({
-      message: "Ready to save: recording.wav",
-      kind: "toast",
-    });
+    const notice = pipelineCompletionNotification(card("Generating Metadata"), card("Ready to Save"));
+    expect(notice?.kind).toBe("toast");
+    expect(english.text(notice!.message)).toBe("Ready to save: recording.wav");
     expect(pipelineCompletionNotification(card("Transcribing"), card("Error"))).toBeNull();
   });
 
@@ -102,8 +104,8 @@ describe("notification lifetime and severity surfaces", () => {
     expect(Array.from(document.querySelectorAll(".persistent-notice__severity")))
       .toHaveLength(0);
     const statuses = Array.from(document.querySelectorAll<HTMLElement>('[role="status"]'));
-    expect(statuses.some((status) => status.textContent === "Recovered recording")).toBe(true);
-    expect(statuses.some((status) => status.textContent === "Recording duplicated")).toBe(true);
+    expect(statuses.some((status) => status.textContent === english.text(message("notice.recovered", { count: 1 })))).toBe(true);
+    expect(statuses.some((status) => status.textContent === "Recording duplicated.")).toBe(true);
   });
 
   it("dismisses only the chosen persistent result", async () => {

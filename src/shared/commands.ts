@@ -8,18 +8,18 @@ import type { CommandDefinition } from "./app-shell";
 // keyboard-shortcut-conventions ("ArrowUp" → "Up", " " → "Space").
 export const COMMAND_DEFINITIONS: CommandDefinition[] = [
   // Queue navigation
-  { id: "select-previous",    label: "Select Previous Recording", group: "Queue",    key: "ArrowUp" },
-  { id: "select-next",        label: "Select Next Recording",     group: "Queue",    key: "ArrowDown" },
+  { id: "select-previous",    labelKey: "command.selectPrevious", groupKey: "commandGroup.queue",    key: "ArrowUp" },
+  { id: "select-next",        labelKey: "command.selectNext",     groupKey: "commandGroup.queue",    key: "ArrowDown" },
   // Playback
-  { id: "play-pause",         label: "Play / Pause",              group: "Playback", key: " " },
-  { id: "skip-backward",      label: "Skip Backward",             group: "Playback", key: "ArrowLeft" },
-  { id: "skip-forward",       label: "Skip Forward",              group: "Playback", key: "ArrowRight" },
-  { id: "play-first-snippet", label: "Play First N Seconds",      group: "Playback", key: "[" },
-  { id: "play-last-snippet",  label: "Play Last N Seconds",       group: "Playback", key: "]" },
+  { id: "play-pause",         labelKey: "command.playPause",              groupKey: "commandGroup.playback", key: " " },
+  { id: "skip-backward",      labelKey: "command.skipBackward",             groupKey: "commandGroup.playback", key: "ArrowLeft" },
+  { id: "skip-forward",       labelKey: "command.skipForward",              groupKey: "commandGroup.playback", key: "ArrowRight" },
+  { id: "play-first-snippet", labelKey: "command.playFirstSnippet",      groupKey: "commandGroup.playback", key: "[" },
+  { id: "play-last-snippet",  labelKey: "command.playLastSnippet",       groupKey: "commandGroup.playback", key: "]" },
   // Trim
-  { id: "set-front-marker",   label: "Set Front Marker",          group: "Trim",     key: "f" },
-  { id: "set-back-marker",    label: "Set Back Marker",           group: "Trim",     key: "b" },
+  { id: "set-front-marker",   labelKey: "command.setFrontMarker",          groupKey: "commandGroup.trim",     key: "f" },
+  { id: "set-back-marker",    labelKey: "command.setBackMarker",           groupKey: "commandGroup.trim",     key: "b" },
   // Workflow
-  { id: "transcribe-selected", label: "Generate All",             group: "Workflow", key: "t" },
-  { id: "save-selected",       label: "Save",                     group: "Workflow", key: "s" },
+  { id: "transcribe-selected", labelKey: "command.generateAll",             groupKey: "commandGroup.workflow", key: "t" },
+  { id: "save-selected",       labelKey: "command.save",                     groupKey: "commandGroup.workflow", key: "s" },
 ];
