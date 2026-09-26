@@ -1,4 +1,4 @@
-import type { MumblerCard } from "./app-shell";
+import type { CardTrim, MumblerCard } from "./app-shell";
 
 // The single "is this card busy?" predicate, shared by the main process (the
 // mutation guards in app-runtime) and the renderer (control disabling). A card
@@ -16,4 +16,16 @@ export function isCardBusy(card: MumblerCard): boolean {
     card.status === "Generating Metadata" ||
     card.status === "Saving"
   );
+}
+
+function sameTrim(left: CardTrim, right: CardTrim): boolean {
+  return left.frontMarkerSec === right.frontMarkerSec && left.backMarkerSec === right.backMarkerSec;
+}
+
+// Whether the card's AI results describe a span other than the current trim: the
+// markers moved after the transcription was made. A trim keeps the results
+// rather than clearing them, so this is how both the renderer and a reader of
+// the card tell that they may no longer match the audio.
+export function hasStaleResults(card: MumblerCard): boolean {
+  return card.transcribedTrim !== null && !sameTrim(card.transcribedTrim, card.trim);
 }

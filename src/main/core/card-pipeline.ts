@@ -174,6 +174,7 @@ export async function executeCardPipeline(
           model: transcriptionResult.modelVersion ?? settings.transcriptionModel,
           generatedAtUtc: Date.now(),
         };
+        card.transcribedTrim = { ...card.trim };
         card.updatedAtUtc = Date.now();
 
         await logger.info("pipeline.transcription-complete", "Completed Gemini transcription.", {
@@ -449,6 +450,7 @@ export function clearCardResultsFromStep(
   if (step === "transcription") {
     card.transcription = { text: null };
     card.ai.transcription = null;
+    card.transcribedTrim = null;
   }
 
   if (step === "transcription" || step === "structured") {

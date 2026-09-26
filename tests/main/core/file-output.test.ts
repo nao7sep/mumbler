@@ -55,6 +55,7 @@ function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
     },
     trim: { frontMarkerSec: null, backMarkerSec: null },
     trimDecision: null,
+    transcribedTrim: null,
     transcription: { text: "raw text" },
     metadata: { structured: "## Outline\n\nBody.", title: "My Title", slug: "my-slug" },
     ai: {

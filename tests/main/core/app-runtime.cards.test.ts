@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppSnapshot, MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
+import { hasStaleResults } from "@shared/card-status";
 import { formatUtcMarker } from "@shared/timestamps";
 
 // The card list as the user builds it: confirm what was dropped in, duplicate a
@@ -95,6 +96,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
 
 const { ApplicationRuntime } = await import("@main/core/app-runtime");
 const { createStateStore } = await import("@main/core/settings-schema");
+const { TranscriptStore } = await import("@main/core/transcript-store");
 
 type Runtime = Awaited<ReturnType<typeof ApplicationRuntime.initialize>>;
 
@@ -312,9 +314,7 @@ describe("working with a card", () => {
     await runtime.shutdown();
     const store = createStateStore(join(home, "state.json"));
     const loaded = await store.load();
-    await store.save({
-      ...loaded.value,
-      cards: loaded.value.cards.map((card) =>
+    const transcribed = loaded.value.cards.map((card) =>
         card.id === cardId
           ? {
               ...card,
@@ -324,8 +324,10 @@ describe("working with a card", () => {
               ai: { transcription: run, structured: run, title: run, slug: run },
             }
           : card,
-      ),
-    });
+    );
+    // The long text lives in each card's own file, not in state.json.
+    await new TranscriptStore(join(home, "transcripts")).writeChanged(transcribed);
+    await store.save({ ...loaded.value, cards: transcribed });
     runtime = await ApplicationRuntime.initialize();
   }
 
@@ -518,11 +520,12 @@ describe("working with a card", () => {
     expect(persisted.value.cards.find((card) => card.id === second.id)?.trim.frontMarkerSec).toBe(1);
   });
 
-  it("moves the recorded time forward by the front marker and clears what no longer applies", async () => {
+  it("moves the recorded time forward by the front marker and keeps the results, marked stale", async () => {
     const card = await confirmed();
     // A card that has already been through the pipeline: its text and metadata
-    // describe the old span, so moving a marker has to drop them.
+    // describe the old span, so a trim keeps them and marks them stale.
     await transcribedOnDisk(card.id);
+    expect(hasStaleResults(cards(runtime.getSnapshot())[0]), "results stored before a trim match it").toBe(false);
 
     const snapshot = await runtime.updateCardTrim(card.id, { frontMarkerSec: 65.5, backMarkerSec: 200 });
 
@@ -533,13 +536,15 @@ describe("working with a card", () => {
     // The instant moves by whole seconds; the tenths stay visible in the text.
     expect(updated.timestamps.effectiveUtc - updated.timestamps.confirmedUtc).toBe(65_000);
     expect(updated.timestamps.effectiveLocal).toBe("2026-03-01 07:31:05.5");
-    expect(updated, "anything derived from the old span is dropped").toMatchObject({
-      transcription: { text: null },
-      metadata: { structured: null, title: null, slug: null },
-      ai: { transcription: null, structured: null, title: null, slug: null },
-      status: "Imported",
-      lastError: null,
+    expect(updated, "the paid results survive the trim").toMatchObject({
+      transcription: { text: "the words from the old span" },
+      metadata: { structured: "notes", title: "Old title", slug: "old-title" },
+      status: "Ready to Save",
     });
+    expect(hasStaleResults(updated)).toBe(true);
+
+    const restored = await runtime.updateCardTrim(card.id, { frontMarkerSec: null, backMarkerSec: null });
+    expect(hasStaleResults(cards(restored)[0]), "moving the markers back matches again").toBe(false);
   });
 
   it("refuses markers that fall outside the recording or cross each other", async () => {

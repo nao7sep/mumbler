@@ -197,11 +197,19 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
   // save/reload now that instants serialize as ISO, and selectNextQueuedCard
   // would then skip the card forever.
   const queuedAtUtc = queuedMode !== null ? normalizeUtcMs(card.queuedAtUtc) : null;
+  const transcriptionRun = normalizeAiRunInfo(card.ai?.transcription);
+  // Before a trim kept results, every stored transcription matched the card's
+  // current trim, so a record without transcribedTrim takes it from there. The
+  // text itself lives in the card's transcript file, so the run info is what
+  // says a transcription exists.
+  const transcribedTrim =
+    transcriptionRun === null ? null : (card.transcribedTrim ?? { ...card.trim });
 
   return {
     ...card,
     audioProfile: card.audioProfile ?? null,
     transcription: { text: card.transcription?.text ?? null },
+    transcribedTrim,
     timestamps: {
       ...card.timestamps,
       confirmedUtc,
@@ -214,7 +222,7 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
       slug: card.metadata?.slug ?? null,
     },
     ai: {
-      transcription: normalizeAiRunInfo(card.ai?.transcription),
+      transcription: transcriptionRun,
       structured: normalizeAiRunInfo(card.ai?.structured),
       title: normalizeAiRunInfo(card.ai?.title),
       slug: normalizeAiRunInfo(card.ai?.slug),

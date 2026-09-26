@@ -812,6 +812,7 @@ export class ApplicationRuntime {
           backMarkerSec: null,
         },
         trimDecision: null,
+        transcribedTrim: null,
         transcription: {
           text: null,
         },
@@ -1005,15 +1006,13 @@ export class ApplicationRuntime {
   ): Promise<void> {
     const state = this.runtime.state!;
     const cardId = card.id;
+    // The AI results are kept: a trim usually shaves silence and leaves the
+    // words as they were. They read as stale while the trim differs from the
+    // one they were transcribed from (hasStaleResults), and Generate replaces
+    // them. Status and last error stay as they are for the same reason.
     card.trim = normalizedTrim;
     card.trimDecision = trimDecision;
     card.timestamps = applyFrontTrimOffset(card.timestamps, normalizedTrim.frontMarkerSec ?? 0);
-    card.transcription = { text: null };
-    card.metadata = { structured: null, title: null, slug: null };
-    card.ai = { transcription: null, structured: null, title: null, slug: null };
-    card.status = "Imported";
-    card.activeStep = null;
-    card.lastError = null;
     card.updatedAtUtc = Date.now();
 
     state.cards.sort((left, right) =>
@@ -1877,6 +1876,7 @@ function createDuplicatedCard(source: MumblerCard, sourceFilePath: string): Mumb
       backMarkerSec: null,
     },
     trimDecision: null,
+    transcribedTrim: null,
     timestamps: applyFrontTrimOffset(source.timestamps, 0),
     transcription: {
       text: null,

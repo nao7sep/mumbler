@@ -90,6 +90,7 @@ function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
     },
     trim: { frontMarkerSec: null, backMarkerSec: null },
     trimDecision: null,
+    transcribedTrim: null,
     transcription: { text: "hello world" },
     metadata: { structured: null, title: null, slug: null },
     ai: { transcription: null, structured: null, title: null, slug: null },

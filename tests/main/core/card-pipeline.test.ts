@@ -29,6 +29,7 @@ function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
     },
     trim: { frontMarkerSec: null, backMarkerSec: null },
     trimDecision: null,
+    transcribedTrim: null,
     transcription: { text: "raw text" },
     metadata: { structured: "structured", title: "Title", slug: "slug" },
     ai: {
@@ -101,10 +102,11 @@ describe("clearCardResultsFromStep", () => {
   });
 
   it("clearing from transcription drops everything", () => {
-    const card = makeCard();
+    const card = makeCard({ transcribedTrim: { frontMarkerSec: null, backMarkerSec: null } });
     clearCardResultsFromStep(card, "transcription");
     expect(card.transcription.text).toBeNull();
     expect(card.ai.transcription).toBeNull();
+    expect(card.transcribedTrim).toBeNull();
     expect(card.metadata.structured).toBeNull();
     expect(card.metadata.title).toBeNull();
     expect(card.metadata.slug).toBeNull();

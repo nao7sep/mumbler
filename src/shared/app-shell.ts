@@ -276,6 +276,9 @@ export interface MumblerCard {
   timestamps: CardTimestamps;
   trim: CardTrim;
   trimDecision: TrimDecision | null;
+  // The trim the current transcription was made from, null while there is no
+  // transcription. The results are stale when it differs from `trim`.
+  transcribedTrim: CardTrim | null;
   transcription: {
     text: string | null;
   };

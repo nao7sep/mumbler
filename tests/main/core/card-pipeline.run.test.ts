@@ -60,6 +60,7 @@ function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
     },
     trim: { frontMarkerSec: null, backMarkerSec: null },
     trimDecision: null,
+    transcribedTrim: null,
     transcription: { text: "hello world" },
     metadata: { structured: null, title: null, slug: null },
     ai: { transcription: null, structured: null, title: null, slug: null },
@@ -137,6 +138,8 @@ describe("executeCardPipeline", () => {
       const fresh = makeCard({ sourceFilePath: source });
       const freshCtx = makeContext(fresh, new AbortController().signal);
       await executeCardPipeline(fresh.id, "transcription", "generate", freshCtx);
+
+      expect(fresh.transcribedTrim, "the transcription records the trim it was made from").toEqual(fresh.trim);
 
       const known = makeCard({ sourceFilePath: source, trimDecision: analyzed });
       const knownCtx = makeContext(known, new AbortController().signal);

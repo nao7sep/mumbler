@@ -50,7 +50,7 @@ import { AudioToolsModal } from "./AudioToolsModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
 import { useSettingsModal } from "./useSettingsModal";
-import { formatCardStatusMessage, formatStepName, isCardBusy } from "./card-status";
+import { formatCardStatusMessage, formatStepName, hasStaleResults, isCardBusy, staleResultsNote } from "./card-status";
 import { useTablist } from "./useTablist";
 import { CloseIcon } from "./Icon";
 import { presentFailure } from "./presentFailure";
@@ -1411,6 +1411,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
                   <p className={`panel__note status-text status-text--${statusModifier(selectedCard.status)}`}>
                     {formatCardStatusMessage(selectedCard)}
                   </p>
+                  {hasStaleResults(selectedCard) ? <p className="panel__note">{staleResultsNote}</p> : null}
                   <div className="result-grid">
                     <label className="field field--tall">
                       <span className="field-label-with-action">
@@ -1593,6 +1594,7 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
                     </button>
                   </div>
                   <p className="field-hint">Saving exports audio and metadata, then removes this recording from the queue.</p>
+                  {hasStaleResults(selectedCard) ? <p className="panel__note">{staleResultsNote}</p> : null}
                   {saveDisabledReason && !selectedCardIsBusy ? (
                     <p className="panel__note">{saveDisabledReason}</p>
                   ) : null}
