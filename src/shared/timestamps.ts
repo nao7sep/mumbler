@@ -41,6 +41,21 @@ export function isValidTimezone(timezone: string): boolean {
   }
 }
 
+// The saved value of a zone setting that follows the computer's zone on every
+// launch rather than recording it (timestamp-conventions, "Time zones").
+export const SYSTEM_TIMEZONE = "system";
+
+// The computer's zone, or UTC when it is unavailable.
+export function getSystemTimezone(): string {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return timezone && timezone.length > 0 && isValidTimezone(timezone) ? timezone : "UTC";
+}
+
+// A zone setting as saved ("system" or an IANA zone), resolved to the zone to use.
+export function resolveTimezone(setting: string): string {
+  return setting === SYSTEM_TIMEZONE ? getSystemTimezone() : setting;
+}
+
 export function parseTimestampFromFilename(
   filenameStem: string,
   patterns: string[],

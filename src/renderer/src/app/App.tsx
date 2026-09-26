@@ -53,7 +53,9 @@ import { useSettingsModal } from "./useSettingsModal";
 import { formatCardStatusMessage, formatStepName, hasStaleResults, isCardBusy, staleResultsNote } from "./card-status";
 import { useTablist } from "./useTablist";
 import { CloseIcon } from "./Icon";
-import { presentFailure } from "./presentFailure";
+import { presentFailure, reportRendererDiagnostic } from "./presentFailure";
+import { I18nProvider } from "../i18n/I18nContext";
+import { isLanguage, type InterfaceLanguage } from "@shared/i18n/languages";
 import { CardActionResults, type CardActionError } from "./CardActionResults";
 import {
   PersistentNotifications,
@@ -127,7 +129,41 @@ const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
   output: "Output",
 };
 
+// The first text on screen is already in the interface language, so nothing is
+// drawn until the main process has said which language that is.
 export function App(): ReactElement {
+  const [startupLanguage, setStartupLanguage] = useState<InterfaceLanguage | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.mumbler
+      .getInterfaceLanguage()
+      .then((resolved) => {
+        if (!cancelled) setStartupLanguage(isLanguage(resolved?.language) ? resolved : ENGLISH);
+      })
+      .catch((error: unknown) => {
+        reportRendererDiagnostic(error, "interface language load failed");
+        if (!cancelled) setStartupLanguage(ENGLISH);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (startupLanguage === null) {
+    return <main className="renderer-failure" role="status" aria-busy="true" />;
+  }
+
+  return (
+    <I18nProvider language={startupLanguage.language} locale={startupLanguage.locale}>
+      <StartupGate />
+    </I18nProvider>
+  );
+}
+
+const ENGLISH: InterfaceLanguage = { language: "en", locale: "en" };
+
+function StartupGate(): ReactElement {
   const [startupLoad, setStartupLoad] = useState<
     | { status: "loading" }
     | { status: "failed"; retrying: boolean; message: string }
@@ -198,7 +234,25 @@ export function App(): ReactElement {
 }
 
 function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): ReactElement {
-  const [snapshot, setSnapshot] = useState<AppSnapshot | null>(initialSnapshot);
+  const [snapshot, setSnapshot] = useState<AppSnapshot>(initialSnapshot);
+  // Every snapshot carries the language the main process speaks, so a language
+  // saved in Settings reaches the renderer with the snapshot that Save returns.
+  const { language, locale } = snapshot.interfaceLanguage;
+  return (
+    <I18nProvider language={language} locale={locale}>
+      <LoadedShell snapshot={snapshot} setSnapshot={setSnapshot} />
+    </I18nProvider>
+  );
+}
+
+function LoadedShell({
+  snapshot,
+  setSnapshot,
+}: {
+  snapshot: AppSnapshot;
+  setSnapshot: (snapshot: AppSnapshot) => void;
+}): ReactElement {
+  const initialSnapshot = snapshot;
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     const recovered = initialSnapshot.queueSummary?.recoveredInterruptedCards ?? 0;
     return recovered > 0

@@ -17,8 +17,11 @@ import {
   type SettingsDraft,
   type ToolName,
 } from "@shared/app-shell";
+import type { InterfaceLanguage } from "@shared/i18n/languages";
 
 const api: MumblerShellApi = {
+  getInterfaceLanguage: () =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.getInterfaceLanguage) as Promise<InterfaceLanguage>,
   getSnapshot: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.getSnapshot) as Promise<AppSnapshot>,
   getSettingsDraft: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getSettingsDraft) as Promise<SettingsDraft>,

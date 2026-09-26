@@ -121,6 +121,7 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     });
   };
 
+  handle(APP_SHELL_CHANNELS.getInterfaceLanguage, () => runtime.interfaceLanguage());
   handle(APP_SHELL_CHANNELS.getSnapshot, () => runtime.getSnapshot());
   handle(APP_SHELL_CHANNELS.getSettingsDraft, () => runtime.getSettingsDraft());
   handle(APP_SHELL_CHANNELS.getDefaultPrompts, () => runtime.getDefaultPrompts());

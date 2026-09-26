@@ -1,0 +1,7 @@
+{
+  "language.name": "English",
+  "settings.language": "Language",
+  "settings.languageSystem": "System",
+  "settings.languageHint": "System follows the computer's language.",
+  "settings.timezoneSystem": "System ({zone})"
+}

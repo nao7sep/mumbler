@@ -5,7 +5,10 @@ import {
   getSettingsNumberIssues,
   type NumericSettingField,
 } from "@shared/settings-validation";
-import { getSupportedTimezones } from "@shared/timestamps";
+import { SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
+import { CATALOGUES } from "@shared/i18n/catalogues";
+import { LANGUAGES, normalizeLanguagePreference } from "@shared/i18n/languages";
+import { useI18n } from "../i18n/I18nContext";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 import { ModalShell } from "./modal/ModalShell";
 import { useTablist } from "./useTablist";
@@ -163,6 +166,8 @@ export function SettingsModal({
   const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
   const geminiModelEntries = useMemo(() => parseEntries(draft.geminiModelsText), [draft.geminiModelsText]);
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
+  const systemTimezone = useMemo(() => getSystemTimezone(), []);
+  const t = useI18n().t;
   const numberIssues = useMemo(() => getSettingsNumberIssues(draft), [draft]);
   const canSave = isDirty && numberIssues.length === 0 && !isSaving;
   const numberIssueByField = new Map(numberIssues.map((issue) => [issue.field, issue]));
@@ -227,6 +232,28 @@ export function SettingsModal({
         <div className="settings-sections">
 
           <div className="app-tabpanel" {...settingsTablist.getPanelProps("general")} hidden={activeTab !== "general"}>
+            <section className="settings-section">
+              <h3 id="settings-language-heading">{t("settings.language")}</h3>
+              <div className="field-stack">
+                {/* Each language is listed by its own name, in its own script, so a
+                    reader of any of them can find it whatever language is showing.
+                    Applied on Save with the rest. */}
+                <select
+                  aria-labelledby="settings-language-heading"
+                  value={draft.language}
+                  onChange={(event) => onChange({ ...draft, language: normalizeLanguagePreference(event.target.value) })}
+                >
+                  <option value="system">{t("settings.languageSystem")}</option>
+                  {LANGUAGES.map((language) => (
+                    <option key={language} value={language} lang={language}>
+                      {CATALOGUES[language]["language.name"] as string}
+                    </option>
+                  ))}
+                </select>
+                <p className="field-hint">{t("settings.languageHint")}</p>
+              </div>
+            </section>
+
             <section className="settings-section">
               <h3>Appearance</h3>
               <div className="field-stack">
@@ -321,6 +348,7 @@ export function SettingsModal({
                     value={draft.defaultTimezone}
                     onChange={(event) => onChange({ ...draft, defaultTimezone: event.target.value })}
                   >
+                    <option value={SYSTEM_TIMEZONE}>{t("settings.timezoneSystem", { zone: systemTimezone })}</option>
                     {timezoneOptions.map((tz) => (
                       <option key={tz} value={tz}>{tz}</option>
                     ))}

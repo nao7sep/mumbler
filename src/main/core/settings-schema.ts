@@ -8,10 +8,13 @@ import type {
 } from "@shared/app-shell";
 import { homedir } from "node:os";
 import {
+  SYSTEM_TIMEZONE,
   formatUtcIsoCompact,
   isValidTimezone,
   normalizeUtcMs,
+  resolveTimezone,
 } from "@shared/timestamps";
+import { normalizeLanguagePreference } from "@shared/i18n/languages";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
 import { DEFAULT_GEMINI_MODELS, THEME_PREFERENCES, normalizeThemePreference } from "@shared/app-shell";
 import { JsonStore } from "./json-store";
@@ -73,6 +76,12 @@ function normalizeOptionalPath(value: unknown, homeDirectory: string): string | 
   return raw.length === 0 ? null : resolvePathFromHome(raw, homeDirectory);
 }
 
+// "system" or a zone Intl can use; anything else falls back to the default.
+function normalizeTimezoneSetting(value: unknown, fallback: string): string {
+  const raw = asString(value);
+  return raw !== null && (raw === SYSTEM_TIMEZONE || isValidTimezone(raw)) ? raw : fallback;
+}
+
 function normalizeSettings(
   raw: Record<string, unknown>,
   defaults: MumblerSettings,
@@ -84,6 +93,7 @@ function normalizeSettings(
 
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
+    language: normalizeLanguagePreference(raw.language),
     // Appearance
     theme: normalizeThemePreference(raw.theme),
     // Free text; blank resolves to the built-in default stack at apply time.
@@ -92,10 +102,7 @@ function normalizeSettings(
     outputDirectory: normalizeOptionalPath(raw.outputDirectory, homeDirectory),
     backupDirectory: normalizeOptionalPath(raw.backupDirectory, homeDirectory),
     // Import
-    defaultTimezone:
-      asString(raw.defaultTimezone) && isValidTimezone(asString(raw.defaultTimezone)!)
-        ? (asString(raw.defaultTimezone) as string)
-        : defaults.defaultTimezone,
+    defaultTimezone: normalizeTimezoneSetting(raw.defaultTimezone, defaults.defaultTimezone),
     timestampPatterns: asStringArray(raw.timestampPatterns) ?? defaults.timestampPatterns,
     // Player
     skipIntervalSec: asPositiveInteger(raw.skipIntervalSec) ?? defaults.skipIntervalSec,
@@ -383,14 +390,10 @@ function requireRatio(value: number, label: string): number {
   return value;
 }
 
-export function getSystemTimezone(): string {
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return timezone && timezone.length > 0 && isValidTimezone(timezone) ? timezone : "UTC";
-}
-
-export function createDefaultSettings(systemTimezone: string): MumblerSettings {
+export function createDefaultSettings(): MumblerSettings {
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
+    language: "system",
     // Appearance
     theme: "system",
     uiFontFamily: "",
@@ -398,7 +401,8 @@ export function createDefaultSettings(systemTimezone: string): MumblerSettings {
     outputDirectory: null,
     backupDirectory: null,
     // Import
-    defaultTimezone: systemTimezone,
+    // Follows the computer's zone; a zone the user picks is kept instead.
+    defaultTimezone: SYSTEM_TIMEZONE,
     timestampPatterns: [
       "(?<year>\\d{2}(?:\\d{2})?)(?<month>\\d{2})(?<day>\\d{2})[-_](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})?",
     ],
@@ -453,8 +457,8 @@ export function createSettingsStore(
     path,
     schemaVersion: SETTINGS_SCHEMA_VERSION,
     validate: (raw) =>
-      normalizeSettings(raw, createDefaultSettings(getSystemTimezone()), homeDirectory),
-    createDefault: () => createDefaultSettings(getSystemTimezone()),
+      normalizeSettings(raw, createDefaultSettings(), homeDirectory),
+    createDefault: () => createDefaultSettings(),
   });
 }
 
@@ -494,7 +498,7 @@ export function summarizeSettings(
     backupDirectory: settings.backupDirectory,
     defaultBackupDirectory,
     // Import
-    defaultTimezone: settings.defaultTimezone,
+    defaultTimezone: resolveTimezone(settings.defaultTimezone),
     timestampPatternCount: settings.timestampPatterns.length,
     // Player
     skipIntervalSec: settings.skipIntervalSec,
@@ -517,6 +521,7 @@ export function buildSettingsDraft(
 ): SettingsDraft {
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
+    language: settings.language,
     // Appearance
     theme: settings.theme,
     uiFontFamily: settings.uiFontFamily,
@@ -574,7 +579,7 @@ export function applySettingsDraft(
     throw new OperationError("Theme must be System, Light, or Dark.");
   }
 
-  if (!isValidTimezone(defaultTimezone)) {
+  if (defaultTimezone !== SYSTEM_TIMEZONE && !isValidTimezone(defaultTimezone)) {
     throw new OperationError("Default timezone must be a valid IANA timezone.");
   }
 
@@ -623,6 +628,7 @@ export function applySettingsDraft(
 
   return {
     ...current,
+    language: normalizeLanguagePreference(draft.language),
     // Appearance
     theme: draft.theme,
     // Free text; blank means the built-in default stack.

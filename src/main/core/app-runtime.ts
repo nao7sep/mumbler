@@ -45,6 +45,7 @@ import {
   parseTimestampFromFilename,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
+  resolveTimezone,
 } from "@shared/timestamps";
 import { closeBackupStore, setBackupStoreWarn } from "./backupStore";
 import { CorruptStateError, type JsonStore } from "./json-store";
@@ -63,7 +64,7 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
-import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, getSystemTimezone, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
+import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
 import {
   clampQueueWidth,
   createDefaultLayout,
@@ -74,6 +75,9 @@ import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
 import { type AppLogger, createLogger, serializeError } from "./logger";
 import { OperationError } from "./operation-error";
 import { applyThemePreference } from "./theme";
+import { mainTranslator, resolveInterfaceLanguage } from "../i18n";
+import type { InterfaceLanguage, LanguagePreference } from "@shared/i18n/languages";
+import type { Translator } from "@shared/i18n/translate";
 import { clearCardResultsFromStep, resolveGenerateStartStep } from "./card-pipeline";
 import { PipelineCoordinator } from "./pipeline-coordinator";
 
@@ -154,6 +158,7 @@ export class ApplicationRuntime {
   private readonly pipeline: PipelineCoordinator;
   private shutdownPromise: Promise<void> | null = null;
   private onPipelineProgressCallback: (() => void) | null = null;
+  private onLanguageChangedCallback: (() => void) | null = null;
   private onDependenciesChangedCallback: (() => void) | null = null;
   // Picker, drop, review confirm and review cancel all change the pending
   // imports. Keep copy -> pending state -> persistence, and settling a review,
@@ -527,6 +532,7 @@ export class ApplicationRuntime {
     const { paths, settings, state, layout } = this.runtime;
 
     return {
+      interfaceLanguage: this.interfaceLanguage(),
       appName: app.getName(),
       appVersion: __APP_VERSION__,
       platform: process.platform,
@@ -623,7 +629,7 @@ export class ApplicationRuntime {
     const settingsStore = createSettingsStore(paths.settingsPath);
     const stateStore = createStateStore(paths.statePath);
     const layoutStore = createLayoutStore(paths.layoutPath);
-    const settings = createDefaultSettings(getSystemTimezone());
+    const settings = createDefaultSettings();
     const state = createEmptyState();
     const layout = createDefaultLayout();
 
@@ -682,11 +688,11 @@ export class ApplicationRuntime {
   }
 
   getDefaultPrompts(): MumblerSettings["prompts"] {
-    return createDefaultSettings(getSystemTimezone()).prompts;
+    return createDefaultSettings().prompts;
   }
 
   getDefaultModels(): DefaultModels {
-    const defaults = createDefaultSettings(getSystemTimezone());
+    const defaults = createDefaultSettings();
     return {
       models: defaults.geminiModels,
       transcriptionModel: defaults.transcriptionModel,
@@ -1178,6 +1184,25 @@ export class ApplicationRuntime {
     });
   }
 
+  /** The saved language, or System when settings could not be loaded. */
+  languagePreference(): LanguagePreference {
+    return this.runtime.settings?.language ?? "system";
+  }
+
+  /** The language the main process and the renderer both speak. */
+  interfaceLanguage(): InterfaceLanguage {
+    return resolveInterfaceLanguage(this.languagePreference());
+  }
+
+  /** The translator for text the main process draws: dialogs, menus, the startup window. */
+  translator(): Translator {
+    return mainTranslator(this.languagePreference());
+  }
+
+  onLanguageChanged(callback: () => void): void {
+    this.onLanguageChangedCallback = callback;
+  }
+
   /** The saved theme, or System when settings could not be loaded. */
   themePreference(): ThemePreference {
     return this.runtime.settings?.theme ?? "system";
@@ -1186,11 +1211,15 @@ export class ApplicationRuntime {
   async saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
     this.ensureReady();
 
+    const previousLanguage = this.interfaceLanguage().language;
     const nextSettings = applySettingsDraft(this.runtime.settings!, draft);
     this.runtime.settings = nextSettings;
 
     await this.persistSettings();
     applyThemePreference(nextSettings.theme);
+    if (this.interfaceLanguage().language !== previousLanguage) {
+      this.onLanguageChangedCallback?.();
+    }
     await this.runtime.logger.info("settings.save", "Updated application settings.", {
       outputDirectory: nextSettings.outputDirectory,
       backupDirectory: nextSettings.backupDirectory,
@@ -1635,9 +1664,13 @@ export class ApplicationRuntime {
 
     const filenameStem = basename(originalFilename, extname(originalFilename));
     const parsed = parseTimestampFromFilename(filenameStem, settings.timestampPatterns);
+    // The zone the filename's local time is read in. Each card keeps its own zone
+    // from here on, so a later change of the setting (or of the computer's zone,
+    // under System) never re-dates a recording already imported.
+    const importTimezone = resolveTimezone(settings.defaultTimezone);
     const utcResult =
       parsed.localTimestampText.length > 0
-        ? recomputeUtcFromLocal(parsed.localTimestampText, settings.defaultTimezone)
+        ? recomputeUtcFromLocal(parsed.localTimestampText, importTimezone)
         : { utcMs: null, error: null };
 
     const pendingImport: PendingImportReviewItem = {
@@ -1648,7 +1681,7 @@ export class ApplicationRuntime {
       workingFilePath,
       fileSizeBytes: sourceStats.size,
       localTimestampText: parsed.localTimestampText,
-      timezone: settings.defaultTimezone,
+      timezone: importTimezone,
       utcTimestampText: utcResult.error === null && utcResult.utcMs !== null ? formatUtcForDisplay(utcResult.utcMs) : "",
       parseStatus: parsed.parseStatus,
       deleteOriginalOnConfirm: false,

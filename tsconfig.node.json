@@ -35,6 +35,7 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
-    "src/shared/**/*.d.ts"
+    "src/shared/**/*.d.ts",
+    "src/shared/i18n/locales/*.json"
   ]
 }

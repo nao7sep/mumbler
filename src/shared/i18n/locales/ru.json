@@ -1,0 +1,7 @@
+{
+  "language.name": "Русский",
+  "settings.language": "Язык",
+  "settings.languageSystem": "Как в системе",
+  "settings.languageHint": "«Как в системе» — язык компьютера.",
+  "settings.timezoneSystem": "Как в системе ({zone})"
+}

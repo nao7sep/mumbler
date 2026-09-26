@@ -1,3 +1,5 @@
+import type { InterfaceLanguage, LanguagePreference } from "./i18n/languages";
+
 // Built-in default Gemini model suggestions, seeded into the user-owned, editable
 // model list (MumblerSettings.geminiModels) at first run. A small, editable starter
 // set — the user can add/remove entries and type any id; a wrong or unsupported id
@@ -35,6 +37,7 @@ export const DEFAULT_GEMINI_MODELS: string[] = [
 ];
 
 export const APP_SHELL_CHANNELS = {
+  getInterfaceLanguage: "app-shell:get-interface-language",
   getSnapshot: "app-shell:get-snapshot",
   getSettingsDraft: "app-shell:get-settings-draft",
   getDefaultPrompts: "app-shell:get-default-prompts",
@@ -151,6 +154,9 @@ export function normalizeThemePreference(value: unknown): ThemePreference {
 
 export interface MumblerSettings {
   schemaVersion: 1;
+  // The interface language: "system" follows the computer's language on every
+  // launch, a tag keeps that language (localization-conventions).
+  language: LanguagePreference;
   // Appearance — the theme, applied app-wide through Electron's nativeTheme.themeSource.
   theme: ThemePreference;
   // Appearance — the UI (chrome) font family. Family only; blank means the built-in default stack
@@ -160,7 +166,8 @@ export interface MumblerSettings {
   // Files
   outputDirectory: string | null;
   backupDirectory: string | null;
-  // Import
+  // Import — the zone a filename's local time is read in at import: "system"
+  // (SYSTEM_TIMEZONE) follows the computer's zone, or an IANA zone the user chose.
   defaultTimezone: string;
   timestampPatterns: string[];
   // Player
@@ -343,7 +350,7 @@ export interface SettingsSummary {
   defaultOutputDirectory: string;
   backupDirectory: string | null;
   defaultBackupDirectory: string;
-  // Import
+  // Import — the resolved IANA zone (System already resolved to the computer's).
   defaultTimezone: string;
   timestampPatternCount: number;
   // Player
@@ -362,6 +369,7 @@ export interface SettingsSummary {
 
 export interface SettingsDraft {
   schemaVersion: 1;
+  language: LanguagePreference;
   // Appearance
   theme: ThemePreference;
   uiFontFamily: string;
@@ -370,7 +378,7 @@ export interface SettingsDraft {
   defaultOutputDirectory: string;
   backupDirectory: string;
   defaultBackupDirectory: string;
-  // Import
+  // Import — "system" or an IANA zone, as saved.
   defaultTimezone: string;
   timestampPatternsText: string;
   // Player
@@ -520,6 +528,9 @@ export interface MumblerLayout {
 }
 
 export interface AppSnapshot {
+  // The language the main process and the renderer both speak, resolved from
+  // the saved choice and the computer's language.
+  interfaceLanguage: InterfaceLanguage;
   appName: string;
   appVersion: string;
   platform: Platform;
@@ -578,6 +589,7 @@ export type SaveCardResult =
     };
 
 export interface MumblerShellApi {
+  getInterfaceLanguage(): Promise<InterfaceLanguage>;
   getSnapshot(): Promise<AppSnapshot>;
   getSettingsDraft(): Promise<SettingsDraft>;
   getDefaultPrompts(): Promise<PromptTemplates>;

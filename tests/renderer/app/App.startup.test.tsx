@@ -86,6 +86,7 @@ function rendererApi(): MumblerShellApi {
   const unsubscribe = (): void => undefined;
   return new Proxy(
     {
+      getInterfaceLanguage: async () => ({ language: "en", locale: "en-US" }),
       getSnapshot,
       reportRendererDiagnostic,
       onAppWideErrorChanged: () => unsubscribe,
@@ -103,6 +104,7 @@ function rendererApi(): MumblerShellApi {
 
 function readySnapshot(): AppSnapshot {
   return {
+    interfaceLanguage: { language: "en", locale: "en-US" },
     appName: "Mumbler",
     appVersion: "test",
     platform: "darwin",

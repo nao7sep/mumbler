@@ -78,7 +78,7 @@ async function settle(cardId: string): Promise<void> {
 
 function harness(cards: MumblerCard[], concurrencyLimit = 1) {
   const state: MumblerState = { ...createEmptyState(), cards };
-  const settings = { ...createDefaultSettings("Asia/Tokyo"), concurrencyLimit };
+  const settings = { ...createDefaultSettings(), concurrencyLimit };
   const persistState = vi.fn(async () => {});
   const resolveApiKey = vi.fn(async (): Promise<string | null> => "test-key");
   const coordinator = new PipelineCoordinator(

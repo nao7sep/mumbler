@@ -27,6 +27,7 @@ beforeEach(() => {
 function draft(): SettingsDraft {
   return {
     schemaVersion: 1,
+    language: "system",
     theme: "system",
     uiFontFamily: "",
     outputDirectory: "",
@@ -222,5 +223,59 @@ describe("SettingsModal theme", () => {
 
     await act(async () => radios[2]?.click());
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ theme: "dark" }));
+  });
+});
+
+describe("SettingsModal language and time zone", () => {
+  async function renderWith(onChange: (next: SettingsDraft) => void, overrides: Partial<SettingsDraft> = {}) {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(React.createElement(SettingsModal, {
+        draft: { ...draft(), ...overrides },
+        isDirty: false,
+        isSaving: false,
+        isSavingApiKey: false,
+        isPickingOutputDirectory: false,
+        isPickingBackupDirectory: false,
+        errorMessage: null,
+        onChange,
+        onClose: vi.fn(),
+        onPickOutputDirectory: vi.fn(),
+        onPickBackupDirectory: vi.fn(),
+        onSetApiKey: vi.fn(),
+        onClearApiKey: vi.fn(),
+        onRestoreDefaultPrompts: vi.fn(),
+        onRestoreDefaultModels: vi.fn(),
+        onSave: vi.fn(),
+      }));
+    });
+  }
+
+  it("lists System, then each language by its own name, and edits only the draft", async () => {
+    const onChange = vi.fn();
+    await renderWith(onChange);
+    const select = document.querySelector<HTMLSelectElement>('select[aria-labelledby="settings-language-heading"]')!;
+    const options = Array.from(select.options);
+    expect(options.map((option) => option.value)).toEqual(["system", "en", "de", "es", "fr", "it", "pt-BR", "ru", "ja", "ko", "zh-Hans"]);
+    expect(options[8]?.textContent).toBe("日本語");
+    expect(options[8]?.lang).toBe("ja");
+    expect(select.value).toBe("system");
+
+    await act(async () => {
+      select.value = "ja";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ language: "ja" }));
+  });
+
+  it("starts the zone list with System, naming the computer's zone", async () => {
+    await renderWith(vi.fn(), { defaultTimezone: "system" });
+    const select = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+      .find((candidate) => Array.from(candidate.options).some((option) => option.value === "UTC"))!;
+    expect(select.options[0]?.value).toBe("system");
+    expect(select.options[0]?.textContent).toBe(`System (${Intl.DateTimeFormat().resolvedOptions().timeZone})`);
+    expect(select.value).toBe("system");
   });
 });

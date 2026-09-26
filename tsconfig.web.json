@@ -33,6 +33,7 @@
     "src/renderer/**/*.ts",
     "src/renderer/**/*.tsx",
     "src/shared/**/*.ts",
-    "src/shared/**/*.d.ts"
+    "src/shared/**/*.d.ts",
+    "src/shared/i18n/locales/*.json"
   ]
 }
