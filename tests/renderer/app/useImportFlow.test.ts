@@ -373,3 +373,72 @@ describe("useImportFlow drag acceptance", () => {
     expect(container.querySelector('[data-result="error"]')?.textContent).toContain("Copy failed.");
   });
 });
+
+describe("useImportFlow review cancel", () => {
+  const pendingImport = {
+    id: "pending-1",
+    originalFilename: "take.wav",
+    importSource: "drag-drop",
+    originalSourcePath: "/fixtures/take.wav",
+    workingFilePath: "/working/take.wav",
+    fileSizeBytes: 5,
+    localTimestampText: "2026-03-01 07:30:00",
+    timezone: "Asia/Tokyo",
+    utcTimestampText: "",
+    parseStatus: "parsed",
+    deleteOriginalOnConfirm: false,
+    copyToBackupOnConfirm: true,
+    createdAtUtc: 1,
+    updatedAtUtc: 1,
+  };
+
+  // One snapshot object, as the window holds it until the next update arrives.
+  const snapshot = { state: { pendingImports: [pendingImport] } } as unknown as Parameters<
+    typeof useImportFlow
+  >[0]["snapshot"];
+
+  function ReviewHarness({ onError }: { onError: (owner: string, message: string) => void }): ReactElement {
+    const flow = useImportFlow({
+      snapshot,
+      onSnapshotUpdate: vi.fn(),
+      onError,
+    });
+    return React.createElement(
+      "button",
+      {
+        type: "button",
+        "data-drafts": String(flow.pendingReviewDrafts.length),
+        onClick: () => void flow.handleCancelPendingImports(),
+      },
+      "Cancel",
+    );
+  }
+
+  it("keeps the review open when the cancel fails, as its message says", async () => {
+    const cancelPendingImports = vi.fn().mockRejectedValue(new Error("disk full"));
+    Object.defineProperty(window, "mumbler", {
+      configurable: true,
+      value: {
+        cancelPendingImports,
+        updatePendingImportDrafts: vi.fn().mockResolvedValue({}),
+        reportRendererDiagnostic: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    const onError = vi.fn();
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(React.createElement(ReviewHarness, { onError })));
+    const button = container.querySelector("button");
+    expect(button?.dataset.drafts).toBe("1");
+
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+
+    expect(cancelPendingImports).toHaveBeenCalledWith(["pending-1"]);
+    expect(onError).toHaveBeenCalledWith("import-review-cancel", expect.stringContaining("The review remains open"));
+    expect(button?.dataset.drafts, "the review is still shown").toBe("1");
+  });
+});

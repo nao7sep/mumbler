@@ -199,13 +199,14 @@ export function useImportFlow({
         pendingReviewDrafts.map((item) => item.id),
       );
       onSnapshotUpdate(nextSnapshot);
+      setPendingReviewDrafts([]);
     } catch (error: unknown) {
+      // The drafts stay, so the review stays open for the retry the message offers.
       onError(
         "import-review-cancel",
         presentFailure(error, "The pending import could not be cancelled. The review remains open; try again.", "pending import cancellation failed"),
       );
     }
-    setPendingReviewDrafts([]);
   }
 
   async function handleDroppedPaths(
