@@ -1,11 +1,13 @@
 import { BrowserWindow, nativeTheme, screen } from "electron";
 
+import type { Translator } from "@shared/i18n/translate";
+
 export type StartupFailureChoice = "restart" | "close";
 
 const CHOICE_ORIGIN = "https://mumbler-startup.invalid/choice/";
 
 /** Plain fatal-startup surface with no framework/application severity icon. */
-export async function showStartupFailureDialog(): Promise<StartupFailureChoice> {
+export async function showStartupFailureDialog(translator: Translator): Promise<StartupFailureChoice> {
   const win = new BrowserWindow({
     show: false,
     width: 520,
@@ -18,7 +20,7 @@ export async function showStartupFailureDialog(): Promise<StartupFailureChoice> 
     maximizable: false,
     fullscreenable: false,
     autoHideMenuBar: true,
-    title: "Mumbler could not start",
+    title: translator.t("startup.title"),
     // The page follows prefers-color-scheme, which follows nativeTheme.themeSource
     // (the OS when startup failed before settings were read).
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#111814" : "#edf4ec",
@@ -61,13 +63,25 @@ export async function showStartupFailureDialog(): Promise<StartupFailureChoice> 
         return win.webContents.executeJavaScript("document.getElementById('choice-restart')?.focus()", true);
       }).catch((error: unknown) => fail("measurement", error));
     });
-    void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderStartupFailureHtml())}`)
+    void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderStartupFailureHtml(translator))}`)
       .catch((error: unknown) => fail("load", error));
   });
 }
 
-export function renderStartupFailureHtml(): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+// The page is drawn in the interface language, and declares it so Chinese,
+// Japanese and Korean text takes its own glyphs.
+export function renderStartupFailureHtml(translator: Translator): string {
+  const text = (key: Parameters<Translator["t"]>[0]): string => escapeHtml(translator.t(key));
+  return `<!doctype html><html lang="${translator.language}"><head><meta charset="utf-8"><style>
     :root{color-scheme:light;font:14px/1.5 system-ui,-apple-system,sans-serif;background:#edf4ec;color:#1f2a21}
     *{box-sizing:border-box;scrollbar-width:auto;scrollbar-color:#477552 transparent}*::-webkit-scrollbar{width:16px;height:16px}*::-webkit-scrollbar-thumb{background:#477552;background-clip:padding-box;border:3px solid transparent;border-radius:999px}
     body{margin:0;height:100vh;overflow:hidden}.dialog{height:100vh;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
@@ -78,5 +92,5 @@ export function renderStartupFailureHtml(): string {
     [data-window-inactive] .button{color:#69756b;border-color:#c0c9c1;background:#f2f5f2}[data-window-inactive] .button:focus{outline-color:#9aaba0}
     [data-window-inactive] .primary{color:#eef3ef;background:#789580;border-color:#6e8a76}[data-window-inactive] .primary:hover,[data-window-inactive] .primary:focus{background:#708c78}
     @media (prefers-color-scheme:dark){:root{color-scheme:dark;background:#111814;color:#e4ede5}*{scrollbar-color:#94a596 transparent}*::-webkit-scrollbar-thumb{background:#94a596;background-clip:padding-box}.detail{color:#b0c0b2}.button{color:#e4ede5;border-color:#5f7563;background:#1c2821}.button:hover,.button:focus{outline-color:#94a596}[data-window-inactive] .button{color:#94a596;border-color:#33453a;background:#16201a}[data-window-inactive] .button:focus{outline-color:#5f7563}[data-window-inactive] .primary{color:#dfe8e0;background:#3f5a47;border-color:#4a6853}[data-window-inactive] .primary:hover,[data-window-inactive] .primary:focus{background:#3f5a47}}
-  </style></head><body><main class="dialog"><header class="header" id="dialog-header"><h1>Mumbler could not start</h1></header><section class="body" id="dialog-body" role="region" aria-label="Startup failure details" tabindex="0"><p>Mumbler could not finish opening its saved state or window.</p><p class="detail">Your recordings and saved files were not changed. Restart Mumbler to try again, or close it and inspect the session log.</p></section><footer class="actions" id="dialog-footer"><button class="button" type="button" onclick="location.href='${CHOICE_ORIGIN}close'">Close</button><button id="choice-restart" class="button primary" type="button" onclick="location.href='${CHOICE_ORIGIN}restart'">Restart Mumbler</button></footer></main><script>const syncWindowState=()=>document.documentElement.toggleAttribute('data-window-inactive',!document.hasFocus());addEventListener('focus',syncWindowState);addEventListener('blur',syncWindowState);syncWindowState();</script></body></html>`;
+  </style></head><body><main class="dialog"><header class="header" id="dialog-header"><h1>${text("startup.title")}</h1></header><section class="body" id="dialog-body" role="region" aria-label="${text("startup.detailsLabel")}" tabindex="0"><p>${text("startup.body")}</p><p class="detail">${text("startup.detail")}</p></section><footer class="actions" id="dialog-footer"><button class="button" type="button" onclick="location.href='${CHOICE_ORIGIN}close'">${text("startup.close")}</button><button id="choice-restart" class="button primary" type="button" onclick="location.href='${CHOICE_ORIGIN}restart'">${text("startup.restart")}</button></footer></main><script>const syncWindowState=()=>document.documentElement.toggleAttribute('data-window-inactive',!document.hasFocus());addEventListener('focus',syncWindowState);addEventListener('blur',syncWindowState);syncWindowState();</script></body></html>`;
 }

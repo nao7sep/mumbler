@@ -8,6 +8,8 @@ import { createMainWindow } from "./window";
 import { createMediaResponse } from "./media-response";
 import { applyThemePreference, followOsThemeChanges } from "./core/theme";
 import { showStartupFailureDialog } from "./startup-failure-dialog";
+import { mainTranslator } from "./i18n";
+import { installApplicationMenu } from "./app-menu";
 
 app.setName("Mumbler");
 
@@ -77,6 +79,10 @@ async function bootstrap(): Promise<void> {
   });
 
   registerAppShellIpc(runtime);
+  // The native menu speaks the interface language, and is rebuilt when a
+  // language saved in Settings changes it.
+  installApplicationMenu(runtime.translator(), app.getName());
+  runtime.onLanguageChanged(() => installApplicationMenu(runtime.translator(), app.getName()));
   // Before the window exists, so its first frame, title bar, and background
   // already match the saved choice.
   applyThemePreference(runtime.themePreference());
@@ -147,7 +153,7 @@ async function handleBootstrapFailure(error: unknown): Promise<void> {
   }
   let choice: "close" | "restart" = "close";
   try {
-    choice = await showStartupFailureDialog();
+    choice = await showStartupFailureDialog(runtimeForShutdown?.translator() ?? mainTranslator("system"));
   } catch (dialogError) {
     console.error("[mumbler] Could not show the startup failure window:", dialogError);
   }

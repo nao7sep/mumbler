@@ -22,6 +22,10 @@ const translations = LANGUAGES.filter((language) => language !== "en");
 // Keys whose text is the same word in that language as in English.
 const SAME_AS_ENGLISH: Partial<Record<Language, readonly string[]>> = {
   de: ["settings.languageSystem", "settings.timezoneSystem"],
+  es: ["nativeMenu.zoom"],
+  fr: ["nativeMenu.services"],
+  it: ["nativeMenu.file"],
+  "pt-BR": ["nativeMenu.zoom"],
 };
 
 // The hidden-character-conventions set, plus the no-break spaces, figure space,

@@ -35,6 +35,19 @@ mac:
   icon: build/icon.icns
   extendInfo:
     CFBundleIconName: broadcast-mic-soundwaves
+    # The interface languages (src/shared/i18n/languages.ts), so AppKit offers
+    # its own menu items (Services, Emoji & Symbols, Start Dictation) in them.
+    CFBundleLocalizations:
+      - en
+      - de
+      - es
+      - fr
+      - it
+      - pt-BR
+      - ru
+      - ja
+      - ko
+      - zh-Hans
   # Ad-hoc sign the whole bundle (identity "-") so its seal is valid and the app
   # launches cleanly. No Apple Developer cert; CSC_IDENTITY_AUTO_DISCOVERY=false in
   # CI only blocks real-cert discovery — the "-" identity is what produces the seal.
@@ -75,3 +88,17 @@ nsis:
   createStartMenuShortcut: true
   runAfterFinish: true
   artifactName: ${productName}-${version}-setup.${ext}
+  # The installer speaks the interface languages, picked from Windows' own
+  # language; English, first, is the fallback. electron-builder carries the
+  # wizard text for each of them.
+  installerLanguages:
+    - en_US
+    - de_DE
+    - es_ES
+    - fr_FR
+    - it_IT
+    - pt_BR
+    - ru_RU
+    - ja_JP
+    - ko_KR
+    - zh_CN

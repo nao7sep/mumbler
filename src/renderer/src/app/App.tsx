@@ -54,7 +54,7 @@ import { formatCardStatusMessage, formatStepName, hasStaleResults, isCardBusy, s
 import { useTablist } from "./useTablist";
 import { CloseIcon } from "./Icon";
 import { presentFailure, reportRendererDiagnostic } from "./presentFailure";
-import { I18nProvider } from "../i18n/I18nContext";
+import { I18nProvider, useI18n } from "../i18n/I18nContext";
 import { isLanguage, type InterfaceLanguage } from "@shared/i18n/languages";
 import { CardActionResults, type CardActionError } from "./CardActionResults";
 import {
@@ -253,6 +253,7 @@ function LoadedShell({
   setSnapshot: (snapshot: AppSnapshot) => void;
 }): ReactElement {
   const initialSnapshot = snapshot;
+  const i18n = useI18n();
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     const recovered = initialSnapshot.queueSummary?.recoveredInterruptedCards ?? 0;
     return recovered > 0
@@ -1138,8 +1139,8 @@ function LoadedShell({
 
           {snapshot?.startupDiagnostic ? (
             <section className="panel panel--nested queue-empty">
-              <p className="empty-state__title">{snapshot.startupDiagnostic.title}</p>
-              <p className="empty-state__body">{snapshot.startupDiagnostic.message}</p>
+              <p className="empty-state__title">{i18n.text(snapshot.startupDiagnostic.title)}</p>
+              <p className="empty-state__body">{i18n.text(snapshot.startupDiagnostic.message)}</p>
               <div className="toolbar">
                 <button
                   type="button"
@@ -1783,8 +1784,8 @@ function LoadedShell({
 
       {snapshot?.appWideError ? (
         <AppWideErrorModal
-          title={snapshot.appWideError.title}
-          message={snapshot.appWideError.message}
+          title={i18n.text(snapshot.appWideError.title)}
+          message={i18n.text(snapshot.appWideError.message)}
           onDismiss={() => void handleDismissAppWideError()}
         />
       ) : null}

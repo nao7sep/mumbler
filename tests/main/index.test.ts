@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
 vi.mock("electron", () => ({
   app: {
     setName: vi.fn(),
+    getName: () => "Mumbler",
     requestSingleInstanceLock: () => true,
     whenReady: () => Promise.resolve(),
     on: vi.fn(),
@@ -29,6 +30,8 @@ vi.mock("electron", () => ({
 const runtime = vi.hoisted(() => ({
   currentLogger: () => ({ error: (...args: unknown[]) => { state.loggerErrors.push(args); } }),
   themePreference: () => "system",
+  translator: () => ({ t: (key: string) => key, language: "en" }),
+  onLanguageChanged: vi.fn(),
 }));
 
 vi.mock("@main/core/app-runtime", () => ({
@@ -37,6 +40,7 @@ vi.mock("@main/core/app-runtime", () => ({
   },
 }));
 vi.mock("@main/ipc/app-shell", () => ({ registerAppShellIpc: vi.fn() }));
+vi.mock("@main/app-menu", () => ({ installApplicationMenu: vi.fn() }));
 vi.mock("@main/core/theme", () => ({ applyThemePreference: vi.fn(), followOsThemeChanges: vi.fn() }));
 vi.mock("@main/window", () => ({
   createMainWindow: () => state.windowLoadFailure ? Promise.reject(state.windowLoadFailure) : Promise.resolve({}),

@@ -730,7 +730,7 @@ describe("settings, secrets and the window's own state", () => {
       stack: "at QueueList",
     });
 
-    expect(reported.appWideError).toMatchObject({ title: "Mumbler could not continue" });
+    expect(reported.appWideError).toMatchObject({ title: { key: "diagnostic.unexpectedTitle" } });
     expect((await runtime.dismissAppWideError()).appWideError).toBeNull();
   });
 

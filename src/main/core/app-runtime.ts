@@ -77,7 +77,7 @@ import { OperationError } from "./operation-error";
 import { applyThemePreference } from "./theme";
 import { mainTranslator, resolveInterfaceLanguage } from "../i18n";
 import type { InterfaceLanguage, LanguagePreference } from "@shared/i18n/languages";
-import type { Translator } from "@shared/i18n/translate";
+import { createTranslator, message, type Message, type Translator } from "@shared/i18n/translate";
 import { clearCardResultsFromStep, resolveGenerateStartStep } from "./card-pipeline";
 import { PipelineCoordinator } from "./pipeline-coordinator";
 
@@ -111,8 +111,8 @@ function rendererReportError(report: RendererErrorReport): Error {
  * retained by the IPC/logger boundary and must never become later snapshot UI. */
 export function resetFailureDiagnostic(_error: unknown): NonNullable<AppSnapshot["startupDiagnostic"]> {
   return {
-    title: "Reset Failed",
-    message: "Mumbler could not reset its saved state. Existing files were left unchanged; check the log and try again.",
+    title: message("diagnostic.resetTitle"),
+    message: message("diagnostic.resetBody"),
   };
 }
 
@@ -212,8 +212,8 @@ export class ApplicationRuntime {
         layoutStore: null,
         logger,
         startupDiagnostic: {
-          title: "Storage Location Could Not Be Resolved",
-          message: "Mumbler could not use its configured storage folder. Restore access to that folder or remove the MUMBLER_HOME override, then reopen the app.",
+          title: message("diagnostic.storageTitle"),
+          message: message("diagnostic.storageBody"),
         },
         appWideError: null,
         recoveredInterruptedCards: 0,
@@ -422,15 +422,9 @@ export class ApplicationRuntime {
         transcriptStore: null,
         layoutStore: null,
         logger,
-        startupDiagnostic: {
-          title:
-            error instanceof CorruptStateError
-              ? "Saved Data Could Not Be Loaded"
-              : "Startup Failed",
-          message: error instanceof CorruptStateError
-            ? "Mumbler could not safely load its saved data. The files were left unchanged; check the log before reopening the app."
-            : "Mumbler could not finish preparing its storage. Reopen the app to try again; saved files were left unchanged.",
-        },
+        startupDiagnostic: error instanceof CorruptStateError
+          ? { title: message("diagnostic.corruptTitle"), message: message("diagnostic.corruptBody") }
+          : { title: message("diagnostic.startupTitle"), message: message("diagnostic.startupBody") },
         appWideError: null,
         recoveredInterruptedCards: 0,
         shellReadyAtUtc,
@@ -588,8 +582,8 @@ export class ApplicationRuntime {
 
   async reportRendererError(report: RendererErrorReport): Promise<AppSnapshot> {
     await this.setAppWideError(
-      "Mumbler could not continue",
-      "The window encountered an unexpected problem. Restart Mumbler to continue; your saved files are unchanged.",
+      message("diagnostic.unexpectedTitle"),
+      message("diagnostic.windowBody"),
       rendererReportError(report),
       {
       source: report.source,
@@ -609,14 +603,14 @@ export class ApplicationRuntime {
   }
 
   async reportMainProcessError(origin: "uncaughtException" | "unhandledRejection", error: unknown): Promise<void> {
-    await this.setAppWideError("Mumbler could not continue", "Mumbler encountered an unexpected problem. Restart the app to continue; your saved files are unchanged.", error, {
+    await this.setAppWideError(message("diagnostic.unexpectedTitle"), message("diagnostic.mainBody"), error, {
       origin,
       error: serializeError(error),
     });
   }
 
   async dismissAppWideError(): Promise<AppSnapshot> {
-    const title = this.runtime.appWideError?.title ?? null;
+    const title = this.runtime.appWideError?.title.key ?? null;
     this.runtime.appWideError = null;
     await this.runtime.logger.info("app.error-dismissed", "App-wide error dismissed by user.", {
       dismissedTitle: title,
@@ -703,15 +697,16 @@ export class ApplicationRuntime {
   async openImportDialog(window: BrowserWindow): Promise<ImportOperationResult> {
     this.ensureReady();
 
+    const t = this.translator().t;
     const result = await dialog.showOpenDialog(window, {
-      title: "Import Audio Files",
+      title: t("dialog.importTitle"),
       properties: ["openFile", "multiSelections"],
       filters: [
         {
-          name: "Audio Files",
+          name: t("dialog.audioFiles"),
           extensions: [...AUDIO_IMPORT_EXTENSIONS],
         },
-        { name: "All Files", extensions: ["*"] },
+        { name: t("dialog.allFiles"), extensions: ["*"] },
       ],
     });
 
@@ -1156,7 +1151,7 @@ export class ApplicationRuntime {
     this.ensureReady();
 
     const result = await dialog.showOpenDialog(window, {
-      title: "Choose Output Directory",
+      title: this.translator().t("dialog.chooseOutputFolder"),
       properties: ["openDirectory", "createDirectory"],
     });
 
@@ -1761,17 +1756,17 @@ export class ApplicationRuntime {
   }
 
   private async setAppWideError(
-    title: string,
-    message: string,
+    title: Message,
+    body: Message,
     error: unknown,
     details?: unknown,
   ): Promise<void> {
     this.runtime.appWideError = {
       title,
-      message,
+      message: body,
     };
 
-    await this.runtime.logger.error("app.unhandled", title, error, details);
+    await this.runtime.logger.error("app.unhandled", createTranslator("en").text(title), error, details);
   }
 
   // Never throws: it runs after a save has published its files.

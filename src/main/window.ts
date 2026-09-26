@@ -9,6 +9,7 @@ import type { ApplicationRuntime } from "./core/app-runtime";
 import { serializeError } from "./core/logger";
 import { createWindowWithUsablePersistedBounds } from "./window-state-recovery";
 import { windowBackground } from "./core/theme";
+import { buildContextMenuTemplate } from "./app-menu";
 
 export { isAllowedExternalUrl } from "./external-url";
 
@@ -117,38 +118,9 @@ export async function createMainWindow(runtime: ApplicationRuntime): Promise<Bro
   window.webContents.on("context-menu", (_event, params) => {
     if (!params.isEditable && !params.selectionText) return;
 
-    const template: Electron.MenuItemConstructorOptions[] = [];
-
-    if (params.misspelledWord) {
-      if (params.dictionarySuggestions.length > 0) {
-        for (const word of params.dictionarySuggestions) {
-          template.push({ label: word, click: () => window.webContents.replaceMisspelling(word) });
-        }
-      } else {
-        template.push({ label: "No suggestions", enabled: false });
-      }
-      template.push({ type: "separator" });
-    }
-
-    if (params.isEditable) {
-      template.push(
-        { role: "undo",      enabled: params.editFlags.canUndo },
-        { role: "redo",      enabled: params.editFlags.canRedo },
-        { type: "separator" },
-        { role: "cut",       enabled: params.editFlags.canCut },
-      );
-    }
-
-    template.push({ role: "copy", enabled: params.editFlags.canCopy });
-
-    if (params.isEditable) {
-      template.push(
-        { role: "paste",     enabled: params.editFlags.canPaste },
-        { type: "separator" },
-        { role: "selectAll",          enabled: params.editFlags.canSelectAll },
-      );
-    }
-
+    const template = buildContextMenuTemplate(runtime.translator().t, params, (word) =>
+      window.webContents.replaceMisspelling(word),
+    );
     Menu.buildFromTemplate(template).popup();
   });
 

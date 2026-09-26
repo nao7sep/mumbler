@@ -1,3 +1,4 @@
+import { createTranslator } from "@shared/i18n/translate";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
@@ -60,9 +61,10 @@ describe("reset failure presentation", () => {
 
     const presentation = resetFailureDiagnostic(hostile);
 
-    expect(presentation.title).toBe("Reset Failed");
-    expect(presentation.message).toContain("Existing files were left unchanged");
-    expect(presentation.message).not.toMatch(/EACCES|private\/tmp|SENTINEL|invoking remote method/i);
+    const english = createTranslator("en");
+    expect(english.text(presentation.title)).toBe("Reset Failed");
+    expect(english.text(presentation.message)).toContain("Existing files were left unchanged");
+    expect(JSON.stringify(presentation)).not.toMatch(/EACCES|private\/tmp|SENTINEL|invoking remote method/i);
   });
 });
 

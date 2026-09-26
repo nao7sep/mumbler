@@ -1,4 +1,5 @@
 import type { InterfaceLanguage, LanguagePreference } from "./i18n/languages";
+import type { Message } from "./i18n/translate";
 
 // Built-in default Gemini model suggestions, seeded into the user-owned, editable
 // model list (MumblerSettings.geminiModels) at first run. A small, editable starter
@@ -414,9 +415,10 @@ export interface QueueSummary {
   recoveredInterruptedCards: number;
 }
 
+// Rendered in the interface language by the renderer, never finished text.
 export interface StartupDiagnostic {
-  title: string;
-  message: string;
+  title: Message;
+  message: Message;
 }
 
 export interface RendererErrorReport {

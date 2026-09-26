@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { LANGUAGES } from "@shared/i18n/languages";
+
 const config = readFileSync(
   new URL("../../electron-builder.yml", import.meta.url),
   "utf8",
@@ -69,5 +71,33 @@ describe("release artifact names", () => {
     expect(section("dmg")).toContain("  artifactName: ${productName}-${version}.${ext}");
     expect(section("win")).toContain("  artifactName: ${productName}-${version}-win.${ext}");
     expect(section("nsis")).toContain("  artifactName: ${productName}-${version}-setup.${ext}");
+  });
+});
+
+describe("interface languages in the packaged app", () => {
+  function listUnder(key: string): string[] {
+    const lines = config.split("\n");
+    const start = lines.findIndex((line) => line.trim() === `${key}:`);
+    expect(start, key).toBeGreaterThanOrEqual(0);
+    const items: string[] = [];
+    for (const line of lines.slice(start + 1)) {
+      const match = /^\s+- (\S+)$/.exec(line);
+      if (!match) break;
+      items.push(match[1]!);
+    }
+    return items;
+  }
+
+  it("declares exactly the language set in the macOS bundle", () => {
+    expect(listUnder("CFBundleLocalizations")).toEqual([...LANGUAGES]);
+  });
+
+  it("builds the Windows installer in the same languages, English first", () => {
+    const installer = listUnder("installerLanguages");
+    expect(installer[0]).toBe("en_US");
+    const asTags = installer.map((code) =>
+      code === "pt_BR" ? "pt-BR" : code === "zh_CN" ? "zh-Hans" : code.split("_")[0],
+    );
+    expect(asTags).toEqual([...LANGUAGES]);
   });
 });
