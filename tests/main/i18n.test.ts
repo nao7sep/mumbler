@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls = vi.hoisted(() => [] as string[]);
-const defaults = vi.hoisted(() => ({ appleLanguages: null as string[] | null }));
+const defaults = vi.hoisted(() => ({ appleLanguages: null as string[] | null, isPackaged: true }));
 
 vi.mock("electron", () => ({
   app: {
@@ -11,6 +11,9 @@ vi.mock("electron", () => ({
       return defaults.appleLanguages ?? ["de-DE", "en-US"];
     },
     getSystemLocale: () => "de-DE",
+    get isPackaged() {
+      return defaults.isPackaged;
+    },
   },
   systemPreferences: {
     removeUserDefault: (key: string) => {
@@ -30,6 +33,7 @@ beforeEach(() => {
   vi.resetModules();
   calls.length = 0;
   defaults.appleLanguages = ["ja"]; // written by a previous launch
+  defaults.isPackaged = true;
   Object.defineProperty(process, "platform", { value: "darwin" });
   return () => Object.defineProperty(process, "platform", platform);
 });
@@ -54,5 +58,12 @@ describe("AppKit's language on macOS", () => {
     const { alignAppKit } = await import("@main/i18n");
     alignAppKit("ja", vi.fn());
     expect(calls.filter((call) => call !== "read")).toEqual([]);
+  });
+
+  it("touches no defaults on an unpackaged macOS run", async () => {
+    defaults.isPackaged = false;
+    const { alignAppKit } = await import("@main/i18n");
+    alignAppKit("ja", vi.fn());
+    expect(calls).toEqual([]);
   });
 });

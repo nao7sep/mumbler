@@ -28,15 +28,21 @@ let computer: ComputerLanguage | null = null;
 // (never the global one), as macOS's own per-app language setting does: AppKit,
 // and Chromium's own strings, pick it up at the next launch, as the conventions
 // allow for a language saved mid-session. System removes the entry, so the
-// computer's own list applies again.
+// computer's own list applies again. Only the packaged app does this: an
+// unpackaged run shares the Electron runtime's own domain with every other
+// app in development.
 const APPLE_LANGUAGES = "AppleLanguages";
+
+function ownsAppKitLanguages(): boolean {
+  return process.platform === "darwin" && app.isPackaged;
+}
 
 function readComputerLanguage(): ComputerLanguage {
   if (computer === null) {
     let preferred: string[] = [];
     let locale: string | null = null;
     try {
-      if (process.platform === "darwin") {
+      if (ownsAppKitLanguages()) {
         // The entry this app wrote shadows the computer's list; clear it first
         // so System reads what the computer prefers. alignAppKit writes it back.
         systemPreferences.removeUserDefault(APPLE_LANGUAGES);
@@ -67,7 +73,7 @@ export function mainTranslator(preference: LanguagePreference): Translator {
 /** Points AppKit at the interface language from the next launch: the saved tag
  *  in the app's own defaults domain, or no entry for System. */
 export function alignAppKit(preference: LanguagePreference, onError: (error: unknown) => void): void {
-  if (process.platform !== "darwin") return;
+  if (!ownsAppKitLanguages()) return;
   readComputerLanguage(); // the computer's list is read before the entry is written
   try {
     if (preference === "system") systemPreferences.removeUserDefault(APPLE_LANGUAGES);
