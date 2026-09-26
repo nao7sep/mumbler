@@ -48,6 +48,9 @@ const audioGate = vi.hoisted(() => ({
 // Confirming a review probes each recording; holding the probe keeps a confirm
 // in flight while something else reaches the import boundary.
 const probeGate = vi.hoisted(() => ({ held: null as Promise<void> | null, entered: 0 }));
+// Holding the silence analysis keeps a trim in flight, the way ffmpeg does on a
+// long recording, while the user presses the next shortcut.
+const trimGate = vi.hoisted(() => ({ held: null as Promise<void> | null, entered: 0 }));
 vi.mock("@main/core/audio-tools", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@main/core/audio-tools")>();
   return {
@@ -67,7 +70,10 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
       if (probeGate.held !== null) await probeGate.held;
       return probed.profile;
     },
-    analyzeTrimDecision: async (_path: string, trim: { frontMarkerSec: number | null; backMarkerSec: number | null }) => ({
+    analyzeTrimDecision: async (_path: string, trim: { frontMarkerSec: number | null; backMarkerSec: number | null }) => {
+      trimGate.entered += 1;
+      if (trimGate.held !== null) await trimGate.held;
+      return {
       kind: "stream-copy" as const,
       toleranceSec: 3,
       requestedStartSec: trim.frontMarkerSec,
@@ -82,7 +88,8 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
       endDeltaSec: 0,
       reason: "Boundaries found.",
       analyzedAtUtc: Date.now(),
-    }),
+      };
+    },
   };
 });
 
@@ -140,6 +147,8 @@ beforeEach(async () => {
   audioGate.entered = 0;
   probeGate.held = null;
   probeGate.entered = 0;
+  trimGate.held = null;
+  trimGate.entered = 0;
   runtime = await ApplicationRuntime.initialize();
 });
 
@@ -353,6 +362,62 @@ describe("working with a card", () => {
     expect(result.kind).toBe("saved");
     expect(cards(result.snapshot)).toEqual([]);
     expect(audioGate.entered, "only one save ran").toBe(1);
+  });
+
+  it("holds a card whose trim is still being applied against every other change", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    let release!: () => void;
+    trimGate.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const trimming = runtime.updateCardTrim(card.id, { frontMarkerSec: null, backMarkerSec: 200 });
+    await vi.waitFor(() => expect(trimGate.entered).toBe(1));
+
+    await expect(runtime.saveCard(card.id)).rejects.toThrow(/still being applied/);
+    await expect(runtime.removeCard(card.id)).rejects.toThrow(/being processed/);
+    await expect(runtime.duplicateCard(card.id)).rejects.toThrow(/being processed/);
+    await runtime.setGeminiApiKey("AIza-test-key");
+    await expect(runtime.generateCardStep(card.id, "title")).rejects.toThrow(/already being processed/);
+
+    release();
+    const [trimmed] = cards(await trimming);
+    expect(trimmed.trim.backMarkerSec).toBe(200);
+    expect(await exists(card.sourceFilePath), "the working audio is kept").toBe(true);
+    expect(await readdir(join(home, "output")).catch(() => []), "nothing was saved").toEqual([]);
+  });
+
+  it("refuses to generate without an API key and leaves the card as it was", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+
+    await expect(runtime.generateCardStep(card.id, "title")).rejects.toThrow(/not configured/);
+
+    expect(cards(runtime.getSnapshot())[0]).toMatchObject({
+      status: "Ready to Save",
+      metadata: { title: "Old title", slug: "old-title" },
+    });
+  });
+
+  it("keeps the latest trim when an earlier one finishes analyzing after it", async () => {
+    const card = await confirmed();
+    let release!: () => void;
+    trimGate.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const earlier = runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: null });
+    await vi.waitFor(() => expect(trimGate.entered).toBe(1));
+    trimGate.held = null;
+    await runtime.updateCardTrim(card.id, { frontMarkerSec: 9, backMarkerSec: null });
+    release();
+    await earlier;
+
+    expect(cards(runtime.getSnapshot())[0].trim.frontMarkerSec).toBe(9);
+    await runtime.shutdown();
+    const persisted = await createStateStore(join(home, "state.json")).load();
+    expect(persisted.value.cards[0].trim.frontMarkerSec).toBe(9);
   });
 
   it("cancels a save cut short by quitting and leaves the card ready to save", async () => {

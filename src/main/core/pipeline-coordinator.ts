@@ -115,11 +115,10 @@ export class PipelineCoordinator {
       throw new OperationError("Card to process does not exist.");
     }
 
+    // Check and claim with no await between them: the card's busy status is set
+    // below before the first await, so no trim, save or second start can pass
+    // its own idle check in between. The caller resolves the API key first.
     this.assertCardCanStart(card);
-
-    if ((await this.hooks.resolveApiKey()) === null) {
-      throw new OperationError("Gemini API key is not configured.");
-    }
 
     const startStep = requestedStartStep ?? "transcription";
     const needsTranscriptionSlot = startStep === "transcription";

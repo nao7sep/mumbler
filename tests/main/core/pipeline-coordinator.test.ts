@@ -140,16 +140,14 @@ describe("PipelineCoordinator.startOrEnqueue", () => {
     );
   });
 
-  it("refuses to start when no API key resolves, leaving the card untouched", async () => {
+  it("claims the card before its first await, so nothing can slip in between check and claim", () => {
     const card = makeCard({ id: "a" });
-    const { coordinator, resolveApiKey } = harness([card]);
-    resolveApiKey.mockResolvedValue(null);
+    const { coordinator } = harness([card]);
 
-    await expect(coordinator.startOrEnqueue("a", "generate")).rejects.toThrow(
-      "Gemini API key is not configured.",
-    );
-    expect(card.status).toBe("Imported");
-    expect(coordinator.hasRun("a")).toBe(false);
+    void coordinator.startOrEnqueue("a", "generate", "transcription");
+
+    expect(card.status).toBe("Transcribing");
+    expect(() => coordinator.assertCardCanStart(card)).toThrow(OperationError);
   });
 });
 

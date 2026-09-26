@@ -25,6 +25,7 @@ import {
   type SettingsDraft,
   type ThemePreference,
   type ToolName,
+  type TrimDecision,
 } from "@shared/app-shell";
 import { AUDIO_IMPORT_EXTENSIONS, isSupportedAudioImportName } from "@shared/audio-import";
 import { isCardBusy } from "@shared/card-status";
@@ -161,6 +162,11 @@ export class ApplicationRuntime {
   // In-flight saves, so shutdown can cancel each one and wait for it to roll
   // back (or finish publishing) before the stores are flushed.
   private readonly activeSaves = new Map<AbortController, Promise<unknown>>();
+  // Cards whose trim markers are being analyzed, with the number of the latest
+  // request. A card listed here is busy for every other mutation (save,
+  // generate, remove, duplicate), because the trim changes it after its await;
+  // a newer trim of the same card supersedes an older one still analyzing.
+  private readonly trimRequests = new Map<string, number>();
 
   private constructor(runtime: AppRuntimeState) {
     this.runtime = runtime;
@@ -964,19 +970,41 @@ export class ApplicationRuntime {
 
   async updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot> {
     this.ensureReady();
-    const state = this.runtime.state!;
-    const card = this.requireIdleCard(cardId, {
-      missing: "Card to update does not exist.",
-      busy: "Cannot change trim markers while this card is being processed.",
-    });
-
+    const card = this.requireCard(cardId, "Card to update does not exist.");
+    // Not requireIdleCard: a trim still analyzing is superseded by this one
+    // rather than refusing it.
+    if (isCardBusy(card)) {
+      throw new OperationError("Cannot change trim markers while this card is being processed.");
+    }
     const normalizedTrim = normalizeTrim(trim, card.durationSec);
-    const trimDecision = await analyzeTrimDecision(
-      card.sourceFilePath,
-      normalizedTrim,
-      card.durationSec,
-    );
 
+    const request = (this.trimRequests.get(cardId) ?? 0) + 1;
+    this.trimRequests.set(cardId, request);
+    try {
+      const trimDecision = await analyzeTrimDecision(
+        card.sourceFilePath,
+        normalizedTrim,
+        card.durationSec,
+      );
+      if (this.trimRequests.get(cardId) !== request) {
+        return this.getSnapshot();
+      }
+      await this.applyCardTrim(card, normalizedTrim, trimDecision);
+    } finally {
+      if (this.trimRequests.get(cardId) === request) {
+        this.trimRequests.delete(cardId);
+      }
+    }
+    return this.getSnapshot();
+  }
+
+  private async applyCardTrim(
+    card: MumblerCard,
+    normalizedTrim: CardTrim,
+    trimDecision: TrimDecision,
+  ): Promise<void> {
+    const state = this.runtime.state!;
+    const cardId = card.id;
     card.trim = normalizedTrim;
     card.trimDecision = trimDecision;
     card.timestamps = applyFrontTrimOffset(card.timestamps, normalizedTrim.frontMarkerSec ?? 0);
@@ -1012,8 +1040,6 @@ export class ApplicationRuntime {
       decision: trimDecision.kind,
       reason: trimDecision.reason,
     });
-
-    return this.getSnapshot();
   }
 
   async getCardMediaSource(cardId: string): Promise<string> {
@@ -1036,13 +1062,19 @@ export class ApplicationRuntime {
 
   async generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
     this.ensureReady();
-    const card = this.requireCard(cardId, "Card to generate does not exist.");
+    this.requireCard(cardId, "Card to generate does not exist.");
 
-    this.pipeline.assertCardCanStart(card);
-
+    // The key is resolved before the card is checked, so nothing awaits between
+    // the idle check and startOrEnqueue claiming the card.
     if ((await this.resolveGeminiApiKey()) === null) {
       throw new OperationError("Gemini API key is not configured.");
     }
+
+    const card = this.requireIdleCard(cardId, {
+      missing: "Card to generate does not exist.",
+      busy: "This card is already being processed.",
+    });
+    this.pipeline.assertCardCanStart(card);
 
     const startStep = resolveGenerateStartStep(card, target);
     clearCardResultsFromStep(card, startStep);
@@ -1299,6 +1331,9 @@ export class ApplicationRuntime {
     if (this.shutdownPromise !== null) {
       throw new OperationError("Mumbler is closing; the recording was not saved.");
     }
+    if (this.trimRequests.has(cardId)) {
+      throw new OperationError("The trim markers are still being applied. Save again in a moment.");
+    }
 
     // Claim the card before the first await: "Saving" is busy, so no generation,
     // trim, removal or second save can start while this one reads the card and
@@ -1460,6 +1495,9 @@ export class ApplicationRuntime {
       missing: "Card to remove does not exist.",
       busy: "Cannot remove a card while it is being processed.",
     });
+    // Out of the queue before the first await, so no save or trim can claim the
+    // card while its audio is being deleted.
+    state.cards = state.cards.filter((entry) => entry.id !== cardId);
 
     try {
       await rm(card.sourceFilePath, { force: true });
@@ -1479,7 +1517,6 @@ export class ApplicationRuntime {
       );
     }
 
-    state.cards = state.cards.filter((entry) => entry.id !== cardId);
     await this.persistState();
     return this.getSnapshot();
   }
@@ -1641,7 +1678,7 @@ export class ApplicationRuntime {
     messages: { missing: string; busy: string },
   ): MumblerCard {
     const card = this.requireCard(cardId, messages.missing);
-    if (isCardBusy(card)) {
+    if (isCardBusy(card) || this.trimRequests.has(cardId)) {
       throw new OperationError(messages.busy);
     }
     return card;
