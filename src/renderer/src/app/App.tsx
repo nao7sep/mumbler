@@ -32,7 +32,7 @@ import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
 import { HamburgerIcon } from "./Icon";
 import { Menu, MenuItem } from "./Menu";
 import { SettingsModal } from "./SettingsModal";
-import { findMatchingGlobalCommand, isActivationTarget, isTextEditingTarget, isTypingTarget } from "./shortcut-utils";
+import { findMatchingGlobalCommand, isActivationTarget, isShortcutsHelpChord, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
 import { QueueList, formatBytes, formatDuration, statusModifier } from "./QueueList";
 import { PaneSplitter } from "./PaneSplitter";
@@ -864,21 +864,8 @@ function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): React
         return;
       }
 
-      // Cmd/Ctrl+Slash opens the shortcuts help (the fleet's conventional help
-      // chord); Alt is excluded so Windows AltGr — delivered as Ctrl+Alt —
-      // keeps typing characters. On macOS the Ctrl half stands down while the
-      // target takes typed text — Ctrl belongs to the text system there — and
-      // the Cmd half is the binding and always fires
-      // (keyboard-shortcut-conventions).
       const isMac = snapshot == null || snapshot.platform === "darwin";
-      if (
-        !modalIsOpen &&
-        !isMenuOpen &&
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey &&
-        event.key === "/" &&
-        !(isMac && event.ctrlKey && !event.metaKey && isTextEditingTarget(event.target))
-      ) {
+      if (!modalIsOpen && !isMenuOpen && isShortcutsHelpChord(event, isMac)) {
         event.preventDefault();
         setShowShortcutsHelp(true);
         return;

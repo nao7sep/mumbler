@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 
 import type { CommandId } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
-import { findMatchingGlobalCommand, isTextEditingTarget, isTypingTarget } from "@renderer/app/shortcut-utils";
+import {
+  findMatchingGlobalCommand,
+  isShortcutsHelpChord,
+  isTextEditingTarget,
+  isTypingTarget,
+} from "@renderer/app/shortcut-utils";
 
 function keydown(init: KeyboardEventInit): KeyboardEvent {
   return new KeyboardEvent("keydown", init);
@@ -100,5 +105,19 @@ describe("isTextEditingTarget", () => {
     range.type = "range";
     expect(isTextEditingTarget(range)).toBe(false);
     expect(isTypingTarget(range)).toBe(true);
+  });
+});
+
+describe("isShortcutsHelpChord", () => {
+  it("opens the help on Cmd+Slash on macOS and Ctrl+Slash elsewhere", () => {
+    expect(isShortcutsHelpChord(keydown({ key: "/", metaKey: true }), true)).toBe(true);
+    expect(isShortcutsHelpChord(keydown({ key: "/", ctrlKey: true }), false)).toBe(true);
+    expect(isShortcutsHelpChord(keydown({ key: "/", ctrlKey: true, altKey: true }), false), "AltGr types").toBe(false);
+    expect(isShortcutsHelpChord(keydown({ key: "/" }), true)).toBe(false);
+  });
+
+  it("stands down while an IME composition is in progress", () => {
+    expect(isShortcutsHelpChord(keydown({ key: "/", metaKey: true, isComposing: true }), true)).toBe(false);
+    expect(isShortcutsHelpChord(keydown({ key: "/", ctrlKey: true, keyCode: 229 }), false)).toBe(false);
   });
 });

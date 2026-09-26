@@ -57,7 +57,12 @@ export function isComposingKeyboardEvent(
   e: React.KeyboardEvent | KeyboardEvent,
 ): boolean {
   if (composingRef.current) return true;
-  const nativeEvent = "nativeEvent" in e ? e.nativeEvent : e;
+  return isImeKeyEvent("nativeEvent" in e ? e.nativeEvent : e);
+}
+
+// Layers 2 and 3 alone, for a window-level listener that has no composition
+// events of its own to track.
+export function isImeKeyEvent(nativeEvent: KeyboardEvent): boolean {
   if (nativeEvent.isComposing) return true;
 
   // Legacy fallback for older IME implementations. Confirmed empirically
@@ -69,7 +74,5 @@ export function isComposingKeyboardEvent(
   // this is also safe: reading a missing property in JavaScript yields
   // undefined rather than throwing, so no try/catch is needed.
   const legacyKeyCode = (nativeEvent as { keyCode?: number }).keyCode;
-  if (legacyKeyCode === 229) return true;
-
-  return false;
+  return legacyKeyCode === 229;
 }

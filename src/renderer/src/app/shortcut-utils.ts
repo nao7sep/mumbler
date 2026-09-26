@@ -1,6 +1,8 @@
 import type { CommandId } from "@shared/app-shell";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
 
+import { isImeKeyEvent } from "./useComposing";
+
 const TEXT_INPUT_TYPES = new Set([
   "",
   "email",
@@ -30,6 +32,25 @@ export function findMatchingGlobalCommand(event: KeyboardEvent): CommandId | nul
     }
   }
   return null;
+}
+
+/**
+ * Cmd/Ctrl+Slash opens the shortcuts help (the fleet's conventional help
+ * chord). Alt is excluded so Windows AltGr — delivered as Ctrl+Alt — keeps
+ * typing characters. On macOS the Ctrl half stands down while the target takes
+ * typed text — Ctrl belongs to the text system there — and the Cmd half is the
+ * binding (keyboard-shortcut-conventions). Never while an IME composition is in
+ * progress: opening the help moves focus and would tear the composition down
+ * (text-input-ime-conventions).
+ */
+export function isShortcutsHelpChord(event: KeyboardEvent, isMac: boolean): boolean {
+  return (
+    (event.metaKey || event.ctrlKey) &&
+    !event.altKey &&
+    event.key === "/" &&
+    !(isMac && event.ctrlKey && !event.metaKey && isTextEditingTarget(event.target)) &&
+    !isImeKeyEvent(event)
+  );
 }
 
 /** Text-entry targets — where the macOS text system owns the Ctrl half of a
