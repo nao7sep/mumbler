@@ -390,7 +390,7 @@
   "decision.discardReviewBody": "保存していない日時の変更があります。破棄して読み込みをキャンセルしますか？",
   "decision.keepEditing": "編集を続ける",
   "decision.discard": "破棄",
-  "decision.fileExistsTitle": "ファイルがあります",
+  "decision.fileExistsTitle": "ファイルがすでに存在します",
   "decision.fileExistsBody": "出力ファイルがすでに存在します：{paths}。",
   "decision.overwrite": "上書き",
   "decision.addSuffix": "接尾辞を付ける",

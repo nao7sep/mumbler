@@ -275,7 +275,7 @@
   "output.lastStoppedStep": "Dernière étape interrompue",
   "output.changeDirectory": "Changer de dossier de sortie",
   "output.saveAndRemove": "Enregistrer et retirer",
-  "output.hint": "L’enregistrement exporte l’audio et les métadonnées, puis retire cet enregistrement de la file d’attente.",
+  "output.hint": "Enregistrer exporte l’audio et les métadonnées, puis retire cet enregistrement de la file d’attente.",
   "detail.selectRecording": "Sélectionnez un enregistrement",
   "detail.noSelection": "Aucune sélection",
   "detail.noSelectionBody": "Importez des enregistrements pour commencer.",
@@ -449,16 +449,16 @@
   "player.setFrontAtCursor": "Début au curseur",
   "player.setBackAtCursor": "Fin au curseur",
   "player.clearMarkers": "Effacer les repères",
-  "player.duplicate": "Dupliquer l’enregistrement",
+  "player.duplicate": "Dupliquer",
   "player.playFirst": {
-    "one": "Lire les {count} premières s",
-    "many": "Lire les {count} premières s",
-    "other": "Lire les {count} premières s"
+    "one": "Lire {count}\u00a0s du début",
+    "many": "Lire {count}\u00a0s du début",
+    "other": "Lire {count}\u00a0s du début"
   },
   "player.playLast": {
-    "one": "Lire les {count} dernières s",
-    "many": "Lire les {count} dernières s",
-    "other": "Lire les {count} dernières s"
+    "one": "Lire {count}\u00a0s de la fin",
+    "many": "Lire {count}\u00a0s de la fin",
+    "other": "Lire {count}\u00a0s de la fin"
   },
   "player.frontMarker": "Repère de début",
   "player.keepFrom": "Conserver l’audio à partir de",

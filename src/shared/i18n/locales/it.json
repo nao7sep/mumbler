@@ -19,7 +19,7 @@
   "nativeMenu.cut": "Taglia",
   "nativeMenu.copy": "Copia",
   "nativeMenu.paste": "Incolla",
-  "nativeMenu.pasteAndMatchStyle": "Incolla e mantieni stile",
+  "nativeMenu.pasteAndMatchStyle": "Incolla e adegua lo stile",
   "nativeMenu.delete": "Elimina",
   "nativeMenu.selectAll": "Seleziona tutto",
   "nativeMenu.speech": "Voce",
@@ -451,14 +451,14 @@
   "player.clearMarkers": "Cancella marcatori",
   "player.duplicate": "Duplica registrazione",
   "player.playFirst": {
-    "one": "Riproduci i primi {count} s",
-    "many": "Riproduci i primi {count} s",
-    "other": "Riproduci i primi {count} s"
+    "one": "Riproduci {count} s iniziale",
+    "many": "Riproduci {count} s iniziali",
+    "other": "Riproduci {count} s iniziali"
   },
   "player.playLast": {
-    "one": "Riproduci gli ultimi {count} s",
-    "many": "Riproduci gli ultimi {count} s",
-    "other": "Riproduci gli ultimi {count} s"
+    "one": "Riproduci {count} s finale",
+    "many": "Riproduci {count} s finali",
+    "other": "Riproduci {count} s finali"
   },
   "player.frontMarker": "Marcatore iniziale",
   "player.keepFrom": "Mantieni l’audio da",

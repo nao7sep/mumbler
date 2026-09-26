@@ -2,7 +2,7 @@
   "language.name": "Español",
   "settings.language": "Idioma",
   "settings.languageSystem": "Sistema",
-  "settings.languageHint": "Sistema sigue el idioma de la computadora.",
+  "settings.languageHint": "Sistema sigue el idioma del equipo.",
   "settings.timezoneSystem": "Sistema ({zone})",
   "nativeMenu.about": "Acerca de {app}",
   "nativeMenu.services": "Servicios",
@@ -451,14 +451,14 @@
   "player.clearMarkers": "Borrar marcadores",
   "player.duplicate": "Duplicar grabación",
   "player.playFirst": {
-    "one": "Reproducir los primeros {count} s",
-    "many": "Reproducir los primeros {count} s",
-    "other": "Reproducir los primeros {count} s"
+    "one": "Reproducir {count} s del inicio",
+    "many": "Reproducir {count} s del inicio",
+    "other": "Reproducir {count} s del inicio"
   },
   "player.playLast": {
-    "one": "Reproducir los últimos {count} s",
-    "many": "Reproducir los últimos {count} s",
-    "other": "Reproducir los últimos {count} s"
+    "one": "Reproducir {count} s del final",
+    "many": "Reproducir {count} s del final",
+    "other": "Reproducir {count} s del final"
   },
   "player.frontMarker": "Marcador inicial",
   "player.keepFrom": "Conservar el audio desde",

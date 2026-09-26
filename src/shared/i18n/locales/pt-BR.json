@@ -19,7 +19,7 @@
   "nativeMenu.cut": "Recortar",
   "nativeMenu.copy": "Copiar",
   "nativeMenu.paste": "Colar",
-  "nativeMenu.pasteAndMatchStyle": "Colar e Manter Estilo",
+  "nativeMenu.pasteAndMatchStyle": "Colar com o Mesmo Estilo",
   "nativeMenu.delete": "Apagar",
   "nativeMenu.selectAll": "Selecionar Tudo",
   "nativeMenu.speech": "Fala",
@@ -36,7 +36,7 @@
   "nativeMenu.window": "Janela",
   "nativeMenu.minimize": "Minimizar",
   "nativeMenu.zoom": "Zoom",
-  "nativeMenu.bringAllToFront": "Trazer Tudo para a Frente",
+  "nativeMenu.bringAllToFront": "Trazer Todas para a Frente",
   "nativeMenu.close": "Fechar",
   "nativeMenu.help": "Ajuda",
   "contextMenu.noSuggestions": "Nenhuma sugestão",
@@ -451,14 +451,14 @@
   "player.clearMarkers": "Limpar marcadores",
   "player.duplicate": "Duplicar gravação",
   "player.playFirst": {
-    "one": "Reproduzir os primeiros {count} s",
-    "many": "Reproduzir os primeiros {count} s",
-    "other": "Reproduzir os primeiros {count} s"
+    "one": "Reproduzir {count} s do início",
+    "many": "Reproduzir {count} s do início",
+    "other": "Reproduzir {count} s do início"
   },
   "player.playLast": {
-    "one": "Reproduzir os últimos {count} s",
-    "many": "Reproduzir os últimos {count} s",
-    "other": "Reproduzir os últimos {count} s"
+    "one": "Reproduzir {count} s do fim",
+    "many": "Reproduzir {count} s do fim",
+    "other": "Reproduzir {count} s do fim"
   },
   "player.frontMarker": "Marcador inicial",
   "player.keepFrom": "Manter o áudio a partir de",

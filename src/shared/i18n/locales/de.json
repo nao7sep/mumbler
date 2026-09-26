@@ -443,8 +443,8 @@
   "player.loading": "Arbeitsaudio wird geladen …",
   "player.pause": "Pause",
   "player.play": "Abspielen",
-  "player.setFrontAtCursor": "Anfang am Cursor setzen",
-  "player.setBackAtCursor": "Ende am Cursor setzen",
+  "player.setFrontAtCursor": "Anfang am Cursor",
+  "player.setBackAtCursor": "Ende am Cursor",
   "player.clearMarkers": "Marken löschen",
   "player.duplicate": "Aufnahme duplizieren",
   "player.playFirst": {
