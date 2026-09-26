@@ -386,7 +386,7 @@
   "review.utcTimestamp": "UTC timestamp",
   "review.copyToBackup": "Copy originals to backup folder",
   "review.backupHint": "Backups are saved to {path}. Configure the location in Settings.",
-  "review.deleteOriginals": "Permanently delete originals after import",
+  "review.deleteOriginals": "Permanently delete originals after importing",
   "review.bothOptionsHint": "If both options are selected, the backup is made before the original is deleted. A failed backup cancels the deletion for that file.",
   "decision.discardTitle": "Discard Changes?",
   "decision.discardSettingsBody": "You have unsaved changes. Discard them and close settings?",
