@@ -8,10 +8,9 @@ import type { Translator } from "@shared/i18n/translate";
 // On macOS the Edit menu is titled in the interface language; AppKit adds its
 // own items to it (Emoji & Symbols, Start Dictation, AutoFill, Writing Tools)
 // whatever it is titled (app-chrome-conventions, localization-conventions).
-// Those AppKit items speak the language AppKit settled on when the application
-// object was created, which Electron does before this code runs: they follow
-// the computer's language (the bundle declares the set in CFBundleLocalizations),
-// and a different language chosen in Settings does not reach them.
+// Those AppKit items speak the language AppKit settled on at launch, which
+// src/main/i18n.ts (alignAppKit) points at the interface language from the
+// next launch.
 export function buildApplicationMenuTemplate(
   t: Translator["t"],
   platform: NodeJS.Platform,

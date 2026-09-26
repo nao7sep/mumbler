@@ -82,6 +82,7 @@ async function bootstrap(): Promise<void> {
   // The native menu speaks the interface language, and is rebuilt when a
   // language saved in Settings changes it.
   installApplicationMenu(runtime.translator(), app.getName());
+  runtime.alignAppKit();
   runtime.onLanguageChanged(() => installApplicationMenu(runtime.translator(), app.getName()));
   // Before the window exists, so its first frame, title bar, and background
   // already match the saved choice.

@@ -1,4 +1,4 @@
-import { app } from "electron";
+import { app, systemPreferences } from "electron";
 
 import {
   effectiveLanguage,
@@ -21,11 +21,26 @@ interface ComputerLanguage {
 
 let computer: ComputerLanguage | null = null;
 
+// macOS draws some Edit menu items itself (Emoji & Symbols, Start Dictation,
+// AutoFill, Writing Tools, Services) in the language AppKit settles on before
+// any JavaScript runs, from AppleLanguages. Electron offers no volatile argument
+// domain, so Mumbler keeps the interface language in its own defaults domain
+// (never the global one), as macOS's own per-app language setting does: AppKit,
+// and Chromium's own strings, pick it up at the next launch, as the conventions
+// allow for a language saved mid-session. System removes the entry, so the
+// computer's own list applies again.
+const APPLE_LANGUAGES = "AppleLanguages";
+
 function readComputerLanguage(): ComputerLanguage {
   if (computer === null) {
     let preferred: string[] = [];
     let locale: string | null = null;
     try {
+      if (process.platform === "darwin") {
+        // The entry this app wrote shadows the computer's list; clear it first
+        // so System reads what the computer prefers. alignAppKit writes it back.
+        systemPreferences.removeUserDefault(APPLE_LANGUAGES);
+      }
       preferred = app.getPreferredSystemLanguages();
       locale = app.getSystemLocale() || null;
     } catch {
@@ -47,4 +62,17 @@ export function resolveInterfaceLanguage(preference: LanguagePreference): Interf
 export function mainTranslator(preference: LanguagePreference): Translator {
   const { language, locale } = resolveInterfaceLanguage(preference);
   return createTranslator(language, locale);
+}
+
+/** Points AppKit at the interface language from the next launch: the saved tag
+ *  in the app's own defaults domain, or no entry for System. */
+export function alignAppKit(preference: LanguagePreference, onError: (error: unknown) => void): void {
+  if (process.platform !== "darwin") return;
+  readComputerLanguage(); // the computer's list is read before the entry is written
+  try {
+    if (preference === "system") systemPreferences.removeUserDefault(APPLE_LANGUAGES);
+    else systemPreferences.setUserDefault(APPLE_LANGUAGES, "array", [preference]);
+  } catch (error) {
+    onError(error);
+  }
 }

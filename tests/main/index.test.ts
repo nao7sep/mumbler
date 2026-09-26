@@ -32,6 +32,7 @@ const runtime = vi.hoisted(() => ({
   themePreference: () => "system",
   translator: () => ({ t: (key: string) => key, language: "en" }),
   onLanguageChanged: vi.fn(),
+  alignAppKit: vi.fn(),
 }));
 
 vi.mock("@main/core/app-runtime", () => ({

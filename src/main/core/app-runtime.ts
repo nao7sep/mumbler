@@ -75,7 +75,7 @@ import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
 import { type AppLogger, createLogger, serializeError } from "./logger";
 import { OperationError } from "./operation-error";
 import { applyThemePreference } from "./theme";
-import { mainTranslator, resolveInterfaceLanguage } from "../i18n";
+import { alignAppKit, mainTranslator, resolveInterfaceLanguage } from "../i18n";
 import type { InterfaceLanguage, LanguagePreference } from "@shared/i18n/languages";
 import { createTranslator, message, type Message, type Translator } from "@shared/i18n/translate";
 import type { MessageKey } from "@shared/i18n/catalogues";
@@ -1201,6 +1201,15 @@ export class ApplicationRuntime {
     return mainTranslator(this.languagePreference());
   }
 
+  /** Hands the saved language to AppKit for its own menu items, from the next launch. */
+  alignAppKit(): void {
+    alignAppKit(this.languagePreference(), (error) => {
+      void this.runtime.logger.warn("language.appkit", "The interface language could not be handed to AppKit.", {
+        error: serializeError(error),
+      });
+    });
+  }
+
   onLanguageChanged(callback: () => void): void {
     this.onLanguageChangedCallback = callback;
   }
@@ -1213,12 +1222,16 @@ export class ApplicationRuntime {
   async saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
     this.ensureReady();
 
+    const previousPreference = this.languagePreference();
     const previousLanguage = this.interfaceLanguage().language;
     const nextSettings = applySettingsDraft(this.runtime.settings!, draft);
     this.runtime.settings = nextSettings;
 
     await this.persistSettings();
     applyThemePreference(nextSettings.theme);
+    if (nextSettings.language !== previousPreference) {
+      this.alignAppKit();
+    }
     if (this.interfaceLanguage().language !== previousLanguage) {
       this.onLanguageChangedCallback?.();
     }
