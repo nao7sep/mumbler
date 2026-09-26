@@ -1775,7 +1775,6 @@ select:not([multiple]) {
 }
 
 .modal-close:disabled {
-  cursor: not-allowed;
   opacity: 0.45;
 }
 

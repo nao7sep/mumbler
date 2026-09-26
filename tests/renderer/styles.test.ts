@@ -30,6 +30,11 @@ describe("styles.css window chrome", () => {
     expect(css).toContain("scrollbar-gutter: stable");
   });
 
+  it("never shows the forbidden cursor on a disabled control", () => {
+    // Disabled controls fall through to the global plain-arrow rule.
+    expect(css).not.toMatch(/cursor:\s*not-allowed/);
+  });
+
   it("gives the detail workspace track a real minimum, not a zero floor", () => {
     expect(css).not.toContain("400px minmax(0, 1fr)");
     expect(css).toContain("minmax(var(--detail-min-width), 1fr)");
