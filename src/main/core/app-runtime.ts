@@ -1359,13 +1359,19 @@ export class ApplicationRuntime {
     try {
       await this.persistState();
       outcome = await this.writeCardOutputs(card, resolution, signal);
-      return outcome;
     } finally {
       if (outcome?.kind !== "saved") {
         card.status = "Ready to Save";
         await this.persistState();
       }
     }
+    // Publication is the commit point: once the files are out, the save has
+    // succeeded, and removing the card from the queue is cleanup that reports
+    // its own failure to the log rather than turning the save into a failure.
+    if (outcome.kind === "saved") {
+      await this.discardWorkingCard(card);
+    }
+    return outcome;
   }
 
   private async writeCardOutputs(
@@ -1477,7 +1483,6 @@ export class ApplicationRuntime {
         overwrite: resolution === "overwrite",
       });
 
-      await this.discardWorkingCard(card);
       return { kind: "saved", ...targetPaths };
     } finally {
       await finalAudio.cleanup();
@@ -1736,6 +1741,7 @@ export class ApplicationRuntime {
     await this.runtime.logger.error("app.unhandled", title, error, details);
   }
 
+  // Never throws: it runs after a save has published its files.
   private async discardWorkingCard(card: MumblerCard): Promise<void> {
     this.runtime.state!.cards = this.runtime.state!.cards.filter((entry) => entry.id !== card.id);
     try {
@@ -1752,7 +1758,18 @@ export class ApplicationRuntime {
       );
     }
 
-    await this.persistState();
+    try {
+      await this.persistState();
+    } catch (error: unknown) {
+      // The next successful save of the queue drops the card. If none happens,
+      // startup finds its working audio gone and drops it then.
+      await this.runtime.logger.error(
+        "card.cleanup",
+        "Saved card was removed from the queue, but the queue could not be saved.",
+        error,
+        { cardId: card.id },
+      );
+    }
   }
 }
 

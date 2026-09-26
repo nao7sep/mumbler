@@ -440,6 +440,28 @@ describe("working with a card", () => {
     await expect(runtime.saveCard(card.id), "no save starts while closing").rejects.toThrow(/closing/);
   });
 
+  it("reports a save as saved once its files are out, even when the queue then cannot be written", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    const stateStore = (runtime as unknown as { runtime: { stateStore: { save(value: unknown): Promise<void> } } })
+      .runtime.stateStore;
+    const realSave = stateStore.save.bind(stateStore);
+    let saves = 0;
+    vi.spyOn(stateStore, "save").mockImplementation(async (value) => {
+      saves += 1;
+      // The first write claims the card as Saving; the next one follows publication.
+      if (saves === 2) throw new Error("disk full");
+      return realSave(value);
+    });
+
+    const result = await runtime.saveCard(card.id);
+
+    expect(result.kind).toBe("saved");
+    expect(cards(result.snapshot), "the saved card is out of the queue").toEqual([]);
+    expect((await readdir(join(home, "output"))).length).toBe(3);
+    expect(await exists(card.sourceFilePath), "the working audio is gone").toBe(false);
+  });
+
   it("keeps a file that took the save's name after its conflict check", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
