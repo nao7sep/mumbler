@@ -56,3 +56,18 @@ describe("Windows installer configuration", () => {
     }
   });
 });
+
+/** The indented body of one top-level section of electron-builder.yml. */
+function section(name: string): string {
+  const match = new RegExp(`^${name}:\\n((?:[ #].*\\n|\\n)*)`, "m").exec(config);
+  return match?.[1] ?? "";
+}
+
+describe("release artifact names", () => {
+  it("names every artifact as the release naming contract says, with no arch suffix", () => {
+    expect(section("mac")).toContain("  artifactName: ${productName}-${version}-mac.${ext}");
+    expect(section("dmg")).toContain("  artifactName: ${productName}-${version}.${ext}");
+    expect(section("win")).toContain("  artifactName: ${productName}-${version}-win.${ext}");
+    expect(section("nsis")).toContain("  artifactName: ${productName}-${version}-setup.${ext}");
+  });
+});

@@ -49,15 +49,24 @@ mac:
     - target: zip
       arch:
         - arm64
+  # Release names are fixed (app-release-conventions): electron-builder's default
+  # appends the arch whenever it is not x64, which would ship "-arm64" names.
+  # This is the portable zip's name; dmg below overrides it for the image.
+  artifactName: ${productName}-${version}-mac.${ext}
+
+dmg:
+  artifactName: ${productName}-${version}.${ext}
 
 win:
   icon: build/icon.ico
   target:
     - nsis
     - zip
+  # The portable zip's name; nsis below overrides it for the installer.
+  artifactName: ${productName}-${version}-win.${ext}
 
 # Clean, predictable installer filename (electron-builder's default is
-# "Mumbler Setup X.Y.Z.exe", with a space). Portable zips keep their defaults.
+# "Mumbler Setup X.Y.Z.exe", with a space).
 nsis:
   oneClick: false
   perMachine: false
