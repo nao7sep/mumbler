@@ -242,18 +242,20 @@ export function SettingsModal({
                 {/* Each language is listed by its own name, in its own script, so a
                     reader of any of them can find it whatever language is showing.
                     Applied on Save with the rest. */}
-                <select
-                  aria-labelledby="settings-language-heading"
-                  value={draft.language}
-                  onChange={(event) => onChange({ ...draft, language: normalizeLanguagePreference(event.target.value) })}
-                >
-                  <option value="system">{t("settings.languageSystem")}</option>
-                  {LANGUAGES.map((language) => (
-                    <option key={language} value={language} lang={language}>
-                      {CATALOGUES[language]["language.name"] as string}
-                    </option>
-                  ))}
-                </select>
+                <div className="field">
+                  <select
+                    aria-labelledby="settings-language-heading"
+                    value={draft.language}
+                    onChange={(event) => onChange({ ...draft, language: normalizeLanguagePreference(event.target.value) })}
+                  >
+                    <option value="system">{t("settings.languageSystem")}</option>
+                    {LANGUAGES.map((language) => (
+                      <option key={language} value={language} lang={language}>
+                        {CATALOGUES[language]["language.name"] as string}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <p className="field-hint">{t("settings.languageHint")}</p>
               </div>
             </section>
