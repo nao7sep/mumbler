@@ -27,7 +27,7 @@ export function findMatchingGlobalCommand(event: KeyboardEvent): CommandId | nul
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   for (const command of COMMAND_DEFINITIONS) {
     if (command.id === "select-previous" || command.id === "select-next") continue;
-    if (command.key === key) {
+    if (command.keys.includes(key)) {
       return command.id;
     }
   }

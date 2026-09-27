@@ -110,8 +110,10 @@ export interface CommandDefinition {
   id: CommandId;
   labelKey: MessageKey;
   groupKey: MessageKey;
-  /** The literal event.key this command matches (letters lowercase). */
-  key: string;
+  /** The literal event.key values this command matches (letters lowercase).
+   * Usually one; a second entry is an alternate binding kept alongside the
+   * original (keyboard-shortcut-conventions: "known from elsewhere"). */
+  keys: readonly string[];
 }
 
 export interface RetryPolicy {

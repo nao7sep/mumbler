@@ -23,6 +23,13 @@ describe("findMatchingGlobalCommand", () => {
     expect(findMatchingGlobalCommand(keydown({ key: "ArrowRight" }))).toBe("skip-forward");
   });
 
+  it("matches YouTube's J/L as alternate seek keys, case-insensitively", () => {
+    expect(findMatchingGlobalCommand(keydown({ key: "j" }))).toBe("skip-backward");
+    expect(findMatchingGlobalCommand(keydown({ key: "J" }))).toBe("skip-backward");
+    expect(findMatchingGlobalCommand(keydown({ key: "l" }))).toBe("skip-forward");
+    expect(findMatchingGlobalCommand(keydown({ key: "L" }))).toBe("skip-forward");
+  });
+
   it("matches the single-letter trim and workflow keys", () => {
     expect(findMatchingGlobalCommand(keydown({ key: "f" }))).toBe("set-front-marker");
     expect(findMatchingGlobalCommand(keydown({ key: "b" }))).toBe("set-back-marker");

@@ -28,6 +28,12 @@ function formatShortcutKey(key: string): string {
   return KEY_DISPLAY[key] ?? (key.length === 1 ? key.toUpperCase() : key);
 }
 
+// Alternate bindings for the same command share the empty modifier, so they
+// join with a tight `/` per the keyboard-shortcut-conventions ("Alternatives").
+function formatShortcutKeys(keys: readonly string[]): string {
+  return keys.map(formatShortcutKey).join("/");
+}
+
 export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactElement {
   const { t } = useI18n();
   const groups = COMMAND_DEFINITIONS.reduce<Array<{ name: CommandDefinition["groupKey"]; commands: CommandDefinition[] }>>(
@@ -63,7 +69,7 @@ export function ShortcutsHelpModal({ onClose }: { onClose: () => void }): ReactE
                 {group.commands.map((command) => (
                   <div key={command.id} className="shortcut-item">
                     <span>{t(command.labelKey)}</span>
-                    <kbd>{formatShortcutKey(command.key)}</kbd>
+                    <kbd>{formatShortcutKeys(command.keys)}</kbd>
                   </div>
                 ))}
               </div>
