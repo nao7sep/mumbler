@@ -1,5 +1,5 @@
 import { createTranslator } from "@shared/i18n/translate";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 
@@ -373,3 +373,56 @@ describe("ApplicationRuntime dropped-path import authority", () => {
     }
   });
 });
+
+// Storage-path-conventions: the root is owner-only (0700) on POSIX — created
+// that way, and tightened to 0700 at each launch when an existing root is
+// broader. Windows uses its own permission model, so this is skipped there.
+(process.platform === "win32" ? describe.skip : describe)(
+  "ApplicationRuntime storage root permissions",
+  () => {
+    it("creates a fresh storage root as owner-only (0700)", async () => {
+      const root = await mkdtemp(join(tmpdir(), "mumbler-runtime-root-"));
+      const previousRoot = process.env.MUMBLER_HOME;
+      process.env.MUMBLER_HOME = join(root, "profile");
+
+      let runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>> | null = null;
+      try {
+        runtime = await ApplicationRuntime.initialize();
+        expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+
+        const mode = (await stat(process.env.MUMBLER_HOME)).mode & 0o777;
+        expect(mode).toBe(0o700);
+      } finally {
+        await runtime?.shutdown();
+        if (previousRoot === undefined) delete process.env.MUMBLER_HOME;
+        else process.env.MUMBLER_HOME = previousRoot;
+        await rm(root, { force: true, recursive: true });
+      }
+    });
+
+    it("tightens an existing broader storage root to 0700 on launch", async () => {
+      const root = await mkdtemp(join(tmpdir(), "mumbler-runtime-root-"));
+      const homeDir = join(root, "profile");
+      await mkdir(homeDir, { recursive: true, mode: 0o755 });
+      await chmod(homeDir, 0o755);
+      expect((await stat(homeDir)).mode & 0o777).toBe(0o755);
+
+      const previousRoot = process.env.MUMBLER_HOME;
+      process.env.MUMBLER_HOME = homeDir;
+
+      let runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>> | null = null;
+      try {
+        runtime = await ApplicationRuntime.initialize();
+        expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+
+        const mode = (await stat(homeDir)).mode & 0o777;
+        expect(mode).toBe(0o700);
+      } finally {
+        await runtime?.shutdown();
+        if (previousRoot === undefined) delete process.env.MUMBLER_HOME;
+        else process.env.MUMBLER_HOME = previousRoot;
+        await rm(root, { force: true, recursive: true });
+      }
+    });
+  },
+);

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
-import { mkdir, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -250,7 +250,7 @@ export class ApplicationRuntime {
     const stateStore = createStateStore(paths.statePath);
 
     try {
-      await ensureDirectories(paths);
+      await ensureDirectories(paths, logger);
 
       const settingsLoad = await settingsStore.load();
       const settings = settingsLoad.value;
@@ -635,7 +635,7 @@ export class ApplicationRuntime {
     const layout = createDefaultLayout();
 
     try {
-      await ensureDirectories(paths);
+      await ensureDirectories(paths, this.runtime.logger);
       // Preserve each store before the user-commanded reset writes defaults.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
       const preservedStateFiles = await stateStore.preserveExistingFiles();
@@ -1857,8 +1857,35 @@ function makeApiKeyWarn(
   };
 }
 
-async function ensureDirectories(paths: AppPaths): Promise<void> {
-  await mkdir(paths.homeDir, { recursive: true });
+// Tightens the storage root to owner-only (0700) on POSIX, per the storage-path
+// conventions: created that way, and tightened at each launch when an existing
+// root is broader, because derived data and logs must never be readable by
+// accounts that cannot read their sources. Windows uses its own permission
+// model and is unaffected. mkdir's own `mode` is masked by umask and never
+// changes an *existing* directory's mode, so this always re-checks after
+// creation rather than relying on the mkdir call alone. A failure to tighten
+// is logged and never stops the app.
+async function secureRoot(rootDir: string, logger: AppLogger): Promise<void> {
+  if (process.platform === "win32") {
+    return;
+  }
+  try {
+    const info = await stat(rootDir);
+    if ((info.mode & 0o077) !== 0) {
+      await chmod(rootDir, 0o700);
+    }
+  } catch (error: unknown) {
+    await logger.warn(
+      "storage.root-permissions",
+      "Could not tighten the storage root to owner-only (0700).",
+      { rootDir, error: error instanceof Error ? error.message : String(error) },
+    );
+  }
+}
+
+async function ensureDirectories(paths: AppPaths, logger: AppLogger): Promise<void> {
+  await mkdir(paths.homeDir, { recursive: true, mode: 0o700 });
+  await secureRoot(paths.homeDir, logger);
   await mkdir(paths.logsDir, { recursive: true });
   await mkdir(paths.workingDir, { recursive: true });
   await mkdir(paths.binDir, { recursive: true });
