@@ -883,6 +883,7 @@ textarea:focus-visible,
   top: calc(100% + 4px);
   z-index: 100;
   min-width: 180px;
+  max-width: calc(100vw - 16px);
   background: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -908,8 +909,9 @@ textarea:focus-visible,
   /* After `font: inherit`, which would otherwise restore the page's 1.5. */
   line-height: normal;
   color: var(--text);
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-menu-item:hover:not(:disabled) {
