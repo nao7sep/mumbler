@@ -568,8 +568,7 @@ textarea:focus-visible,
 }
 
 .inline-result {
-  position: relative;
-  padding: 10px 40px 10px 12px;
+  padding: 10px 12px;
   border: 1px solid transparent;
   border-radius: var(--radius);
   font-size: 0.8125rem;
@@ -586,14 +585,31 @@ textarea:focus-visible,
   overflow-wrap: anywhere;
 }
 
+/* The dismiss X sits beside the message as a normal flex item (not an absolute
+   overlay at a fixed offset), top-aligned with the row and nudged down by
+   margin-block so it centres on the message's first line (--result-first-line,
+   in `1lh` units) rather than on the whole, possibly wrapped, block. One
+   mechanism, shared by every container below that can host a .result-close:
+   .inline-result, .persistent-notice, .queue-import-result. `.result-close`
+   itself must keep inheriting its font (no font-size/line-height of its own),
+   since an `lh` value stored in a custom property is re-resolved against
+   whichever element's font is in effect where it's used. */
+.inline-result:has(.result-close),
+.persistent-notice:has(.result-close),
+.queue-import-result:has(.result-close) {
+  --result-first-line: 1lh;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .result-close {
-  position: absolute;
-  top: 6px;
-  right: 8px;
+  flex: none;
   display: inline-grid;
   place-items: center;
   width: 24px;
   height: 24px;
+  margin-block: calc((var(--result-first-line) - 24px) / 2);
   padding: 0;
   border: 0;
   border-radius: 5px;
@@ -648,14 +664,15 @@ textarea:focus-visible,
 }
 
 .queue-import-result {
-  position: relative;
-  padding: 8px 40px 8px 10px;
+  padding: 8px 10px;
   border: 1px solid;
   border-radius: var(--radius);
   font-size: 0.8125rem;
 }
 
 .queue-import-result > span {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow-wrap: anywhere;
 }
 
@@ -1980,8 +1997,7 @@ select:not([multiple]) {
 }
 
 .persistent-notice {
-  position: relative;
-  padding: 8px 44px 8px 16px;
+  padding: 8px 16px;
   font-size: 0.85rem;
   border: 1px solid transparent;
   border-radius: var(--radius);
@@ -1998,6 +2014,8 @@ select:not([multiple]) {
 }
 
 .persistent-notice__message {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow-wrap: anywhere;
 }
 
