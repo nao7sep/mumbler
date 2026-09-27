@@ -34,6 +34,15 @@ const FILES_API_CLEANUP_TIMEOUT_MS = 30_000;
  */
 const THINKING_CONFIG = { thinkingBudget: -1 } as const;
 
+// The SDK's own retries would resend a request that may already have been billed,
+// stacking on top of card-pipeline's retryPolicy (ai-model-routing-conventions:
+// "Calling the provider"). `attempts: 1` disables them so the pipeline is the only
+// retry authority. `timeout` is set from the same bound already used for the call's
+// AbortSignal — belt-and-suspenders, not a second, shorter deadline.
+function singleAttemptHttpOptions(timeoutMs: number): { timeout: number; retryOptions: { attempts: number } } {
+  return { timeout: timeoutMs, retryOptions: { attempts: 1 } };
+}
+
 export interface GeminiAudioTranscriptionParams {
   apiKey: string;
   filePath: string;
@@ -102,6 +111,7 @@ export async function transcribeWithGemini(
         config: {
           abortSignal: abortState.signal,
           thinkingConfig: THINKING_CONFIG,
+          httpOptions: singleAttemptHttpOptions(params.timeoutMs),
         },
       });
     } else {
@@ -112,6 +122,7 @@ export async function transcribeWithGemini(
         config: {
           mimeType: params.mimeType,
           abortSignal: abortState.signal,
+          httpOptions: singleAttemptHttpOptions(params.timeoutMs),
         },
       });
       uploadedFileName = uploadedFile.name ?? null;
@@ -140,6 +151,7 @@ export async function transcribeWithGemini(
         config: {
           abortSignal: abortState.signal,
           thinkingConfig: THINKING_CONFIG,
+          httpOptions: singleAttemptHttpOptions(params.timeoutMs),
         },
       });
     }
@@ -168,7 +180,10 @@ async function deleteUploadedFile(ai: GoogleGenAI, name: string, logger: AppLogg
   try {
     await ai.files.delete({
       name,
-      config: { abortSignal: AbortSignal.timeout(FILES_API_CLEANUP_TIMEOUT_MS) },
+      config: {
+        abortSignal: AbortSignal.timeout(FILES_API_CLEANUP_TIMEOUT_MS),
+        httpOptions: singleAttemptHttpOptions(FILES_API_CLEANUP_TIMEOUT_MS),
+      },
     });
   } catch (cleanupError: unknown) {
     await logger?.warn(
@@ -201,6 +216,7 @@ export async function generateTextWithGemini(
       config: {
         abortSignal: abortState.signal,
         thinkingConfig: THINKING_CONFIG,
+        httpOptions: singleAttemptHttpOptions(params.timeoutMs),
       },
     });
 
