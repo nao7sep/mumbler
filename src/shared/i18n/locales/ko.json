@@ -221,7 +221,7 @@
   "menu.settings": "설정",
   "menu.managedTools": "관리형 도구",
   "menu.keyboardShortcuts": "키보드 단축키",
-  "menu.about": "정보",
+  "menu.about": "Mumbler에 관하여",
   "queue.title": "대기열",
   "queue.importing": "가져오는 중…",
   "queue.import": "가져오기",
