@@ -27,7 +27,7 @@ import {
   type ModalId,
 } from "./modalStack";
 
-export type ModalSize = "narrow" | "default" | "settings";
+export type ModalSize = "narrow" | "default" | "settings" | "about";
 
 export interface ModalShellProps {
   /** Visible heading; also the accessible name via aria-labelledby. */
@@ -64,6 +64,7 @@ const SIZE_CLASS: Record<ModalSize, string> = {
   narrow: "modal-card modal-card--narrow",
   default: "modal-card",
   settings: "modal-card modal-card--settings",
+  about: "modal-card modal-card--about",
 };
 
 export function ModalShell({

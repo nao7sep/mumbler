@@ -46,7 +46,7 @@ export function AboutModal({
     <ModalShell
       title={t("about.title")}
       titleVisuallyHidden
-      size="narrow"
+      size="about"
       onRequestClose={onClose}
       describedById="about-description"
       footer={

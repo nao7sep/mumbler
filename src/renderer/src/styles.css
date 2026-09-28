@@ -1715,6 +1715,13 @@ select:not([multiple]) {
   width: min(480px, calc(100vw - 48px));
 }
 
+/* Sized for the About dialog (its only user): the introduction line needs
+   less room than the shared narrow width in ja/ru, and this stays a size of
+   its own so a future narrow dialog with different content isn't coupled to it. */
+.modal-card--about {
+  width: min(390px, calc(100vw - 48px));
+}
+
 .modal-card--settings {
   width: min(1100px, calc(100vw - 48px));
 }
