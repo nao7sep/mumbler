@@ -399,7 +399,7 @@
   "about.issuesLinkFailed": "문제 보고 페이지를 열 수 없습니다. 다시 시도하십시오.",
   "about.title": "Mumbler 정보",
   "about.version": "버전 {version}",
-  "about.description": "음성 녹음을 깔끔하게 정리하십시오. 가져오기, 전사, 구조화, 제목과 슬러그 생성, 내보내기까지 한곳에서 할 수 있습니다.",
+  "about.description": "음성 녹음을 AI로 전사하고, 전사 내용을 구조화하며, 게시할 준비가 된 제목과 슬러그를 생성하세요.",
   "about.reportIssue": "문제 보고",
   "about.copyright": "© {year} {author} — GNU GPL v3 이상",
   "tools.stateNotInstalled": "설치되지 않음",

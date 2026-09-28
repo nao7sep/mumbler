@@ -405,7 +405,7 @@
   "about.issuesLinkFailed": "Impossibile aprire l’elenco delle segnalazioni. Riprova.",
   "about.title": "Informazioni su Mumbler",
   "about.version": "Versione {version}",
-  "about.description": "Tieni in ordine le tue registrazioni vocali. Importa, trascrivi, struttura, genera titoli e slug ed esporta, tutto in un unico posto.",
+  "about.description": "Trascrivi le registrazioni vocali con l’IA, struttura la trascrizione e genera titoli e slug pronti per la pubblicazione.",
   "about.reportIssue": "Segnala un problema",
   "about.copyright": "© {year} {author} — GNU GPL v3 o successiva",
   "tools.stateNotInstalled": "Non installato",

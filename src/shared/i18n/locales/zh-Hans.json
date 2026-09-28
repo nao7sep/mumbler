@@ -399,7 +399,7 @@
   "about.issuesLinkFailed": "无法打开问题反馈页面。请重试。",
   "about.title": "关于 Mumbler",
   "about.version": "版本 {version}",
-  "about.description": "让你的语音录音井井有条。导入、转写、结构化、生成标题和别名并导出——一站完成。",
+  "about.description": "用 AI 转写语音录音，结构化转写内容，并生成可直接发布的标题和别名。",
   "about.reportIssue": "报告问题",
   "about.copyright": "© {year} {author} — GNU GPL v3 或更高版本",
   "tools.stateNotInstalled": "未安装",

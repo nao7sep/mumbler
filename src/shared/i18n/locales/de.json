@@ -402,7 +402,7 @@
   "about.issuesLinkFailed": "Die Fehlerverwaltung konnte nicht geöffnet werden. Versuchen Sie es erneut.",
   "about.title": "Über Mumbler",
   "about.version": "Version {version}",
-  "about.description": "Halten Sie Ihre Sprachaufnahmen in Ordnung. Importieren, transkribieren, strukturieren, Titel und Slugs erzeugen und exportieren – alles an einem Ort.",
+  "about.description": "Transkribieren Sie Sprachaufnahmen mit KI, strukturieren Sie die Transkription, und erzeugen Sie Titel und Slugs, die veröffentlichungsbereit sind.",
   "about.reportIssue": "Problem melden",
   "about.copyright": "© {year} {author} – GNU GPL v3 oder später",
   "tools.stateNotInstalled": "Nicht installiert",

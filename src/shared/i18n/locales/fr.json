@@ -405,7 +405,7 @@
   "about.issuesLinkFailed": "Le suivi des problèmes n’a pas pu être ouvert. Réessayez.",
   "about.title": "À propos de Mumbler",
   "about.version": "Version {version}",
-  "about.description": "Gardez vos enregistrements vocaux en ordre. Importez, transcrivez, structurez, générez titres et slugs, puis exportez, le tout au même endroit.",
+  "about.description": "Transcrivez vos enregistrements vocaux avec l’IA, structurez la transcription, et générez des titres et des slugs prêts à publier.",
   "about.reportIssue": "Signaler un problème",
   "about.copyright": "© {year} {author} — GNU GPL v3 ou ultérieure",
   "tools.stateNotInstalled": "Non installé",

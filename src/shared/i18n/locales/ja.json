@@ -399,7 +399,7 @@
   "about.issuesLinkFailed": "問題の報告ページを開けませんでした。もう一度お試しください。",
   "about.title": "Mumblerについて",
   "about.version": "バージョン {version}",
-  "about.description": "音声の録音をきちんと整理。読み込み、文字起こし、構造化、タイトルとスラッグの生成、書き出しまでをひとつの場所で行えます。",
+  "about.description": "音声の録音を AI で文字起こしし、構造化して、公開に使えるタイトルとスラッグを生成しましょう。",
   "about.reportIssue": "問題を報告",
   "about.copyright": "© {year} {author} — GNU GPL v3以降",
   "tools.stateNotInstalled": "未インストール",

@@ -405,7 +405,7 @@
   "about.issuesLinkFailed": "Não foi possível abrir a lista de problemas. Tente novamente.",
   "about.title": "Sobre o Mumbler",
   "about.version": "Versão {version}",
-  "about.description": "Mantenha suas gravações de voz organizadas. Importe, transcreva, estruture, gere títulos e slugs e exporte, tudo em um só lugar.",
+  "about.description": "Transcreva gravações de voz com IA, estruture a transcrição e gere títulos e slugs prontos para publicar.",
   "about.reportIssue": "Relatar um problema",
   "about.copyright": "© {year} {author} — GNU GPL v3 ou posterior",
   "tools.stateNotInstalled": "Não instalada",

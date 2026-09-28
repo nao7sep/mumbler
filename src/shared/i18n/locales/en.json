@@ -402,7 +402,7 @@
   "about.issuesLinkFailed": "The issue tracker could not be opened. Try again.",
   "about.title": "About Mumbler",
   "about.version": "Version {version}",
-  "about.description": "Keep your voice recordings organized. Import, generate transcription, structure it, generate titles and slugs, and export — all in one place.",
+  "about.description": "Transcribe voice recordings with AI, structure the transcript, and generate titles and slugs ready to publish.",
   "about.reportIssue": "Report Issue",
   "about.copyright": "© {year} {author} — GNU GPL v3 or later",
   "tools.stateNotInstalled": "Not installed",
