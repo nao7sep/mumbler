@@ -1742,14 +1742,16 @@ select:not([multiple]) {
 .modal-card__header {
   padding-top: 14px;
   padding-bottom: 14px;
-  border-bottom: 1px solid var(--border-subtle);
+  /* No fainter than the app's own control borders, so the band stays visible
+     without a tint. */
+  border-bottom: 1px solid var(--field-border);
 }
 
 /* A strip between the title bar and the body — the Settings tabs, a toolbar —
    is its own band, closed by its own line. */
 .modal-card__strip {
   padding: 14px 20px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--field-border);
 }
 
 /* A hidden heading leaves the close button alone in the header: it keeps its
@@ -1808,7 +1810,7 @@ select:not([multiple]) {
    band, the note and the buttons sit inside it. */
 .modal-footer-note {
   padding: 14px 20px 0;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--field-border);
   display: grid;
   gap: 4px;
 }
@@ -1824,14 +1826,14 @@ select:not([multiple]) {
   flex-wrap: wrap;
   gap: 8px;
   padding: 14px 20px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--field-border);
 }
 
 .modal-toolbar {
   margin-top: 0;
   padding-top: 14px;
   padding-bottom: 14px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--field-border);
 }
 
 .modal-toolbar__field {
