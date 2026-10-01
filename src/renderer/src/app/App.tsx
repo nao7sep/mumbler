@@ -1,4 +1,3 @@
-import { modelOptions } from "@shared/model-options";
 import { nanoid } from "nanoid";
 import {
   useCallback,
@@ -60,6 +59,7 @@ import { isLanguage, type InterfaceLanguage } from "@shared/i18n/languages";
 import type { MessageKey } from "@shared/i18n/catalogues";
 import { message, type Message } from "@shared/i18n/translate";
 import { CardActionResults, type CardActionError } from "./CardActionResults";
+import { ConfiguredModels } from "./ConfiguredModels";
 import {
   PersistentNotifications,
   ToastNotifications,
@@ -753,27 +753,6 @@ function LoadedShell({
     }
   }
 
-  async function handleDetailModelChange(field: "transcriptionModel" | "outlineModel" | "metadataModel", value: string): Promise<void> {
-    const cardId = selectedCard?.id ?? null;
-    try {
-      const draft = await window.mumbler.getSettingsDraft();
-      const nextSnapshot = await window.mumbler.saveSettingsDraft({ ...draft, [field]: value });
-      setSnapshot(nextSnapshot);
-      if (cardId !== null) {
-        clearCardActionError(cardId, `model-${field}`);
-      }
-      addToast(message("notice.modelUpdated"));
-    } catch (error: unknown) {
-      if (cardId !== null) {
-        setCardActionError(
-          cardId,
-          `model-${field}`,
-          presentFailure(error, message("error.modelUpdate"), "model update failed"),
-        );
-      }
-    }
-  }
-
   async function handleCopyResult(target: GenerateTarget, value: string | null): Promise<void> {
     if (value === null || value.trim().length === 0) {
       return;
@@ -1324,21 +1303,7 @@ function LoadedShell({
                     <div className="detail-card__header">
                       <h3>{t("options.title")}</h3>
                     </div>
-                    <div className="field-stack">
-                      {(["transcription", "outline", "metadata"] as const).map((role) => {
-                        const field = `${role}Model` as "transcriptionModel" | "outlineModel" | "metadataModel";
-                        const kind = role === "transcription" ? "transcription" : role === "outline" ? "text-balanced" : "text-fast";
-                        const labelKey = role === "transcription" ? "options.transcriptionModel" : role === "outline" ? "options.structuredTranscriptionModel" : "options.metadataModel";
-                        const value = snapshot?.settingsSummary?.[field] ?? "";
-                        const groups = modelOptions(kind, [], [], value);
-                        return <label className="field" key={role}>
-                          <span>{t(labelKey)}</span>
-                          <select value={value} disabled={selectedCardIsBusy} onChange={(event) => void handleDetailModelChange(field, event.target.value)}>
-                            {Object.values(groups).flat().map((id) => <option key={id} value={id}>{id}</option>)}
-                          </select>
-                        </label>;
-                      })}
-                    </div>
+                    <ConfiguredModels summary={snapshot?.settingsSummary ?? null} />
                   </section>
                 </div>
                 <div className="app-tabpanel__footer">

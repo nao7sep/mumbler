@@ -192,8 +192,6 @@
   "error.cancelGeneration": "Todavía no se puede cancelar el procesamiento con IA. Espera a que termine e inténtalo de nuevo.",
   "notice.outputDirectorySet": "Carpeta de salida configurada.",
   "error.chooseOutputFolder": "No se pudo seleccionar la carpeta de salida. La carpeta actual no cambió; inténtalo de nuevo.",
-  "notice.modelUpdated": "Modelo actualizado.",
-  "error.modelUpdate": "No se pudo guardar el modelo elegido. Se sigue usando el modelo anterior; inténtalo de nuevo.",
   "notice.copied.transcription": "Transcripción copiada.",
   "notice.copied.structured": "Transcripción estructurada copiada.",
   "notice.copied.title": "Título copiado.",

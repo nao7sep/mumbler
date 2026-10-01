@@ -3,7 +3,6 @@ import { AI_ROLES, SUPPORTED_MODELS, defaultModelFor, isSupportedModel, modelsFo
 import { ThinkingLevel } from "@google/genai";
 import { supportedModelConfig } from "@shared/model-branches";
 import { createDefaultSettings, buildSettingsDraft } from "@main/core/settings-schema";
-import { modelOptions } from "@shared/model-options";
 
 describe("the model registry and committed lineup", () => {
   it("keeps every approved row, each with its own branch, and gives any other id the plain request", () => {
@@ -38,11 +37,5 @@ describe("the model registry and committed lineup", () => {
     expect(isSupportedModel(" GEMINI-3.8-FLASH ")).toBe(true);
     expect(isSupportedModel("gemini-2.5-pro")).toBe(false);
     expect(isSupportedModel("")).toBe(false);
-  });
-
-  it("groups and deduplicates suggestions while retaining an out-of-list selection", () => {
-    expect(modelOptions("text-balanced", ["gemini-3.8-flash", "gemini-future"], ["gemini-future", "custom"], "orphan")).toEqual({
-      bundled: ["gemini-3.8-flash"], provider: ["gemini-future"], extra: ["custom"], outOfList: ["orphan"],
-    });
   });
 });

@@ -192,8 +192,6 @@
   "error.cancelGeneration": "Le traitement par l’IA ne peut pas encore être annulé. Attendez qu’il se termine, puis réessayez.",
   "notice.outputDirectorySet": "Dossier de sortie défini.",
   "error.chooseOutputFolder": "Le dossier de sortie n’a pas pu être sélectionné. Le dossier actuel est inchangé\u00a0; réessayez.",
-  "notice.modelUpdated": "Modèle modifié.",
-  "error.modelUpdate": "Le choix du modèle n’a pas pu être enregistré. Le modèle précédent reste utilisé\u00a0; réessayez.",
   "notice.copied.transcription": "Transcription copiée.",
   "notice.copied.structured": "Transcription structurée copiée.",
   "notice.copied.title": "Titre copié.",

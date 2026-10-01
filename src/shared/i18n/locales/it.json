@@ -192,8 +192,6 @@
   "error.cancelGeneration": "Non è ancora possibile annullare l’elaborazione IA. Attendi che termini, poi riprova.",
   "notice.outputDirectorySet": "Cartella di output impostata.",
   "error.chooseOutputFolder": "Impossibile selezionare la cartella di output. La cartella attuale non è cambiata; riprova.",
-  "notice.modelUpdated": "Modello aggiornato.",
-  "error.modelUpdate": "Impossibile salvare il modello scelto. Resta in uso il modello precedente; riprova.",
   "notice.copied.transcription": "Trascrizione copiata.",
   "notice.copied.structured": "Trascrizione strutturata copiata.",
   "notice.copied.title": "Titolo copiato.",

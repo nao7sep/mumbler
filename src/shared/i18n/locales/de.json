@@ -191,8 +191,6 @@
   "error.cancelGeneration": "Die KI-Verarbeitung kann noch nicht abgebrochen werden. Warten Sie, bis sie abgeschlossen ist, und versuchen Sie es dann erneut.",
   "notice.outputDirectorySet": "Ausgabeordner festgelegt.",
   "error.chooseOutputFolder": "Der Ausgabeordner konnte nicht ausgewählt werden. Der aktuelle Ordner ist unverändert; versuchen Sie es erneut.",
-  "notice.modelUpdated": "Modell geändert.",
-  "error.modelUpdate": "Die Modellauswahl konnte nicht gespeichert werden. Das bisherige Modell bleibt in Verwendung; versuchen Sie es erneut.",
   "notice.copied.transcription": "Transkription kopiert.",
   "notice.copied.structured": "Strukturierte Transkription kopiert.",
   "notice.copied.title": "Titel kopiert.",

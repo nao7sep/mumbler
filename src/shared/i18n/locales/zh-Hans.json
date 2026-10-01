@@ -190,8 +190,6 @@
   "error.cancelGeneration": "暂时还不能取消 AI 处理。请等待其完成后重试。",
   "notice.outputDirectorySet": "已设置输出文件夹。",
   "error.chooseOutputFolder": "无法选择输出文件夹。当前文件夹未改变；请重试。",
-  "notice.modelUpdated": "已更改模型。",
-  "error.modelUpdate": "无法保存所选模型。仍在使用之前的模型；请重试。",
   "notice.copied.transcription": "已拷贝转写。",
   "notice.copied.structured": "已拷贝结构化转写。",
   "notice.copied.title": "已拷贝标题。",

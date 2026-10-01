@@ -191,8 +191,6 @@
   "error.cancelGeneration": "The AI operation could not be cancelled yet. Wait for it to finish, then try again.",
   "notice.outputDirectorySet": "Output directory set.",
   "error.chooseOutputFolder": "The output folder could not be selected. The current folder is unchanged; try again.",
-  "notice.modelUpdated": "Model updated.",
-  "error.modelUpdate": "The model selection could not be saved. The previous model remains in use; try again.",
   "notice.copied.transcription": "Transcription copied.",
   "notice.copied.structured": "Structured transcription copied.",
   "notice.copied.title": "Title copied.",

@@ -190,8 +190,6 @@
   "error.cancelGeneration": "아직 AI 처리를 취소할 수 없습니다. 처리가 끝날 때까지 기다린 후 다시 시도하십시오.",
   "notice.outputDirectorySet": "출력 폴더를 설정했습니다.",
   "error.chooseOutputFolder": "출력 폴더를 선택할 수 없습니다. 현재 폴더는 변경되지 않았습니다. 다시 시도하십시오.",
-  "notice.modelUpdated": "모델을 변경했습니다.",
-  "error.modelUpdate": "모델 선택을 저장할 수 없습니다. 이전 모델이 계속 사용됩니다. 다시 시도하십시오.",
   "notice.copied.transcription": "전사를 복사했습니다.",
   "notice.copied.structured": "구조화된 전사를 복사했습니다.",
   "notice.copied.title": "제목을 복사했습니다.",

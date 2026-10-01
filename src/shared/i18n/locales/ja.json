@@ -190,8 +190,6 @@
   "error.cancelGeneration": "AIの処理はまだキャンセルできません。処理が終わるのを待ってから、もう一度お試しください。",
   "notice.outputDirectorySet": "出力フォルダを設定しました。",
   "error.chooseOutputFolder": "出力フォルダを選択できませんでした。現在のフォルダは変わっていません。もう一度お試しください。",
-  "notice.modelUpdated": "モデルを変更しました。",
-  "error.modelUpdate": "モデルの選択を保存できませんでした。以前のモデルが引き続き使用されます。もう一度お試しください。",
   "notice.copied.transcription": "文字起こしをコピーしました。",
   "notice.copied.structured": "構造化した文字起こしをコピーしました。",
   "notice.copied.title": "タイトルをコピーしました。",

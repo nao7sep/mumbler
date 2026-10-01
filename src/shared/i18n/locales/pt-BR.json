@@ -192,8 +192,6 @@
   "error.cancelGeneration": "Ainda não é possível cancelar o processamento por IA. Aguarde a conclusão e tente novamente.",
   "notice.outputDirectorySet": "Pasta de saída definida.",
   "error.chooseOutputFolder": "Não foi possível selecionar a pasta de saída. A pasta atual não foi alterada; tente novamente.",
-  "notice.modelUpdated": "Modelo atualizado.",
-  "error.modelUpdate": "Não foi possível salvar o modelo escolhido. O modelo anterior continua em uso; tente novamente.",
   "notice.copied.transcription": "Transcrição copiada.",
   "notice.copied.structured": "Transcrição estruturada copiada.",
   "notice.copied.title": "Título copiado.",
