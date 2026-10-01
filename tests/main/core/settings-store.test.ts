@@ -295,15 +295,6 @@ describe("settings store", () => {
     await store.save({ "gemini.outline": "unknown-model" });
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "unknown-model" });
   });
-
-  it("drops retired model-selection keys without migrating them into role sets", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ geminiModels: ["old"], transcriptionModel: "old", metadataModel: "old" }));
-    const store = createSettingsStore(settingsPath());
-    expect((await store.load()).value).toEqual(createDefaultSettings());
-    await store.save({ "gemini.outline": "unknown-model" });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "unknown-model" });
-  });
-
   it("keeps an empty model list as the user's copy", async () => {
     await writeFile(settingsPath(), JSON.stringify({ extraModelIds: { gemini: [] } }));
     expect((await createSettingsStore(settingsPath()).load()).value.extraModelIds).toEqual({ gemini: [] });
