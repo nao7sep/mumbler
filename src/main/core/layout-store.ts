@@ -50,5 +50,7 @@ export function createLayoutStore(path: string): JsonStore<MumblerLayout> {
     schemaVersion: LAYOUT_SCHEMA_VERSION,
     validate: (raw) => normalizeLayout(raw),
     createDefault: () => createDefaultLayout(),
+    // Volatile state (queue width, selected card) only: not recorded in backups.sqlite3.
+    record: false,
   });
 }
