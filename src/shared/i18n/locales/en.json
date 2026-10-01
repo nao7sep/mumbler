@@ -365,7 +365,7 @@
   "settings.slugPrompt": "Slug Prompt",
   "settings.resetPrompts": "Reset prompts",
   "settings.maxRetries": "Max Retries",
-  "settings.maxRetriesHint": "Additional retries per AI call, with at most three attempts in total.",
+  "settings.maxRetriesHint": "Maximum number of retry attempts per AI call.",
   "settings.initialRetryDelay": "Initial Retry Delay (ms)",
   "settings.initialRetryDelayHint": "Wait time before the first retry.",
   "settings.maxRetryDelay": "Max Retry Delay (ms)",

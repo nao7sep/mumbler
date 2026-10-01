@@ -368,7 +368,7 @@
   "settings.slugPrompt": "Prompt dello slug",
   "settings.resetPrompts": "Ripristina prompt",
   "settings.maxRetries": "Tentativi massimi",
-  "settings.maxRetriesHint": "Tentativi aggiuntivi per chiamata IA, con un massimo di tre tentativi complessivi.",
+  "settings.maxRetriesHint": "Numero massimo di nuovi tentativi per chiamata all’IA.",
   "settings.initialRetryDelay": "Attesa iniziale tra i tentativi (ms)",
   "settings.initialRetryDelayHint": "Tempo di attesa prima del primo nuovo tentativo.",
   "settings.maxRetryDelay": "Attesa massima tra i tentativi (ms)",

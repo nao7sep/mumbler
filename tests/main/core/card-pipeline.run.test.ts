@@ -194,17 +194,17 @@ describe("executeCardPipeline", () => {
     expect(card.ai.title?.model).toBe("custom-metadata");
   });
 
-  it("caps automatic retries at three attempts", async () => {
+  it("retries a retryable failure as many times as the retry setting allows", async () => {
     vi.useFakeTimers();
     try {
       mockGenerateText.mockRejectedValue(new ApiError({ status: 503, message: JSON.stringify({ error: { code: 503, message: "Wait before retrying.", status: "UNAVAILABLE" } }) }));
       const card = makeCard();
       const ctx = makeContext(card, new AbortController().signal);
-      ctx.settings.retryPolicy.maxRetries = 20;
+      ctx.settings.retryPolicy.maxRetries = 5;
       const run = executeCardPipeline(card.id, "structured", "generate", ctx);
       await vi.runAllTimersAsync();
       await run;
-      expect(mockGenerateText).toHaveBeenCalledTimes(3);
+      expect(mockGenerateText).toHaveBeenCalledTimes(6);
       expect(card.lastError?.providerReason).toBe("Wait before retrying.");
     } finally { vi.useRealTimers(); }
   });

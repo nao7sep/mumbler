@@ -412,7 +412,7 @@ async function executeWithRetry<T>(params: {
       return await params.execute();
     } catch (error: unknown) {
       const retryable = isRetryableGeminiError(error);
-      const exhausted = attempt >= Math.min(3, retryPolicy.maxRetries + 1);
+      const exhausted = attempt > retryPolicy.maxRetries;
 
       await logger.warn(params.op, "Gemini step attempt failed.", {
         cardId: params.cardId,

@@ -362,7 +362,7 @@
   "settings.slugPrompt": "슬러그 프롬프트",
   "settings.resetPrompts": "프롬프트 재설정",
   "settings.maxRetries": "최대 재시도 횟수",
-  "settings.maxRetriesHint": "AI 호출별 추가 재시도 횟수입니다. 최초 호출을 포함해 최대 3회 시도합니다.",
+  "settings.maxRetriesHint": "AI 호출 한 번에 대한 최대 재시도 횟수입니다.",
   "settings.initialRetryDelay": "재시도 초기 대기 시간(ms)",
   "settings.initialRetryDelayHint": "첫 번째 재시도 전 대기 시간입니다.",
   "settings.maxRetryDelay": "재시도 최대 대기 시간(ms)",

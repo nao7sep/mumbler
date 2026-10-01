@@ -362,7 +362,7 @@
   "settings.slugPrompt": "スラッグのプロンプト",
   "settings.resetPrompts": "プロンプトをリセット",
   "settings.maxRetries": "最大再試行回数",
-  "settings.maxRetriesHint": "AI 呼び出しごとの追加再試行回数です。最初の呼び出しを含めて最大 3 回試行します。",
+  "settings.maxRetriesHint": "AIの呼び出し1回あたりの最大再試行回数です。",
   "settings.initialRetryDelay": "再試行の初回待ち時間（ms）",
   "settings.initialRetryDelayHint": "最初の再試行までの待ち時間です。",
   "settings.maxRetryDelay": "再試行の最大待ち時間（ms）",

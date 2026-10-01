@@ -368,7 +368,7 @@
   "settings.slugPrompt": "Instrucción del slug",
   "settings.resetPrompts": "Restablecer instrucciones",
   "settings.maxRetries": "Máximo de reintentos",
-  "settings.maxRetriesHint": "Reintentos adicionales por llamada de IA, con un máximo de tres intentos en total.",
+  "settings.maxRetriesHint": "Número máximo de reintentos por llamada a la IA.",
   "settings.initialRetryDelay": "Espera inicial entre reintentos (ms)",
   "settings.initialRetryDelayHint": "Tiempo de espera antes del primer reintento.",
   "settings.maxRetryDelay": "Espera máxima entre reintentos (ms)",

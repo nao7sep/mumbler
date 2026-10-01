@@ -365,7 +365,7 @@
   "settings.slugPrompt": "Prompt für den Slug",
   "settings.resetPrompts": "Prompts zurücksetzen",
   "settings.maxRetries": "Maximale Wiederholungen",
-  "settings.maxRetriesHint": "Zusätzliche Wiederholungen pro KI-Aufruf, insgesamt höchstens drei Versuche.",
+  "settings.maxRetriesHint": "Höchstzahl der Wiederholungsversuche pro KI-Aufruf.",
   "settings.initialRetryDelay": "Anfängliche Wartezeit (ms)",
   "settings.initialRetryDelayHint": "Wartezeit vor dem ersten Wiederholungsversuch.",
   "settings.maxRetryDelay": "Maximale Wartezeit (ms)",

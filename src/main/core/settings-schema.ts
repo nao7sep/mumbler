@@ -386,7 +386,7 @@ export function createDefaultSettings(): MumblerSettings {
         "Create a short English URL slug for the title. Lowercase a–z, digits, and hyphens only. No leading or trailing hyphen. Aim for 3–6 words. Output only the slug.\n\n<title>\n{title}\n</title>",
     },
     retryPolicy: {
-      maxRetries: 2,
+      maxRetries: 3,
       initialDelayMs: 1000,
       maxDelayMs: 16000,
       jitterRatio: 0.2,

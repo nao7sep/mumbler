@@ -371,7 +371,7 @@
   "settings.slugPrompt": "Промпт для слага",
   "settings.resetPrompts": "Сбросить промпты",
   "settings.maxRetries": "Максимум повторов",
-  "settings.maxRetriesHint": "Повторные попытки для каждого вызова ИИ, не более трёх попыток всего.",
+  "settings.maxRetriesHint": "Наибольшее число повторных попыток для одного вызова ИИ.",
   "settings.initialRetryDelay": "Начальная задержка повтора (мс)",
   "settings.initialRetryDelayHint": "Время ожидания перед первой повторной попыткой.",
   "settings.maxRetryDelay": "Максимальная задержка повтора (мс)",

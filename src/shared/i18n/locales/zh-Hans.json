@@ -362,7 +362,7 @@
   "settings.slugPrompt": "别名提示词",
   "settings.resetPrompts": "重置提示词",
   "settings.maxRetries": "最大重试次数",
-  "settings.maxRetriesHint": "每次 AI 调用的额外重试次数，包括首次调用在内最多尝试 3 次。",
+  "settings.maxRetriesHint": "每次 AI 调用的最大重试次数。",
   "settings.initialRetryDelay": "初始重试等待时间（毫秒）",
   "settings.initialRetryDelayHint": "第一次重试前的等待时间。",
   "settings.maxRetryDelay": "最大重试等待时间（毫秒）",
