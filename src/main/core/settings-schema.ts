@@ -431,7 +431,7 @@ export class SettingsStore {
     await this.store.update((current) => {
       const next = { ...current, ...knownSettings(sets) };
       for (const key of reset) delete next[key];
-      return next;
+      return Object.keys(next).length === 0 ? null : next;
     });
   }
 

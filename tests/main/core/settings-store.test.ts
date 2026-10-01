@@ -222,6 +222,47 @@ describe("queue data store", () => {
 });
 
 describe("settings store", () => {
+  it("reads every absent set as its built-in when the file holds only one set", async () => {
+    const raw = JSON.stringify({ concurrencyLimit: 5 });
+    await writeFile(settingsPath(), raw, "utf8");
+    const store = createSettingsStore(settingsPath());
+
+    expect((await store.load()).value).toEqual({ ...createDefaultSettings(), concurrencyLimit: 5 });
+    expect(await readFile(settingsPath(), "utf8")).toBe(raw);
+  });
+
+  it("keeps a fresh install without a file when model and prompt copies are reset", async () => {
+    const store = createSettingsStore(settingsPath());
+    await store.save({}, ["geminiModels", "transcriptionModel", "metadataModel", "prompts"]);
+
+    await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await store.load()).value).toEqual(createDefaultSettings());
+  });
+
+  it("deletes the file when its final set is reset, dropping unknown keys too", async () => {
+    await writeFile(settingsPath(), JSON.stringify({
+      prompts: { structured: "custom", title: "custom", slug: "custom" },
+      schemaVersion: 1,
+      retired: true,
+    }));
+    const store = createSettingsStore(settingsPath());
+    await store.save({}, ["prompts"]);
+
+    await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await store.load()).value).toEqual(createDefaultSettings());
+  });
+
+  it.each(["reset-first", "save-first"])("keeps another set across an overlapping reset (%s)", async (order) => {
+    await writeFile(settingsPath(), JSON.stringify({ prompts: createDefaultSettings().prompts }));
+    const store = createSettingsStore(settingsPath());
+    const reset = () => store.save({}, ["prompts"]);
+    const save = () => store.save({ concurrencyLimit: 5 });
+    await Promise.all(order === "reset-first" ? [reset(), save()] : [save(), reset()]);
+
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
+    expect((await store.load()).value).toEqual({ ...createDefaultSettings(), concurrencyLimit: 5 });
+  });
+
   it("loads no file without seeding and writes just one changed set", async () => {
     const store = createSettingsStore(settingsPath());
     expect((await store.load()).value).toEqual(createDefaultSettings());
