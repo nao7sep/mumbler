@@ -324,9 +324,12 @@ describe("settings store", () => {
     await store.save({ "gemini.outline": "unknown-model" });
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "unknown-model" });
   });
-  it("keeps an empty model list as the user's copy", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ extraModelIds: { gemini: [] } }));
-    expect((await createSettingsStore(settingsPath()).load()).value.extraModelIds).toEqual({ gemini: [] });
+  it("ignores the retired provider and extra-model keys and drops them at the next write", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ provider: "gemini", extraModelIds: { gemini: ["custom"] } }));
+    const store = createSettingsStore(settingsPath());
+    expect((await store.load()).value).toEqual(createDefaultSettings());
+    await store.save({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
   });
 
   it("falls back for a malformed whole set and warns once with its key", async () => {

@@ -1332,8 +1332,7 @@ textarea:focus-visible,
 }
 
 /* A button beside a field takes the field's height, wherever the pair sits. */
-.inline-action-field .button,
-.editable-list__add .button {
+.inline-action-field .button {
   height: var(--control-md);
 }
 
@@ -1948,52 +1947,8 @@ select:not([multiple]) {
   text-decoration: underline;
 }
 
-.editable-list {
-  display: grid;
-  gap: 6px;
-}
-
-.editable-list__items {
-  display: grid;
-  gap: 4px;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.editable-list__item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0.375rem 0.625rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-muted);
-  font-size: 0.8125rem;
-}
-
-.editable-list__item span {
-  word-break: break-all;
-  color: var(--text);
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 400;
-}
-
-.editable-list__add {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-}
-
-.editable-list__add input {
-  width: 100%;
-  border: 1px solid var(--field-border);
-  border-radius: var(--radius);
-  padding: 0.5rem 0.625rem;
-  font-size: 0.8125rem;
-  background: var(--field-bg);
-  color: var(--text);
+.field-hint--warning {
+  color: var(--warning);
 }
 
 /* Persistent strip. Its bottom margin matches the top bar's, so the strip sits

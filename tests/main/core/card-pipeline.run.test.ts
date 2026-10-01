@@ -89,7 +89,6 @@ function makePaths(): AppPaths {
   return {
     homeDir: "/tmp/.mumbler",
     settingsPath: "/tmp/.mumbler/config.json",
-    modelListsPath: "/tmp/.mumbler/model-lists.json",
     queuePath: "/tmp/.mumbler/queue.json",
     legacyQueuePath: "/tmp/.mumbler/state.json",
     transcriptsDir: "/tmp/.mumbler/transcripts",

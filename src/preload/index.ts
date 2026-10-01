@@ -5,7 +5,6 @@ import {
   APP_SHELL_EVENTS,
   type AppSnapshot,
   type CardTrim,
-  type DefaultModels,
   type GenerateTarget,
   type ImportOperationResult,
   type MumblerShellApi,
@@ -25,11 +24,8 @@ const api: MumblerShellApi = {
   getSnapshot: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.getSnapshot) as Promise<AppSnapshot>,
   getSettingsDraft: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getSettingsDraft) as Promise<SettingsDraft>,
-  getModelList: (endpoint, force) => ipcRenderer.invoke(APP_SHELL_CHANNELS.getModelList, endpoint, force) as Promise<string[]>,
   getDefaultPrompts: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getDefaultPrompts) as Promise<PromptTemplates>,
-  getDefaultModels: () =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.getDefaultModels) as Promise<DefaultModels>,
   openImportDialog: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.openImportDialog) as Promise<ImportOperationResult>,
   importDroppedPaths: (paths: string[]) =>

@@ -35,12 +35,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function asStringArray(value: unknown): string[] | null {
-  return Array.isArray(value) && value.every((item) => typeof item === "string")
-    ? [...value]
-    : null;
-}
-
 function asPositiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
 }
@@ -49,7 +43,6 @@ type SettingsValidator = (value: unknown) => boolean;
 const isString: SettingsValidator = (value) => typeof value === "string";
 const isPath: SettingsValidator = (value) => value === null || isString(value);
 const isPositive: SettingsValidator = (value) => asPositiveInteger(value) !== null;
-const isStrings: SettingsValidator = (value) => asStringArray(value) !== null;
 function hasMembers(value: unknown, members: Record<string, SettingsValidator>): boolean {
   const record = asRecord(value);
   return record !== null && Object.entries(members).every(([key, valid]) => valid(record[key]));
@@ -66,9 +59,7 @@ const SETTINGS_SETS = {
   timestampPattern: isString,
   skipIntervalSec: isPositive,
   previewSnippetSeconds: isPositive,
-  provider: (value) => value === "gemini",
   "gemini.endpoint": isString,
-  extraModelIds: (value) => hasMembers(value, { gemini: isStrings }),
   "gemini.transcription": isString,
   "gemini.outline": isString,
   "gemini.metadata": isString,
@@ -313,17 +304,6 @@ export function recoverInterruptedCards(
   };
 }
 
-function parseSettingsEntries(value: string): string[] {
-  return value
-    .split(/[\n,]/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-}
-
-function deduplicateStrings(values: string[]): string[] {
-  return [...new Set(values)];
-}
-
 function requirePromptPlaceholders(
   prompt: string,
   requiredPlaceholders: string[],
@@ -386,9 +366,7 @@ export function createDefaultSettings(): MumblerSettings {
     // Player
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,
-    provider: "gemini",
     "gemini.endpoint": GEMINI_ENDPOINT,
-    extraModelIds: { gemini: [] },
     "gemini.transcription": defaultModelFor("gemini", "transcription"),
     "gemini.outline": defaultModelFor("gemini", "text-balanced"),
     "gemini.metadata": defaultModelFor("gemini", "text-fast"),
@@ -513,7 +491,6 @@ export function summarizeSettings(
     previewSnippetSeconds: settings.previewSnippetSeconds,
     // AI
     hasGeminiApiKey,
-    extraModelIds: settings.extraModelIds,
     transcriptionModel: settings["gemini.transcription"],
     outlineModel: settings["gemini.outline"],
     metadataModel: settings["gemini.metadata"],
@@ -546,9 +523,7 @@ export function buildSettingsDraft(
     previewSnippetSeconds: settings.previewSnippetSeconds,
     // AI (presence only; the key value is never part of the draft)
     hasGeminiApiKey,
-    provider: settings.provider,
     geminiEndpoint: settings["gemini.endpoint"],
-    extraModelIdsText: settings.extraModelIds.gemini.join("\n"),
     transcriptionModel: settings["gemini.transcription"],
     outlineModel: settings["gemini.outline"],
     metadataModel: settings["gemini.metadata"],
@@ -574,7 +549,6 @@ export function applySettingsDraft(
   const backupDirectory = draft.backupDirectory.trim();
   const defaultTimezone = singleLine(draft.defaultTimezone);
   const timestampPattern = singleLine(draft.timestampPattern);
-  const extraModelIds = { gemini: deduplicateStrings(parseSettingsEntries(draft.extraModelIdsText)) };
   const geminiEndpoint = singleLine(draft.geminiEndpoint);
   const outlineModel = draft.outlineModel.trim();
   const transcriptionModel = draft.transcriptionModel.trim();
@@ -605,7 +579,6 @@ export function applySettingsDraft(
     throw new OperationError("Timestamp pattern must be a valid regular expression.");
   }
 
-  if (draft.provider !== "gemini") throw new OperationError("Choose a supported provider.");
   try {
     const url = new URL(geminiEndpoint);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
@@ -670,9 +643,7 @@ export function applySettingsDraft(
     skipIntervalSec,
     previewSnippetSeconds,
     // AI (the Gemini key is set via its own IPC path, not this draft)
-    provider: draft.provider,
     "gemini.endpoint": geminiEndpoint,
-    extraModelIds,
     "gemini.transcription": transcriptionModel,
     "gemini.outline": outlineModel,
     "gemini.metadata": metadataModel,

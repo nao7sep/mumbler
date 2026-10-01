@@ -6,7 +6,7 @@ Transcribe voice recordings with AI, structure the transcript, and generate titl
 
 - **Waveform editor** — set front/back trim markers to cut silence before generation
 - **AI pipeline** — transcription → structured transcription → title → slug, each a dependent step that regenerates downstream outputs when changed
-- **Separate model choices** — choose a Gemini model for transcription, another for the structured outline, and one for titles and slugs. The defaults use balanced models for longer work and a fast model for short metadata.
+- **Separate model choices** — choose a Gemini model for transcription, another for the structured transcription, and one for titles and slugs. The defaults use a balanced model for longer work and a fast model for short metadata.
 - **Queue** — import many files and process them concurrently, with a configurable limit
 - **Timestamp parsing** — pull the recording datetime from filenames via configurable regex, prompting when none matches
 - **Atomic save** — writes audio + JSON + Markdown together, with rollback on failure
@@ -38,7 +38,7 @@ npm run dev
 
 On first launch, open Settings and enter your Gemini API key. Saved files default to `~/.mumbler/output`.
 
-Type any model ID or choose from bundled suggestions, provider models, and your own extra IDs. Settings refreshes the provider list at most daily when opened; **Refresh models** requests it again. **Reset models** removes your extra IDs and saved selections so they follow the built-in defaults. A selection outside every list is kept, and an invalid or retired model is reported when a job calls Gemini. You can change the provider endpoint while the request parameters continue to follow the model ID.
+Each model field holds its default until you type another model ID. An ID Mumbler does not support is kept and marked under its field; it gets a plain request, and Gemini reports an invalid or retired model when a job calls it. You can change the endpoint while the request parameters continue to follow the model ID.
 
 ## Tests
 

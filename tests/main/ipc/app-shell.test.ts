@@ -27,7 +27,7 @@ const { registerAppShellIpc } = await import("@main/ipc/app-shell");
 const { OperationError } = await import("@main/core/operation-error");
 
 const RUNTIME_METHODS = [
-  "getSnapshot", "getSettingsDraft", "getModelList", "getDefaultPrompts", "getDefaultModels",
+  "getSnapshot", "getSettingsDraft", "getDefaultPrompts",
   "openImportDialog", "importDroppedPaths", "updatePendingImportDrafts", "confirmPendingImports",
   "selectCard", "duplicateCard", "updateCardTrim", "getCardMediaSource", "generateCardStep",
   "cancelCardProcessing", "pickOutputDirectory", "openOutputDirectory", "saveSettingsDraft",
@@ -81,9 +81,7 @@ describe("the app-shell IPC boundary", () => {
   it.each([
     ["getSnapshot", "getSnapshot", []],
     ["getSettingsDraft", "getSettingsDraft", []],
-    ["getModelList", "getModelList", ["https://provider.example", true]],
     ["getDefaultPrompts", "getDefaultPrompts", []],
-    ["getDefaultModels", "getDefaultModels", []],
     ["importDroppedPaths", "importDroppedPaths", [["/tmp/a.flac", "/tmp/b.m4a"]]],
     ["updatePendingImportDrafts", "updatePendingImportDrafts", [[draft()]]],
     ["confirmPendingImports", "confirmPendingImports", [[draft({ deleteOriginalOnConfirm: true })]]],

@@ -216,34 +216,18 @@ describe("applySettingsDraft — validation", () => {
   });
 });
 
-describe("Gemini extra model ids", () => {
-  it("keeps bundled defaults separate from the empty user extra-id set", () => {
+describe("Gemini model fields", () => {
+  it("holds each role's default model", () => {
     const settings = createDefaultSettings();
     expect(settings["gemini.transcription"]).toBe("gemini-3.8-flash");
     expect(settings["gemini.outline"]).toBe("gemini-3.8-flash");
     expect(settings["gemini.metadata"]).toBe("gemini-3.5-flash-lite");
-    expect(settings.extraModelIds.gemini).toEqual([]);
   });
 
-  it("round-trips the owned model list through the draft, trimming and de-duplicating", () => {
+  it("keeps a typed id that has no supported row", () => {
     const draft = freshDraft();
-    draft.extraModelIdsText = "  gemini-3.5-flash \n gemini-2.5-pro \n gemini-3.5-flash ";
-    const result = applySettingsDraft(createDefaultSettings(), draft);
-    expect(result.extraModelIds.gemini).toEqual(["gemini-3.5-flash", "gemini-2.5-pro"]); // trimmed + de-duplicated
-  });
-
-  it("preserves an out-of-list selection — an orphaned pick after a list edit is kept, not snapped or rejected", () => {
-    const draft = freshDraft();
-    draft.extraModelIdsText = "gemini-3.5-flash";
-    draft.transcriptionModel = "gemini-2.5-pro"; // no longer in the list; the store keeps it (the UI shows it as a fallback option)
-    const result = applySettingsDraft(createDefaultSettings(), draft);
-    expect(result["gemini.transcription"]).toBe("gemini-2.5-pro");
-  });
-
-  it("accepts an empty extra-id list", () => {
-    const draft = freshDraft();
-    draft.extraModelIdsText = "   \n  ";
-    expect(applySettingsDraft(createDefaultSettings(), draft).extraModelIds.gemini).toEqual([]);
+    draft.transcriptionModel = "gemini-2.5-pro";
+    expect(applySettingsDraft(createDefaultSettings(), draft)["gemini.transcription"]).toBe("gemini-2.5-pro");
   });
 });
 
@@ -275,6 +259,5 @@ describe("summarizeSettings", () => {
     const absent = summarizeSettings(createDefaultSettings(), OUT, BACKUP, false);
     expect(absent.hasGeminiApiKey).toBe(false);
     expect(absent.defaultOutputDirectory).toBe(OUT);
-    expect(absent.extraModelIds.gemini).toEqual(createDefaultSettings().extraModelIds.gemini);
   });
 });

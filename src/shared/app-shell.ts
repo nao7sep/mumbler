@@ -2,15 +2,11 @@ import type { InterfaceLanguage, LanguagePreference } from "./i18n/languages";
 import type { MessageKey } from "./i18n/catalogues";
 import type { Message } from "./i18n/translate";
 
-import type { AiProvider } from "./ai-models";
-
 export const APP_SHELL_CHANNELS = {
   getInterfaceLanguage: "app-shell:get-interface-language",
   getSnapshot: "app-shell:get-snapshot",
   getSettingsDraft: "app-shell:get-settings-draft",
-  getModelList: "app-shell:get-model-list",
   getDefaultPrompts: "app-shell:get-default-prompts",
-  getDefaultModels: "app-shell:get-default-models",
   openImportDialog: "app-shell:open-import-dialog",
   importDroppedPaths: "app-shell:import-dropped-paths",
   updatePendingImportDrafts: "app-shell:update-pending-import-drafts",
@@ -101,13 +97,6 @@ export interface PromptTemplates {
   slug: string;
 }
 
-// The effective values shown after removing the extra-id and selection copies.
-export interface DefaultModels {
-  extraModelIdsText: string;
-  transcriptionModel: string;
-  outlineModel: string;
-  metadataModel: string;
-}
 
 /** The saved appearance choice. System follows the OS appearance. */
 export type ThemePreference = "system" | "light" | "dark";
@@ -147,10 +136,7 @@ export interface MumblerSettings {
   // NOTE: the Gemini API key is NOT a setting. It is a secret resolved
   // environment-first and stored in its own 0600 file (api-keys.json), never in
   // this shared settings store. See src/main/core/api-keys.ts.
-  //
-  provider: AiProvider;
   "gemini.endpoint": string;
-  extraModelIds: { gemini: string[] };
   "gemini.transcription": string;
   "gemini.outline": string;
   "gemini.metadata": string;
@@ -289,7 +275,6 @@ export interface MumblerQueue {
 export interface AppPaths {
   homeDir: string;
   settingsPath: string;
-  modelListsPath: string;
   queuePath: string;
   // The earlier queue filename, renamed only when queuePath is absent.
   legacyQueuePath: string;
@@ -331,7 +316,6 @@ export interface SettingsSummary {
   previewSnippetSeconds: number;
   // AI
   hasGeminiApiKey: boolean;
-  extraModelIds: { gemini: string[] };
   transcriptionModel: string;
   outlineModel: string;
   metadataModel: string;
@@ -363,9 +347,7 @@ export interface SettingsDraft {
   // through the dedicated setGeminiApiKey/clearGeminiApiKey IPC, not the settings
   // JSON roundtrip.
   hasGeminiApiKey: boolean;
-  provider: AiProvider;
   geminiEndpoint: string;
-  extraModelIdsText: string;
   transcriptionModel: string;
   outlineModel: string;
   metadataModel: string;
@@ -568,9 +550,7 @@ export interface MumblerShellApi {
   getInterfaceLanguage(): Promise<InterfaceLanguage>;
   getSnapshot(): Promise<AppSnapshot>;
   getSettingsDraft(): Promise<SettingsDraft>;
-  getModelList(endpoint: string, force?: boolean): Promise<string[]>;
   getDefaultPrompts(): Promise<PromptTemplates>;
-  getDefaultModels(): Promise<DefaultModels>;
   openImportDialog(): Promise<ImportOperationResult>;
   importDroppedPaths(paths: string[]): Promise<ImportOperationResult>;
   updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot>;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AI_ROLES, SUPPORTED_MODELS, defaultModelFor, modelsFor, type ModelKind } from "@shared/ai-models";
+import { AI_ROLES, SUPPORTED_MODELS, defaultModelFor, isSupportedModel, modelsFor, type ModelKind } from "@shared/ai-models";
 import { ThinkingLevel } from "@google/genai";
 import { supportedModelConfig } from "@shared/model-branches";
 import { createDefaultSettings, buildSettingsDraft } from "@main/core/settings-schema";
@@ -32,7 +32,12 @@ describe("the model registry and committed lineup", () => {
       expect(settings[`gemini.${role.id}`]).toBe(defaultModelFor("gemini", kind));
       expect(draft[`${role.id}Model`]).toBe(settings[`gemini.${role.id}`]);
     }
-    expect(settings.extraModelIds).toEqual({ gemini: [] });
+  });
+
+  it("recognises a supported model id trimmed and case-insensitively", () => {
+    expect(isSupportedModel(" GEMINI-3.8-FLASH ")).toBe(true);
+    expect(isSupportedModel("gemini-2.5-pro")).toBe(false);
+    expect(isSupportedModel("")).toBe(false);
   });
 
   it("groups and deduplicates suggestions while retaining an out-of-list selection", () => {

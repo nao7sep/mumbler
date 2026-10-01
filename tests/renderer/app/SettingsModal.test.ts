@@ -39,10 +39,8 @@ function draft(): SettingsDraft {
     skipIntervalSec: 0,
     previewSnippetSeconds: 10,
     hasGeminiApiKey: false,
-    provider: "gemini",
     geminiEndpoint: "https://generativelanguage.googleapis.com",
     outlineModel: "gemini-3.8-flash",
-    extraModelIdsText: "gemini-3.7-flash",
     transcriptionModel: "gemini-3.7-flash",
     metadataModel: "gemini-3.7-flash",
     concurrencyLimit: 1,
@@ -98,7 +96,6 @@ describe("SettingsModal results", () => {
         onSetApiKey: vi.fn(),
         onClearApiKey: vi.fn(),
         onRestoreDefaultPrompts: vi.fn(),
-        onRestoreDefaultModels: vi.fn(),
         onSave: vi.fn(),
       }));
     });
@@ -136,7 +133,6 @@ describe("SettingsModal results", () => {
         onSetApiKey: vi.fn(),
         onClearApiKey: vi.fn(),
         onRestoreDefaultPrompts: vi.fn(),
-        onRestoreDefaultModels: vi.fn(),
         onSave: vi.fn(),
       }));
     });
@@ -172,7 +168,6 @@ describe("SettingsModal results", () => {
         onSetApiKey: vi.fn(),
         onClearApiKey: vi.fn(),
         onRestoreDefaultPrompts: vi.fn(),
-        onRestoreDefaultModels: vi.fn(),
         onSave: vi.fn(),
       }));
     });
@@ -214,7 +209,6 @@ describe("SettingsModal theme", () => {
         onSetApiKey: vi.fn(),
         onClearApiKey: vi.fn(),
         onRestoreDefaultPrompts: vi.fn(),
-        onRestoreDefaultModels: vi.fn(),
         onSave: vi.fn(),
       }));
     });
@@ -250,7 +244,6 @@ describe("SettingsModal language and time zone", () => {
         onSetApiKey: vi.fn(),
         onClearApiKey: vi.fn(),
         onRestoreDefaultPrompts: vi.fn(),
-        onRestoreDefaultModels: vi.fn(),
         onSave: vi.fn(),
       }));
     });
@@ -280,5 +273,51 @@ describe("SettingsModal language and time zone", () => {
     expect(select.options[0]?.value).toBe("system");
     expect(select.options[0]?.textContent).toBe(`System (${Intl.DateTimeFormat().resolvedOptions().timeZone})`);
     expect(select.value).toBe("system");
+  });
+});
+
+describe("SettingsModal AI tab", () => {
+  async function renderAiTab(value: SettingsDraft): Promise<HTMLElement> {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(React.createElement(SettingsModal, {
+        draft: value,
+        isDirty: false,
+        isSaving: false,
+        isSavingApiKey: false,
+        isPickingOutputDirectory: false,
+        isPickingBackupDirectory: false,
+        errorMessage: null,
+        onChange: vi.fn(),
+        onClose: vi.fn(),
+        onPickOutputDirectory: vi.fn(),
+        onPickBackupDirectory: vi.fn(),
+        onSetApiKey: vi.fn(),
+        onClearApiKey: vi.fn(),
+        onRestoreDefaultPrompts: vi.fn(),
+        onSave: vi.fn(),
+      }));
+    });
+    const tab = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]')).find((node) => node.textContent === "AI");
+    await act(async () => tab?.click());
+    return Array.from(document.querySelectorAll<HTMLElement>('[role="tabpanel"]')).find((panel) => !panel.hidden)!;
+  }
+
+  it("lays out the Gemini section in order, then Concurrency", async () => {
+    const panel = await renderAiTab(draft());
+    const labels = Array.from(panel.querySelectorAll("h3, label.field > span")).map((node) => node.textContent);
+    expect(labels).toEqual([
+      "Gemini", "Endpoint URL", "Gemini API Key", "Transcription Model",
+      "Structured Transcription Model", "Metadata Model", "Concurrency", "Concurrent Transcriptions",
+    ]);
+    expect(panel.querySelectorAll("select")).toHaveLength(0);
+  });
+
+  it("warns under a model field whose id has no supported row", async () => {
+    const panel = await renderAiTab({ ...draft(), transcriptionModel: " GEMINI-3.8-FLASH ", outlineModel: "gemini-3.8-flash", metadataModel: "custom-model" });
+    const warnings = Array.from(panel.querySelectorAll(".field-hint--warning")).map((node) => node.textContent);
+    expect(warnings).toEqual(["Not a supported model. It may not work as expected."]);
   });
 });

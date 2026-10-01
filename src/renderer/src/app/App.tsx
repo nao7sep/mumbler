@@ -1328,10 +1328,11 @@ function LoadedShell({
                       {(["transcription", "outline", "metadata"] as const).map((role) => {
                         const field = `${role}Model` as "transcriptionModel" | "outlineModel" | "metadataModel";
                         const kind = role === "transcription" ? "transcription" : role === "outline" ? "text-balanced" : "text-fast";
+                        const labelKey = role === "transcription" ? "options.transcriptionModel" : role === "outline" ? "options.structuredTranscriptionModel" : "options.metadataModel";
                         const value = snapshot?.settingsSummary?.[field] ?? "";
-                        const groups = modelOptions(kind, [], snapshot?.settingsSummary?.extraModelIds.gemini ?? [], value);
+                        const groups = modelOptions(kind, [], [], value);
                         return <label className="field" key={role}>
-                          <span>{t(`options.${field}`)}</span>
+                          <span>{t(labelKey)}</span>
                           <select value={value} disabled={selectedCardIsBusy} onChange={(event) => void handleDetailModelChange(field, event.target.value)}>
                             {Object.values(groups).flat().map((id) => <option key={id} value={id}>{id}</option>)}
                           </select>
@@ -1665,9 +1666,6 @@ function LoadedShell({
       {settingsModal.settingsDraft ? (
         <SettingsModal
           draft={settingsModal.settingsDraft}
-          fetchedModelIds={settingsModal.fetchedModelIds}
-          isRefreshingModels={settingsModal.isRefreshingModels}
-          onRefreshModels={() => void settingsModal.handleRefreshModels()}
           isDirty={settingsModal.isSettingsDirty}
           isSaving={settingsModal.isSavingSettings}
           isSavingApiKey={settingsModal.isSavingApiKey}
@@ -1681,7 +1679,6 @@ function LoadedShell({
           onSetApiKey={(apiKey) => void settingsModal.handleSetGeminiApiKey(apiKey)}
           onClearApiKey={() => void settingsModal.handleClearGeminiApiKey()}
           onRestoreDefaultPrompts={() => void settingsModal.handleRestoreDefaultPrompts()}
-          onRestoreDefaultModels={() => void settingsModal.handleRestoreDefaultModels()}
           onSave={() => void settingsModal.handleSaveSettings()}
         />
       ) : null}

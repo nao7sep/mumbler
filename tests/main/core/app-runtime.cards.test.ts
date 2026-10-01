@@ -742,16 +742,15 @@ describe("settings, secrets and the window's own state", () => {
   });
 
   it("removes model and prompt copies when Save holds their built-ins, as after a reset", async () => {
+    const defaults = runtime.getSettingsDraft();
     await runtime.saveSettingsDraft({
-      ...runtime.getSettingsDraft(), extraModelIdsText: "custom-model",
-      transcriptionModel: "custom-model", metadataModel: "custom-model",
+      ...defaults, transcriptionModel: "custom-model", metadataModel: "custom-model",
       structuredPrompt: "Custom {transcript}", concurrencyLimit: 5,
     });
-    const models = runtime.getDefaultModels();
     const prompts = runtime.getDefaultPrompts();
     await runtime.saveSettingsDraft({
-      ...runtime.getSettingsDraft(), extraModelIdsText: models.extraModelIdsText,
-      transcriptionModel: models.transcriptionModel, outlineModel: models.outlineModel, metadataModel: models.metadataModel,
+      ...runtime.getSettingsDraft(),
+      transcriptionModel: defaults.transcriptionModel, metadataModel: defaults.metadataModel,
       structuredPrompt: prompts.structured, titlePrompt: prompts.title, slugPrompt: prompts.slug,
     });
     expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ concurrencyLimit: 5 });

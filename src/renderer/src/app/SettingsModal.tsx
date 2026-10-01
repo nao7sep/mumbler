@@ -1,7 +1,7 @@
-import { ModelPicker } from "./ModelPicker";
 import { useMemo, useRef, useState, type ReactElement } from "react";
 
 import { THEME_PREFERENCES, type SettingsDraft } from "@shared/app-shell";
+import { isSupportedModel } from "@shared/ai-models";
 import {
   getSettingsNumberIssues,
   type NumericSettingField,
@@ -12,7 +12,6 @@ import { LANGUAGES, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { useI18n } from "../i18n/I18nContext";
 import type { MessageKey } from "@shared/i18n/catalogues";
 import { message, type Message } from "@shared/i18n/translate";
-import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 import { ModalShell } from "./modal/ModalShell";
 import { useTablist } from "./useTablist";
 import { ExternalLinkIcon } from "./Icon";
@@ -21,88 +20,22 @@ import { presentFailure } from "./presentFailure";
 
 const TIMEZONE_REFERENCE_URL = "https://en.wikipedia.org/wiki/List_of_tz_database_time_zones";
 
-function parseEntries(value: string): string[] {
-  return [...new Set(value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
-}
-
-function entriesToText(entries: string[]): string {
-  return entries.join("\n");
-}
-
-function EditableList({
-  entries,
-  onChange,
-  placeholder,
-  monospace = false,
-}: {
-  entries: string[];
-  onChange: (entries: string[]) => void;
-  placeholder: string;
-  monospace?: boolean;
+// One model field: free-typed, with a warning line when the id has no row in SUPPORTED_MODELS.
+function ModelField({ label, hint, value, onChange }: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (value: string) => void;
 }): ReactElement {
   const { t } = useI18n();
-  const [newValue, setNewValue] = useState("");
-  const listRef = useRef<HTMLDivElement>(null);
-  const composing = useComposing();
-
-  function handleAdd(): void {
-    const trimmed = newValue.trim();
-    if (trimmed.length === 0 || entries.includes(trimmed)) {
-      return;
-    }
-    onChange([...entries, trimmed]);
-    setNewValue("");
-    // Scroll to bottom after React re-renders
-    setTimeout(() => {
-      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-    }, 0);
-  }
-
-  function handleRemove(index: number): void {
-    onChange(entries.filter((_, i) => i !== index));
-  }
-
   return (
-    <div className="editable-list">
-      <div className="editable-list__items" ref={listRef}>
-        {entries.map((entry, index) => (
-          <div key={`${entry}-${index}`} className="editable-list__item">
-            <span style={monospace ? { fontFamily: "var(--font-mono)", fontSize: "1.05em" } : undefined}>{entry}</span>
-            <button
-              type="button"
-              className="button button--ghost button--compact"
-              onClick={() => handleRemove(index)}
-            >
-              {t("common.remove")}
-            </button>
-          </div>
-        ))}
-      </div>
-      <div className="editable-list__add">
-        <input
-          style={monospace ? { fontFamily: "var(--font-mono)", fontSize: "1.05em" } : undefined}
-          value={newValue}
-          placeholder={placeholder}
-          onChange={(event) => setNewValue(event.target.value)}
-          onCompositionStart={composing.handlers.onCompositionStart}
-          onCompositionEnd={composing.handlers.onCompositionEnd}
-          onKeyDown={(event) => {
-            if (isComposingKeyboardEvent(composing.composingRef, event)) return;
-            if (event.key === "Enter") {
-              event.preventDefault();
-              handleAdd();
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="button button--ghost button--compact"
-          onClick={handleAdd}
-          disabled={newValue.trim().length === 0}
-        >
-          {t("common.add")}
-        </button>
-      </div>
+    <div>
+      <label className="field">
+        <span>{label}</span>
+        <input spellCheck={false} value={value} onChange={(event) => onChange(event.target.value)} />
+      </label>
+      <p className="field-hint">{hint}</p>
+      {isSupportedModel(value) ? null : <p className="field-hint field-hint--warning">{t("settings.unsupportedModel")}</p>}
     </div>
   );
 }
@@ -121,9 +54,6 @@ const SETTINGS_TAB_LABELS: Record<SettingsTab, MessageKey> = {
 
 export function SettingsModal({
   draft,
-  fetchedModelIds = [],
-  isRefreshingModels = false,
-  onRefreshModels,
   isDirty,
   isSaving,
   isSavingApiKey,
@@ -137,13 +67,9 @@ export function SettingsModal({
   onSetApiKey,
   onClearApiKey,
   onRestoreDefaultPrompts,
-  onRestoreDefaultModels,
   onSave,
 }: {
   draft: SettingsDraft;
-  fetchedModelIds?: string[];
-  isRefreshingModels?: boolean;
-  onRefreshModels?: () => void;
   isDirty: boolean;
   isSaving: boolean;
   isSavingApiKey: boolean;
@@ -157,7 +83,6 @@ export function SettingsModal({
   onSetApiKey: (apiKey: string) => void;
   onClearApiKey: () => void;
   onRestoreDefaultPrompts: () => void;
-  onRestoreDefaultModels: () => void;
   onSave: () => void;
 }): ReactElement {
   // The API key field is self-contained: its value is committed to the dedicated
@@ -173,7 +98,6 @@ export function SettingsModal({
     onSelect: setActiveTab,
     idBase: "settings",
   });
-  const geminiModelEntries = useMemo(() => parseEntries(draft.extraModelIdsText), [draft.extraModelIdsText]);
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
   const systemTimezone = useMemo(() => getSystemTimezone(), []);
   const i18n = useI18n();
@@ -460,16 +384,6 @@ export function SettingsModal({
           </div>
 
           <div className="app-tabpanel" {...settingsTablist.getPanelProps("ai")} hidden={activeTab !== "ai"}>
-            <section className="settings-section">
-              <h3>{t("result.transcription")}</h3>
-              <ModelPicker label={t("options.transcriptionModel")} value={draft.transcriptionModel} kind="transcription" fetched={fetchedModelIds} extra={geminiModelEntries} onChange={(transcriptionModel) => onChange({ ...draft, transcriptionModel })} />
-            </section>
-            <label className="field">
-              <span>{t("settings.provider")}</span>
-              <select value={draft.provider} onChange={() => onChange({ ...draft, provider: "gemini" })}>
-                <option value="gemini">{t("settings.gemini")}</option>
-              </select>
-            </label>
             {/* The tab already says AI, so the sections carry only their own
                 names — no heading that repeats the tab label. */}
             <section className="settings-section">
@@ -478,11 +392,9 @@ export function SettingsModal({
               <div className="field-stack">
                 <label className="field">
                   <span>{t("settings.endpoint")}</span>
-                  <input value={draft.geminiEndpoint} onChange={(event) => onChange({ ...draft, geminiEndpoint: event.target.value })} />
+                  <input spellCheck={false} value={draft.geminiEndpoint} onChange={(event) => onChange({ ...draft, geminiEndpoint: event.target.value })} />
                 </label>
-                <button type="button" className="button button--ghost" disabled={isRefreshingModels || !draft.hasGeminiApiKey} onClick={onRefreshModels}>
-                  {t("settings.refreshModels")}
-                </button>
+                <p className="field-hint">{t("settings.endpointHint")}</p>
                 {draft.hasGeminiApiKey ? (
                   <div className="api-key-status">
                     <span className="api-key-status__label">{t("settings.apiKeyConfigured")}</span>
@@ -521,28 +433,24 @@ export function SettingsModal({
                 <p className="field-hint">
                   {i18n.rich("settings.apiKeyHint", { variable: <code>GEMINI_API_KEY</code> })}
                 </p>
-                <div className="field">
-                  <span>{t("settings.geminiModels")}</span>
-                  <p className="field-hint">{t("settings.geminiModelsHint")}</p>
-                  <EditableList
-                    monospace
-                    entries={geminiModelEntries}
-                    onChange={(entries) => onChange({ ...draft, extraModelIdsText: entriesToText(entries) })}
-                    placeholder={t("settings.addModel", { example: "gemini-3.5-flash" })}
-                  />
-                </div>
-                <div>
-                  <button
-                    type="button"
-                    className="button button--danger"
-                    onClick={onRestoreDefaultModels}
-                    disabled={isSaving}
-                  >
-                    {t("settings.resetModels")}
-                  </button>
-                </div>
-                <ModelPicker label={t("options.outlineModel")} value={draft.outlineModel} kind="text-balanced" fetched={fetchedModelIds} extra={geminiModelEntries} onChange={(outlineModel) => onChange({ ...draft, outlineModel })} />
-                <ModelPicker label={t("options.metadataModel")} value={draft.metadataModel} kind="text-fast" fetched={fetchedModelIds} extra={geminiModelEntries} onChange={(metadataModel) => onChange({ ...draft, metadataModel })} />
+                <ModelField
+                  label={t("options.transcriptionModel")}
+                  hint={t("settings.transcriptionModelHint")}
+                  value={draft.transcriptionModel}
+                  onChange={(transcriptionModel) => onChange({ ...draft, transcriptionModel })}
+                />
+                <ModelField
+                  label={t("options.structuredTranscriptionModel")}
+                  hint={t("settings.structuredTranscriptionModelHint")}
+                  value={draft.outlineModel}
+                  onChange={(outlineModel) => onChange({ ...draft, outlineModel })}
+                />
+                <ModelField
+                  label={t("options.metadataModel")}
+                  hint={t("settings.metadataModelHint")}
+                  value={draft.metadataModel}
+                  onChange={(metadataModel) => onChange({ ...draft, metadataModel })}
+                />
               </div>
             </section>
 

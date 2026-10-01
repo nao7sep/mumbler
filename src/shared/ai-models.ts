@@ -25,6 +25,12 @@ export const AI_ROLES = [
   { id: "metadata", kind: "text-fast" },
 ] as const;
 
+// A model id is its own key, matched trimmed and case-insensitively.
+export function isSupportedModel(id: string): boolean {
+  const key = id.trim().toLowerCase();
+  return SUPPORTED_MODELS.some((row) => row.id === key);
+}
+
 export function modelsFor(provider: AiProvider, kind: ModelKind): readonly SupportedModel[] {
   return SUPPORTED_MODELS.filter((row) => row.provider === provider && row.kinds.includes(kind));
 }
