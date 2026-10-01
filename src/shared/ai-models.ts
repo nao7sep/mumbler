@@ -17,7 +17,7 @@ export const SUPPORTED_MODELS: readonly SupportedModel[] = [
 ];
 
 export const AI_ROLES = [
-  // Long audio in one call, inline up to 20 MB and through the Files API above; only Gemini takes it whole.
+  // Long audio in one call, inline up to 14.25 MB and through the Files API above; only Gemini takes it whole.
   { id: "transcription", provider: "gemini" },
   // Turns the transcript into structured text; balanced reasoning preserves the substance.
   { id: "outline", kind: "text-balanced" },

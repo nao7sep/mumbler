@@ -9,7 +9,7 @@ import {
   GeminiTimeoutError,
   geminiProviderReason,
   generateTextWithGemini,
-  getInlineAudioSafetyLimitBytes,
+  INLINE_AUDIO_LIMIT_BYTES,
   isRetryableGeminiError,
   transcribeWithGemini,
 } from "@main/core/gemini-adapter";
@@ -104,7 +104,7 @@ describe("the Gemini SDK transport", () => {
   it("uploads through the resumable Files API at the configured endpoint and removes the upload", async () => {
     const filePath = join(root, "long.m4a");
     await writeFile(filePath, "");
-    await truncate(filePath, getInlineAudioSafetyLimitBytes() + 1);
+    await truncate(filePath, INLINE_AUDIO_LIMIT_BYTES + 1);
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       if (url === `${endpoint}/upload/v1beta/files`) return json({}, 200, { "x-goog-upload-url": "https://proxy.example/upload-session" });

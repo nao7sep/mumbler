@@ -16,8 +16,7 @@ import {
 import {
   generateTextWithGemini,
   geminiProviderReason,
-  getInlineAudioSafetyLimitBytes,
-  getInlineRequestLimitBytes,
+  INLINE_AUDIO_LIMIT_BYTES,
   isRetryableGeminiError,
   transcribeWithGemini,
 } from "./gemini-adapter";
@@ -134,11 +133,10 @@ export async function executeCardPipeline(
         await logger.info("pipeline.audio-input", "Prepared audio for Gemini transcription.", {
           cardId,
           transportCandidate:
-            (await stat(preparedAudio.filePath)).size <= getInlineAudioSafetyLimitBytes()
+            (await stat(preparedAudio.filePath)).size <= INLINE_AUDIO_LIMIT_BYTES
               ? "inline"
               : "files-api",
-          inlineSafetyLimitBytes: getInlineAudioSafetyLimitBytes(),
-          inlineRequestLimitBytes: getInlineRequestLimitBytes(),
+          inlineAudioLimitBytes: INLINE_AUDIO_LIMIT_BYTES,
           sourceFilePath: card.sourceFilePath,
           preparedFilePath: preparedAudio.filePath,
           preparedMimeType: preparedAudio.mimeType,

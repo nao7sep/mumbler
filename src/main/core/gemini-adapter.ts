@@ -7,8 +7,8 @@ import { supportedModelConfig } from "@shared/model-branches";
 import { type AppLogger } from "./logger";
 import { CancelledError } from "./cancellation";
 
-const INLINE_REQUEST_LIMIT_BYTES = 20_000_000;
-const INLINE_AUDIO_SAFETY_LIMIT_BYTES = INLINE_REQUEST_LIMIT_BYTES;
+// Inline audio travels as base64 (4 bytes per 3) in a request of at most 20,000,000 bytes that also carries the prompt.
+export const INLINE_AUDIO_LIMIT_BYTES = ((20_000_000 - 1_000_000) * 3) / 4;
 const FILES_API_CLEANUP_TIMEOUT_MS = 30_000;
 
 // The SDK's own retries would resend a request that may already have been billed,
@@ -97,7 +97,7 @@ export async function transcribeWithGemini(
     const prompt = buildTranscriptionPrompt();
 
     let response: GenerateContentResponse;
-    if (fileStats.size <= INLINE_AUDIO_SAFETY_LIMIT_BYTES) {
+    if (fileStats.size <= INLINE_AUDIO_LIMIT_BYTES) {
       const inlineData = await readFile(params.filePath, { encoding: "base64" });
       throwIfExternallyCancelled(params.signal);
       response = await ai.models.generateContent({
@@ -253,14 +253,6 @@ function connectionCode(error: unknown): string | null {
   if (!error || typeof error !== "object") return null;
   if ("code" in error && typeof error.code === "string") return error.code;
   return "cause" in error ? connectionCode(error.cause) : null;
-}
-
-export function getInlineAudioSafetyLimitBytes(): number {
-  return INLINE_AUDIO_SAFETY_LIMIT_BYTES;
-}
-
-export function getInlineRequestLimitBytes(): number {
-  return INLINE_REQUEST_LIMIT_BYTES;
 }
 
 function buildTranscriptionPrompt(): string {

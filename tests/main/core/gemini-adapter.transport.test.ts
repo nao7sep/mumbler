@@ -39,12 +39,12 @@ import { ApiError, ThinkingLevel } from "@google/genai";
 import {
   GeminiTimeoutError,
   generateTextWithGemini,
-  getInlineAudioSafetyLimitBytes,
+  INLINE_AUDIO_LIMIT_BYTES,
   transcribeWithGemini,
 } from "@main/core/gemini-adapter";
 import { CancelledError } from "@main/core/cancellation";
 
-const SAFE = getInlineAudioSafetyLimitBytes();
+const SAFE = INLINE_AUDIO_LIMIT_BYTES;
 
 function baseParams() {
   return {
@@ -101,15 +101,15 @@ describe("thinking is stated on every model call", () => {
   });
 });
 
-describe("the plain request and the decimal audio threshold", () => {
+describe("the plain request and the inline audio limit", () => {
   it("sends model and contents only for an id with no branch", async () => {
     generateContent.mockResolvedValue({ text: "result" });
     await generateTextWithGemini({ apiKey: "fixture", prompt: "title", model: "unknown", timeoutMs: 1000 });
     expect(generateContent.mock.calls[0]![0].config).toEqual({ abortSignal: expect.any(AbortSignal) });
   });
 
-  it("uses inline audio through 20,000,000 bytes and Files API above it", async () => {
-    expect(SAFE).toBe(20_000_000);
+  it("sends audio inline through 14,250,000 bytes and through the Files API one byte above", async () => {
+    expect(SAFE).toBe(14_250_000);
     stat.mockResolvedValue({ size: SAFE });
     generateContent.mockResolvedValue({ text: "result" });
     expect((await transcribeWithGemini(baseParams())).transport).toBe("inline");
