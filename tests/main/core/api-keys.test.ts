@@ -11,7 +11,7 @@ import { closeBackupStore } from "@main/core/backupStore";
 // (storage-path-conventions: tests relocate the root via the env override) and
 // resolving the api-keys path under it exactly as the app does. The whole tree is
 // removed after each test.
-const GEMINI = apiKeyEnvVar(["gemini"]); // "GEMINI_API_KEY"
+const GEMINI = apiKeyEnvVar("gemini"); // "GEMINI_API_KEY"
 
 let home: string;
 let apiKeysPath: string;
@@ -44,11 +44,11 @@ describe("API key secrets store", () => {
     if (process.platform === "win32") {
       return; // POSIX-only permission model.
     }
-    await writeApiKey(apiKeysPath, ["gemini"], "stored-key");
+    await writeApiKey(apiKeysPath, "gemini", "stored-key");
     await chmod(apiKeysPath, 0o644);
 
     const warn = vi.fn();
-    expect(await resolveApiKey(apiKeysPath, ["gemini"], undefined, warn)).toBe("stored-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini", warn)).toBe("stored-key");
 
     expect(warn).toHaveBeenCalledTimes(1);
     const fileStat = await stat(apiKeysPath);
@@ -59,29 +59,29 @@ describe("API key secrets store", () => {
     if (process.platform === "win32") {
       return; // POSIX-only permission model.
     }
-    await writeApiKey(apiKeysPath, ["gemini"], "stored-key");
+    await writeApiKey(apiKeysPath, "gemini", "stored-key");
     const warn = vi.fn();
 
     // First access: widen, then read. Tightened back to 0600 regardless of
     // whether the once-per-session warning has already fired in an earlier test.
     await chmod(apiKeysPath, 0o644);
-    expect(await resolveApiKey(apiKeysPath, ["gemini"], undefined, warn)).toBe("stored-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini", warn)).toBe("stored-key");
     expect((await stat(apiKeysPath)).mode & 0o777).toBe(0o600);
 
     // Second access, widened again: the tightening itself must never be gated
     // behind the warning having already been emitted once this session.
     await chmod(apiKeysPath, 0o644);
-    expect(await resolveApiKey(apiKeysPath, ["gemini"], undefined, warn)).toBe("stored-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini", warn)).toBe("stored-key");
     expect((await stat(apiKeysPath)).mode & 0o777).toBe(0o600);
   });
 
   it("prefers the environment value over the stored value and never persists it", async () => {
-    await writeApiKey(apiKeysPath, ["gemini"], "stored-key");
+    await writeApiKey(apiKeysPath, "gemini", "stored-key");
     process.env[GEMINI] = "  env-key  ";
 
     // Env wins (trimmed); the stored value is ignored while env is present.
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("env-key");
-    expect(await hasApiKey(apiKeysPath, ["gemini"])).toBe(true);
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("env-key");
+    expect(await hasApiKey(apiKeysPath, "gemini")).toBe(true);
 
     // The env value is never written back: the file still holds only the stored key.
     const onDisk = await readFile(apiKeysPath, "utf8");
@@ -89,18 +89,18 @@ describe("API key secrets store", () => {
   });
 
   it("uses the stored value when no environment variable is set", async () => {
-    await writeApiKey(apiKeysPath, ["gemini"], "stored-key");
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("stored-key");
-    expect(await hasApiKey(apiKeysPath, ["gemini"])).toBe(true);
+    await writeApiKey(apiKeysPath, "gemini", "stored-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("stored-key");
+    expect(await hasApiKey(apiKeysPath, "gemini")).toBe(true);
   });
 
   it("returns null when neither an env nor a stored key is present", async () => {
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBeNull();
-    expect(await hasApiKey(apiKeysPath, ["gemini"])).toBe(false);
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBeNull();
+    expect(await hasApiKey(apiKeysPath, "gemini")).toBe(false);
   });
 
-  it("writes the key obfuscated to a 0600 api-keys.json, under its segment id, not into settings", async () => {
-    await writeApiKey(apiKeysPath, ["gemini"], "AIzaSecretKey123");
+  it("writes the key obfuscated to a 0600 api-keys.json, under its id, not into settings", async () => {
+    await writeApiKey(apiKeysPath, "gemini", "AIzaSecretKey123");
 
     const stored = await readFile(apiKeysPath, "utf8");
     expect(stored).not.toContain("AIzaSecretKey123"); // obfuscated at rest
@@ -117,8 +117,8 @@ describe("API key secrets store", () => {
 
   it("never records the secret into the backup store (record:false on the choke point)", async () => {
     // MUMBLER_HOME is `home` here, so the store — if it recorded — would create home/backups.sqlite3.
-    await writeApiKey(apiKeysPath, ["gemini"], "AIzaSecretKey123");
-    await writeApiKey(apiKeysPath, ["gemini"], "AIzaSecretKey999"); // a second, changed write
+    await writeApiKey(apiKeysPath, "gemini", "AIzaSecretKey123");
+    await writeApiKey(apiKeysPath, "gemini", "AIzaSecretKey999"); // a second, changed write
     await closeBackupStore();
 
     // The secret write path opts out of recording, so NO backup store file exists — the credential never
@@ -127,24 +127,24 @@ describe("API key secrets store", () => {
   });
 
   it("clears the stored key while leaving any env key in effect", async () => {
-    await writeApiKey(apiKeysPath, ["gemini"], "stored-key");
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("stored-key");
+    await writeApiKey(apiKeysPath, "gemini", "stored-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("stored-key");
 
-    await clearApiKey(apiKeysPath, ["gemini"]);
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBeNull();
+    await clearApiKey(apiKeysPath, "gemini");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBeNull();
 
     process.env[GEMINI] = "env-key";
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("env-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("env-key");
   });
 
   it("treats an untagged stored value as plaintext (a hand-pasted key)", async () => {
     await writeFile(apiKeysPath, JSON.stringify({ keys: { gemini: "sk-plain-pasted" } }), "utf8");
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("sk-plain-pasted");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("sk-plain-pasted");
   });
 
   it("round-trips a validly encoded obf: value", async () => {
-    await writeApiKey(apiKeysPath, ["gemini"], "AIzaValidRoundTripKey123");
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("AIzaValidRoundTripKey123");
+    await writeApiKey(apiKeysPath, "gemini", "AIzaValidRoundTripKey123");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("AIzaValidRoundTripKey123");
   });
 
   it("treats a malformed obf: value as absent and warns naming the key id, rather than decoding it to garbage", async () => {
@@ -158,7 +158,7 @@ describe("API key secrets store", () => {
     );
 
     const warn = vi.fn();
-    expect(await resolveApiKey(apiKeysPath, ["gemini"], undefined, warn)).toBeNull();
+    expect(await resolveApiKey(apiKeysPath, "gemini", warn)).toBeNull();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("gemini"),
       expect.objectContaining({ keyId: "gemini" }),
@@ -167,36 +167,37 @@ describe("API key secrets store", () => {
 
   it("matches stored key ids case-insensitively", async () => {
     await writeFile(apiKeysPath, JSON.stringify({ keys: { Gemini: "case-key" } }), "utf8");
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("case-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("case-key");
   });
 
   it("trims values and treats a blank env as unset, falling through to the stored key", async () => {
-    await writeApiKey(apiKeysPath, ["gemini"], "stored-key");
+    await writeApiKey(apiKeysPath, "gemini", "stored-key");
 
     process.env[GEMINI] = "   ";
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("stored-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("stored-key");
 
     process.env[GEMINI] = "  env-key  ";
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("env-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("env-key");
   });
 
-  it("resolves source-first with most-to-least-specific fallback", async () => {
-    await writeApiKey(apiKeysPath, ["gemini"], "general-stored");
-    await writeApiKey(apiKeysPath, ["gemini", "text"], "text-stored");
+  it("resolves a provider.purpose id exactly and never falls back to the provider id", async () => {
+    expect(apiKeyEnvVar("gemini.text")).toBe("GEMINI_TEXT_API_KEY");
 
-    // A more specific stored key beats the general stored key.
-    expect(await resolveApiKey(apiKeysPath, ["gemini", "text"])).toBe("text-stored");
-    // An unconfigured specific key falls back to the general stored key.
-    expect(await resolveApiKey(apiKeysPath, ["gemini", "other"])).toBe("general-stored");
+    await writeApiKey(apiKeysPath, "gemini", "general-stored");
+    // No stored or env value for gemini.text: the provider key is never used for it.
+    expect(await resolveApiKey(apiKeysPath, "gemini.text")).toBeNull();
+    expect(await hasApiKey(apiKeysPath, "gemini.text")).toBe(false);
 
-    // Source-first: the general env beats even a more specific stored key.
-    process.env[GEMINI] = "general-env";
-    expect(await resolveApiKey(apiKeysPath, ["gemini", "text"])).toBe("general-env");
-    delete process.env[GEMINI];
+    await writeApiKey(apiKeysPath, "gemini.text", "text-stored");
+    expect(await resolveApiKey(apiKeysPath, "gemini.text")).toBe("text-stored");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("general-stored");
 
-    // fallback:false consults only the exact key.
-    expect(await resolveApiKey(apiKeysPath, ["gemini", "missing"], { fallback: false })).toBeNull();
-    expect(await resolveApiKey(apiKeysPath, ["gemini", "text"], { fallback: false })).toBe("text-stored");
+    // The exact derived variable wins; the provider's variable is not consulted.
+    process.env.GEMINI_API_KEY = "general-env";
+    expect(await resolveApiKey(apiKeysPath, "gemini.text")).toBe("text-stored");
+    process.env.GEMINI_TEXT_API_KEY = "text-env";
+    expect(await resolveApiKey(apiKeysPath, "gemini.text")).toBe("text-env");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("general-env");
   });
 
   it("preserves a wrong-shaped valid-JSON key file before rebuilding it", async () => {
@@ -204,7 +205,7 @@ describe("API key secrets store", () => {
     await writeFile(apiKeysPath, original, "utf8");
 
     const warn = vi.fn();
-    await writeApiKey(apiKeysPath, ["gemini"], "replacement-key", warn);
+    await writeApiKey(apiKeysPath, "gemini", "replacement-key", warn);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("unexpected shape"),
       expect.objectContaining({ path: apiKeysPath }),
@@ -216,7 +217,7 @@ describe("API key secrets store", () => {
     expect(preservedName).toBeDefined();
     expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
 
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("replacement-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("replacement-key");
     expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
   });
 
@@ -224,21 +225,21 @@ describe("API key secrets store", () => {
     const original = "null\n";
     await writeFile(apiKeysPath, original, "utf8");
 
-    await writeApiKey(apiKeysPath, ["gemini"], "replacement-key");
+    await writeApiKey(apiKeysPath, "gemini", "replacement-key");
 
     const preservedName = (await readdir(home)).find((entry) =>
       /^api-keys-\d{8}-\d{6}-\d{3}-utc\.invalid$/.test(entry),
     );
     expect(preservedName).toBeDefined();
     expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
-    expect(await resolveApiKey(apiKeysPath, ["gemini"])).toBe("replacement-key");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("replacement-key");
   });
 
   it("moves a corrupt (unparseable) key file aside and resolves to no key instead of throwing", async () => {
     await writeFile(apiKeysPath, "not json at all", "utf8");
 
     const warn = vi.fn();
-    await expect(resolveApiKey(apiKeysPath, ["gemini"], undefined, warn)).resolves.toBeNull();
+    await expect(resolveApiKey(apiKeysPath, "gemini", warn)).resolves.toBeNull();
     expect(warn).toHaveBeenCalled();
 
     // The unreadable file is preserved aside (timestamped), not left in place to be

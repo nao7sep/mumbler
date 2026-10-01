@@ -265,8 +265,7 @@ export class ApplicationRuntime {
       // secrets file) once, so the snapshot can report presence without async I/O.
       const hasGeminiApiKey = await hasApiKey(
         paths.apiKeysPath,
-        ["gemini"],
-        undefined,
+        "gemini",
         makeApiKeyWarn(logger),
       );
 
@@ -1262,7 +1261,7 @@ export class ApplicationRuntime {
       throw new OperationError("Enter a Gemini API key.");
     }
 
-    await writeApiKey(this.runtime.paths!.apiKeysPath, ["gemini"], trimmed, this.apiKeyWarn());
+    await writeApiKey(this.runtime.paths!.apiKeysPath, "gemini", trimmed, this.apiKeyWarn());
     await this.refreshHasGeminiApiKey();
     await this.runtime.logger.info("settings.api-key-set", "Stored Gemini API key.", {
       hasGeminiApiKey: this.runtime.hasGeminiApiKey,
@@ -1276,7 +1275,7 @@ export class ApplicationRuntime {
   // present, still resolves afterward — so hasGeminiApiKey may remain true.
   async clearGeminiApiKey(): Promise<AppSnapshot> {
     this.ensureReady();
-    await clearApiKey(this.runtime.paths!.apiKeysPath, ["gemini"], this.apiKeyWarn());
+    await clearApiKey(this.runtime.paths!.apiKeysPath, "gemini", this.apiKeyWarn());
     await this.refreshHasGeminiApiKey();
     await this.runtime.logger.info("settings.api-key-clear", "Cleared stored Gemini API key.", {
       hasGeminiApiKey: this.runtime.hasGeminiApiKey,
@@ -1288,14 +1287,13 @@ export class ApplicationRuntime {
   // null when neither is set. Single chokepoint used by the pipeline guards and
   // by spawnCardPipeline; nothing else reads the secret.
   private async resolveGeminiApiKey(): Promise<string | null> {
-    return resolveApiKey(this.runtime.paths!.apiKeysPath, ["gemini"], undefined, this.apiKeyWarn());
+    return resolveApiKey(this.runtime.paths!.apiKeysPath, "gemini", this.apiKeyWarn());
   }
 
   private async refreshHasGeminiApiKey(): Promise<void> {
     this.runtime.hasGeminiApiKey = await hasApiKey(
       this.runtime.paths!.apiKeysPath,
-      ["gemini"],
-      undefined,
+      "gemini",
       this.apiKeyWarn(),
     );
   }

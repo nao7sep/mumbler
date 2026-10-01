@@ -8,19 +8,19 @@ import { fileExists, formatError, preserveAside, readJsonFile, writeJsonFile } f
  * shared settings store. This is the fleet api-key-storage-conventions realized
  * for mumbler.
  *
- * mumbler uses a single key today (`["gemini"]` → GEMINI_API_KEY), but the
- * module is the generic, segment-addressed form so its contract matches every
+ * mumbler uses a single key today (`"gemini"` → GEMINI_API_KEY), but the
+ * module is the generic, id-addressed form so its contract matches every
  * other app in the fleet.
  *
  * Contract (api-key-storage-conventions):
- *   - A key id is its segments joined by ".", lowercase; its environment
- *     variable is the segments uppercased, joined by "_", suffixed "_API_KEY".
- *     Stored ids are matched case-insensitively; non-conforming ids are ignored.
- *   - Resolution is source-first: every environment candidate (most→least
- *     specific) then every stored candidate. Environment wins; the longer (more
- *     specific) key wins within each source. `fallback: false` consults only the
- *     exact key. Every value is trimmed; blank counts as absent; an environment
- *     value is never written back.
+ *   - A key id is one flat lowercase string (`gemini`, or `provider.purpose`
+ *     such as `gemini.text`); its environment variable is the id uppercased,
+ *     dots to underscores, suffixed "_API_KEY". Stored ids are matched
+ *     case-insensitively; non-conforming ids are ignored.
+ *   - Resolution consults exactly two places for the exact id: the environment
+ *     variable, then the stored value. There is no fallback from a longer id to
+ *     a shorter one. Every value is trimmed; blank counts as absent; an
+ *     environment value is never written back.
  *   - The stored value is `obf:` + base64 of the reversed UTF-8 bytes; an
  *     untagged value is treated as plaintext. This is NOT encryption — the 0600
  *     mode is the real protection. A marked value that fails canonical base64
@@ -44,34 +44,18 @@ interface ApiKeysFile {
   keys: Record<string, string>;
 }
 
-interface ResolveOptions {
-  fallback?: boolean;
-}
-
 // --- key id / env var derivation ---------------------------------------------
 
-const SEGMENT_RE = /^[a-z0-9]+$/;
 const KEY_ID_RE = /^[a-z0-9]+(\.[a-z0-9]+)*$/;
 
-function assertSegments(segments: string[]): void {
-  if (segments.length === 0 || !segments.every((s) => SEGMENT_RE.test(s))) {
-    throw new Error(`Invalid api-key segments [${segments.join(", ")}]: each must match [a-z0-9]+`);
+function assertKeyId(id: string): void {
+  if (!KEY_ID_RE.test(id)) {
+    throw new Error(`Invalid api-key id "${id}": must match [a-z0-9]+(.[a-z0-9]+)*`);
   }
 }
 
-// The prefixes of a segment list, most specific first: [a,b,c] → [[a,b,c],[a,b],[a]].
-function prefixes(segments: string[]): string[][] {
-  const out: string[][] = [];
-  for (let n = segments.length; n >= 1; n--) out.push(segments.slice(0, n));
-  return out;
-}
-
-function keyId(segments: string[]): string {
-  return segments.join(".");
-}
-
-export function apiKeyEnvVar(segments: string[]): string {
-  return `${segments.map((s) => s.toUpperCase()).join("_")}_API_KEY`;
+export function apiKeyEnvVar(id: string): string {
+  return `${id.toUpperCase().replace(/\./g, "_")}_API_KEY`;
 }
 
 // --- obfuscation (NOT encryption) --------------------------------------------
@@ -189,49 +173,43 @@ async function writeAll(filePath: string, data: ApiKeysFile): Promise<void> {
   });
 }
 
-function envValue(segments: string[]): string | null {
-  const value = process.env[apiKeyEnvVar(segments)]?.trim();
+function envValue(id: string): string | null {
+  const value = process.env[apiKeyEnvVar(id)]?.trim();
   return value ? value : null;
 }
 
 // --- public API --------------------------------------------------------------
 
 /**
- * Resolve a key's plaintext value, source-first (environment then stored,
- * most→least specific), or null when nothing resolves. `fallback: false`
- * consults only the exact key.
+ * Resolve a key's plaintext value for the exact id — the environment variable,
+ * then the stored value — or null when neither holds one. There is no fallback
+ * to a shorter id.
  */
 export async function resolveApiKey(
   filePath: string,
-  segments: string[],
-  options: ResolveOptions = {},
+  id: string,
   warn: WarnFn = noopWarn,
 ): Promise<string | null> {
-  assertSegments(segments);
-  const levels = options.fallback === false ? [segments] : prefixes(segments);
+  assertKeyId(id);
 
-  for (const level of levels) {
-    const fromEnv = envValue(level);
-    if (fromEnv) return fromEnv;
-  }
+  const fromEnv = envValue(id);
+  if (fromEnv) return fromEnv;
+
   const all = await readAll(filePath, warn);
-  for (const level of levels) {
-    const stored = all.keys[keyId(level)];
-    if (typeof stored === "string") {
-      const decoded = decodeApiKey(stored);
-      if (decoded === null) {
-        // A malformed obf: payload never reaches the caller (Node's base64
-        // decoder would otherwise silently drop invalid characters and hand
-        // back garbage). Treat this candidate as absent and warn, then keep
-        // walking the fallback chain exactly as if it were unset.
-        warn(`API key "${keyId(level)}" is stored with a malformed obf: value; treating as absent.`, {
-          keyId: keyId(level),
-        });
-        continue;
-      }
-      const key = decoded.trim();
-      if (key) return key;
+  const stored = all.keys[id];
+  if (typeof stored === "string") {
+    const decoded = decodeApiKey(stored);
+    if (decoded === null) {
+      // A malformed obf: payload never reaches the caller (Node's base64
+      // decoder would otherwise silently drop invalid characters and hand
+      // back garbage). Treat it as absent and warn.
+      warn(`API key "${id}" is stored with a malformed obf: value; treating as absent.`, {
+        keyId: id,
+      });
+      return null;
     }
+    const key = decoded.trim();
+    if (key) return key;
   }
   return null;
 }
@@ -239,27 +217,26 @@ export async function resolveApiKey(
 /** Whether a key resolves from either the environment or the stored file. */
 export async function hasApiKey(
   filePath: string,
-  segments: string[],
-  options: ResolveOptions = {},
+  id: string,
   warn: WarnFn = noopWarn,
 ): Promise<boolean> {
-  return (await resolveApiKey(filePath, segments, options, warn)) !== null;
+  return (await resolveApiKey(filePath, id, warn)) !== null;
 }
 
 /** Persist a key (trimmed, obfuscated). A blank key clears it instead. */
 export async function writeApiKey(
   filePath: string,
-  segments: string[],
+  id: string,
   apiKey: string,
   warn: WarnFn = noopWarn,
 ): Promise<void> {
-  assertSegments(segments);
+  assertKeyId(id);
   const trimmed = apiKey.trim();
   const all = await readAll(filePath, warn);
   if (trimmed.length === 0) {
-    delete all.keys[keyId(segments)];
+    delete all.keys[id];
   } else {
-    all.keys[keyId(segments)] = encodeApiKey(trimmed);
+    all.keys[id] = encodeApiKey(trimmed);
   }
   await writeAll(filePath, all);
 }
@@ -267,13 +244,13 @@ export async function writeApiKey(
 /** Remove the stored key. Any environment value is unaffected. */
 export async function clearApiKey(
   filePath: string,
-  segments: string[],
+  id: string,
   warn: WarnFn = noopWarn,
 ): Promise<void> {
-  assertSegments(segments);
+  assertKeyId(id);
   const all = await readAll(filePath, warn);
-  if (keyId(segments) in all.keys) {
-    delete all.keys[keyId(segments)];
+  if (id in all.keys) {
+    delete all.keys[id];
     await writeAll(filePath, all);
   }
 }
