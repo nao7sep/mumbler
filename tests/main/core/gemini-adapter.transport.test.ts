@@ -14,7 +14,8 @@ const { createClient, generateContent, upload, deleteFile, stat, readFile } = vi
   readFile: vi.fn(),
 }));
 
-vi.mock("@google/genai", () => ({
+vi.mock("@google/genai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@google/genai")>()),
   GoogleGenAI: class {
     models = { generateContent };
     files = { upload, delete: deleteFile };
@@ -33,7 +34,7 @@ vi.mock("@google/genai", () => ({
 
 vi.mock("node:fs/promises", () => ({ stat, readFile }));
 
-import { ApiError } from "@google/genai";
+import { ApiError, ThinkingLevel } from "@google/genai";
 
 import {
   GeminiTimeoutError,
@@ -61,9 +62,9 @@ beforeEach(() => {
   readFile.mockResolvedValue("YmFzZTY0");
 });
 
-// Family policy is stated on every generation transport.
+// A supported model's branch reaches every generation call, and nothing else does.
 describe("thinking is stated on every model call", () => {
-  const DYNAMIC = { thinkingLevel: "medium" };
+  const BRANCH_CONFIG = { abortSignal: expect.any(AbortSignal), thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM } };
 
   it("states medium thinking on the inline transcription call", async () => {
     stat.mockResolvedValue({ size: SAFE - 1 });
@@ -71,7 +72,7 @@ describe("thinking is stated on every model call", () => {
 
     await transcribeWithGemini(baseParams());
 
-    expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(DYNAMIC);
+    expect(generateContent.mock.calls[0]?.[0].config).toEqual(BRANCH_CONFIG);
   });
 
   it("states medium thinking on the Files-API transcription call", async () => {
@@ -81,7 +82,7 @@ describe("thinking is stated on every model call", () => {
 
     await transcribeWithGemini(baseParams());
 
-    expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(DYNAMIC);
+    expect(generateContent.mock.calls[0]?.[0].config).toEqual(BRANCH_CONFIG);
     // The upload is a file transfer, not a generation — it must not carry one.
     expect(upload.mock.calls[0]?.[0].config).not.toHaveProperty("thinkingConfig");
   });
@@ -96,32 +97,15 @@ describe("thinking is stated on every model call", () => {
       timeoutMs: 60_000,
     });
 
-    expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(DYNAMIC);
-  });
-
-  it("uses the resolved family policy without a legacy thinking budget", async () => {
-    stat.mockResolvedValue({ size: SAFE - 1 });
-    generateContent.mockResolvedValue({ text: "hi", modelVersion: "v1", usageMetadata: null });
-
-    await transcribeWithGemini(baseParams());
-
-    expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(DYNAMIC);
+    expect(generateContent.mock.calls[0]?.[0].config).toEqual(BRANCH_CONFIG);
   });
 });
 
-describe("model policy and the decimal audio threshold", () => {
-  it("omits thinking for unknown ids while preserving the metadata ceiling", async () => {
+describe("the plain request and the decimal audio threshold", () => {
+  it("sends model and contents only for an id with no branch", async () => {
     generateContent.mockResolvedValue({ text: "result" });
     await generateTextWithGemini({ apiKey: "fixture", prompt: "title", model: "unknown", timeoutMs: 1000 });
-    const config = generateContent.mock.calls[0]![0].config;
-    expect(config).not.toHaveProperty("thinkingConfig");
-    expect(config.maxOutputTokens).toBe(1024);
-  });
-
-  it("uses dynamic thinking for 2.5 and the outline ceiling", async () => {
-    generateContent.mockResolvedValue({ text: "result" });
-    await generateTextWithGemini({ apiKey: "fixture", prompt: "outline", model: "gemini-2.5-pro", role: "outline", timeoutMs: 1000 });
-    expect(generateContent.mock.calls[0]![0].config).toMatchObject({ thinkingConfig: { thinkingBudget: -1 }, maxOutputTokens: 65536 });
+    expect(generateContent.mock.calls[0]![0].config).toEqual({ abortSignal: expect.any(AbortSignal) });
   });
 
   it("uses inline audio through 20,000,000 bytes and Files API above it", async () => {
@@ -129,7 +113,6 @@ describe("model policy and the decimal audio threshold", () => {
     stat.mockResolvedValue({ size: SAFE });
     generateContent.mockResolvedValue({ text: "result" });
     expect((await transcribeWithGemini(baseParams())).transport).toBe("inline");
-    expect(generateContent.mock.calls[0]![0].config.maxOutputTokens).toBe(65536);
     stat.mockResolvedValue({ size: SAFE + 1 });
     upload.mockResolvedValue({ name: "files/fixture", uri: "https://provider.example/file" });
     expect((await transcribeWithGemini(baseParams())).transport).toBe("files-api");

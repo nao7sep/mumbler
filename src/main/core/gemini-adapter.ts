@@ -2,8 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 
 import { ApiError, GoogleGenAI, type GenerateContentResponse } from "@google/genai";
 
-import { generationPolicy } from "@shared/model-registry";
-import type { AiRole } from "@shared/ai-models";
+import { supportedModelConfig } from "@shared/model-branches";
 
 import { type AppLogger } from "./logger";
 import { CancelledError } from "./cancellation";
@@ -39,7 +38,6 @@ export interface GeminiTextGenerationParams {
   apiKey: string;
   endpoint?: string;
   prompt: string;
-  role?: Exclude<AiRole, "transcription">;
   model: string;
   timeoutMs: number;
   signal?: AbortSignal;
@@ -120,7 +118,7 @@ export async function transcribeWithGemini(
         ],
         config: {
           abortSignal: abortState.signal,
-          ...generationPolicy(params.model, "transcription"),
+          ...supportedModelConfig(params.model),
         },
       });
     } else {
@@ -155,7 +153,7 @@ export async function transcribeWithGemini(
         ],
         config: {
           abortSignal: abortState.signal,
-          ...generationPolicy(params.model, "transcription"),
+          ...supportedModelConfig(params.model),
         },
       });
     }
@@ -222,7 +220,7 @@ export async function generateTextWithGemini(
       ],
       config: {
         abortSignal: abortState.signal,
-        ...generationPolicy(params.model, params.role ?? "metadata"),
+        ...supportedModelConfig(params.model),
       },
     });
 

@@ -27,10 +27,10 @@ describe("model-list facts", () => {
   it("does nothing before Settings requests a list and writes filtered facts once per day", async () => {
     const owner = new ModelLists(path, logger);
     expect(list).not.toHaveBeenCalled();
-    list.mockResolvedValue(["gemini-3.8-flash", "gemini-future", "embedding", "gemini-future"]);
-    expect(await owner.get(endpoint, false, key)).toEqual(["gemini-3.8-flash", "gemini-future"]);
+    list.mockResolvedValue(["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-future", "embedding", "gemini-3.5-flash-lite"]);
+    expect(await owner.get(endpoint, false, key)).toEqual(["gemini-3.8-flash", "gemini-3.5-flash-lite"]);
     const raw = JSON.parse(await readFile(path, "utf8"));
-    expect(raw).toEqual({ gemini: { fetchedAtUtc: expect.any(String), ids: ["gemini-3.8-flash", "gemini-future"] } });
+    expect(raw).toEqual({ gemini: { fetchedAtUtc: expect.any(String), ids: ["gemini-3.8-flash", "gemini-3.5-flash-lite"] } });
     expect(await owner.get(endpoint, false, key)).toEqual(raw.gemini.ids);
     expect(list).toHaveBeenCalledOnce();
     await expect(readFile(join(process.env.MUMBLER_DATA_DIR!, "backups.sqlite3"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -46,9 +46,9 @@ describe("model-list facts", () => {
     const first = owner.get(endpoint, false, key);
     const second = owner.get(endpoint, true, key);
     await vi.waitFor(() => expect(list).toHaveBeenCalledOnce());
-    resolve(["gemini-future"]);
-    expect(await first).toEqual(["gemini-future"]);
-    expect(await second).toEqual(["gemini-future"]);
+    resolve(["gemini-3.8-flash"]);
+    expect(await first).toEqual(["gemini-3.8-flash"]);
+    expect(await second).toEqual(["gemini-3.8-flash"]);
   });
 
   it("keeps prior facts when fetching fails, warns once, and never requires a key", async () => {

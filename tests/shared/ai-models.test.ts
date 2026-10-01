@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { AI_ROLES, SUPPORTED_MODELS, defaultModelFor, modelsFor, type ModelKind } from "@shared/ai-models";
-import { MODEL_EXCEPTIONS, generationPolicy, resolveModel } from "@shared/model-registry";
+import { ThinkingLevel } from "@google/genai";
+import { supportedModelConfig } from "@shared/model-branches";
 import { createDefaultSettings, buildSettingsDraft } from "@main/core/settings-schema";
 import { modelOptions } from "@shared/model-options";
 
 describe("the model registry and committed lineup", () => {
-  it("keeps every approved row and a non-generic family for each", () => {
+  it("keeps every approved row, each with its own branch, and gives any other id the plain request", () => {
     expect(SUPPORTED_MODELS.map((row) => row.id)).toEqual(["gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.5-flash-lite"]);
-    for (const row of SUPPORTED_MODELS) expect(resolveModel(row.id).generic).toBe(false);
-    expect(resolveModel("nonsense").generic).toBe(true);
-    expect(MODEL_EXCEPTIONS).toEqual({});
+    for (const row of SUPPORTED_MODELS) {
+      expect(supportedModelConfig(row.id), row.id).toEqual({ thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM } });
+    }
+    expect(supportedModelConfig(" GEMINI-3.8-FLASH ")).toEqual(supportedModelConfig("gemini-3.8-flash"));
+    for (const id of ["gemini-3.9-flash", "gemini-2.5-pro", "custom-model"]) {
+      expect(supportedModelConfig(id), id).toBeUndefined();
+    }
   });
 
   it("has exactly one default for every offered kind and a selection field for every role", () => {
@@ -28,19 +33,6 @@ describe("the model registry and committed lineup", () => {
       expect(draft[`${role.id}Model`]).toBe(settings[`gemini.${role.id}`]);
     }
     expect(settings.extraModelIds).toEqual({ gemini: [] });
-  });
-
-  it("resolves future ids by family and builds only declared parameters", () => {
-    for (const id of ["gemini-3.9-flash", "gemini-2.5-pro", "gemini-next", "custom-model"]) {
-      const family = resolveModel(id);
-      const policy = generationPolicy(id, "outline");
-      expect(policy).not.toHaveProperty("temperature");
-      expect(Object.keys(policy).every((key) => Object.hasOwn(family.policy, key))).toBe(true);
-      expect(policy.maxOutputTokens).toBe(65536);
-    }
-    expect(generationPolicy("gemini-3.8-flash", "metadata")).toEqual({ thinkingConfig: { thinkingLevel: "medium" }, maxOutputTokens: 1024 });
-    expect(generationPolicy("gemini-2.5-flash", "transcription")).toEqual({ thinkingConfig: { thinkingBudget: -1 }, maxOutputTokens: 65536 });
-    expect(generationPolicy("custom-model", "metadata")).toEqual({ maxOutputTokens: 1024 });
   });
 
   it("groups and deduplicates suggestions while retaining an out-of-list selection", () => {

@@ -185,10 +185,10 @@ describe("executeCardPipeline", () => {
     ctx.settings["gemini.metadata"] = "custom-metadata";
     ctx.settings["gemini.endpoint"] = "https://proxy.example";
     await executeCardPipeline(card.id, "structured", "generate", ctx);
-    expect(mockGenerateText.mock.calls.map(([params]) => [params.model, params.role, params.endpoint])).toEqual([
-      ["gemini-outline-future", "outline", "https://proxy.example"],
-      ["custom-metadata", "metadata", "https://proxy.example"],
-      ["custom-metadata", "metadata", "https://proxy.example"],
+    expect(mockGenerateText.mock.calls.map(([params]) => [params.model, params.endpoint])).toEqual([
+      ["gemini-outline-future", "https://proxy.example"],
+      ["custom-metadata", "https://proxy.example"],
+      ["custom-metadata", "https://proxy.example"],
     ]);
     expect(card.ai.structured?.model).toBe("gemini-outline-future");
     expect(card.ai.title?.model).toBe("custom-metadata");

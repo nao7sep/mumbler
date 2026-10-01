@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { resolveModel } from "@shared/model-registry";
+import { SUPPORTED_MODELS } from "@shared/ai-models";
 import { readJsonFile, writeJsonFile } from "./file-io";
 import type { AppLogger } from "./logger";
 
@@ -48,7 +48,7 @@ export class ModelLists {
       for await (const model of models) {
         if (model.name && model.supportedActions?.includes("generateContent")) listed.push(model.name.replace(/^models\//, ""));
       }
-      const ids = [...new Set(listed.filter((id) => !resolveModel(id).generic))];
+      const ids = [...new Set(listed.filter((id) => SUPPORTED_MODELS.some((row) => row.id === id)))];
       const fact = { fetchedAtUtc: new Date().toISOString(), ids };
       // Not recorded: provider catalogue facts can be fetched again.
       if (this.controller.signal.aborted) return cached?.ids ?? [];
