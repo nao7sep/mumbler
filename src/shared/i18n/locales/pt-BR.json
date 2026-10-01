@@ -51,7 +51,7 @@
   "startup.close": "Fechar",
   "startup.restart": "Reiniciar o Mumbler",
   "diagnostic.storageTitle": "Não foi possível determinar o local de armazenamento",
-  "diagnostic.storageBody": "O Mumbler não conseguiu usar a pasta de armazenamento configurada. Restaure o acesso a essa pasta ou remova a variável MUMBLER_HOME e abra o app novamente.",
+  "diagnostic.storageBody": "O Mumbler não conseguiu usar a pasta de armazenamento configurada. Restaure o acesso a essa pasta ou remova a variável MUMBLER_DATA_DIR e abra o app novamente.",
   "diagnostic.corruptTitle": "Não foi possível carregar os dados salvos",
   "diagnostic.corruptBody": "O Mumbler não conseguiu carregar os dados salvos com segurança. Os arquivos não foram alterados; verifique o log antes de abrir o app novamente.",
   "diagnostic.startupTitle": "Falha ao iniciar",

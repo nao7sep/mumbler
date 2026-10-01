@@ -70,7 +70,7 @@ function requireKey(name: string): void {
 
 /** Opens the runtime on `home`, runs `body`, and shuts everything down again. */
 async function withRuntime<T>(home: string, body: (runtime: Runtime) => Promise<T>): Promise<T> {
-  process.env.MUMBLER_HOME = home;
+  process.env.MUMBLER_DATA_DIR = home;
   const runtime = await ApplicationRuntime.initialize();
   let result: T;
   try {

@@ -5,7 +5,7 @@
  * whole tree and two derivations can never disagree.
  *
  * The root is `~/.mumbler` by default, resolved from `os.homedir()` and from nothing about how the app was
- * launched — never the working directory. `MUMBLER_HOME` relocates the whole root: its value is expanded
+ * launched — never the working directory. `MUMBLER_DATA_DIR` relocates the whole root: its value is expanded
  * (a leading `~`/`~/` and `$VAR`/`${VAR}`/`%VAR%` references) and then made absolute *against the home
  * directory*, never against `process.cwd()`, so the override can never reintroduce the cwd dependence the
  * convention removes. A value that cannot be made into a usable absolute path is a reported startup error,
@@ -61,7 +61,7 @@ export function resolvePathFromHome(rawValue: string, homeDirectory: string): st
   return resolve(homeDirectory, value);
 }
 
-// Resolve the single storage root per the storage-path-conventions. The root is MUMBLER_HOME when that
+// Resolve the single storage root per the storage-path-conventions. The root is MUMBLER_DATA_DIR when that
 // variable is set and non-empty (trimmed); otherwise the default `<home>/.mumbler`. An override is
 // expanded (a leading `~`/`~/` and `$VAR` env references), then made absolute against the HOME directory —
 // never process.cwd(), so the override can never reintroduce a working-directory dependence. A value that
@@ -81,16 +81,16 @@ export function resolveStorageRoot(
   } catch (error: unknown) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `MUMBLER_HOME is set to "${rawOverride}" but could not be resolved: ${reason} ` +
+      `MUMBLER_DATA_DIR is set to "${rawOverride}" but could not be resolved: ${reason} ` +
         `Set it to a usable directory, or unset it to use ~/.mumbler.`,
     );
   }
 }
 
-// The resolved storage root for this process, honoring MUMBLER_HOME. Computed lazily at every call (not
+// The resolved storage root for this process, honoring MUMBLER_DATA_DIR. Computed lazily at every call (not
 // frozen into a module constant at import time) so the environment is read after it is set, per the
 // storage-path convention's caution against import-time resolution. This is the mumbler analogue of
 // zipkit's `storageRoot()`.
 export function storageRoot(): string {
-  return resolveStorageRoot(process.env.MUMBLER_HOME, homedir());
+  return resolveStorageRoot(process.env.MUMBLER_DATA_DIR, homedir());
 }

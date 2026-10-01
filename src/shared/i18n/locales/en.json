@@ -51,7 +51,7 @@
   "startup.close": "Close",
   "startup.restart": "Restart Mumbler",
   "diagnostic.storageTitle": "Storage Location Could Not Be Resolved",
-  "diagnostic.storageBody": "Mumbler could not use its configured storage folder. Restore access to that folder or remove the MUMBLER_HOME override, then reopen the app.",
+  "diagnostic.storageBody": "Mumbler could not use its configured storage folder. Restore access to that folder or remove the MUMBLER_DATA_DIR override, then reopen the app.",
   "diagnostic.corruptTitle": "Saved Data Could Not Be Loaded",
   "diagnostic.corruptBody": "Mumbler could not safely load its saved data. The files were left unchanged; check the log before reopening the app.",
   "diagnostic.startupTitle": "Startup Failed",

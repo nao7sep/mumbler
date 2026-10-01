@@ -51,7 +51,7 @@
   "startup.close": "Schließen",
   "startup.restart": "Mumbler neu starten",
   "diagnostic.storageTitle": "Speicherort konnte nicht ermittelt werden",
-  "diagnostic.storageBody": "Mumbler konnte den eingestellten Speicherordner nicht verwenden. Stellen Sie den Zugriff auf diesen Ordner wieder her oder entfernen Sie die Einstellung MUMBLER_HOME und öffnen Sie die App dann erneut.",
+  "diagnostic.storageBody": "Mumbler konnte den eingestellten Speicherordner nicht verwenden. Stellen Sie den Zugriff auf diesen Ordner wieder her oder entfernen Sie die Einstellung MUMBLER_DATA_DIR und öffnen Sie die App dann erneut.",
   "diagnostic.corruptTitle": "Gespeicherte Daten konnten nicht geladen werden",
   "diagnostic.corruptBody": "Mumbler konnte seine gespeicherten Daten nicht sicher laden. Die Dateien wurden nicht verändert; prüfen Sie das Protokoll, bevor Sie die App erneut öffnen.",
   "diagnostic.startupTitle": "Start fehlgeschlagen",

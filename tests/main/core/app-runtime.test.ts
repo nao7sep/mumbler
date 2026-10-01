@@ -185,7 +185,7 @@ describe("applyFrontTrimOffset", () => {
   });
 });
 
-// The MUMBLER_HOME storage-root resolution (storage-path-conventions). The home
+// The MUMBLER_DATA_DIR storage-root resolution (storage-path-conventions). The home
 // directory is injected so these are pure, working-directory-independent
 // assertions that never touch the real environment or filesystem.
 describe("resolveStorageRoot", () => {
@@ -262,13 +262,13 @@ describe("getAppPaths standard layout", () => {
   const ROOT = join(parse(process.cwd()).root, "data", "mumbler-paths-test");
 
   function withRoot<T>(run: () => T): T {
-    const previous = process.env.MUMBLER_HOME;
-    process.env.MUMBLER_HOME = ROOT;
+    const previous = process.env.MUMBLER_DATA_DIR;
+    process.env.MUMBLER_DATA_DIR = ROOT;
     try {
       return run();
     } finally {
-      if (previous === undefined) delete process.env.MUMBLER_HOME;
-      else process.env.MUMBLER_HOME = previous;
+      if (previous === undefined) delete process.env.MUMBLER_DATA_DIR;
+      else process.env.MUMBLER_DATA_DIR = previous;
     }
   }
 
@@ -308,8 +308,8 @@ describe("ApplicationRuntime dropped-path import authority", () => {
     const secondAudio = join(sourceDir, "second.mp3");
     const unsupported = join(sourceDir, "notes.txt");
     const unavailable = join(sourceDir, "missing.wav");
-    const previousRoot = process.env.MUMBLER_HOME;
-    process.env.MUMBLER_HOME = join(root, "profile");
+    const previousRoot = process.env.MUMBLER_DATA_DIR;
+    process.env.MUMBLER_DATA_DIR = join(root, "profile");
 
     await mkdir(sourceDir, { recursive: true });
     await Promise.all([
@@ -360,15 +360,15 @@ describe("ApplicationRuntime dropped-path import authority", () => {
         expect((await stat(item.workingFilePath)).isFile()).toBe(true);
       }
 
-      const persisted = await createStateStore(join(process.env.MUMBLER_HOME, "state.json")).load();
+      const persisted = await createStateStore(join(process.env.MUMBLER_DATA_DIR, "state.json")).load();
       expect(persisted.value.pendingImports.map((item) => item.originalSourcePath)).toEqual([
         firstAudio,
         secondAudio,
       ]);
     } finally {
       await runtime?.shutdown();
-      if (previousRoot === undefined) delete process.env.MUMBLER_HOME;
-      else process.env.MUMBLER_HOME = previousRoot;
+      if (previousRoot === undefined) delete process.env.MUMBLER_DATA_DIR;
+      else process.env.MUMBLER_DATA_DIR = previousRoot;
       await rm(root, { force: true, recursive: true });
     }
   });
@@ -382,20 +382,20 @@ describe("ApplicationRuntime dropped-path import authority", () => {
   () => {
     it("creates a fresh storage root as owner-only (0700)", async () => {
       const root = await mkdtemp(join(tmpdir(), "mumbler-runtime-root-"));
-      const previousRoot = process.env.MUMBLER_HOME;
-      process.env.MUMBLER_HOME = join(root, "profile");
+      const previousRoot = process.env.MUMBLER_DATA_DIR;
+      process.env.MUMBLER_DATA_DIR = join(root, "profile");
 
       let runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>> | null = null;
       try {
         runtime = await ApplicationRuntime.initialize();
         expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
 
-        const mode = (await stat(process.env.MUMBLER_HOME)).mode & 0o777;
+        const mode = (await stat(process.env.MUMBLER_DATA_DIR)).mode & 0o777;
         expect(mode).toBe(0o700);
       } finally {
         await runtime?.shutdown();
-        if (previousRoot === undefined) delete process.env.MUMBLER_HOME;
-        else process.env.MUMBLER_HOME = previousRoot;
+        if (previousRoot === undefined) delete process.env.MUMBLER_DATA_DIR;
+        else process.env.MUMBLER_DATA_DIR = previousRoot;
         await rm(root, { force: true, recursive: true });
       }
     });
@@ -407,8 +407,8 @@ describe("ApplicationRuntime dropped-path import authority", () => {
       await chmod(homeDir, 0o755);
       expect((await stat(homeDir)).mode & 0o777).toBe(0o755);
 
-      const previousRoot = process.env.MUMBLER_HOME;
-      process.env.MUMBLER_HOME = homeDir;
+      const previousRoot = process.env.MUMBLER_DATA_DIR;
+      process.env.MUMBLER_DATA_DIR = homeDir;
 
       let runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>> | null = null;
       try {
@@ -419,8 +419,8 @@ describe("ApplicationRuntime dropped-path import authority", () => {
         expect(mode).toBe(0o700);
       } finally {
         await runtime?.shutdown();
-        if (previousRoot === undefined) delete process.env.MUMBLER_HOME;
-        else process.env.MUMBLER_HOME = previousRoot;
+        if (previousRoot === undefined) delete process.env.MUMBLER_DATA_DIR;
+        else process.env.MUMBLER_DATA_DIR = previousRoot;
         await rm(root, { force: true, recursive: true });
       }
     });

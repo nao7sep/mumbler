@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiKeyEnvVar, clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "@main/core/api-keys";
 import { closeBackupStore } from "@main/core/backupStore";
 
-// The secrets store is isolated by pointing MUMBLER_HOME at a throwaway directory
+// The secrets store is isolated by pointing MUMBLER_DATA_DIR at a throwaway directory
 // (storage-path-conventions: tests relocate the root via the env override) and
 // resolving the api-keys path under it exactly as the app does. The whole tree is
 // removed after each test.
@@ -25,14 +25,14 @@ function clearGeminiEnv(): void {
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "mumbler-secrets-"));
-  process.env.MUMBLER_HOME = home;
+  process.env.MUMBLER_DATA_DIR = home;
   apiKeysPath = join(home, "api-keys.json");
   settingsPath = join(home, "config.json");
   clearGeminiEnv();
 });
 
 afterEach(async () => {
-  delete process.env.MUMBLER_HOME;
+  delete process.env.MUMBLER_DATA_DIR;
   clearGeminiEnv();
   await rm(home, { recursive: true, force: true });
 });
@@ -116,7 +116,7 @@ describe("API key secrets store", () => {
   });
 
   it("never records the secret into the backup store (record:false on the choke point)", async () => {
-    // MUMBLER_HOME is `home` here, so the store — if it recorded — would create home/backups.sqlite3.
+    // MUMBLER_DATA_DIR is `home` here, so the store — if it recorded — would create home/backups.sqlite3.
     await writeApiKey(apiKeysPath, "gemini", "AIzaSecretKey123");
     await writeApiKey(apiKeysPath, "gemini", "AIzaSecretKey999"); // a second, changed write
     await closeBackupStore();

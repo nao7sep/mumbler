@@ -67,7 +67,7 @@ describe("dependencies store — timestamp persistence", () => {
   });
 
   it("does not record re-derivable dependency facts in the backup history", async () => {
-    process.env.MUMBLER_HOME = dir;
+    process.env.MUMBLER_DATA_DIR = dir;
     const store = createDependenciesStore(storePath());
     await store.save((await store.load()).value);
     await closeBackupStore();

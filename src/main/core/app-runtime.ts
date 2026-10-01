@@ -191,7 +191,7 @@ export class ApplicationRuntime {
   static async initialize(): Promise<ApplicationRuntime> {
     const shellReadyAtUtc = Date.now();
 
-    // Resolve the storage root first. An unusable MUMBLER_HOME override is a
+    // Resolve the storage root first. An unusable MUMBLER_DATA_DIR override is a
     // startup error the convention requires us to report and STOP on, never a
     // silent fallback to the default — and it happens before any logger or store
     // exists (those derive from the very paths we could not resolve), so it
@@ -1826,7 +1826,7 @@ export class ApplicationRuntime {
 export { resolveStorageRoot };
 
 export function getAppPaths(): AppPaths {
-  const homeDir = resolveStorageRoot(process.env.MUMBLER_HOME, homedir());
+  const homeDir = resolveStorageRoot(process.env.MUMBLER_DATA_DIR, homedir());
 
   return {
     homeDir,

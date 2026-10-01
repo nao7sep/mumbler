@@ -2,8 +2,8 @@
  * Pins the write-through backup store (data-backup conventions): byte-identical BLOB fidelity, the
  * serialized ISO-8601-ms `written_at_utc` shape (NOT a filename stamp), content-hash dedup per path, and
  * the best-effort contract (a store failure never throws, logs exactly one warn, and never touches the
- * caller's bytes). The store resolves its file from MUMBLER_HOME, which the global setup points at a
- * throwaway root and closes between tests; each test here overrides MUMBLER_HOME with its own root so it
+ * caller's bytes). The store resolves its file from MUMBLER_DATA_DIR, which the global setup points at a
+ * throwaway root and closes between tests; each test here overrides MUMBLER_DATA_DIR with its own root so it
  * can read the resulting `backups.sqlite3` back directly.
  */
 import { createHash } from "node:crypto";
@@ -28,7 +28,7 @@ let storeFilePath: string;
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "mumbler-backupstore-"));
-  process.env.MUMBLER_HOME = root;
+  process.env.MUMBLER_DATA_DIR = root;
   storeFilePath = join(root, "backups.sqlite3");
 });
 
@@ -38,7 +38,7 @@ afterEach(async () => {
   setBackupStoreWarn((message, details) => {
     console.warn(message, details);
   });
-  delete process.env.MUMBLER_HOME;
+  delete process.env.MUMBLER_DATA_DIR;
   await rm(root, { recursive: true, force: true });
 });
 
@@ -185,24 +185,24 @@ describe("record — dedup by content hash per path", () => {
 
 describe("record — best-effort: a store failure never throws, logs one warn, save unaffected", () => {
   it("catches an insert failure, logs exactly one warn, and does not throw", async () => {
-    // Force a failure at the store's OPEN step by pointing MUMBLER_HOME at a path whose parent is a file,
+    // Force a failure at the store's OPEN step by pointing MUMBLER_DATA_DIR at a path whose parent is a file,
     // so mkdirSync of the store's directory throws (ENOTDIR). record() must swallow it and warn once.
     const blocker = join(root, "not-a-dir");
     // Create a regular file where a directory would need to be.
     writeFileSync(blocker, "x");
-    process.env.MUMBLER_HOME = join(blocker, "inside");
+    process.env.MUMBLER_DATA_DIR = join(blocker, "inside");
 
     const warn = vi.fn<BackupWarn>();
     setBackupStoreWarn(warn);
 
     const bytes = Buffer.from("payload", "utf8");
     // The call itself must not throw — the "never breaks the save" guarantee.
-    expect(() => record(join(process.env.MUMBLER_HOME!, "config.json"), bytes)).not.toThrow();
+    expect(() => record(join(process.env.MUMBLER_DATA_DIR!, "config.json"), bytes)).not.toThrow();
 
     // Recording is asynchronous: enqueue a second record, then drain the worker.
     // The failed open disables its engine, so the second record does not add a
     // per-save warning flood.
-    record(join(process.env.MUMBLER_HOME!, "state.json"), Buffer.from("more", "utf8"));
+    record(join(process.env.MUMBLER_DATA_DIR!, "state.json"), Buffer.from("more", "utf8"));
     await closeBackupStore();
     expect(warn).toHaveBeenCalledTimes(1);
 

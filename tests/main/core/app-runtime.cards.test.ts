@@ -10,7 +10,7 @@ import { formatUtcMarker } from "@shared/timestamps";
 
 // The card list as the user builds it: confirm what was dropped in, duplicate a
 // card to trim it twice, move the markers, remove one, start over. This drives
-// the real runtime against a real MUMBLER_HOME, so what is asserted is the state
+// the real runtime against a real MUMBLER_DATA_DIR, so what is asserted is the state
 // that survives on disk, not a mock's bookkeeping.
 vi.mock("electron", () => ({
   app: { getName: () => "Mumbler Test", getVersion: () => "9.9.9-test", getPath: () => "/tmp", isPackaged: false },
@@ -139,8 +139,8 @@ beforeEach(async () => {
   home = join(root, "profile");
   sourceDir = join(root, "sources");
   await mkdir(sourceDir, { recursive: true });
-  previousHome = process.env.MUMBLER_HOME;
-  process.env.MUMBLER_HOME = home;
+  previousHome = process.env.MUMBLER_DATA_DIR;
+  process.env.MUMBLER_DATA_DIR = home;
   // A key in the developer's own environment resolves ahead of the stored one,
   // so these cases start from none; the rule itself is asserted below.
   previousGeminiKey = process.env.GEMINI_API_KEY;
@@ -156,8 +156,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await runtime.shutdown();
-  if (previousHome === undefined) delete process.env.MUMBLER_HOME;
-  else process.env.MUMBLER_HOME = previousHome;
+  if (previousHome === undefined) delete process.env.MUMBLER_DATA_DIR;
+  else process.env.MUMBLER_DATA_DIR = previousHome;
   if (previousGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
   else process.env.GEMINI_API_KEY = previousGeminiKey;
   await rm(root, { recursive: true, force: true });

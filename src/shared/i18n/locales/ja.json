@@ -51,7 +51,7 @@
   "startup.close": "閉じる",
   "startup.restart": "Mumblerを再起動",
   "diagnostic.storageTitle": "保存場所を特定できませんでした",
-  "diagnostic.storageBody": "Mumblerは設定された保存フォルダを使用できませんでした。そのフォルダへのアクセスを回復するか、MUMBLER_HOMEの指定を削除してから、アプリを開き直してください。",
+  "diagnostic.storageBody": "Mumblerは設定された保存フォルダを使用できませんでした。そのフォルダへのアクセスを回復するか、MUMBLER_DATA_DIRの指定を削除してから、アプリを開き直してください。",
   "diagnostic.corruptTitle": "保存されたデータを読み込めませんでした",
   "diagnostic.corruptBody": "Mumblerは保存されたデータを安全に読み込めませんでした。ファイルは変更されていません。アプリを開き直す前にログを確認してください。",
   "diagnostic.startupTitle": "起動に失敗しました",

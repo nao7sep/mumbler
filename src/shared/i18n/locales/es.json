@@ -51,7 +51,7 @@
   "startup.close": "Cerrar",
   "startup.restart": "Reiniciar Mumbler",
   "diagnostic.storageTitle": "No se pudo determinar la ubicación de almacenamiento",
-  "diagnostic.storageBody": "Mumbler no pudo usar la carpeta de almacenamiento configurada. Restablece el acceso a esa carpeta o quita la variable MUMBLER_HOME y vuelve a abrir la app.",
+  "diagnostic.storageBody": "Mumbler no pudo usar la carpeta de almacenamiento configurada. Restablece el acceso a esa carpeta o quita la variable MUMBLER_DATA_DIR y vuelve a abrir la app.",
   "diagnostic.corruptTitle": "No se pudieron cargar los datos guardados",
   "diagnostic.corruptBody": "Mumbler no pudo cargar sus datos guardados de forma segura. Los archivos no se modificaron; revisa el registro antes de volver a abrir la app.",
   "diagnostic.startupTitle": "Error al iniciar",

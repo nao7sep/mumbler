@@ -51,7 +51,7 @@
   "startup.close": "Chiudi",
   "startup.restart": "Riavvia Mumbler",
   "diagnostic.storageTitle": "Impossibile determinare la posizione di archiviazione",
-  "diagnostic.storageBody": "Mumbler non ha potuto usare la cartella di archiviazione configurata. Ripristina l’accesso a quella cartella o rimuovi la variabile MUMBLER_HOME, poi riapri l’app.",
+  "diagnostic.storageBody": "Mumbler non ha potuto usare la cartella di archiviazione configurata. Ripristina l’accesso a quella cartella o rimuovi la variabile MUMBLER_DATA_DIR, poi riapri l’app.",
   "diagnostic.corruptTitle": "Impossibile caricare i dati salvati",
   "diagnostic.corruptBody": "Mumbler non è riuscito a caricare in sicurezza i dati salvati. I file non sono stati modificati; controlla il log prima di riaprire l’app.",
   "diagnostic.startupTitle": "Avvio non riuscito",

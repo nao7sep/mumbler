@@ -51,7 +51,7 @@
   "startup.close": "Fermer",
   "startup.restart": "Redémarrer Mumbler",
   "diagnostic.storageTitle": "Impossible de déterminer l’emplacement de stockage",
-  "diagnostic.storageBody": "Mumbler n’a pas pu utiliser le dossier de stockage configuré. Rétablissez l’accès à ce dossier ou supprimez la variable MUMBLER_HOME, puis rouvrez l’app.",
+  "diagnostic.storageBody": "Mumbler n’a pas pu utiliser le dossier de stockage configuré. Rétablissez l’accès à ce dossier ou supprimez la variable MUMBLER_DATA_DIR, puis rouvrez l’app.",
   "diagnostic.corruptTitle": "Impossible de charger les données enregistrées",
   "diagnostic.corruptBody": "Mumbler n’a pas pu charger ses données enregistrées en toute sécurité. Les fichiers n’ont pas été modifiés\u00a0; consultez le journal avant de rouvrir l’app.",
   "diagnostic.startupTitle": "Échec du démarrage",
