@@ -1,11 +1,7 @@
 // Single source of truth for the window's minimum size.
 //
-// The window-chrome conventions require the window minimum to be DERIVED from
-// the panes' own minimums plus the fixed chrome — never a hand-typed constant
-// that silently drifts when a pane changes and starts truncating content. The
-// constants below mirror the layout in src/renderer/src/styles.css; the window
-// minimum falls out of them, so the OS can never shrink the window small enough
-// to clip a pane.
+// Pane sizing: window-conventions. These constants mirror the layout in
+// src/renderer/src/styles.css.
 //
 // When a value here changes, change the matching CSS rule (noted per constant)
 // and the derivation stays correct automatically.
@@ -78,9 +74,7 @@ export const WINDOW_MIN_HEIGHT = VERTICAL_CHROME + DETAIL_MIN_HEIGHT;
 // live extent of the container the panes share (here the workspace's content-box
 // width); `siblingMin` is the sum of minimums on the far side (the detail-pane
 // minimum plus the workspace gap); `min`/`max` are the dragged pane's own bounds.
-// Used to derive the DISPLAYED width from the persisted intent on every resize —
-// never to change what is persisted (app-chrome-conventions: re-clamp on resize,
-// persist only on a drag).
+// Pane sizing: window-conventions.
 export function clampSplitter(
   desired: number,
   opts: { available: number; siblingMin: number; min: number; max: number },

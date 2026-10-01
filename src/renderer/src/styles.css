@@ -197,7 +197,7 @@
 
 .renderer-failure__card button { width: max-content; }
 
-/* Scroll bars: reachable, rounded, themed (window-chrome conventions).
+/* Scroll bars: app-chrome-conventions.
    color-scheme above sets the native palette but leaves the platform's default
    bar in place, so the bar is styled explicitly.
    Applied globally (unscoped pseudo-elements) so every overflow container — the

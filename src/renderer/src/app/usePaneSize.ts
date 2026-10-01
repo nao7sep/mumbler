@@ -6,13 +6,7 @@ import { clampSplitter } from "@shared/layout";
  * Derive an adjustable pane's DISPLAYED size from its persisted INTENT and the
  * live container.
  *
- * The persisted value is the intent — the size the user dragged to, bounded only
- * by the pane's own min/max. The displayed size is that intent clamped to the
- * current container (clampSplitter: container − siblingMin, then the pane's own
- * min/max), recomputed whenever the container resizes. A window-shrink therefore
- * narrows the *display* toward the pane minimum while the intent is untouched; a
- * window-grow returns the pane to its intent. Display-only — nothing here persists
- * (app-chrome-conventions: re-clamp on resize, never save the clamped value).
+ * Pane sizing: window-conventions.
  *
  * Returns a ref to attach to the container whose extent feeds the clamp (here the
  * `.workspace` grid) and the derived displayed size. Before the container has
