@@ -1,4 +1,4 @@
-import { GeminiClient } from "./gemini-http";
+import { GoogleGenAI } from "@google/genai";
 import { resolveModel } from "@shared/model-registry";
 import { readJsonFile, writeJsonFile } from "./file-io";
 import type { AppLogger } from "./logger";
@@ -42,7 +42,13 @@ export class ModelLists {
       const apiKey = await key();
       if (!apiKey) return cached?.ids ?? [];
       this.lastAttempt = { endpoint, atUtc: Date.now() };
-      const ids = [...new Set((await new GeminiClient({ apiKey, endpoint }).list(AbortSignal.any([this.controller.signal, AbortSignal.timeout(30_000)]))).filter((id) => !resolveModel(id).generic))];
+      const ai = new GoogleGenAI({ apiKey, httpOptions: { baseUrl: endpoint, retryOptions: { attempts: 1 } } });
+      const models = await ai.models.list({ config: { pageSize: 1000, abortSignal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(30_000)]) } });
+      const listed: string[] = [];
+      for await (const model of models) {
+        if (model.name && model.supportedActions?.includes("generateContent")) listed.push(model.name.replace(/^models\//, ""));
+      }
+      const ids = [...new Set(listed.filter((id) => !resolveModel(id).generic))];
       const fact = { fetchedAtUtc: new Date().toISOString(), ids };
       // Not recorded: provider catalogue facts can be fetched again.
       if (this.controller.signal.aborted) return cached?.ids ?? [];

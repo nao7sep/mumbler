@@ -1,4 +1,4 @@
-import { GeminiHttpError } from "@main/core/gemini-http";
+import { ApiError } from "@google/genai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppPaths, MumblerCard } from "@shared/app-shell";
@@ -194,10 +194,10 @@ describe("executeCardPipeline", () => {
     expect(card.ai.title?.model).toBe("custom-metadata");
   });
 
-  it("caps automatic retries at three attempts and honours capped Retry-After", async () => {
+  it("caps automatic retries at three attempts", async () => {
     vi.useFakeTimers();
     try {
-      mockGenerateText.mockRejectedValue(new GeminiHttpError("Wait before retrying.", 503, "120", "Wait before retrying."));
+      mockGenerateText.mockRejectedValue(new ApiError({ status: 503, message: JSON.stringify({ error: { code: 503, message: "Wait before retrying.", status: "UNAVAILABLE" } }) }));
       const card = makeCard();
       const ctx = makeContext(card, new AbortController().signal);
       ctx.settings.retryPolicy.maxRetries = 20;
@@ -205,13 +205,12 @@ describe("executeCardPipeline", () => {
       await vi.runAllTimersAsync();
       await run;
       expect(mockGenerateText).toHaveBeenCalledTimes(3);
-      expect(vi.mocked(ctx.logger.debug).mock.calls.filter(([op]) => op === "gemini.structured").map(([, , details]) => details)).toEqual([expect.objectContaining({ delayMs: 30_000 }), expect.objectContaining({ delayMs: 30_000 })]);
       expect(card.lastError?.providerReason).toBe("Wait before retrying.");
     } finally { vi.useRealTimers(); }
   });
 
   it.each([500, 502, 504])("reports HTTP %s without automatically resending", async (status) => {
-    mockGenerateText.mockRejectedValue(new GeminiHttpError("Provider could not finish.", status, null, "Provider could not finish."));
+    mockGenerateText.mockRejectedValue(new ApiError({ status, message: JSON.stringify({ error: { code: status, message: "Provider could not finish.", status: "INTERNAL" } }) }));
     const card = makeCard();
     const ctx = makeContext(card, new AbortController().signal);
     await executeCardPipeline(card.id, "structured", "generate", ctx);

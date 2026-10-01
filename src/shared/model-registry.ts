@@ -1,3 +1,5 @@
+import type { GenerateContentConfig } from "@google/genai";
+
 import type { AiRole } from "./ai-models";
 
 interface FamilyPolicy {
@@ -30,10 +32,12 @@ export function resolveModel(id: string): ModelFamily {
   return exception ? { ...family, policy: { ...family.policy, ...exception } } : family;
 }
 
-export function generationPolicy(id: string, role: AiRole): { thinkingConfig?: FamilyPolicy["thinkingConfig"]; maxOutputTokens?: number } {
+// The SDK types `thinkingLevel` as its own enum, whose values are upper case; the
+// policy sends the lower-case value, so the result is asserted to the SDK's type.
+export function generationPolicy(id: string, role: AiRole): GenerateContentConfig {
   const { policy } = resolveModel(id);
   return {
     ...(policy.thinkingConfig ? { thinkingConfig: policy.thinkingConfig } : {}),
     ...(policy.maxOutputTokens ? { maxOutputTokens: role === "metadata" ? 1024 : 65536 } : {}),
-  };
+  } as GenerateContentConfig;
 }

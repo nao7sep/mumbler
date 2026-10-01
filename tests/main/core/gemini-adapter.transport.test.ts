@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // SDK and fs so it can be exercised deterministically without a network or a key.
 // Kept in its own file so the SDK mock doesn't leak into gemini-adapter.test.ts,
 // which needs the real ApiError class.
-const { generateContent, upload, deleteFile, stat, readFile } = vi.hoisted(() => ({
+const { createClient, generateContent, upload, deleteFile, stat, readFile } = vi.hoisted(() => ({
+  createClient: vi.fn(),
   generateContent: vi.fn(),
   upload: vi.fn(),
   deleteFile: vi.fn(),
@@ -13,14 +14,21 @@ const { generateContent, upload, deleteFile, stat, readFile } = vi.hoisted(() =>
   readFile: vi.fn(),
 }));
 
-vi.mock("@main/core/gemini-http", () => ({
-  GeminiClient: class {
-    generateContent = generateContent;
-    upload = upload;
-    delete = deleteFile;
+vi.mock("@google/genai", () => ({
+  GoogleGenAI: class {
+    models = { generateContent };
+    files = { upload, delete: deleteFile };
+    constructor(options: unknown) {
+      createClient(options);
+    }
   },
-  GeminiHttpError: class extends Error {},
-
+  ApiError: class ApiError extends Error {
+    status?: number;
+    constructor(options: { message: string; status?: number }) {
+      super(options.message);
+      this.status = options.status;
+    }
+  },
 }));
 
 vi.mock("node:fs/promises", () => ({ stat, readFile }));
@@ -159,6 +167,7 @@ describe("transcribeWithGemini transport selection", () => {
       name: "files/abc",
       config: {
         abortSignal: expect.any(AbortSignal),
+        httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } },
       },
     });
   });
@@ -173,6 +182,7 @@ describe("transcribeWithGemini transport selection", () => {
       name: "files/xyz",
       config: {
         abortSignal: expect.any(AbortSignal),
+        httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } },
       },
     });
   });
@@ -231,19 +241,85 @@ describe("transcribeWithGemini cancellation and timeout", () => {
   });
 });
 
-describe("the transport never adds a retry", () => {
-  it("propagates a 503 after exactly one generation call", async () => {
+// ai-model-routing-conventions ("Calling the provider"): the SDK's own retries are
+// off everywhere, so card-pipeline's retryPolicy is the only retry authority — a
+// 503 that reaches the SDK must surface as a single attempt, not be silently
+// resent (and re-billed) underneath it.
+describe("SDK retries are disabled (single attempt under a 503)", () => {
+  it("propagates a 503 after exactly one generateContent call, with SDK retries turned off", async () => {
     stat.mockResolvedValue({ size: SAFE - 1 });
-    generateContent.mockRejectedValue(new ApiError({ message: "busy", status: 503 }));
-    await expect(transcribeWithGemini(baseParams())).rejects.toThrow("busy");
-    expect(generateContent).toHaveBeenCalledOnce();
+    generateContent.mockRejectedValue(new ApiError({ message: "unavailable", status: 503 }));
+
+    await expect(transcribeWithGemini(baseParams())).rejects.toMatchObject({ status: 503 });
+
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    expect(createClient.mock.calls[0]?.[0].httpOptions).toEqual({
+      timeout: 60_000,
+      retryOptions: { attempts: 1 },
+    });
   });
 
-  it("propagates an upload failure after exactly one upload", async () => {
+  it("propagates a 503 after exactly one Files-API upload attempt", async () => {
     stat.mockResolvedValue({ size: SAFE + 1 });
-    upload.mockRejectedValue(new ApiError({ message: "busy", status: 503 }));
-    await expect(transcribeWithGemini(baseParams())).rejects.toThrow("busy");
-    expect(upload).toHaveBeenCalledOnce();
+    upload.mockRejectedValue(new ApiError({ message: "unavailable", status: 503 }));
+
+    await expect(transcribeWithGemini(baseParams())).rejects.toMatchObject({ status: 503 });
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(generateContent).not.toHaveBeenCalled();
+    expect(createClient.mock.calls[0]?.[0].httpOptions).toEqual({
+      timeout: 60_000,
+      retryOptions: { attempts: 1 },
+    });
+    // Given its own httpOptions, the SDK's upload drops its resumable-upload headers.
+    expect(upload.mock.calls[0]?.[0].config).not.toHaveProperty("httpOptions");
+  });
+
+  it("states single-attempt httpOptions on the text-generation call", async () => {
+    generateContent.mockResolvedValue({ text: "out", modelVersion: "v1", usageMetadata: null });
+
+    await generateTextWithGemini({
+      apiKey: "test-key",
+      prompt: "hi",
+      model: "gemini-test",
+      timeoutMs: 45_000,
+    });
+
+    expect(createClient.mock.calls[0]?.[0].httpOptions).toEqual({
+      timeout: 45_000,
+      retryOptions: { attempts: 1 },
+    });
+  });
+});
+
+describe("generateTextWithGemini", () => {
+  it("returns trimmed text with no transport field", async () => {
+    generateContent.mockResolvedValue({ text: " result ", modelVersion: "v1", usageMetadata: null });
+
+    const result = await generateTextWithGemini({
+      apiKey: "test-key",
+      prompt: "hi",
+      model: "gemini-test",
+      timeoutMs: 60_000,
+    });
+
+    expect(result.text).toBe("result");
+    expect(result).not.toHaveProperty("transport");
+  });
+
+  it("rejects immediately when already cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      generateTextWithGemini({
+        apiKey: "test-key",
+        prompt: "hi",
+        model: "gemini-test",
+        timeoutMs: 60_000,
+        signal: controller.signal,
+      }),
+    ).rejects.toBeInstanceOf(CancelledError);
     expect(generateContent).not.toHaveBeenCalled();
   });
 });

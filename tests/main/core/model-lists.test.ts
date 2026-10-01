@@ -4,7 +4,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppLogger } from "@main/core/logger";
 const { list } = vi.hoisted(() => ({ list: vi.fn() }));
-vi.mock("@main/core/gemini-http", () => ({ GeminiClient: class { list = list; } }));
+vi.mock("@google/genai", () => ({
+  GoogleGenAI: class {
+    models = {
+      list: async ({ config }: { config: { abortSignal: AbortSignal } }) =>
+        ((await list(config.abortSignal)) as string[]).map((id) => ({ name: `models/${id}`, supportedActions: ["generateContent"] })),
+    };
+  },
+}));
 import { ModelLists } from "@main/core/model-lists";
 
 let root: string;

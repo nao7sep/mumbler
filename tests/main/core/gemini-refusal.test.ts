@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const generateContent = vi.fn();
-vi.mock("@main/core/gemini-http", () => ({
-  GeminiClient: class { generateContent = generateContent; },
-  GeminiHttpError: class extends Error {},
+vi.mock("@google/genai", () => ({
+  GoogleGenAI: class { models = { generateContent }; files = { upload: vi.fn(), get: vi.fn() }; },
+  ApiError: class extends Error {},
 }));
 
 import { generateTextWithGemini, geminiProviderReason, isRetryableGeminiError } from "@main/core/gemini-adapter";

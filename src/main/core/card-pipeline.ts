@@ -19,7 +19,6 @@ import {
   getInlineAudioSafetyLimitBytes,
   getInlineRequestLimitBytes,
   isRetryableGeminiError,
-  retryAfterDelayMs,
   transcribeWithGemini,
 } from "./gemini-adapter";
 import { CancelledError, isCancelledError } from "./cancellation";
@@ -431,7 +430,7 @@ async function executeWithRetry<T>(params: {
         throw error;
       }
 
-      const delayMs = retryAfterDelayMs(error) ?? computeRetryDelayMs(attempt, retryPolicy);
+      const delayMs = computeRetryDelayMs(attempt, retryPolicy);
       await logger.debug(params.op, "Retrying Gemini step after delay.", {
         cardId: params.cardId,
         step: params.step,
