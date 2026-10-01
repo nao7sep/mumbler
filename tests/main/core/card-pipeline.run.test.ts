@@ -1,4 +1,5 @@
 import { ApiError } from "@google/genai";
+import { GeminiResultError } from "@main/core/gemini-adapter";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppPaths, MumblerCard } from "@shared/app-shell";
@@ -215,6 +216,30 @@ describe("executeCardPipeline", () => {
     await executeCardPipeline(card.id, "structured", "generate", ctx);
     expect(mockGenerateText).toHaveBeenCalledOnce();
     expect(card.lastError?.providerReason).toBe("Provider could not finish.");
+  });
+
+  it("records a refusal on the card, and nothing of the kind for a missing key or a 503", async () => {
+    mockGenerateText.mockRejectedValue(new GeminiResultError("Gemini refused this request (SAFETY).", "Please use different audio.", true));
+    const refused = makeCard();
+    await executeCardPipeline(refused.id, "structured", "generate", makeContext(refused, new AbortController().signal));
+    expect(refused.lastError).toMatchObject({ refused: true, providerReason: "Please use different audio." });
+
+    mockGenerateText.mockRejectedValue(new ApiError({ status: 503, message: JSON.stringify({ error: { code: 503, message: "Overloaded.", status: "UNAVAILABLE" } }) }));
+    const unavailable = makeCard();
+    const unavailableCtx = makeContext(unavailable, new AbortController().signal);
+    unavailableCtx.settings.retryPolicy.maxRetries = 1;
+    unavailableCtx.settings.retryPolicy.initialDelayMs = 1;
+    await executeCardPipeline(unavailable.id, "structured", "generate", unavailableCtx);
+    expect(unavailable.lastError).not.toHaveProperty("refused");
+
+    const keyless = makeCard();
+    const keylessCtx = makeContext(keyless, new AbortController().signal);
+    keylessCtx.apiKey = "";
+    mockGenerateText.mockClear();
+    await executeCardPipeline(keyless.id, "structured", "generate", keylessCtx);
+    expect(mockGenerateText).not.toHaveBeenCalled();
+    expect(keyless.status).toBe("Error");
+    expect(keyless.lastError).not.toHaveProperty("refused");
   });
 
   it("marks the card cancelled and makes no Gemini call when the signal is already aborted", async () => {

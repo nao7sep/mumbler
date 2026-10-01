@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CardStatus, MumblerCard, TrimDecision, TrimDecisionKind } from "@shared/app-shell";
 import {
+  canRetryCard,
   describeTrimDecision,
   formatOptionalSeconds,
   getGenerateConfirmBody,
@@ -132,5 +133,22 @@ describe("getRemoveConfirmBody", () => {
 
   it("gives the plain message when there is no work to lose", () => {
     expect(en(getRemoveConfirmBody(card()))).toMatch(/Saved output is not affected/);
+  });
+});
+
+describe("canRetryCard", () => {
+  const failed = (lastError: MumblerCard["lastError"]): MumblerCard =>
+    ({ status: "Error", lastError }) as MumblerCard;
+  const at = { occurredAtUtc: 0, failedStep: "transcription" as const };
+
+  it("offers Retry for a missing key and for a provider failure such as a 503", () => {
+    expect(canRetryCard(failed({ ...at, message: "Gemini API key is not configured." }))).toBe(true);
+    expect(canRetryCard(failed({ ...at, message: "Transcription failed.", providerReason: "The model is overloaded." }))).toBe(true);
+  });
+
+  it("offers no Retry for a refusal, an interrupted run, or a card without an error", () => {
+    expect(canRetryCard(failed({ ...at, message: "Transcription failed.", refused: true }))).toBe(false);
+    expect(canRetryCard(failed({ ...at, message: "Interrupted", failedStep: "startup-recovery" }))).toBe(false);
+    expect(canRetryCard({ status: "Ready to Save", lastError: null } as MumblerCard)).toBe(false);
   });
 });

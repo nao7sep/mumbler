@@ -16,6 +16,7 @@ import {
 import {
   generateTextWithGemini,
   geminiProviderReason,
+  GeminiResultError,
   INLINE_AUDIO_LIMIT_BYTES,
   isRetryableGeminiError,
   transcribeWithGemini,
@@ -335,6 +336,7 @@ export async function executeCardPipeline(
     card.lastError = wasCancelled ? null : {
       message: cardFailureMessage(activeStep),
       ...(providerReason ? { providerReason } : {}),
+      ...(error instanceof GeminiResultError && error.refused ? { refused: true as const } : {}),
       occurredAtUtc: Date.now(),
       failedStep: activeStep,
     };

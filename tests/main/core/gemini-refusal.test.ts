@@ -43,6 +43,15 @@ describe("a refused or truncated Gemini response reports the provider's reason",
     expect(geminiProviderReason(await call().catch((failure) => failure))).toBeNull();
   });
 
+  it("marks a refusal as refused, and a truncation as not", async () => {
+    generateContent.mockResolvedValue({ promptFeedback: { blockReason: "PROHIBITED_CONTENT" }, text: undefined });
+    expect(await call().catch((failure) => failure)).toMatchObject({ refused: true });
+    generateContent.mockResolvedValue({ candidates: [{ finishReason: "PROHIBITED_CONTENT" }], text: "" });
+    expect(await call().catch((failure) => failure)).toMatchObject({ refused: true });
+    generateContent.mockResolvedValue({ candidates: [{ finishReason: "MAX_TOKENS" }], text: "half" });
+    expect(await call().catch((failure) => failure)).toMatchObject({ refused: false });
+  });
+
   it("still returns text on a normal stop, and when no finishReason is given at all", async () => {
     generateContent.mockResolvedValue({ candidates: [{ finishReason: "STOP" }], text: "ok" });
     await expect(call()).resolves.toMatchObject({ text: "ok" });

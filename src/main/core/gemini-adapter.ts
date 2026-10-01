@@ -50,8 +50,9 @@ export interface GeminiRunResult {
   transport: "inline" | "files-api";
 }
 
+// `refused` marks the provider declining the input, which resending cannot change.
 export class GeminiResultError extends Error {
-  constructor(message: string, readonly providerMessage: string | null = null) { super(message); }
+  constructor(message: string, readonly providerMessage: string | null = null, readonly refused = false) { super(message); }
 }
 
 export function geminiProviderReason(error: unknown): string | null {
@@ -283,13 +284,14 @@ function readResponseText(response: GenerateContentResponse): string {
     throw new GeminiResultError(
       `Gemini refused this request (${blockReason}). The input was rejected, not lost — try different audio or wording.`,
       response.promptFeedback?.blockReasonMessage ?? null,
+      true,
     );
   }
 
   const finishReason = response.candidates?.[0]?.finishReason;
   const finishMessage = response.candidates?.[0]?.finishMessage ?? null;
   if (finishReason === "SAFETY" || finishReason === "PROHIBITED_CONTENT") {
-    throw new GeminiResultError(`Gemini refused this request (${finishReason}). Try different audio or wording.`, finishMessage);
+    throw new GeminiResultError(`Gemini refused this request (${finishReason}). Try different audio or wording.`, finishMessage, true);
   }
   if (finishReason === "MAX_TOKENS") {
     throw new GeminiResultError("Gemini stopped at its output limit, so this result is truncated rather than complete.", finishMessage);

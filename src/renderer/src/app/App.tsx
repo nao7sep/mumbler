@@ -69,6 +69,7 @@ import {
   type AppNotification,
 } from "./Notifications";
 import {
+  canRetryCard,
   describeTrimDecision,
   formatOptionalSeconds,
   getGenerateConfirmBody,
@@ -1214,7 +1215,7 @@ function LoadedShell({
                 results={cardActionErrors}
                 onDismiss={(operation) => clearCardActionError(selectedCard.id, operation)}
               />
-              {selectedCard.status === "Error" && selectedCard.lastError?.failedStep && selectedCard.lastError.failedStep !== "startup-recovery" ? (
+              {canRetryCard(selectedCard) ? (
                 <button type="button" className="button button--ghost" disabled={selectedCardIsBusy} onClick={() => handleRequestGenerate(selectedCard, selectedCard.lastError!.failedStep as GenerateTarget)}>{t("common.retry")}</button>
               ) : null}
               <div className="detail-grid">

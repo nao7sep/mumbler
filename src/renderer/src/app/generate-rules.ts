@@ -63,6 +63,15 @@ export function getGenerateDisabledReason(params: {
   return null;
 }
 
+// Retry resends the failed step; a refusal is the provider's verdict on the input,
+// which resending cannot change.
+export function canRetryCard(card: MumblerCard): boolean {
+  return card.status === "Error" &&
+    card.lastError !== null &&
+    card.lastError.failedStep !== "startup-recovery" &&
+    card.lastError.refused !== true;
+}
+
 export function getSaveDisabledReason(params: {
   selectedCard: MumblerCard | null;
   selectedCardIsBusy: boolean;

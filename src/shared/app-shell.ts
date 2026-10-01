@@ -159,6 +159,8 @@ export type TimestampParseStatus = "parsed" | "manual-required";
 export interface CardError {
   /** Human-readable reason from the provider's documented field, never raw transport errors. */
   providerReason?: string;
+  /** The provider refused the input; a retry cannot change that. */
+  refused?: true;
   message: string;
   occurredAtUtc: number;
   failedStep: Exclude<CardProcessingStep, null> | "startup-recovery";
