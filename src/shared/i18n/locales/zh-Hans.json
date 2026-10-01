@@ -249,6 +249,7 @@
   "units.hertz": "{value} Hz",
   "options.title": "选项",
   "options.transcriptionModel": "转写模型",
+  "options.structuredTranscriptionModel": "结构化转写模型",
   "options.metadataModel": "元数据模型",
   "trim.title": "播放与裁剪",
   "trim.analysis": "裁剪分析",
@@ -336,6 +337,8 @@
   "settings.previewDurationHint": "播放开头 / 结尾按钮所播放的秒数。",
   "settings.gemini": "Gemini",
   "settings.geminiHint": "目前仅支持 Gemini 这一个 AI 服务。",
+  "settings.endpoint": "接口地址",
+  "settings.endpointHint": "Mumbler 发送 Gemini 请求的地址。",
   "settings.apiKeyConfigured": "已配置 Gemini API 密钥。",
   "settings.removeKey": "移除密钥",
   "settings.replaceKey": "替换密钥",
@@ -451,8 +454,5 @@
   "player.noTrimMarkers": "无裁剪标记",
   "player.keepToEnd": "保留从 {from} 到结尾",
   "player.keepRange": "保留从 {from} 到 {to}",
-  "queue.resizePane": "调整队列宽度",
-  "settings.endpoint": "接口地址",
-  "settings.endpointHint": "Mumbler 发送 Gemini 请求的地址。",
-  "options.structuredTranscriptionModel": "结构化转写模型"
+  "queue.resizePane": "调整队列宽度"
 }

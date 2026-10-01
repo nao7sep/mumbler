@@ -249,6 +249,7 @@
   "units.hertz": "{value} Hz",
   "options.title": "オプション",
   "options.transcriptionModel": "文字起こしモデル",
+  "options.structuredTranscriptionModel": "構造化した文字起こしのモデル",
   "options.metadataModel": "メタデータモデル",
   "trim.title": "再生とトリム",
   "trim.analysis": "トリムの分析",
@@ -336,6 +337,8 @@
   "settings.previewDurationHint": "最初・最後を再生するボタンで再生する秒数です。",
   "settings.gemini": "Gemini",
   "settings.geminiHint": "現在対応しているAIプロバイダはGeminiだけです。",
+  "settings.endpoint": "接続先URL",
+  "settings.endpointHint": "MumblerがGeminiへのリクエストを送る接続先です。",
   "settings.apiKeyConfigured": "Gemini APIキーが設定されています。",
   "settings.removeKey": "キーを削除",
   "settings.replaceKey": "キーを置き換える",
@@ -451,8 +454,5 @@
   "player.noTrimMarkers": "トリムマーカーなし",
   "player.keepToEnd": "{from}から最後まで残す",
   "player.keepRange": "{from}から{to}まで残す",
-  "queue.resizePane": "キューの幅を変更",
-  "settings.endpoint": "接続先 URL",
-  "settings.endpointHint": "MumblerがGeminiへのリクエストを送る接続先です。",
-  "options.structuredTranscriptionModel": "構造化した文字起こしのモデル"
+  "queue.resizePane": "キューの幅を変更"
 }

@@ -251,6 +251,7 @@
   "units.hertz": "{value} Hz",
   "options.title": "Opzioni",
   "options.transcriptionModel": "Modello di trascrizione",
+  "options.structuredTranscriptionModel": "Modello di trascrizione strutturata",
   "options.metadataModel": "Modello dei metadati",
   "trim.title": "Riproduzione e taglio",
   "trim.analysis": "Analisi del taglio",
@@ -342,6 +343,8 @@
   "settings.previewDurationHint": "Secondi riprodotti dai pulsanti per l’inizio e la fine.",
   "settings.gemini": "Gemini",
   "settings.geminiHint": "Al momento Gemini è l’unico fornitore di IA supportato.",
+  "settings.endpoint": "Indirizzo del servizio",
+  "settings.endpointHint": "L’indirizzo a cui Mumbler invia le richieste a Gemini.",
   "settings.apiKeyConfigured": "È configurata una chiave API di Gemini.",
   "settings.removeKey": "Rimuovi chiave",
   "settings.replaceKey": "Sostituisci chiave",
@@ -461,8 +464,5 @@
   "player.noTrimMarkers": "Nessun marcatore di taglio",
   "player.keepToEnd": "Mantieni da {from} alla fine",
   "player.keepRange": "Mantieni da {from} a {to}",
-  "queue.resizePane": "Ridimensiona la coda",
-  "settings.endpoint": "Indirizzo del servizio",
-  "settings.endpointHint": "L’indirizzo a cui Mumbler invia le richieste a Gemini.",
-  "options.structuredTranscriptionModel": "Modello di trascrizione strutturata"
+  "queue.resizePane": "Ridimensiona la coda"
 }

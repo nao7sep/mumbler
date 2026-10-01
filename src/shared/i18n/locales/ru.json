@@ -252,6 +252,7 @@
   "units.hertz": "{value} Гц",
   "options.title": "Параметры",
   "options.transcriptionModel": "Модель расшифровки",
+  "options.structuredTranscriptionModel": "Модель структурированной расшифровки",
   "options.metadataModel": "Модель метаданных",
   "trim.title": "Воспроизведение и обрезка",
   "trim.analysis": "Анализ обрезки",
@@ -345,6 +346,8 @@
   "settings.previewDurationHint": "Сколько секунд воспроизводят кнопки начала и конца записи.",
   "settings.gemini": "Gemini",
   "settings.geminiHint": "Сейчас Gemini — единственный поддерживаемый поставщик ИИ.",
+  "settings.endpoint": "Адрес сервиса",
+  "settings.endpointHint": "Адрес, на который Mumbler отправляет запросы к Gemini.",
   "settings.apiKeyConfigured": "Ключ API Gemini настроен.",
   "settings.removeKey": "Удалить ключ",
   "settings.replaceKey": "Заменить ключ",
@@ -466,8 +469,5 @@
   "player.noTrimMarkers": "Меток обрезки нет",
   "player.keepToEnd": "Оставить от {from} до конца",
   "player.keepRange": "Оставить от {from} до {to}",
-  "queue.resizePane": "Изменить ширину очереди",
-  "settings.endpoint": "Адрес сервиса",
-  "settings.endpointHint": "Адрес, на который Mumbler отправляет запросы к Gemini.",
-  "options.structuredTranscriptionModel": "Модель структурированной расшифровки"
+  "queue.resizePane": "Изменить ширину очереди"
 }

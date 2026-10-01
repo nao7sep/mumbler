@@ -249,6 +249,7 @@
   "units.hertz": "{value} Hz",
   "options.title": "옵션",
   "options.transcriptionModel": "전사 모델",
+  "options.structuredTranscriptionModel": "구조화된 전사 모델",
   "options.metadataModel": "메타데이터 모델",
   "trim.title": "재생 및 자르기",
   "trim.analysis": "자르기 분석",
@@ -336,6 +337,8 @@
   "settings.previewDurationHint": "처음 / 마지막 재생 버튼으로 재생하는 초입니다.",
   "settings.gemini": "Gemini",
   "settings.geminiHint": "현재 지원되는 AI 제공자는 Gemini뿐입니다.",
+  "settings.endpoint": "엔드포인트 주소",
+  "settings.endpointHint": "Mumbler가 Gemini 요청을 보내는 주소입니다.",
   "settings.apiKeyConfigured": "Gemini API 키가 설정되어 있습니다.",
   "settings.removeKey": "키 제거",
   "settings.replaceKey": "키 교체",
@@ -451,8 +454,5 @@
   "player.noTrimMarkers": "자르기 마커 없음",
   "player.keepToEnd": "{from}부터 끝까지 유지",
   "player.keepRange": "{from}부터 {to}까지 유지",
-  "queue.resizePane": "대기열 너비 조절",
-  "settings.endpoint": "엔드포인트 주소",
-  "settings.endpointHint": "Mumbler가 Gemini 요청을 보내는 주소입니다.",
-  "options.structuredTranscriptionModel": "구조화된 전사 모델"
+  "queue.resizePane": "대기열 너비 조절"
 }

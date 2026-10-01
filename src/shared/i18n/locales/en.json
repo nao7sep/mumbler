@@ -250,6 +250,7 @@
   "units.hertz": "{value} Hz",
   "options.title": "Options",
   "options.transcriptionModel": "Transcription Model",
+  "options.structuredTranscriptionModel": "Structured Transcription Model",
   "options.metadataModel": "Metadata Model",
   "trim.title": "Player and Trim",
   "trim.analysis": "Trim Analysis",
@@ -339,6 +340,8 @@
   "settings.previewDurationHint": "Seconds played by the Play First/Last buttons.",
   "settings.gemini": "Gemini",
   "settings.geminiHint": "Gemini is the only supported AI provider at this time.",
+  "settings.endpoint": "Endpoint URL",
+  "settings.endpointHint": "The address Mumbler sends Gemini requests to.",
   "settings.apiKeyConfigured": "A Gemini API key is configured.",
   "settings.removeKey": "Remove key",
   "settings.replaceKey": "Replace key",
@@ -456,8 +459,5 @@
   "player.noTrimMarkers": "No trim markers",
   "player.keepToEnd": "Keep {from} to the end",
   "player.keepRange": "Keep {from} to {to}",
-  "queue.resizePane": "Resize queue pane",
-  "settings.endpoint": "Endpoint URL",
-  "settings.endpointHint": "The address Mumbler sends Gemini requests to.",
-  "options.structuredTranscriptionModel": "Structured Transcription Model"
+  "queue.resizePane": "Resize queue pane"
 }

@@ -250,6 +250,7 @@
   "units.hertz": "{value} Hz",
   "options.title": "Optionen",
   "options.transcriptionModel": "Transkriptionsmodell",
+  "options.structuredTranscriptionModel": "Modell für strukturierte Transkription",
   "options.metadataModel": "Metadatenmodell",
   "trim.title": "Wiedergabe und Zuschnitt",
   "trim.analysis": "Schnittanalyse",
@@ -339,6 +340,8 @@
   "settings.previewDurationHint": "Sekunden, die über die Schaltflächen zum Abspielen des Anfangs und Endes wiedergegeben werden.",
   "settings.gemini": "Gemini",
   "settings.geminiHint": "Gemini ist derzeit der einzige unterstützte KI-Anbieter.",
+  "settings.endpoint": "Endpunkt-Adresse",
+  "settings.endpointHint": "Die Adresse, an die Mumbler Gemini-Anfragen sendet.",
   "settings.apiKeyConfigured": "Ein Gemini-API-Schlüssel ist eingerichtet.",
   "settings.removeKey": "Schlüssel entfernen",
   "settings.replaceKey": "Schlüssel ersetzen",
@@ -456,8 +459,5 @@
   "player.noTrimMarkers": "Keine Schnittmarken",
   "player.keepToEnd": "Von {from} bis zum Ende behalten",
   "player.keepRange": "Von {from} bis {to} behalten",
-  "queue.resizePane": "Breite der Warteschlange ändern",
-  "settings.endpoint": "Endpunkt-Adresse",
-  "settings.endpointHint": "Die Adresse, an die Mumbler Gemini-Anfragen sendet.",
-  "options.structuredTranscriptionModel": "Modell für strukturierte Transkription"
+  "queue.resizePane": "Breite der Warteschlange ändern"
 }
