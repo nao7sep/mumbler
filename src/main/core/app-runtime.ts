@@ -64,7 +64,7 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
-import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, recoverInterruptedCards, summarizeSettings } from "./settings-schema";
+import { applySettingsDraft, buildSettingsDraft, changedSettingsSets, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, recoverInterruptedCards, summarizeSettings, type SettingsStore } from "./settings-schema";
 import {
   clampQueueWidth,
   createDefaultLayout,
@@ -139,7 +139,7 @@ interface AppRuntimeState {
   // Disposable presentation state (pane width and last-selected card). Loaded
   // leniently: a corrupt layout file self-heals rather than failing startup.
   layout: MumblerLayout | null;
-  settingsStore: JsonStore<MumblerSettings> | null;
+  settingsStore: SettingsStore | null;
   stateStore: JsonStore<MumblerState> | null;
   // Each card's transcription and structured outline, in its own file.
   transcriptStore: TranscriptStore | null;
@@ -246,7 +246,9 @@ export class ApplicationRuntime {
       void logger.warn("backup.record", message, details);
     });
 
-    const settingsStore = createSettingsStore(paths.settingsPath);
+    const settingsStore = createSettingsStore(paths.settingsPath, homedir(), (key) => {
+      void logger.warn("settings.invalid-set", "Invalid settings set; using the built-in.", { key });
+    });
     const stateStore = createStateStore(paths.statePath);
 
     try {
@@ -254,13 +256,6 @@ export class ApplicationRuntime {
 
       const settingsLoad = await settingsStore.load();
       const settings = settingsLoad.value;
-      // Materialize defaults on first launch so the config file is discoverable
-      // and hand-editable. This writes a missing file; it never overwrites an
-      // existing valid one (that path stays in load()).
-      if (settingsLoad.origin === "created") {
-        await settingsStore.save(settings);
-      }
-
       // Resolve whether a Gemini key is available (env-first, then the dedicated
       // secrets file) once, so the snapshot can report presence without async I/O.
       const hasGeminiApiKey = await hasApiKey(
@@ -513,7 +508,7 @@ export class ApplicationRuntime {
       ...this.runtime.settings!,
       checkUpdatesAtLaunch,
     };
-    await this.persistSettings();
+    await this.runtime.settingsStore!.save({ checkUpdatesAtLaunch });
     await this.runtime.logger.info("settings.tool-gates", "Updated audio tool settings.", {
       checkUpdatesAtLaunch,
     });
@@ -635,19 +630,16 @@ export class ApplicationRuntime {
 
     try {
       await ensureDirectories(paths, this.runtime.logger);
-      // Preserve each store before the user-commanded reset writes defaults.
+      // Preserve each store before the user-commanded reset returns to built-ins.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
       const preservedStateFiles = await stateStore.preserveExistingFiles();
       // The preserved state.json keeps its cards' text beside it.
       const preservedTranscripts = await preserveAside(paths.transcriptsDir);
       const preservedLayoutFiles = await layoutStore.preserveExistingFiles();
-      await settingsStore.save(settings);
-      await layoutStore.save(layout);
       // Reuse the per-launch session logger rather than building a new one, so a
       // reset keeps writing to the same file as the rest of the launch.
       const logger = this.runtime.logger;
       const reconciliation = await reconcileWorkingState(paths, state, logger);
-      await stateStore.save(reconciliation.state);
       await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
         workingDir: paths.workingDir,
         preservedSettingsFiles,
@@ -1224,9 +1216,15 @@ export class ApplicationRuntime {
     const previousPreference = this.languagePreference();
     const previousLanguage = this.interfaceLanguage().language;
     const nextSettings = applySettingsDraft(this.runtime.settings!, draft);
+    const defaults = createDefaultSettings();
+    const resets = (draft.resetSets ?? []).filter((key) =>
+      ["geminiModels", "transcriptionModel", "metadataModel", "prompts"].includes(key) &&
+      JSON.stringify(nextSettings[key]) === JSON.stringify(defaults[key]),
+    );
+    const changes = changedSettingsSets(this.runtime.settings!, nextSettings);
+    for (const key of resets) delete changes[key];
+    await this.runtime.settingsStore!.save(changes, resets);
     this.runtime.settings = nextSettings;
-
-    await this.persistSettings();
     applyThemePreference(nextSettings.theme);
     if (nextSettings.language !== previousPreference) {
       this.alignAppKit();
@@ -1347,7 +1345,7 @@ export class ApplicationRuntime {
     this.runtime.settings!.outputDirectory = outputDirectory;
 
     try {
-      await this.persistSettings();
+      await this.runtime.settingsStore!.save({ outputDirectory });
     } catch (error: unknown) {
       this.runtime.settings!.outputDirectory = previousOutputDirectory;
       throw error;
@@ -1767,10 +1765,6 @@ export class ApplicationRuntime {
     };
     this.runtime.layout = layout;
     await this.runtime.layoutStore!.save(layout);
-  }
-
-  private async persistSettings(): Promise<void> {
-    await this.runtime.settingsStore!.save(this.runtime.settings!);
   }
 
   private async setAppWideError(

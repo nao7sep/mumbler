@@ -10,7 +10,6 @@ import {
 
 function validDraft(): SettingsDraft {
   return {
-    schemaVersion: 1,
     language: "system",
     theme: "system",
     uiFontFamily: "",

@@ -19,8 +19,8 @@ export class CorruptStateError extends Error {
 export interface JsonStoreOptions<T> {
   /** Absolute path to the canonical file (e.g. ~/.mumbler/state.json). */
   path: string;
-  /** Highest schema version this build can read. Newer files are refused. */
-  schemaVersion: number;
+  /** When declared, newer schema versions are refused; settings maps omit it. */
+  schemaVersion?: number;
   /** Normalize/validate raw parsed JSON into the typed value. Pure, no I/O. */
   validate: (raw: Record<string, unknown>) => T;
   /** Build the in-memory default when no file exists yet. Pure, no I/O. */
@@ -88,7 +88,7 @@ export class JsonStore<T> {
     const record = raw as Record<string, unknown>;
     const onDiskVersion =
       typeof record.schemaVersion === "number" ? record.schemaVersion : null;
-    if (onDiskVersion !== null && onDiskVersion > this.options.schemaVersion) {
+    if (this.options.schemaVersion !== undefined && onDiskVersion !== null && onDiskVersion > this.options.schemaVersion) {
       throw new CorruptStateError(
         this.options.path,
         `on-disk schema version ${onDiskVersion} is newer than this build supports (${this.options.schemaVersion})`,
@@ -106,6 +106,18 @@ export class JsonStore<T> {
     };
     // Chain on the tail so writes never overlap, and a failed write doesn't
     // wedge the queue (errors propagate to that caller but the chain continues).
+    this.queue = this.queue.then(work, work);
+    return this.queue;
+  }
+
+  /** Serialize a read-modify-write with this store's other writes. */
+  async update(change: (current: T) => T): Promise<void> {
+    const work = async (): Promise<void> => {
+      const { value } = await this.load();
+      const next = change(value);
+      const wire = this.options.serialize ? this.options.serialize(next) : next;
+      await writeJsonFile(this.options.path, wire, { record: this.options.record });
+    };
     this.queue = this.queue.then(work, work);
     return this.queue;
   }

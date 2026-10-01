@@ -53,6 +53,16 @@ describe("applySettingsDraft — happy path", () => {
     expect(result).toEqual(current);
   });
 
+  it("keeps untouched copies when saving another set", () => {
+    const current = createDefaultSettings();
+    current.geminiModels = ["  custom-model  ", "custom-model"];
+    current.prompts.title = "  {structured}  ";
+    const result = applySettingsDraft(current, { ...buildSettingsDraft(current, OUT, BACKUP, false), concurrencyLimit: 5 });
+    expect(result.geminiModels).toEqual(current.geminiModels);
+    expect(result.prompts).toEqual(current.prompts);
+    expect(result.concurrencyLimit).toBe(5);
+  });
+
   it("trims directories to null when blank and parses pattern text", () => {
     const draft = freshDraft();
     draft.outputDirectory = "   ";

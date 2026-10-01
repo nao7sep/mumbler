@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { MumblerCard, MumblerState } from "@shared/app-shell";
 import { CorruptStateError } from "@main/core/json-store";
 import {
+  createDefaultSettings,
   createSettingsStore,
   createStateStore,
   recoverInterruptedCards,
@@ -221,6 +222,58 @@ describe("state store", () => {
 });
 
 describe("settings store", () => {
+  it("loads no file without seeding and writes just one changed set", async () => {
+    const store = createSettingsStore(settingsPath());
+    expect((await store.load()).value).toEqual(createDefaultSettings());
+    await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await store.save({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
+    expect((await store.load()).value).toEqual({ ...createDefaultSettings(), concurrencyLimit: 5 });
+  });
+
+  it("accepts an old version key and drops it and other unknown keys at the next write", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 99, version: 99, theme: "dark", retired: true }));
+    const store = createSettingsStore(settingsPath());
+    expect((await store.load()).value.theme).toBe("dark");
+    await store.save({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ theme: "dark", concurrencyLimit: 5 });
+  });
+
+  it("retains sets changed on disk since load and serializes overlapping patches", async () => {
+    const store = createSettingsStore(settingsPath());
+    await store.load();
+    await writeFile(settingsPath(), JSON.stringify({ theme: "dark" }));
+    await Promise.all([store.save({ concurrencyLimit: 5 }), store.save({ skipIntervalSec: 20 })]);
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ theme: "dark", concurrencyLimit: 5, skipIntervalSec: 20 });
+  });
+
+  it("keeps an empty model list as the user's copy", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ geminiModels: [] }));
+    expect((await createSettingsStore(settingsPath()).load()).value.geminiModels).toEqual([]);
+  });
+
+  it("falls back for a malformed whole set and warns once with its key", async () => {
+    const warnings: string[] = [];
+    await writeFile(settingsPath(), JSON.stringify({
+      prompts: { structured: "custom" },
+      retryPolicy: { maxRetries: 5 },
+      timeouts: { transcriptionMs: 10 },
+      theme: "sepia",
+    }));
+    const store = createSettingsStore(settingsPath(), dir, (key) => warnings.push(key));
+    expect((await store.load()).value).toEqual(createDefaultSettings());
+    await store.load();
+    expect(warnings).toEqual(["theme", "prompts", "retryPolicy", "timeouts"]);
+    await store.save({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8")).prompts).toEqual({ structured: "custom" });
+  });
+
+  it("keeps complete clusters without filling members from built-ins", async () => {
+    const prompts = { structured: "", title: "custom", slug: "custom", extra: "kept" };
+    await writeFile(settingsPath(), JSON.stringify({ prompts }));
+    expect((await createSettingsStore(settingsPath()).load()).value.prompts).toEqual(prompts);
+  });
+
   it("normalizes out-of-range settings values on load", async () => {
     await writeFile(
       settingsPath(),

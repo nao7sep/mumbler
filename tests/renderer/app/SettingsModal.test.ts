@@ -27,7 +27,6 @@ beforeEach(() => {
 
 function draft(): SettingsDraft {
   return {
-    schemaVersion: 1,
     language: "system",
     theme: "system",
     uiFontFamily: "",

@@ -14,15 +14,14 @@ import {
   normalizeUtcMs,
   resolveTimezone,
 } from "@shared/timestamps";
-import { normalizeLanguagePreference } from "@shared/i18n/languages";
+import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
-import { DEFAULT_GEMINI_MODELS, THEME_PREFERENCES, normalizeThemePreference } from "@shared/app-shell";
+import { DEFAULT_GEMINI_MODELS, THEME_PREFERENCES } from "@shared/app-shell";
 import { JsonStore } from "./json-store";
 import { OperationError } from "./operation-error";
 import { resolvePathFromHome } from "./storage-root";
 import { multiline } from "./text-cleanup";
 
-const SETTINGS_SCHEMA_VERSION = 1;
 // Version 2 keeps each card's transcription and structured outline in the card's
 // own file under transcripts/ (TranscriptStore), not in state.json. Version 1
 // files still load: their bodies are read here and moved out on first launch.
@@ -32,14 +31,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function asNullableString(value: unknown): string | null {
-  return value === null ? null : asString(value);
 }
 
 function asStringArray(value: unknown): string[] | null {
@@ -52,97 +43,64 @@ function asPositiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
 }
 
-function asRatio(value: unknown): number | null {
-  return typeof value === "number" && value >= 0 && value <= 1 ? value : null;
+type SettingsValidator = (value: unknown) => boolean;
+const isString: SettingsValidator = (value) => typeof value === "string";
+const isPath: SettingsValidator = (value) => value === null || isString(value);
+const isPositive: SettingsValidator = (value) => asPositiveInteger(value) !== null;
+const isStrings: SettingsValidator = (value) => asStringArray(value) !== null;
+function hasMembers(value: unknown, members: Record<string, SettingsValidator>): boolean {
+  const record = asRecord(value);
+  return record !== null && Object.entries(members).every(([key, valid]) => valid(record[key]));
 }
 
-// The owned Gemini model list: use the stored array when present and non-empty
-// (trimmed + de-duplicated); otherwise fall back to the current built-in defaults.
-// A key absent from an older config resolves to the default, per the
-// config-seeding-conventions' built-in fallback.
-function normalizeGeminiModels(value: unknown, fallback: string[]): string[] {
-  const parsed = asStringArray(value);
-  if (parsed === null) {
-    return fallback;
-  }
-  const cleaned = deduplicateStrings(
-    parsed.map((entry) => entry.trim()).filter((entry) => entry.length > 0),
-  );
-  return cleaned.length > 0 ? cleaned : fallback;
-}
+// The declared set keys also own the shape boundary and unknown-key filtering.
+const SETTINGS_SETS = {
+  language: (value) => value === "system" || isLanguage(value),
+  theme: (value) => THEME_PREFERENCES.some(({ value: theme }) => theme === value),
+  uiFontFamily: isString,
+  outputDirectory: isPath,
+  backupDirectory: isPath,
+  defaultTimezone: (value) => typeof value === "string" && (value === SYSTEM_TIMEZONE || isValidTimezone(value)),
+  timestampPatterns: isStrings,
+  skipIntervalSec: isPositive,
+  previewSnippetSeconds: isPositive,
+  geminiModels: isStrings,
+  transcriptionModel: isString,
+  metadataModel: isString,
+  concurrencyLimit: isPositive,
+  prompts: (value) => hasMembers(value, { structured: isString, title: isString, slug: isString }),
+  retryPolicy: (value) => hasMembers(value, {
+    maxRetries: isPositive, initialDelayMs: isPositive, maxDelayMs: isPositive,
+    jitterRatio: (ratio) => typeof ratio === "number" && isRatioSetting(ratio),
+  }),
+  timeouts: (value) => hasMembers(value, { transcriptionMs: isPositive, metadataMs: isPositive }),
+  checkUpdatesAtLaunch: (value) => typeof value === "boolean",
+} satisfies Record<keyof MumblerSettings, SettingsValidator>;
+const SETTINGS_SET_KEYS = Object.keys(SETTINGS_SETS) as (keyof MumblerSettings)[];
 
-function normalizeOptionalPath(value: unknown, homeDirectory: string): string | null {
-  const raw = asNullableString(value)?.trim() ?? "";
-  return raw.length === 0 ? null : resolvePathFromHome(raw, homeDirectory);
-}
-
-// "system" or a zone Intl can use; anything else falls back to the default.
-function normalizeTimezoneSetting(value: unknown, fallback: string): string {
-  const raw = asString(value);
-  return raw !== null && (raw === SYSTEM_TIMEZONE || isValidTimezone(raw)) ? raw : fallback;
+function knownSettings(raw: Record<string, unknown>): Partial<MumblerSettings> {
+  return Object.fromEntries(SETTINGS_SET_KEYS.filter((key) => Object.hasOwn(raw, key)).map((key) => [key, raw[key]]));
 }
 
 function normalizeSettings(
-  raw: Record<string, unknown>,
-  defaults: MumblerSettings,
+  raw: Partial<MumblerSettings>,
   homeDirectory: string,
+  warn: (key: keyof MumblerSettings) => void,
 ): MumblerSettings {
-  const prompts = asRecord(raw.prompts);
-  const retryPolicy = asRecord(raw.retryPolicy);
-  const timeouts = asRecord(raw.timeouts);
-
-  return {
-    schemaVersion: SETTINGS_SCHEMA_VERSION,
-    language: normalizeLanguagePreference(raw.language),
-    // Appearance
-    theme: normalizeThemePreference(raw.theme),
-    // Free text; blank resolves to the built-in default stack at apply time.
-    uiFontFamily: asString(raw.uiFontFamily) ?? defaults.uiFontFamily,
-    // Files
-    outputDirectory: normalizeOptionalPath(raw.outputDirectory, homeDirectory),
-    backupDirectory: normalizeOptionalPath(raw.backupDirectory, homeDirectory),
-    // Import
-    defaultTimezone: normalizeTimezoneSetting(raw.defaultTimezone, defaults.defaultTimezone),
-    timestampPatterns: asStringArray(raw.timestampPatterns) ?? defaults.timestampPatterns,
-    // Player
-    skipIntervalSec: asPositiveInteger(raw.skipIntervalSec) ?? defaults.skipIntervalSec,
-    previewSnippetSeconds:
-      asPositiveInteger(raw.previewSnippetSeconds) ?? defaults.previewSnippetSeconds,
-    // AI
-    // raw.geminiApiKeyObfuscated (a legacy key stored in this file before the
-    // secrets-file move) is deliberately NOT carried over: it is dropped here on
-    // load, and never written back, so the next save scrubs it from config.json.
-    // Pre-release, this needs no migration — a user with a key in the old settings
-    // simply re-enters it once into the dedicated secrets store.
-    geminiModels: normalizeGeminiModels(raw.geminiModels, defaults.geminiModels),
-    transcriptionModel: asString(raw.transcriptionModel) ?? defaults.transcriptionModel,
-    metadataModel: asString(raw.metadataModel) ?? defaults.metadataModel,
-    concurrencyLimit: asPositiveInteger(raw.concurrencyLimit) ?? defaults.concurrencyLimit,
-    prompts: {
-      structured: asString(prompts?.structured) ?? defaults.prompts.structured,
-      title: asString(prompts?.title) ?? defaults.prompts.title,
-      slug: asString(prompts?.slug) ?? defaults.prompts.slug,
-    },
-    retryPolicy: {
-      maxRetries: asPositiveInteger(retryPolicy?.maxRetries) ?? defaults.retryPolicy.maxRetries,
-      initialDelayMs:
-        asPositiveInteger(retryPolicy?.initialDelayMs) ?? defaults.retryPolicy.initialDelayMs,
-      maxDelayMs: asPositiveInteger(retryPolicy?.maxDelayMs) ?? defaults.retryPolicy.maxDelayMs,
-      jitterRatio: asRatio(retryPolicy?.jitterRatio) ?? defaults.retryPolicy.jitterRatio,
-    },
-    timeouts: {
-      transcriptionMs:
-        asPositiveInteger(timeouts?.transcriptionMs) ?? defaults.timeouts.transcriptionMs,
-      metadataMs: asPositiveInteger(timeouts?.metadataMs) ?? defaults.timeouts.metadataMs,
-    },
-    // The one managed-audio-tool toggle: check for updates at launch. Missing key
-    // → default. Nothing auto-downloads or auto-installs, so there is no second
-    // gate and no invariant between them.
-    checkUpdatesAtLaunch:
-      typeof raw.checkUpdatesAtLaunch === "boolean"
-        ? raw.checkUpdatesAtLaunch
-        : defaults.checkUpdatesAtLaunch,
-  };
+  const settings = createDefaultSettings();
+  for (const key of SETTINGS_SET_KEYS) {
+    if (!Object.hasOwn(raw, key)) continue;
+    if (!SETTINGS_SETS[key](raw[key])) {
+      warn(key);
+      continue;
+    }
+    Object.assign(settings, { [key]: raw[key] });
+  }
+  for (const key of ["outputDirectory", "backupDirectory"] as const) {
+    const path = settings[key]?.trim() ?? "";
+    settings[key] = path.length === 0 ? null : resolvePathFromHome(path, homeDirectory);
+  }
+  return settings;
 }
 
 function normalizePendingImportRecord(item: PendingImportReviewItem): PendingImportReviewItem {
@@ -392,7 +350,6 @@ function requireRatio(value: number, label: string): number {
 
 export function createDefaultSettings(): MumblerSettings {
   return {
-    schemaVersion: SETTINGS_SCHEMA_VERSION,
     language: "system",
     // Appearance
     theme: "system",
@@ -409,7 +366,7 @@ export function createDefaultSettings(): MumblerSettings {
     // Player
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,
-    // AI — the suggestion list is seeded from DEFAULT_GEMINI_MODELS and is then the
+    // AI — the built-in suggestion list is DEFAULT_GEMINI_MODELS; a saved copy is the
     // user's to edit; the two selections are by-value pointers into it. A wrong id
     // surfaces at call time, not here.
     geminiModels: [...DEFAULT_GEMINI_MODELS],
@@ -444,22 +401,56 @@ export function createDefaultSettings(): MumblerSettings {
   };
 }
 
-// Stores for the two canonical files. Each owns serialized atomic writes and
-// non-destructive loading (missing → defaults, malformed or newer-than-supported
-// → CorruptStateError with the file left untouched).
-// Startup recovery (recoverInterruptedCards) and filesystem reconciliation are
-// applied by the caller after load, keeping the store a pure persistence layer.
+// Settings keep the user map separate from effective built-ins. All patches
+// re-read inside the JsonStore write queue; the app holds a single-instance lock.
+export class SettingsStore {
+  private readonly store: JsonStore<Partial<MumblerSettings>>;
+  private readonly warned = new Set<keyof MumblerSettings>();
+
+  constructor(
+    path: string,
+    private readonly homeDirectory: string,
+    private readonly warn: (key: keyof MumblerSettings) => void,
+  ) {
+    this.store = new JsonStore({ path, validate: knownSettings, createDefault: () => ({}) });
+  }
+
+  get path(): string { return this.store.path; }
+
+  async load() {
+    const loaded = await this.store.load();
+    return { ...loaded, value: normalizeSettings(loaded.value, this.homeDirectory, (key) => {
+      if (this.warned.has(key)) return;
+      this.warned.add(key);
+      this.warn(key);
+    }) };
+  }
+
+  async save(sets: Partial<MumblerSettings>, reset: readonly (keyof MumblerSettings)[] = []): Promise<void> {
+    if (Object.keys(sets).length === 0 && reset.length === 0) return;
+    await this.store.update((current) => {
+      const next = { ...current, ...knownSettings(sets) };
+      for (const key of reset) delete next[key];
+      return next;
+    });
+  }
+
+  flush(): Promise<void> { return this.store.flush(); }
+  preserveExistingFiles(): Promise<string[]> { return this.store.preserveExistingFiles(); }
+}
+
 export function createSettingsStore(
   path: string,
   homeDirectory: string = homedir(),
-): JsonStore<MumblerSettings> {
-  return new JsonStore<MumblerSettings>({
-    path,
-    schemaVersion: SETTINGS_SCHEMA_VERSION,
-    validate: (raw) =>
-      normalizeSettings(raw, createDefaultSettings(), homeDirectory),
-    createDefault: () => createDefaultSettings(),
-  });
+  warn: (key: keyof MumblerSettings) => void = (key) => console.warn(`Invalid settings set: ${key}`),
+): SettingsStore {
+  return new SettingsStore(path, homeDirectory, warn);
+}
+
+export function changedSettingsSets(current: MumblerSettings, next: MumblerSettings): Partial<MumblerSettings> {
+  return Object.fromEntries(SETTINGS_SET_KEYS.filter((key) =>
+    JSON.stringify(current[key]) !== JSON.stringify(next[key]),
+  ).map((key) => [key, next[key]]));
 }
 
 export function createStateStore(path: string): JsonStore<MumblerState> {
@@ -520,7 +511,6 @@ export function buildSettingsDraft(
   hasGeminiApiKey: boolean,
 ): SettingsDraft {
   return {
-    schemaVersion: SETTINGS_SCHEMA_VERSION,
     language: settings.language,
     // Appearance
     theme: settings.theme,
@@ -626,7 +616,7 @@ export function applySettingsDraft(
     throw new OperationError("Retry max delay must be greater than or equal to retry initial delay.");
   }
 
-  return {
+  const next: MumblerSettings = {
     ...current,
     language: normalizeLanguagePreference(draft.language),
     // Appearance
@@ -669,5 +659,24 @@ export function applySettingsDraft(
       metadataMs: metadataTimeoutMs,
     },
   };
-}
 
+  // An unchanged form field must not rewrite its set merely because Save trims
+  // editable text. In particular, keep an untouched stored cluster whole.
+  const baseline = buildSettingsDraft(current, "", "", draft.hasGeminiApiKey);
+  const fields: Partial<Record<keyof MumblerSettings, readonly (keyof SettingsDraft)[]>> = {
+    timestampPatterns: ["timestampPatternsText"],
+    geminiModels: ["geminiModelsText"],
+    prompts: ["structuredPrompt", "titlePrompt", "slugPrompt"],
+    retryPolicy: ["retryMaxRetries", "retryInitialDelayMs", "retryMaxDelayMs", "retryJitterRatio"],
+    timeouts: ["transcriptionTimeoutMs", "metadataTimeoutMs"],
+    checkUpdatesAtLaunch: [],
+  };
+  for (const key of SETTINGS_SET_KEYS) {
+    if (draft.resetSets?.some((reset) => reset === key)) continue;
+    const draftFields = fields[key] ?? [key as keyof SettingsDraft];
+    if (draftFields.every((field) => draft[field] === baseline[field])) {
+      Object.assign(next, { [key]: current[key] });
+    }
+  }
+  return next;
+}

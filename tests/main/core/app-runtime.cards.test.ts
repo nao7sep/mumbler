@@ -676,6 +676,47 @@ describe("each card's text in its own file", () => {
 });
 
 describe("settings, secrets and the window's own state", () => {
+  it("does not materialize sets when an unchanged draft is saved", async () => {
+    await runtime.saveSettingsDraft(runtime.getSettingsDraft());
+    expect(await exists(join(home, "config.json"))).toBe(false);
+  });
+
+  it("launches without a config file and writes only the edited set", async () => {
+    expect(await exists(join(home, "config.json"))).toBe(false);
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ concurrencyLimit: 5 });
+  });
+
+  it("writes only the Audio Tools update toggle", async () => {
+    await runtime.saveToolSettings(false);
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ checkUpdatesAtLaunch: false });
+  });
+
+  it("deletes reset model and prompt copies instead of writing built-ins", async () => {
+    await runtime.saveSettingsDraft({
+      ...runtime.getSettingsDraft(), geminiModelsText: "custom-model",
+      transcriptionModel: "custom-model", metadataModel: "custom-model",
+      structuredPrompt: "Custom {transcript}", concurrencyLimit: 5,
+    });
+    const models = runtime.getDefaultModels();
+    const prompts = runtime.getDefaultPrompts();
+    await runtime.saveSettingsDraft({
+      ...runtime.getSettingsDraft(), geminiModelsText: models.models.join("\n"),
+      transcriptionModel: models.transcriptionModel, metadataModel: models.metadataModel,
+      structuredPrompt: prompts.structured, titlePrompt: prompts.title, slugPrompt: prompts.slug,
+      resetSets: ["geminiModels", "transcriptionModel", "metadataModel", "prompts"],
+    });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ concurrencyLimit: 5 });
+  });
+
+  it("keeps edits made after requesting a reset", async () => {
+    await runtime.saveSettingsDraft({
+      ...runtime.getSettingsDraft(), geminiModelsText: "later-model",
+      resetSets: ["geminiModels", "transcriptionModel", "metadataModel"],
+    });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ geminiModels: ["later-model"] });
+  });
+
   it("keeps the queue pane width the user dragged to, within what the window allows", async () => {
     expect((await runtime.saveLayout(420)).layout?.queueWidth).toBe(420);
 
@@ -699,7 +740,7 @@ describe("settings, secrets and the window's own state", () => {
 
     expect(snapshot.settingsSummary?.hasGeminiApiKey).toBe(true);
     expect(JSON.stringify(snapshot), "only the presence is reported").not.toContain("AIza-secret-key");
-    expect(await readFile(join(home, "config.json"), "utf8")).not.toContain("AIza-secret-key");
+    expect(await exists(join(home, "config.json"))).toBe(false);
     const secrets = await readFile(join(home, "api-keys.json"), "utf8");
     expect(secrets, "the key is not left lying in plain sight").not.toContain("AIza-secret-key");
     expect(JSON.parse(secrets).keys.gemini, "it is stored under its own id").toMatch(/^obf:/);
@@ -743,6 +784,9 @@ describe("settings, secrets and the window's own state", () => {
 
     expect(cards(snapshot)).toEqual([]);
     expect(snapshot.settingsSummary?.defaultTimezone).not.toBe("Europe/Berlin");
+    expect(await exists(join(home, "config.json"))).toBe(false);
+    expect(await exists(join(home, "layout.json"))).toBe(false);
+    expect(await exists(join(home, "state.json"))).toBe(false);
     expect(await exists(pending.workingFilePath), "the orphaned working copy is swept").toBe(false);
     expect(await exists(pending.originalSourcePath), "the user's own file is untouched").toBe(true);
   });

@@ -199,6 +199,7 @@ export function useSettingsModal({
           ? current
           : {
               ...current,
+              resetSets: [...new Set([...(current.resetSets ?? []), "prompts" as const])],
               structuredPrompt: defaults.structured,
               titlePrompt: defaults.title,
               slugPrompt: defaults.slug,
@@ -210,10 +211,7 @@ export function useSettingsModal({
     }
   }
 
-  // Reset for the owned Gemini model list (config-seeding-conventions' reset
-  // control): pulls the current built-in models and default selections into the
-  // draft, replacing the user's list and selections wholesale. It only touches the
-  // draft — Save persists, closing without saving keeps the user's models.
+  // Reset intent stays in the draft until Save, so Cancel keeps the user's copy.
   async function handleRestoreDefaultModels(): Promise<void> {
     try {
       const defaults = await window.mumbler.getDefaultModels();
@@ -222,6 +220,7 @@ export function useSettingsModal({
           ? current
           : {
               ...current,
+              resetSets: [...new Set([...(current.resetSets ?? []), "geminiModels" as const, "transcriptionModel" as const, "metadataModel" as const])],
               geminiModelsText: defaults.models.join("\n"),
               transcriptionModel: defaults.transcriptionModel,
               metadataModel: defaults.metadataModel,

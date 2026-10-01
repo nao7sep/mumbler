@@ -157,7 +157,6 @@ export function normalizeThemePreference(value: unknown): ThemePreference {
 }
 
 export interface MumblerSettings {
-  schemaVersion: 1;
   // The interface language: "system" follows the computer's language on every
   // launch, a tag keeps that language (localization-conventions).
   language: LanguagePreference;
@@ -182,11 +181,8 @@ export interface MumblerSettings {
   // environment-first and stored in its own 0600 file (api-keys.json), never in
   // this shared settings store. See src/main/core/api-keys.ts.
   //
-  // The user-owned, editable Gemini model suggestion list (config-seeding-conventions'
-  // Shape 1): seeded from DEFAULT_GEMINI_MODELS at first run, then the user's to
-  // add to, remove from, or edit. transcriptionModel/metadataModel are by-value
-  // selections into it; a value outside the list is allowed (free-text) and is
-  // validated at call time by the adapter, not here.
+  // The editable Gemini suggestions use the built-in list until the user saves
+  // their own copy. Selections outside it are kept and checked by the provider.
   geminiModels: string[];
   transcriptionModel: string;
   metadataModel: string;
@@ -371,8 +367,10 @@ export interface SettingsSummary {
   checkUpdatesAtLaunch: boolean;
 }
 
+export type ResetSettingsSet = "geminiModels" | "transcriptionModel" | "metadataModel" | "prompts";
+
 export interface SettingsDraft {
-  schemaVersion: 1;
+  resetSets?: ResetSettingsSet[];
   language: LanguagePreference;
   // Appearance
   theme: ThemePreference;
