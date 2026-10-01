@@ -124,6 +124,11 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
   handle(APP_SHELL_CHANNELS.getInterfaceLanguage, () => runtime.interfaceLanguage());
   handle(APP_SHELL_CHANNELS.getSnapshot, () => runtime.getSnapshot());
   handle(APP_SHELL_CHANNELS.getSettingsDraft, () => runtime.getSettingsDraft());
+  handle(APP_SHELL_CHANNELS.getModelList, (_event, endpoint: string, force: boolean = false) => {
+    assertString(endpoint, "endpoint");
+    if (typeof force !== "boolean") throw new Error("Invalid model refresh flag.");
+    return runtime.getModelList(endpoint, force);
+  });
   handle(APP_SHELL_CHANNELS.getDefaultPrompts, () => runtime.getDefaultPrompts());
   handle(APP_SHELL_CHANNELS.getDefaultModels, () => runtime.getDefaultModels());
 

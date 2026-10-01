@@ -16,7 +16,8 @@ import {
 } from "@shared/timestamps";
 import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
-import { DEFAULT_GEMINI_MODELS, THEME_PREFERENCES } from "@shared/app-shell";
+import { THEME_PREFERENCES } from "@shared/app-shell";
+import { defaultModelFor, GEMINI_ENDPOINT } from "@shared/ai-models";
 import { JsonStore } from "./json-store";
 import { OperationError } from "./operation-error";
 import { resolvePathFromHome } from "./storage-root";
@@ -64,9 +65,12 @@ const SETTINGS_SETS = {
   timestampPatterns: isStrings,
   skipIntervalSec: isPositive,
   previewSnippetSeconds: isPositive,
-  geminiModels: isStrings,
-  transcriptionModel: isString,
-  metadataModel: isString,
+  provider: (value) => value === "gemini",
+  "gemini.endpoint": isString,
+  extraModelIds: (value) => hasMembers(value, { gemini: isStrings }),
+  "gemini.transcription": isString,
+  "gemini.outline": isString,
+  "gemini.metadata": isString,
   concurrencyLimit: isPositive,
   prompts: (value) => hasMembers(value, { structured: isString, title: isString, slug: isString }),
   retryPolicy: (value) => hasMembers(value, {
@@ -366,15 +370,12 @@ export function createDefaultSettings(): MumblerSettings {
     // Player
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,
-    // AI — the built-in suggestion list is DEFAULT_GEMINI_MODELS; a saved copy is the
-    // user's to edit; the two selections are by-value pointers into it. A wrong id
-    // surfaces at call time, not here.
-    geminiModels: [...DEFAULT_GEMINI_MODELS],
-    // Both default to flash, not to the pro that leads the list: best quality by
-    // default, and flash currently benchmarks above 3.1-pro-preview (see
-    // DEFAULT_GEMINI_MODELS). Transcription moves to a newer pro when one ships.
-    transcriptionModel: "gemini-3.7-flash",
-    metadataModel: "gemini-3.7-flash",
+    provider: "gemini",
+    "gemini.endpoint": GEMINI_ENDPOINT,
+    extraModelIds: { gemini: [] },
+    "gemini.transcription": defaultModelFor("gemini", "transcription"),
+    "gemini.outline": defaultModelFor("gemini", "text-balanced"),
+    "gemini.metadata": defaultModelFor("gemini", "text-fast"),
     concurrencyLimit: 3,
     prompts: {
       structured:
@@ -385,7 +386,7 @@ export function createDefaultSettings(): MumblerSettings {
         "Create a short English URL slug for the title. Lowercase a–z, digits, and hyphens only. No leading or trailing hyphen. Aim for 3–6 words. Output only the slug.\n\n<title>\n{title}\n</title>",
     },
     retryPolicy: {
-      maxRetries: 3,
+      maxRetries: 2,
       initialDelayMs: 1000,
       maxDelayMs: 16000,
       jitterRatio: 0.2,
@@ -496,9 +497,10 @@ export function summarizeSettings(
     previewSnippetSeconds: settings.previewSnippetSeconds,
     // AI
     hasGeminiApiKey,
-    geminiModels: settings.geminiModels,
-    transcriptionModel: settings.transcriptionModel,
-    metadataModel: settings.metadataModel,
+    extraModelIds: settings.extraModelIds,
+    transcriptionModel: settings["gemini.transcription"],
+    outlineModel: settings["gemini.outline"],
+    metadataModel: settings["gemini.metadata"],
     concurrencyLimit: settings.concurrencyLimit,
     checkUpdatesAtLaunch: settings.checkUpdatesAtLaunch,
   };
@@ -528,9 +530,12 @@ export function buildSettingsDraft(
     previewSnippetSeconds: settings.previewSnippetSeconds,
     // AI (presence only; the key value is never part of the draft)
     hasGeminiApiKey,
-    geminiModelsText: settings.geminiModels.join("\n"),
-    transcriptionModel: settings.transcriptionModel,
-    metadataModel: settings.metadataModel,
+    provider: settings.provider,
+    geminiEndpoint: settings["gemini.endpoint"],
+    extraModelIdsText: settings.extraModelIds.gemini.join("\n"),
+    transcriptionModel: settings["gemini.transcription"],
+    outlineModel: settings["gemini.outline"],
+    metadataModel: settings["gemini.metadata"],
     concurrencyLimit: settings.concurrencyLimit,
     structuredPrompt: settings.prompts.structured,
     titlePrompt: settings.prompts.title,
@@ -553,7 +558,9 @@ export function applySettingsDraft(
   const backupDirectory = draft.backupDirectory.trim();
   const defaultTimezone = draft.defaultTimezone.trim();
   const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
-  const geminiModels = deduplicateStrings(parseSettingsEntries(draft.geminiModelsText));
+  const extraModelIds = { gemini: deduplicateStrings(parseSettingsEntries(draft.extraModelIdsText)) };
+  const geminiEndpoint = draft.geminiEndpoint.trim();
+  const outlineModel = draft.outlineModel.trim();
   const transcriptionModel = draft.transcriptionModel.trim();
   const metadataModel = draft.metadataModel.trim();
   // Prompt templates are multi-line bodies (instructions plus <transcript>/<source>/
@@ -577,9 +584,12 @@ export function applySettingsDraft(
     throw new OperationError("Add at least one timestamp regex pattern.");
   }
 
-  if (geminiModels.length === 0) {
-    throw new OperationError("Add at least one Gemini model.");
-  }
+  if (draft.provider !== "gemini") throw new OperationError("Choose a supported provider.");
+  try {
+    const url = new URL(geminiEndpoint);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
+  } catch { throw new OperationError("Endpoint must be an HTTP or HTTPS URL without credentials, query, or fragment."); }
+  if (!outlineModel) throw new OperationError("Outline model is required.");
 
   if (transcriptionModel.length === 0) {
     throw new OperationError("Transcription model is required.");
@@ -639,9 +649,12 @@ export function applySettingsDraft(
     skipIntervalSec,
     previewSnippetSeconds,
     // AI (the Gemini key is set via its own IPC path, not this draft)
-    geminiModels,
-    transcriptionModel,
-    metadataModel,
+    provider: draft.provider,
+    "gemini.endpoint": geminiEndpoint,
+    extraModelIds,
+    "gemini.transcription": transcriptionModel,
+    "gemini.outline": outlineModel,
+    "gemini.metadata": metadataModel,
     concurrencyLimit,
     prompts: {
       structured: structuredPrompt,
@@ -665,7 +678,11 @@ export function applySettingsDraft(
   const baseline = buildSettingsDraft(current, "", "", draft.hasGeminiApiKey);
   const fields: Partial<Record<keyof MumblerSettings, readonly (keyof SettingsDraft)[]>> = {
     timestampPatterns: ["timestampPatternsText"],
-    geminiModels: ["geminiModelsText"],
+    extraModelIds: ["extraModelIdsText"],
+    "gemini.endpoint": ["geminiEndpoint"],
+    "gemini.transcription": ["transcriptionModel"],
+    "gemini.outline": ["outlineModel"],
+    "gemini.metadata": ["metadataModel"],
     prompts: ["structuredPrompt", "titlePrompt", "slugPrompt"],
     retryPolicy: ["retryMaxRetries", "retryInitialDelayMs", "retryMaxDelayMs", "retryJitterRatio"],
     timeouts: ["transcriptionTimeoutMs", "metadataTimeoutMs"],

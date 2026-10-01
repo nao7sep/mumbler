@@ -743,27 +743,27 @@ describe("settings, secrets and the window's own state", () => {
 
   it("deletes reset model and prompt copies instead of writing built-ins", async () => {
     await runtime.saveSettingsDraft({
-      ...runtime.getSettingsDraft(), geminiModelsText: "custom-model",
+      ...runtime.getSettingsDraft(), extraModelIdsText: "custom-model",
       transcriptionModel: "custom-model", metadataModel: "custom-model",
       structuredPrompt: "Custom {transcript}", concurrencyLimit: 5,
     });
     const models = runtime.getDefaultModels();
     const prompts = runtime.getDefaultPrompts();
     await runtime.saveSettingsDraft({
-      ...runtime.getSettingsDraft(), geminiModelsText: models.models.join("\n"),
-      transcriptionModel: models.transcriptionModel, metadataModel: models.metadataModel,
+      ...runtime.getSettingsDraft(), extraModelIdsText: models.extraModelIdsText,
+      transcriptionModel: models.transcriptionModel, outlineModel: models.outlineModel, metadataModel: models.metadataModel,
       structuredPrompt: prompts.structured, titlePrompt: prompts.title, slugPrompt: prompts.slug,
-      resetSets: ["geminiModels", "transcriptionModel", "metadataModel", "prompts"],
+      resetSets: ["extraModelIds", "gemini.transcription", "gemini.outline", "gemini.metadata", "prompts"],
     });
     expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ concurrencyLimit: 5 });
   });
 
   it("keeps edits made after requesting a reset", async () => {
     await runtime.saveSettingsDraft({
-      ...runtime.getSettingsDraft(), geminiModelsText: "later-model",
-      resetSets: ["geminiModels", "transcriptionModel", "metadataModel"],
+      ...runtime.getSettingsDraft(), extraModelIdsText: "later-model",
+      resetSets: ["extraModelIds", "gemini.transcription", "gemini.outline", "gemini.metadata"],
     });
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ geminiModels: ["later-model"] });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ extraModelIds: { gemini: ["later-model"] } });
   });
 
   it("keeps the queue pane width the user dragged to, within what the window allows", async () => {

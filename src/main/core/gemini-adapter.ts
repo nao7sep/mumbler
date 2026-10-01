@@ -1,50 +1,21 @@
 import { readFile, stat } from "node:fs/promises";
 
-import { ApiError, GoogleGenAI, type GenerateContentResponse } from "@google/genai";
+import { ApiError, type GenerateContentResponse } from "@google/genai";
+
+import { GeminiClient, GeminiHttpError } from "./gemini-http";
+import { generationPolicy } from "@shared/model-registry";
+import type { AiRole } from "@shared/ai-models";
 
 import { type AppLogger } from "./logger";
 import { CancelledError } from "./cancellation";
 
-const INLINE_REQUEST_LIMIT_BYTES = 20 * 1024 * 1024;
-const INLINE_AUDIO_SAFETY_LIMIT_BYTES = 18 * 1024 * 1024;
+const INLINE_REQUEST_LIMIT_BYTES = 20_000_000;
+const INLINE_AUDIO_SAFETY_LIMIT_BYTES = INLINE_REQUEST_LIMIT_BYTES;
 const FILES_API_CLEANUP_TIMEOUT_MS = 30_000;
-
-/**
- * Dynamic thinking — the model decides how much to reason. Stated rather than left
- * to the provider's default, because the default is not one behaviour: measured live
- * across the list seeded at the time, gemini-3.5-flash / 3.1-pro-preview /
- * 3-flash-preview all thought unasked while gemini-3.1-flash-lite did not. Silence
- * shipped four behaviours nobody chose; this ships one. Those ids have since rotated
- * out of the list, but the reason to state the setting has not: the variance was
- * between models, so a new pair of ids is a new pair of unknown defaults.
- *
- * Transcription itself is barely affected — it is dictation, not reasoning, and the
- * models agree: on dynamic, flash-lite spends 0 thinking tokens transcribing but 734
- * on an arithmetic question. So this is not "make transcription think", it is "stop
- * letting the provider decide per model". The value is consistency; the cost is a
- * few hundred tokens on the models that opt in.
- *
- * `-1` and not `0`: dynamic is accepted by every callable model tested (the four
- * seeded then, plus 2.5-flash/2.5-pro/flash-latest/pro-latest), so it stays safe for the
- * free-text ids this editable list invites. Disabling is NOT portable —
- * gemini-3.1-pro-preview rejects it outright ("Budget 0 is invalid. This model only
- * works in thinking mode"). That is why there is no thinking toggle: offering one
- * would require knowing each model's limits, i.e. a closed list, and the model
- * choice already IS the speed/quality choice.
- */
-const THINKING_CONFIG = { thinkingBudget: -1 } as const;
-
-// The SDK's own retries would resend a request that may already have been billed,
-// stacking on top of card-pipeline's retryPolicy (ai-model-routing-conventions:
-// "Calling the provider"). `attempts: 1` disables them so the pipeline is the only
-// retry authority. `timeout` is set from the same bound already used for the call's
-// AbortSignal — belt-and-suspenders, not a second, shorter deadline.
-function singleAttemptHttpOptions(timeoutMs: number): { timeout: number; retryOptions: { attempts: number } } {
-  return { timeout: timeoutMs, retryOptions: { attempts: 1 } };
-}
 
 export interface GeminiAudioTranscriptionParams {
   apiKey: string;
+  endpoint?: string;
   filePath: string;
   mimeType: string;
   model: string;
@@ -55,7 +26,9 @@ export interface GeminiAudioTranscriptionParams {
 
 export interface GeminiTextGenerationParams {
   apiKey: string;
+  endpoint?: string;
   prompt: string;
+  role?: Exclude<AiRole, "transcription">;
   model: string;
   timeoutMs: number;
   signal?: AbortSignal;
@@ -68,6 +41,15 @@ export interface GeminiRunResult {
   transport: "inline" | "files-api";
 }
 
+export class GeminiResultError extends Error {
+  constructor(message: string, readonly providerMessage: string | null = null) { super(message); }
+}
+
+export function geminiProviderReason(error: unknown): string | null {
+  if (error instanceof GeminiHttpError) return error.providerMessage;
+  return error instanceof GeminiResultError ? error.providerMessage : null;
+}
+
 export class GeminiTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`Gemini request timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
@@ -78,7 +60,7 @@ export class GeminiTimeoutError extends Error {
 export async function transcribeWithGemini(
   params: GeminiAudioTranscriptionParams,
 ): Promise<GeminiRunResult> {
-  const ai = new GoogleGenAI({ apiKey: params.apiKey });
+  const ai = new GeminiClient({ apiKey: params.apiKey, endpoint: params.endpoint });
   const abortState = createGeminiAbortState(params.timeoutMs, params.signal);
   let uploadedFileName: string | null = null;
   let transport: GeminiRunResult["transport"] = "inline";
@@ -92,7 +74,7 @@ export async function transcribeWithGemini(
     if (fileStats.size <= INLINE_AUDIO_SAFETY_LIMIT_BYTES) {
       const inlineData = await readFile(params.filePath, { encoding: "base64" });
       throwIfExternallyCancelled(params.signal);
-      response = await ai.models.generateContent({
+      response = await ai.generateContent({
         model: params.model,
         contents: [
           {
@@ -110,19 +92,17 @@ export async function transcribeWithGemini(
         ],
         config: {
           abortSignal: abortState.signal,
-          thinkingConfig: THINKING_CONFIG,
-          httpOptions: singleAttemptHttpOptions(params.timeoutMs),
+          ...generationPolicy(params.model, "transcription"),
         },
       });
     } else {
       transport = "files-api";
       throwIfExternallyCancelled(params.signal);
-      const uploadedFile = await ai.files.upload({
+      const uploadedFile = await ai.upload({
         file: params.filePath,
         config: {
           mimeType: params.mimeType,
           abortSignal: abortState.signal,
-          httpOptions: singleAttemptHttpOptions(params.timeoutMs),
         },
       });
       uploadedFileName = uploadedFile.name ?? null;
@@ -132,7 +112,7 @@ export async function transcribeWithGemini(
         mimeType: uploadedFile.mimeType ?? params.mimeType,
       });
 
-      response = await ai.models.generateContent({
+      response = await ai.generateContent({
         model: params.model,
         contents: [
           {
@@ -150,8 +130,7 @@ export async function transcribeWithGemini(
         ],
         config: {
           abortSignal: abortState.signal,
-          thinkingConfig: THINKING_CONFIG,
-          httpOptions: singleAttemptHttpOptions(params.timeoutMs),
+          ...generationPolicy(params.model, "transcription"),
         },
       });
     }
@@ -176,13 +155,12 @@ export async function transcribeWithGemini(
 // Removing the upload is best-effort: Gemini expires uploads by itself. So the
 // delete runs beside the result instead of in front of it, and its own bound
 // ends it on a stalled connection rather than leaving it pending.
-async function deleteUploadedFile(ai: GoogleGenAI, name: string, logger: AppLogger | undefined): Promise<void> {
+async function deleteUploadedFile(ai: GeminiClient, name: string, logger: AppLogger | undefined): Promise<void> {
   try {
-    await ai.files.delete({
+    await ai.delete({
       name,
       config: {
         abortSignal: AbortSignal.timeout(FILES_API_CLEANUP_TIMEOUT_MS),
-        httpOptions: singleAttemptHttpOptions(FILES_API_CLEANUP_TIMEOUT_MS),
       },
     });
   } catch (cleanupError: unknown) {
@@ -200,12 +178,12 @@ async function deleteUploadedFile(ai: GoogleGenAI, name: string, logger: AppLogg
 export async function generateTextWithGemini(
   params: GeminiTextGenerationParams,
 ): Promise<Omit<GeminiRunResult, "transport">> {
-  const ai = new GoogleGenAI({ apiKey: params.apiKey });
+  const ai = new GeminiClient({ apiKey: params.apiKey, endpoint: params.endpoint });
   const abortState = createGeminiAbortState(params.timeoutMs, params.signal);
 
   try {
     throwIfExternallyCancelled(params.signal);
-    const response = await ai.models.generateContent({
+    const response = await ai.generateContent({
       model: params.model,
       contents: [
         {
@@ -215,8 +193,7 @@ export async function generateTextWithGemini(
       ],
       config: {
         abortSignal: abortState.signal,
-        thinkingConfig: THINKING_CONFIG,
-        httpOptions: singleAttemptHttpOptions(params.timeoutMs),
+        ...generationPolicy(params.model, params.role ?? "metadata"),
       },
     });
 
@@ -237,11 +214,26 @@ export function isRetryableGeminiError(error: unknown): boolean {
     return false;
   }
 
-  if (error instanceof ApiError) {
-    return error.status === 429 || error.status >= 500;
+  if (error instanceof ApiError || error instanceof GeminiHttpError) {
+    return [408, 429, 503].includes(error.status);
   }
 
-  return false;
+  const code = connectionCode(error);
+  return code !== null && ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(code);
+}
+
+function connectionCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  if ("code" in error && typeof error.code === "string") return error.code;
+  return "cause" in error ? connectionCode(error.cause) : null;
+}
+
+export function retryAfterDelayMs(error: unknown, now = Date.now()): number | null {
+  const value = error instanceof GeminiHttpError ? error.retryAfter : null;
+  if (!value) return null;
+  const seconds = /^\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) : null;
+  const delay = seconds === null ? Date.parse(value) - now : seconds * 1000;
+  return Number.isFinite(delay) ? Math.min(30_000, Math.max(0, delay)) : null;
 }
 
 export function getInlineAudioSafetyLimitBytes(): number {
@@ -277,19 +269,24 @@ function buildTranscriptionPrompt(): string {
 function readResponseText(response: GenerateContentResponse): string {
   const blockReason = response.promptFeedback?.blockReason;
   if (blockReason) {
-    throw new Error(
-      `Gemini refused this request (${blockReason}). The input was rejected, not lost — try different audio or wording.`
+    throw new GeminiResultError(
+      `Gemini refused this request (${blockReason}). The input was rejected, not lost — try different audio or wording.`,
+      response.promptFeedback?.blockReasonMessage ?? null,
     );
   }
 
   const finishReason = response.candidates?.[0]?.finishReason;
+  const finishMessage = response.candidates?.[0]?.finishMessage ?? null;
+  if (finishReason === "SAFETY" || finishReason === "PROHIBITED_CONTENT") {
+    throw new GeminiResultError(`Gemini refused this request (${finishReason}). Try different audio or wording.`, finishMessage);
+  }
   if (finishReason === "MAX_TOKENS") {
-    throw new Error("Gemini stopped at its output limit, so this result is truncated rather than complete.");
+    throw new GeminiResultError("Gemini stopped at its output limit, so this result is truncated rather than complete.", finishMessage);
   }
   // Anything other than a normal stop is the provider telling us the result is not what was
   // asked for. Absent is fine — not every response carries one.
   if (finishReason && finishReason !== "STOP") {
-    throw new Error(`Gemini stopped early (${finishReason}), so this result is incomplete.`);
+    throw new GeminiResultError(`Gemini stopped early (${finishReason}), so this result is incomplete.`, finishMessage);
   }
 
   return normalizeResponseText(response.text);

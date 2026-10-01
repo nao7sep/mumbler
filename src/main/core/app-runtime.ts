@@ -64,6 +64,7 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
+import { ModelLists } from "./model-lists";
 import { applySettingsDraft, buildSettingsDraft, changedSettingsSets, createDefaultSettings, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type SettingsStore } from "./settings-schema";
 import {
   clampQueueWidth,
@@ -163,6 +164,7 @@ export class ApplicationRuntime {
   // queued-card drain) lives in the coordinator; the runtime keeps owning the
   // app state those pipelines mutate and the single persist path they call.
   private readonly pipeline: PipelineCoordinator;
+  private modelLists: ModelLists | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private onPipelineProgressCallback: (() => void) | null = null;
   private onLanguageChangedCallback: (() => void) | null = null;
@@ -686,6 +688,14 @@ export class ApplicationRuntime {
     );
   }
 
+  async getModelList(endpoint: string, force = false): Promise<string[]> {
+    this.ensureReady();
+    const url = new URL(endpoint);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new OperationError("Invalid provider endpoint.");
+    this.modelLists ??= new ModelLists(this.runtime.paths!.modelListsPath, this.runtime.logger);
+    return this.modelLists.get(endpoint, force, () => this.resolveGeminiApiKey());
+  }
+
   getDefaultPrompts(): MumblerSettings["prompts"] {
     return createDefaultSettings().prompts;
   }
@@ -693,9 +703,10 @@ export class ApplicationRuntime {
   getDefaultModels(): DefaultModels {
     const defaults = createDefaultSettings();
     return {
-      models: defaults.geminiModels,
-      transcriptionModel: defaults.transcriptionModel,
-      metadataModel: defaults.metadataModel,
+      extraModelIdsText: "",
+      transcriptionModel: defaults["gemini.transcription"],
+      outlineModel: defaults["gemini.outline"],
+      metadataModel: defaults["gemini.metadata"],
     };
   }
 
@@ -1225,7 +1236,7 @@ export class ApplicationRuntime {
     const nextSettings = applySettingsDraft(this.runtime.settings!, draft);
     const defaults = createDefaultSettings();
     const resets = (draft.resetSets ?? []).filter((key) =>
-      ["geminiModels", "transcriptionModel", "metadataModel", "prompts"].includes(key) &&
+      ["extraModelIds", "gemini.transcription", "gemini.outline", "gemini.metadata", "prompts"].includes(key) &&
       JSON.stringify(nextSettings[key]) === JSON.stringify(defaults[key]),
     );
     const changes = changedSettingsSets(this.runtime.settings!, nextSettings);
@@ -1242,8 +1253,8 @@ export class ApplicationRuntime {
     await this.runtime.logger.info("settings.save", "Updated application settings.", {
       outputDirectory: nextSettings.outputDirectory,
       backupDirectory: nextSettings.backupDirectory,
-      transcriptionModel: nextSettings.transcriptionModel,
-      metadataModel: nextSettings.metadataModel,
+      transcriptionModel: nextSettings["gemini.transcription"],
+      metadataModel: nextSettings["gemini.metadata"],
       defaultTimezone: nextSettings.defaultTimezone,
       timestampPatternCount: nextSettings.timestampPatterns.length,
       previewSnippetSeconds: nextSettings.previewSnippetSeconds,
@@ -1328,6 +1339,7 @@ export class ApplicationRuntime {
       await Promise.all([
         Promise.allSettled([...this.activeSaves.values()]),
         this.pipeline.shutdown(),
+        this.modelLists?.close(),
       ]);
       await this.runtime.queueStore?.flush();
       await this.runtime.transcriptStore?.flush();
@@ -1832,6 +1844,7 @@ export function getAppPaths(): AppPaths {
   return {
     homeDir,
     settingsPath: join(homeDir, "config.json"),
+    modelListsPath: join(homeDir, "model-lists.json"),
     queuePath: join(homeDir, "queue.json"),
     legacyQueuePath: join(homeDir, "state.json"),
     transcriptsDir: join(homeDir, "transcripts"),

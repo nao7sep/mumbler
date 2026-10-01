@@ -2,46 +2,13 @@ import type { InterfaceLanguage, LanguagePreference } from "./i18n/languages";
 import type { MessageKey } from "./i18n/catalogues";
 import type { Message } from "./i18n/translate";
 
-// Built-in default Gemini model suggestions, seeded into the user-owned, editable
-// model list (MumblerSettings.geminiModels) at first run. A small, editable starter
-// set — the user can add/remove entries and type any id; a wrong or unsupported id
-// surfaces at call time (the validity boundary), not from this list. Google's
-// `-preview` suffix is branding, not a reason to exclude a model.
-//
-// Verified live 2026-08-20 against the models endpoint and real calls: every id below
-// resolves. The ids this list replaced (gemini-3.5-flash, gemini-3.1-flash-lite,
-// gemini-3-flash-preview) still resolve too — superseded, not retired.
-//
-// Transcription verified live 2026-08-20: 8 attempts per model on a 61-second English
-// recording, every model 8/8 clean, no refusals and no script drift.
-//
-// A caution earned the hard way, for whoever next builds an audio fixture here. That check
-// first ran on audio made with a bare `say`, which on a ja_JP machine picks a JAPANESE voice
-// and reads English text as katakana — audible nonsense, and 40% longer for the same words.
-// It produced two false findings before anyone listened to it: that some models "transliterate
-// English into katakana" (they were transcribing it accurately — the audio really was katakana
-// English), and that gemini-3.7-flash "spuriously refuses benign audio 4/8" (the malformed
-// audio was refused, not the content). Same passage, same model, one voice apart:
-//   `say -v Samantha`  0/8 refused
-//   bare `say`         8/8 refused
-// Always pass -v with an explicit voice, and listen to the file before drawing a conclusion
-// from it. A fixture nobody checked is not evidence.
-//
-// Ordered by CATEGORY, one per category: pro (smartest) → flash (balanced) → flash
-// lite (fastest). That ordering and raw capability still disagree — 3.7-flash
-// benchmarks above 3.1-pro-preview, since no newer pro exists yet — which is why both
-// defaults are flash despite pro leading the list. When a newer pro ships,
-// transcription takes it and metadata stays on flash.
-export const DEFAULT_GEMINI_MODELS: string[] = [
-  "gemini-3.1-pro-preview",
-  "gemini-3.7-flash",
-  "gemini-3.5-flash-lite",
-];
+import type { AiProvider } from "./ai-models";
 
 export const APP_SHELL_CHANNELS = {
   getInterfaceLanguage: "app-shell:get-interface-language",
   getSnapshot: "app-shell:get-snapshot",
   getSettingsDraft: "app-shell:get-settings-draft",
+  getModelList: "app-shell:get-model-list",
   getDefaultPrompts: "app-shell:get-default-prompts",
   getDefaultModels: "app-shell:get-default-models",
   openImportDialog: "app-shell:open-import-dialog",
@@ -134,11 +101,11 @@ export interface PromptTemplates {
   slug: string;
 }
 
-// The built-in AI defaults the "Reset models" action restores to: the current
-// Gemini model suggestion list and the default model selections.
+// The effective values shown after removing the extra-id and selection copies.
 export interface DefaultModels {
-  models: string[];
+  extraModelIdsText: string;
   transcriptionModel: string;
+  outlineModel: string;
   metadataModel: string;
 }
 
@@ -181,11 +148,12 @@ export interface MumblerSettings {
   // environment-first and stored in its own 0600 file (api-keys.json), never in
   // this shared settings store. See src/main/core/api-keys.ts.
   //
-  // The editable Gemini suggestions use the built-in list until the user saves
-  // their own copy. Selections outside it are kept and checked by the provider.
-  geminiModels: string[];
-  transcriptionModel: string;
-  metadataModel: string;
+  provider: AiProvider;
+  "gemini.endpoint": string;
+  extraModelIds: { gemini: string[] };
+  "gemini.transcription": string;
+  "gemini.outline": string;
+  "gemini.metadata": string;
   concurrencyLimit: number;
   prompts: PromptTemplates;
   retryPolicy: RetryPolicy;
@@ -203,6 +171,8 @@ export type GenerateTarget = Exclude<CardProcessingStep, null>;
 export type TimestampParseStatus = "parsed" | "manual-required";
 
 export interface CardError {
+  /** Human-readable reason from the provider's documented field, never raw transport errors. */
+  providerReason?: string;
   message: string;
   occurredAtUtc: number;
   failedStep: Exclude<CardProcessingStep, null> | "startup-recovery";
@@ -319,6 +289,7 @@ export interface MumblerQueue {
 export interface AppPaths {
   homeDir: string;
   settingsPath: string;
+  modelListsPath: string;
   queuePath: string;
   // The earlier queue filename, renamed only when queuePath is absent.
   legacyQueuePath: string;
@@ -361,8 +332,9 @@ export interface SettingsSummary {
   previewSnippetSeconds: number;
   // AI
   hasGeminiApiKey: boolean;
-  geminiModels: string[];
+  extraModelIds: { gemini: string[] };
   transcriptionModel: string;
+  outlineModel: string;
   metadataModel: string;
   concurrencyLimit: number;
   // The one managed-audio-tool toggle, surfaced so the Audio Tools modal can show
@@ -370,7 +342,7 @@ export interface SettingsSummary {
   checkUpdatesAtLaunch: boolean;
 }
 
-export type ResetSettingsSet = "geminiModels" | "transcriptionModel" | "metadataModel" | "prompts";
+export type ResetSettingsSet = "extraModelIds" | "gemini.transcription" | "gemini.outline" | "gemini.metadata" | "prompts";
 
 export interface SettingsDraft {
   resetSets?: ResetSettingsSet[];
@@ -395,10 +367,11 @@ export interface SettingsDraft {
   // through the dedicated setGeminiApiKey/clearGeminiApiKey IPC, not the settings
   // JSON roundtrip.
   hasGeminiApiKey: boolean;
-  // The owned Gemini model list as editable text (one id per line) — the same idiom
-  // as timestampPatternsText; parsed and deduped back into geminiModels on save.
-  geminiModelsText: string;
+  provider: AiProvider;
+  geminiEndpoint: string;
+  extraModelIdsText: string;
   transcriptionModel: string;
+  outlineModel: string;
   metadataModel: string;
   concurrencyLimit: number;
   structuredPrompt: string;
@@ -599,6 +572,7 @@ export interface MumblerShellApi {
   getInterfaceLanguage(): Promise<InterfaceLanguage>;
   getSnapshot(): Promise<AppSnapshot>;
   getSettingsDraft(): Promise<SettingsDraft>;
+  getModelList(endpoint: string, force?: boolean): Promise<string[]>;
   getDefaultPrompts(): Promise<PromptTemplates>;
   getDefaultModels(): Promise<DefaultModels>;
   openImportDialog(): Promise<ImportOperationResult>;

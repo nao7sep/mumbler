@@ -25,6 +25,7 @@ const api: MumblerShellApi = {
   getSnapshot: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.getSnapshot) as Promise<AppSnapshot>,
   getSettingsDraft: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getSettingsDraft) as Promise<SettingsDraft>,
+  getModelList: (endpoint, force) => ipcRenderer.invoke(APP_SHELL_CHANNELS.getModelList, endpoint, force) as Promise<string[]>,
   getDefaultPrompts: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getDefaultPrompts) as Promise<PromptTemplates>,
   getDefaultModels: () =>

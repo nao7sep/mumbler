@@ -55,10 +55,10 @@ describe("applySettingsDraft — happy path", () => {
 
   it("keeps untouched copies when saving another set", () => {
     const current = createDefaultSettings();
-    current.geminiModels = ["  custom-model  ", "custom-model"];
+    current.extraModelIds.gemini = ["  custom-model  ", "custom-model"];
     current.prompts.title = "  {structured}  ";
     const result = applySettingsDraft(current, { ...buildSettingsDraft(current, OUT, BACKUP, false), concurrencyLimit: 5 });
-    expect(result.geminiModels).toEqual(current.geminiModels);
+    expect(result.extraModelIds.gemini).toEqual(current.extraModelIds.gemini);
     expect(result.prompts).toEqual(current.prompts);
     expect(result.concurrencyLimit).toBe(5);
   });
@@ -204,34 +204,34 @@ describe("applySettingsDraft — validation", () => {
   });
 });
 
-describe("Gemini model list (config-seeding: owned, editable, current defaults)", () => {
-  it("seeds defaults whose selections are members of the built-in list", () => {
+describe("Gemini extra model ids", () => {
+  it("keeps bundled defaults separate from the empty user extra-id set", () => {
     const settings = createDefaultSettings();
-    expect(settings.transcriptionModel).toBe("gemini-3.7-flash");
-    expect(settings.geminiModels).toContain(settings.transcriptionModel);
-    expect(settings.geminiModels).toContain(settings.metadataModel);
-    expect(settings.geminiModels.length).toBeGreaterThan(0);
+    expect(settings["gemini.transcription"]).toBe("gemini-3.8-flash");
+    expect(settings["gemini.outline"]).toBe("gemini-3.8-flash");
+    expect(settings["gemini.metadata"]).toBe("gemini-3.5-flash-lite");
+    expect(settings.extraModelIds.gemini).toEqual([]);
   });
 
   it("round-trips the owned model list through the draft, trimming and de-duplicating", () => {
     const draft = freshDraft();
-    draft.geminiModelsText = "  gemini-3.5-flash \n gemini-2.5-pro \n gemini-3.5-flash ";
+    draft.extraModelIdsText = "  gemini-3.5-flash \n gemini-2.5-pro \n gemini-3.5-flash ";
     const result = applySettingsDraft(createDefaultSettings(), draft);
-    expect(result.geminiModels).toEqual(["gemini-3.5-flash", "gemini-2.5-pro"]); // trimmed + de-duplicated
+    expect(result.extraModelIds.gemini).toEqual(["gemini-3.5-flash", "gemini-2.5-pro"]); // trimmed + de-duplicated
   });
 
   it("preserves an out-of-list selection — an orphaned pick after a list edit is kept, not snapped or rejected", () => {
     const draft = freshDraft();
-    draft.geminiModelsText = "gemini-3.5-flash";
+    draft.extraModelIdsText = "gemini-3.5-flash";
     draft.transcriptionModel = "gemini-2.5-pro"; // no longer in the list; the store keeps it (the UI shows it as a fallback option)
     const result = applySettingsDraft(createDefaultSettings(), draft);
-    expect(result.transcriptionModel).toBe("gemini-2.5-pro");
+    expect(result["gemini.transcription"]).toBe("gemini-2.5-pro");
   });
 
-  it("rejects an empty model list", () => {
+  it("accepts an empty extra-id list", () => {
     const draft = freshDraft();
-    draft.geminiModelsText = "   \n  ";
-    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow(/Gemini model/i);
+    draft.extraModelIdsText = "   \n  ";
+    expect(applySettingsDraft(createDefaultSettings(), draft).extraModelIds.gemini).toEqual([]);
   });
 });
 
@@ -264,6 +264,6 @@ describe("summarizeSettings", () => {
     expect(absent.hasGeminiApiKey).toBe(false);
     expect(absent.defaultOutputDirectory).toBe(OUT);
     expect(absent.timestampPatternCount).toBe(1);
-    expect(absent.geminiModels).toEqual(createDefaultSettings().geminiModels);
+    expect(absent.extraModelIds.gemini).toEqual(createDefaultSettings().extraModelIds.gemini);
   });
 });

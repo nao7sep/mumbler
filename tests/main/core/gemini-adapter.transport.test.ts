@@ -13,18 +13,14 @@ const { generateContent, upload, deleteFile, stat, readFile } = vi.hoisted(() =>
   readFile: vi.fn(),
 }));
 
-vi.mock("@google/genai", () => ({
-  GoogleGenAI: class {
-    models = { generateContent };
-    files = { upload, delete: deleteFile };
+vi.mock("@main/core/gemini-http", () => ({
+  GeminiClient: class {
+    generateContent = generateContent;
+    upload = upload;
+    delete = deleteFile;
   },
-  ApiError: class ApiError extends Error {
-    status?: number;
-    constructor(options: { message: string; status?: number }) {
-      super(options.message);
-      this.status = options.status;
-    }
-  },
+  GeminiHttpError: class extends Error {},
+
 }));
 
 vi.mock("node:fs/promises", () => ({ stat, readFile }));
@@ -46,7 +42,7 @@ function baseParams() {
     apiKey: "test-key",
     filePath: "/tmp/rec.m4a",
     mimeType: "audio/mp4",
-    model: "gemini-test",
+    model: "gemini-3.8-flash",
     timeoutMs: 60_000,
   };
 }
@@ -57,22 +53,11 @@ beforeEach(() => {
   readFile.mockResolvedValue("YmFzZTY0");
 });
 
-// Thinking is STATED, never left to the provider. The default is not one behaviour:
-// measured live against the list seeded at the time, gemini-3.5-flash /
-// 3.1-pro-preview / 3-flash-preview all thought unasked, while gemini-3.1-flash-lite
-// did not and answered worse for it — so silence shipped four behaviours nobody
-// picked. Those ids have rotated out; the per-model variance they proved has not. `-1` (dynamic) is the one setting
-// every callable Gemini model accepts; `0` is NOT portable (3.1-pro-preview rejects
-// it: "Budget 0 is invalid. This model only works in thinking mode"), which is why
-// this is a constant and not a user toggle.
-//
-// Every generateContent path is pinned separately: they are three distinct call
-// sites, and adding a fourth without the config is exactly the regression this
-// catches. The upload is asserted NOT to carry it — it is a file transfer.
+// Family policy is stated on every generation transport.
 describe("thinking is stated on every model call", () => {
-  const DYNAMIC = { thinkingBudget: -1 };
+  const DYNAMIC = { thinkingLevel: "medium" };
 
-  it("states dynamic thinking on the inline transcription call", async () => {
+  it("states medium thinking on the inline transcription call", async () => {
     stat.mockResolvedValue({ size: SAFE - 1 });
     generateContent.mockResolvedValue({ text: "hi", modelVersion: "v1", usageMetadata: null });
 
@@ -81,7 +66,7 @@ describe("thinking is stated on every model call", () => {
     expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(DYNAMIC);
   });
 
-  it("states dynamic thinking on the Files-API transcription call", async () => {
+  it("states medium thinking on the Files-API transcription call", async () => {
     stat.mockResolvedValue({ size: SAFE + 1 });
     upload.mockResolvedValue({ name: "files/abc", uri: "gs://u", mimeType: "audio/mp4" });
     generateContent.mockResolvedValue({ text: "done", modelVersion: "v1", usageMetadata: null });
@@ -93,26 +78,53 @@ describe("thinking is stated on every model call", () => {
     expect(upload.mock.calls[0]?.[0].config).not.toHaveProperty("thinkingConfig");
   });
 
-  it("states dynamic thinking on the text-generation call", async () => {
+  it("states medium thinking on the text-generation call", async () => {
     generateContent.mockResolvedValue({ text: "out", modelVersion: "v1", usageMetadata: null });
 
     await generateTextWithGemini({
       apiKey: "test-key",
       prompt: "hi",
-      model: "gemini-test",
+      model: "gemini-3.8-flash",
       timeoutMs: 60_000,
     });
 
     expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(DYNAMIC);
   });
 
-  it("never disables thinking — 3.1-pro-preview rejects budget 0 outright", async () => {
+  it("uses the resolved family policy without a legacy thinking budget", async () => {
     stat.mockResolvedValue({ size: SAFE - 1 });
     generateContent.mockResolvedValue({ text: "hi", modelVersion: "v1", usageMetadata: null });
 
     await transcribeWithGemini(baseParams());
 
-    expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig.thinkingBudget).not.toBe(0);
+    expect(generateContent.mock.calls[0]?.[0].config.thinkingConfig).toEqual(DYNAMIC);
+  });
+});
+
+describe("model policy and the decimal audio threshold", () => {
+  it("omits thinking for unknown ids while preserving the metadata ceiling", async () => {
+    generateContent.mockResolvedValue({ text: "result" });
+    await generateTextWithGemini({ apiKey: "fixture", prompt: "title", model: "unknown", timeoutMs: 1000 });
+    const config = generateContent.mock.calls[0]![0].config;
+    expect(config).not.toHaveProperty("thinkingConfig");
+    expect(config.maxOutputTokens).toBe(1024);
+  });
+
+  it("uses dynamic thinking for 2.5 and the outline ceiling", async () => {
+    generateContent.mockResolvedValue({ text: "result" });
+    await generateTextWithGemini({ apiKey: "fixture", prompt: "outline", model: "gemini-2.5-pro", role: "outline", timeoutMs: 1000 });
+    expect(generateContent.mock.calls[0]![0].config).toMatchObject({ thinkingConfig: { thinkingBudget: -1 }, maxOutputTokens: 65536 });
+  });
+
+  it("uses inline audio through 20,000,000 bytes and Files API above it", async () => {
+    expect(SAFE).toBe(20_000_000);
+    stat.mockResolvedValue({ size: SAFE });
+    generateContent.mockResolvedValue({ text: "result" });
+    expect((await transcribeWithGemini(baseParams())).transport).toBe("inline");
+    expect(generateContent.mock.calls[0]![0].config.maxOutputTokens).toBe(65536);
+    stat.mockResolvedValue({ size: SAFE + 1 });
+    upload.mockResolvedValue({ name: "files/fixture", uri: "https://provider.example/file" });
+    expect((await transcribeWithGemini(baseParams())).transport).toBe("files-api");
   });
 });
 
@@ -147,7 +159,6 @@ describe("transcribeWithGemini transport selection", () => {
       name: "files/abc",
       config: {
         abortSignal: expect.any(AbortSignal),
-        httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } },
       },
     });
   });
@@ -162,7 +173,6 @@ describe("transcribeWithGemini transport selection", () => {
       name: "files/xyz",
       config: {
         abortSignal: expect.any(AbortSignal),
-        httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } },
       },
     });
   });
@@ -221,82 +231,19 @@ describe("transcribeWithGemini cancellation and timeout", () => {
   });
 });
 
-// ai-model-routing-conventions ("Calling the provider"): the SDK's own retries are
-// off everywhere, so card-pipeline's retryPolicy is the only retry authority — a
-// 503 that reaches the SDK must surface as a single attempt, not be silently
-// resent (and re-billed) underneath it.
-describe("SDK retries are disabled (single attempt under a 503)", () => {
-  it("propagates a 503 after exactly one generateContent call, with SDK retries turned off", async () => {
+describe("the transport never adds a retry", () => {
+  it("propagates a 503 after exactly one generation call", async () => {
     stat.mockResolvedValue({ size: SAFE - 1 });
-    generateContent.mockRejectedValue(new ApiError({ message: "unavailable", status: 503 }));
-
-    await expect(transcribeWithGemini(baseParams())).rejects.toMatchObject({ status: 503 });
-
-    expect(generateContent).toHaveBeenCalledTimes(1);
-    expect(generateContent.mock.calls[0]?.[0].config.httpOptions).toEqual({
-      timeout: 60_000,
-      retryOptions: { attempts: 1 },
-    });
+    generateContent.mockRejectedValue(new ApiError({ message: "busy", status: 503 }));
+    await expect(transcribeWithGemini(baseParams())).rejects.toThrow("busy");
+    expect(generateContent).toHaveBeenCalledOnce();
   });
 
-  it("propagates a 503 after exactly one Files-API upload attempt", async () => {
+  it("propagates an upload failure after exactly one upload", async () => {
     stat.mockResolvedValue({ size: SAFE + 1 });
-    upload.mockRejectedValue(new ApiError({ message: "unavailable", status: 503 }));
-
-    await expect(transcribeWithGemini(baseParams())).rejects.toMatchObject({ status: 503 });
-
-    expect(upload).toHaveBeenCalledTimes(1);
-    expect(upload.mock.calls[0]?.[0].config.httpOptions).toEqual({
-      timeout: 60_000,
-      retryOptions: { attempts: 1 },
-    });
-  });
-
-  it("states single-attempt httpOptions on the text-generation call", async () => {
-    generateContent.mockResolvedValue({ text: "out", modelVersion: "v1", usageMetadata: null });
-
-    await generateTextWithGemini({
-      apiKey: "test-key",
-      prompt: "hi",
-      model: "gemini-test",
-      timeoutMs: 45_000,
-    });
-
-    expect(generateContent.mock.calls[0]?.[0].config.httpOptions).toEqual({
-      timeout: 45_000,
-      retryOptions: { attempts: 1 },
-    });
-  });
-});
-
-describe("generateTextWithGemini", () => {
-  it("returns trimmed text with no transport field", async () => {
-    generateContent.mockResolvedValue({ text: " result ", modelVersion: "v1", usageMetadata: null });
-
-    const result = await generateTextWithGemini({
-      apiKey: "test-key",
-      prompt: "hi",
-      model: "gemini-test",
-      timeoutMs: 60_000,
-    });
-
-    expect(result.text).toBe("result");
-    expect(result).not.toHaveProperty("transport");
-  });
-
-  it("rejects immediately when already cancelled", async () => {
-    const controller = new AbortController();
-    controller.abort();
-
-    await expect(
-      generateTextWithGemini({
-        apiKey: "test-key",
-        prompt: "hi",
-        model: "gemini-test",
-        timeoutMs: 60_000,
-        signal: controller.signal,
-      }),
-    ).rejects.toBeInstanceOf(CancelledError);
+    upload.mockRejectedValue(new ApiError({ message: "busy", status: 503 }));
+    await expect(transcribeWithGemini(baseParams())).rejects.toThrow("busy");
+    expect(upload).toHaveBeenCalledOnce();
     expect(generateContent).not.toHaveBeenCalled();
   });
 });

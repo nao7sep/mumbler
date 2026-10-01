@@ -1,3 +1,4 @@
+import { modelOptions } from "@shared/model-options";
 import { nanoid } from "nanoid";
 import {
   useCallback,
@@ -752,7 +753,7 @@ function LoadedShell({
     }
   }
 
-  async function handleDetailModelChange(field: "transcriptionModel" | "metadataModel", value: string): Promise<void> {
+  async function handleDetailModelChange(field: "transcriptionModel" | "outlineModel" | "metadataModel", value: string): Promise<void> {
     const cardId = selectedCard?.id ?? null;
     try {
       const draft = await window.mumbler.getSettingsDraft();
@@ -1234,6 +1235,9 @@ function LoadedShell({
                 results={cardActionErrors}
                 onDismiss={(operation) => clearCardActionError(selectedCard.id, operation)}
               />
+              {selectedCard.status === "Error" && selectedCard.lastError?.failedStep && selectedCard.lastError.failedStep !== "startup-recovery" ? (
+                <button type="button" className="button button--ghost" disabled={selectedCardIsBusy} onClick={() => handleRequestGenerate(selectedCard, selectedCard.lastError!.failedStep as GenerateTarget)}>{t("common.retry")}</button>
+              ) : null}
               <div className="detail-grid">
 
               <div className="app-tabpanel" {...detailTablist.getPanelProps("info")} hidden={detailTab !== "info"}>
@@ -1321,42 +1325,18 @@ function LoadedShell({
                       <h3>{t("options.title")}</h3>
                     </div>
                     <div className="field-stack">
-                      <label className="field">
-                        <span>{t("options.transcriptionModel")}</span>
-                        <select
-                          value={snapshot?.settingsSummary?.transcriptionModel ?? ""}
-                          disabled={selectedCardIsBusy}
-                          onChange={(event) => void handleDetailModelChange("transcriptionModel", event.target.value)}
-                        >
-                          {(snapshot?.settingsSummary?.geminiModels ?? []).map((id) => (
-                            <option key={id} value={id}>{id}</option>
-                          ))}
-                          {snapshot?.settingsSummary?.transcriptionModel &&
-                            !(snapshot?.settingsSummary?.geminiModels ?? []).includes(snapshot.settingsSummary.transcriptionModel) && (
-                            <option value={snapshot.settingsSummary.transcriptionModel}>
-                              {snapshot.settingsSummary.transcriptionModel}
-                            </option>
-                          )}
-                        </select>
-                      </label>
-                      <label className="field">
-                        <span>{t("options.metadataModel")}</span>
-                        <select
-                          value={snapshot?.settingsSummary?.metadataModel ?? ""}
-                          disabled={selectedCardIsBusy}
-                          onChange={(event) => void handleDetailModelChange("metadataModel", event.target.value)}
-                        >
-                          {(snapshot?.settingsSummary?.geminiModels ?? []).map((id) => (
-                            <option key={id} value={id}>{id}</option>
-                          ))}
-                          {snapshot?.settingsSummary?.metadataModel &&
-                            !(snapshot?.settingsSummary?.geminiModels ?? []).includes(snapshot.settingsSummary.metadataModel) && (
-                            <option value={snapshot.settingsSummary.metadataModel}>
-                              {snapshot.settingsSummary.metadataModel}
-                            </option>
-                          )}
-                        </select>
-                      </label>
+                      {(["transcription", "outline", "metadata"] as const).map((role) => {
+                        const field = `${role}Model` as "transcriptionModel" | "outlineModel" | "metadataModel";
+                        const kind = role === "transcription" ? "transcription" : role === "outline" ? "text-balanced" : "text-fast";
+                        const value = snapshot?.settingsSummary?.[field] ?? "";
+                        const groups = modelOptions(kind, [], snapshot?.settingsSummary?.extraModelIds.gemini ?? [], value);
+                        return <label className="field" key={role}>
+                          <span>{t(`options.${field}`)}</span>
+                          <select value={value} disabled={selectedCardIsBusy} onChange={(event) => void handleDetailModelChange(field, event.target.value)}>
+                            {Object.values(groups).flat().map((id) => <option key={id} value={id}>{id}</option>)}
+                          </select>
+                        </label>;
+                      })}
                     </div>
                   </section>
                 </div>
@@ -1685,6 +1665,9 @@ function LoadedShell({
       {settingsModal.settingsDraft ? (
         <SettingsModal
           draft={settingsModal.settingsDraft}
+          fetchedModelIds={settingsModal.fetchedModelIds}
+          isRefreshingModels={settingsModal.isRefreshingModels}
+          onRefreshModels={() => void settingsModal.handleRefreshModels()}
           isDirty={settingsModal.isSettingsDirty}
           isSaving={settingsModal.isSavingSettings}
           isSavingApiKey={settingsModal.isSavingApiKey}

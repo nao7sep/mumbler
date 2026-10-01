@@ -13,19 +13,20 @@ describe("isRetryableGeminiError", () => {
     expect(isRetryableGeminiError(new CancelledError())).toBe(false);
   });
 
-  it("retries HTTP 429 and 5xx ApiErrors", () => {
+  it("retries only 408, 429, and 503 ApiErrors", () => {
     expect(isRetryableGeminiError(new ApiError({ message: "rate limited", status: 429 }))).toBe(
       true,
     );
-    expect(isRetryableGeminiError(new ApiError({ message: "server", status: 500 }))).toBe(true);
+    expect(isRetryableGeminiError(new ApiError({ message: "server", status: 408 }))).toBe(true);
     expect(isRetryableGeminiError(new ApiError({ message: "gateway", status: 503 }))).toBe(true);
   });
 
-  it("does not retry client ApiErrors below 500 (other than 429)", () => {
+  it("does not retry client errors or ambiguous server failures", () => {
     expect(isRetryableGeminiError(new ApiError({ message: "bad request", status: 400 }))).toBe(
       false,
     );
     expect(isRetryableGeminiError(new ApiError({ message: "forbidden", status: 403 }))).toBe(false);
+    for (const status of [500, 502, 504]) expect(isRetryableGeminiError(new ApiError({ message: "server", status }))).toBe(false);
   });
 
   it("does not infer retry policy from arbitrary exception prose", () => {

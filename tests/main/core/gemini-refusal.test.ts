@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const generateContent = vi.fn();
-vi.mock("@google/genai", () => ({
-  GoogleGenAI: class { models = { generateContent }; files = { upload: vi.fn(), get: vi.fn() }; },
-  ApiError: class extends Error {},
+vi.mock("@main/core/gemini-http", () => ({
+  GeminiClient: class { generateContent = generateContent; },
+  GeminiHttpError: class extends Error {},
 }));
 
-import { generateTextWithGemini } from "@main/core/gemini-adapter";
+import { generateTextWithGemini, geminiProviderReason, isRetryableGeminiError } from "@main/core/gemini-adapter";
 
 const call = () => generateTextWithGemini({
   apiKey: "k", model: "gemini-3.7-flash", prompt: "hi", timeoutMs: 1000,
@@ -31,7 +31,16 @@ describe("a refused or truncated Gemini response reports the provider's reason",
 
   it("reports any other non-STOP finish reason", async () => {
     generateContent.mockResolvedValue({ candidates: [{ finishReason: "SAFETY" }], text: "" });
-    await expect(call()).rejects.toThrow(/stopped early \(SAFETY\)/);
+    await expect(call()).rejects.toThrow(/refused this request \(SAFETY\)/);
+  });
+
+  it("presents only the provider's documented refusal message and never retries it", async () => {
+    generateContent.mockResolvedValue({ candidates: [{ finishReason: "SAFETY", finishMessage: "Please use different audio." }], text: "" });
+    const error = await call().catch((failure) => failure);
+    expect(geminiProviderReason(error)).toBe("Please use different audio.");
+    expect(isRetryableGeminiError(error)).toBe(false);
+    generateContent.mockResolvedValue({ candidates: [{ finishReason: "SAFETY" }], text: "" });
+    expect(geminiProviderReason(await call().catch((failure) => failure))).toBeNull();
   });
 
   it("still returns text on a normal stop, and when no finishReason is given at all", async () => {

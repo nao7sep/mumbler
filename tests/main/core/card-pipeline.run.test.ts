@@ -1,3 +1,4 @@
+import { GeminiHttpError } from "@main/core/gemini-http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppPaths, MumblerCard } from "@shared/app-shell";
@@ -88,6 +89,7 @@ function makePaths(): AppPaths {
   return {
     homeDir: "/tmp/.mumbler",
     settingsPath: "/tmp/.mumbler/config.json",
+    modelListsPath: "/tmp/.mumbler/model-lists.json",
     queuePath: "/tmp/.mumbler/queue.json",
     legacyQueuePath: "/tmp/.mumbler/state.json",
     transcriptsDir: "/tmp/.mumbler/transcripts",
@@ -173,6 +175,48 @@ describe("executeCardPipeline", () => {
     expect(card.status).toBe("Ready to Save");
     expect(card.lastError).toBeNull();
     expect(ctx.releaseTranscriptionSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes the outline separately from title and slug, using the configured endpoint", async () => {
+    mockGenerateText.mockResolvedValue({ text: "result", modelVersion: null, usageMetadata: null });
+    const card = makeCard();
+    const ctx = makeContext(card, new AbortController().signal);
+    ctx.settings["gemini.outline"] = "gemini-outline-future";
+    ctx.settings["gemini.metadata"] = "custom-metadata";
+    ctx.settings["gemini.endpoint"] = "https://proxy.example";
+    await executeCardPipeline(card.id, "structured", "generate", ctx);
+    expect(mockGenerateText.mock.calls.map(([params]) => [params.model, params.role, params.endpoint])).toEqual([
+      ["gemini-outline-future", "outline", "https://proxy.example"],
+      ["custom-metadata", "metadata", "https://proxy.example"],
+      ["custom-metadata", "metadata", "https://proxy.example"],
+    ]);
+    expect(card.ai.structured?.model).toBe("gemini-outline-future");
+    expect(card.ai.title?.model).toBe("custom-metadata");
+  });
+
+  it("caps automatic retries at three attempts and honours capped Retry-After", async () => {
+    vi.useFakeTimers();
+    try {
+      mockGenerateText.mockRejectedValue(new GeminiHttpError("Wait before retrying.", 503, "120", "Wait before retrying."));
+      const card = makeCard();
+      const ctx = makeContext(card, new AbortController().signal);
+      ctx.settings.retryPolicy.maxRetries = 20;
+      const run = executeCardPipeline(card.id, "structured", "generate", ctx);
+      await vi.runAllTimersAsync();
+      await run;
+      expect(mockGenerateText).toHaveBeenCalledTimes(3);
+      expect(vi.mocked(ctx.logger.debug).mock.calls.filter(([op]) => op === "gemini.structured").map(([, , details]) => details)).toEqual([expect.objectContaining({ delayMs: 30_000 }), expect.objectContaining({ delayMs: 30_000 })]);
+      expect(card.lastError?.providerReason).toBe("Wait before retrying.");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([500, 502, 504])("reports HTTP %s without automatically resending", async (status) => {
+    mockGenerateText.mockRejectedValue(new GeminiHttpError("Provider could not finish.", status, null, "Provider could not finish."));
+    const card = makeCard();
+    const ctx = makeContext(card, new AbortController().signal);
+    await executeCardPipeline(card.id, "structured", "generate", ctx);
+    expect(mockGenerateText).toHaveBeenCalledOnce();
+    expect(card.lastError?.providerReason).toBe("Provider could not finish.");
   });
 
   it("marks the card cancelled and makes no Gemini call when the signal is already aborted", async () => {

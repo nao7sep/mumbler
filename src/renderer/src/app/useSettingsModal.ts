@@ -20,6 +20,9 @@ interface UseSettingsModalResult {
   isPickingSettingsBackupDirectory: boolean;
   settingsErrorMessage: Message | null;
   showDiscardConfirm: boolean;
+  fetchedModelIds: string[];
+  isRefreshingModels: boolean;
+  handleRefreshModels: () => Promise<void>;
   setSettingsDraft: Dispatch<SetStateAction<SettingsDraft | null>>;
   setSettingsErrorMessage: Dispatch<SetStateAction<Message | null>>;
   handleOpenSettings: () => Promise<void>;
@@ -48,6 +51,12 @@ export function useSettingsModal({
   const [isPickingSettingsBackupDirectory, setIsPickingSettingsBackupDirectory] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<Message | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const [fetchedModelIds, setFetchedModelIds] = useState<string[]>([]);
+  const [isRefreshingModels, setIsRefreshingModels] = useState(false);
+  const modelFetchRef = useRef(0);
+  const currentEndpointRef = useRef<string | null>(null);
+  currentEndpointRef.current = settingsDraft?.geminiEndpoint ?? null;
+  const modelBusyRef = useRef(false);
   const initialDraftRef = useRef<SettingsDraft | null>(null);
 
   // Recomputes only when the draft object changes, not on every App re-render
@@ -67,11 +76,29 @@ export function useSettingsModal({
       setSettingsDraft(draft);
       initialDraftRef.current = draft;
       setSettingsErrorMessage(null);
+      currentEndpointRef.current = draft.geminiEndpoint;
+      void refreshModels(draft.geminiEndpoint, false);
     } catch (error: unknown) {
       onError(presentFailure(error, message("error.settingsLoad"), "settings load failed"));
     } finally {
       setIsLoadingSettings(false);
     }
+  }
+
+  async function refreshModels(endpoint: string, force: boolean): Promise<void> {
+    if (force && modelBusyRef.current) return;
+    modelBusyRef.current = true;
+    const request = ++modelFetchRef.current;
+    setIsRefreshingModels(true);
+    try {
+      const ids = await window.mumbler.getModelList(endpoint, force);
+      if (request === modelFetchRef.current && currentEndpointRef.current === endpoint) setFetchedModelIds(ids);
+    } catch { /* Suggestions are best-effort; the main owner logs the failure. */ }
+    finally { if (request === modelFetchRef.current) { modelBusyRef.current = false; setIsRefreshingModels(false); } }
+  }
+
+  async function handleRefreshModels(): Promise<void> {
+    if (settingsDraft) await refreshModels(settingsDraft.geminiEndpoint, true);
   }
 
   async function handlePickSettingsOutputDirectory(): Promise<void> {
@@ -127,6 +154,7 @@ export function useSettingsModal({
     try {
       const nextSnapshot = await window.mumbler.saveSettingsDraft(settingsDraft);
       onSnapshotUpdate(nextSnapshot);
+      currentEndpointRef.current = null;
       setSettingsDraft(null);
       setSettingsErrorMessage(null);
       setShowDiscardConfirm(false);
@@ -220,8 +248,9 @@ export function useSettingsModal({
           ? current
           : {
               ...current,
-              resetSets: [...new Set([...(current.resetSets ?? []), "geminiModels" as const, "transcriptionModel" as const, "metadataModel" as const])],
-              geminiModelsText: defaults.models.join("\n"),
+              resetSets: [...new Set([...(current.resetSets ?? []), "extraModelIds" as const, "gemini.transcription" as const, "gemini.outline" as const, "gemini.metadata" as const])],
+              extraModelIdsText: defaults.extraModelIdsText,
+              outlineModel: defaults.outlineModel,
               transcriptionModel: defaults.transcriptionModel,
               metadataModel: defaults.metadataModel,
             },
@@ -233,6 +262,11 @@ export function useSettingsModal({
   }
 
   function handleCloseSettings(): void {
+    modelFetchRef.current += 1;
+    modelBusyRef.current = false;
+    currentEndpointRef.current = null;
+    setIsRefreshingModels(false);
+    setFetchedModelIds([]);
     setSettingsDraft(null);
     setSettingsErrorMessage(null);
     setShowDiscardConfirm(false);
@@ -260,6 +294,9 @@ export function useSettingsModal({
 
   return {
     settingsDraft,
+    fetchedModelIds,
+    isRefreshingModels,
+    handleRefreshModels,
     isSettingsDirty,
     isLoadingSettings,
     isSavingSettings,

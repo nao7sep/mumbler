@@ -58,6 +58,20 @@ describe("QueueList card results", () => {
     expect(document.body.textContent).toContain("AI work cancelled by user.");
   });
 
+  it("shows a documented provider reason beneath the app's failure copy", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const failed = card("failed", "Error");
+    failed.lastError!.message = "TypeError EACCES /private/tmp/RAW-SENTINEL";
+    failed.lastError!.providerReason = "This model is unavailable.";
+    await act(async () => root?.render(React.createElement(QueueList, { cards: [failed], selectedCardId: failed.id, onSelect: vi.fn() })));
+    const alert = document.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain("The recording could not be transcribed.");
+    expect(alert.textContent).toContain("This model is unavailable.");
+    expect(alert.textContent).not.toContain("RAW-SENTINEL");
+  });
+
   it("owns conventional listbox navigation and remains reachable when empty", async () => {
     const container = document.createElement("div");
     document.body.append(container);

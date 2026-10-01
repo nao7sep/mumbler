@@ -233,7 +233,7 @@ describe("settings store", () => {
 
   it("keeps a fresh install without a file when model and prompt copies are reset", async () => {
     const store = createSettingsStore(settingsPath());
-    await store.save({}, ["geminiModels", "transcriptionModel", "metadataModel", "prompts"]);
+    await store.save({}, ["extraModelIds", "gemini.transcription", "gemini.outline", "gemini.metadata", "prompts"]);
 
     await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect((await store.load()).value).toEqual(createDefaultSettings());
@@ -288,9 +288,25 @@ describe("settings store", () => {
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ theme: "dark", concurrencyLimit: 5, skipIntervalSec: 20 });
   });
 
+  it("drops retired model-selection keys without migrating them into role sets", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ geminiModels: ["old"], transcriptionModel: "old", metadataModel: "old" }));
+    const store = createSettingsStore(settingsPath());
+    expect((await store.load()).value).toEqual(createDefaultSettings());
+    await store.save({ "gemini.outline": "unknown-model" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "unknown-model" });
+  });
+
+  it("drops retired model-selection keys without migrating them into role sets", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ geminiModels: ["old"], transcriptionModel: "old", metadataModel: "old" }));
+    const store = createSettingsStore(settingsPath());
+    expect((await store.load()).value).toEqual(createDefaultSettings());
+    await store.save({ "gemini.outline": "unknown-model" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "unknown-model" });
+  });
+
   it("keeps an empty model list as the user's copy", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ geminiModels: [] }));
-    expect((await createSettingsStore(settingsPath()).load()).value.geminiModels).toEqual([]);
+    await writeFile(settingsPath(), JSON.stringify({ extraModelIds: { gemini: [] } }));
+    expect((await createSettingsStore(settingsPath()).load()).value.extraModelIds).toEqual({ gemini: [] });
   });
 
   it("falls back for a malformed whole set and warns once with its key", async () => {

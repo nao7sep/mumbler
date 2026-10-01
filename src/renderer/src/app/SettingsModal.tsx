@@ -1,3 +1,4 @@
+import { ModelPicker } from "./ModelPicker";
 import { useMemo, useRef, useState, type ReactElement } from "react";
 
 import { THEME_PREFERENCES, type SettingsDraft } from "@shared/app-shell";
@@ -120,6 +121,9 @@ const SETTINGS_TAB_LABELS: Record<SettingsTab, MessageKey> = {
 
 export function SettingsModal({
   draft,
+  fetchedModelIds = [],
+  isRefreshingModels = false,
+  onRefreshModels,
   isDirty,
   isSaving,
   isSavingApiKey,
@@ -137,6 +141,9 @@ export function SettingsModal({
   onSave,
 }: {
   draft: SettingsDraft;
+  fetchedModelIds?: string[];
+  isRefreshingModels?: boolean;
+  onRefreshModels?: () => void;
   isDirty: boolean;
   isSaving: boolean;
   isSavingApiKey: boolean;
@@ -167,7 +174,7 @@ export function SettingsModal({
     idBase: "settings",
   });
   const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
-  const geminiModelEntries = useMemo(() => parseEntries(draft.geminiModelsText), [draft.geminiModelsText]);
+  const geminiModelEntries = useMemo(() => parseEntries(draft.extraModelIdsText), [draft.extraModelIdsText]);
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
   const systemTimezone = useMemo(() => getSystemTimezone(), []);
   const i18n = useI18n();
@@ -444,12 +451,29 @@ export function SettingsModal({
           </div>
 
           <div className="app-tabpanel" {...settingsTablist.getPanelProps("ai")} hidden={activeTab !== "ai"}>
+            <section className="settings-section">
+              <h3>{t("result.transcription")}</h3>
+              <ModelPicker label={t("options.transcriptionModel")} value={draft.transcriptionModel} kind="transcription" fetched={fetchedModelIds} extra={geminiModelEntries} onChange={(transcriptionModel) => onChange({ ...draft, transcriptionModel })} />
+            </section>
+            <label className="field">
+              <span>{t("settings.provider")}</span>
+              <select value={draft.provider} onChange={() => onChange({ ...draft, provider: "gemini" })}>
+                <option value="gemini">{t("settings.gemini")}</option>
+              </select>
+            </label>
             {/* The tab already says AI, so the sections carry only their own
                 names — no heading that repeats the tab label. */}
             <section className="settings-section">
               <h3>{t("settings.gemini")}</h3>
               <p className="field-hint">{t("settings.geminiHint")}</p>
               <div className="field-stack">
+                <label className="field">
+                  <span>{t("settings.endpoint")}</span>
+                  <input value={draft.geminiEndpoint} onChange={(event) => onChange({ ...draft, geminiEndpoint: event.target.value })} />
+                </label>
+                <button type="button" className="button button--ghost" disabled={isRefreshingModels || !draft.hasGeminiApiKey} onClick={onRefreshModels}>
+                  {t("settings.refreshModels")}
+                </button>
                 {draft.hasGeminiApiKey ? (
                   <div className="api-key-status">
                     <span className="api-key-status__label">{t("settings.apiKeyConfigured")}</span>
@@ -494,7 +518,7 @@ export function SettingsModal({
                   <EditableList
                     monospace
                     entries={geminiModelEntries}
-                    onChange={(entries) => onChange({ ...draft, geminiModelsText: entriesToText(entries) })}
+                    onChange={(entries) => onChange({ ...draft, extraModelIdsText: entriesToText(entries) })}
                     placeholder={t("settings.addModel", { example: "gemini-3.5-flash" })}
                   />
                 </div>
@@ -508,36 +532,8 @@ export function SettingsModal({
                     {t("settings.resetModels")}
                   </button>
                 </div>
-                <label className="field">
-                  <span>{t("options.transcriptionModel")}</span>
-                  <select
-                    value={draft.transcriptionModel}
-                    onChange={(event) => onChange({ ...draft, transcriptionModel: event.target.value })}
-                  >
-                    {geminiModelEntries.map((id) => (
-                      <option key={id} value={id}>{id}</option>
-                    ))}
-                    {draft.transcriptionModel && !geminiModelEntries.includes(draft.transcriptionModel) && (
-                      <option value={draft.transcriptionModel}>{draft.transcriptionModel}</option>
-                    )}
-                  </select>
-                </label>
-                <p className="field-hint">{t("settings.transcriptionModelHint")}</p>
-                <label className="field">
-                  <span>{t("options.metadataModel")}</span>
-                  <select
-                    value={draft.metadataModel}
-                    onChange={(event) => onChange({ ...draft, metadataModel: event.target.value })}
-                  >
-                    {geminiModelEntries.map((id) => (
-                      <option key={id} value={id}>{id}</option>
-                    ))}
-                    {draft.metadataModel && !geminiModelEntries.includes(draft.metadataModel) && (
-                      <option value={draft.metadataModel}>{draft.metadataModel}</option>
-                    )}
-                  </select>
-                </label>
-                <p className="field-hint">{t("settings.metadataModelHint")}</p>
+                <ModelPicker label={t("options.outlineModel")} value={draft.outlineModel} kind="text-balanced" fetched={fetchedModelIds} extra={geminiModelEntries} onChange={(outlineModel) => onChange({ ...draft, outlineModel })} />
+                <ModelPicker label={t("options.metadataModel")} value={draft.metadataModel} kind="text-fast" fetched={fetchedModelIds} extra={geminiModelEntries} onChange={(metadataModel) => onChange({ ...draft, metadataModel })} />
               </div>
             </section>
 
