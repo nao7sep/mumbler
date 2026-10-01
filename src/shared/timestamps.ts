@@ -1,6 +1,11 @@
 import type { TimestampParseStatus } from "./app-shell";
 import type { MessageKey } from "./i18n/catalogues";
 
+// The built-in filename timestamp pattern: one regex whose alternatives, joined
+// with `|`, each use the named groups year, month, day, hour, minute, second.
+export const DEFAULT_TIMESTAMP_PATTERN =
+  "(?<year>\\d{2}(?:\\d{2})?)(?<month>\\d{2})(?<day>\\d{2})[-_](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})?";
+
 interface TimestampParts {
   year: number;
   month: number;
@@ -59,27 +64,19 @@ export function resolveTimezone(setting: string): string {
 
 export function parseTimestampFromFilename(
   filenameStem: string,
-  patterns: string[],
+  pattern: string,
 ): { localTimestampText: string; parseStatus: TimestampParseStatus } {
-  for (const pattern of patterns) {
-    try {
-      const match = new RegExp(pattern).exec(filenameStem);
-      if (!match?.groups) {
-        continue;
-      }
-
-      const parts = groupsToTimestampParts(match.groups);
-      if (parts === null) {
-        continue;
-      }
-
+  try {
+    const match = new RegExp(pattern).exec(filenameStem);
+    const parts = match?.groups ? groupsToTimestampParts(match.groups) : null;
+    if (parts !== null) {
       return {
         localTimestampText: formatLocalTimestamp(parts),
         parseStatus: "parsed",
       };
-    } catch {
-      continue;
     }
+  } catch {
+    // A pattern that does not compile parses nothing.
   }
 
   return {

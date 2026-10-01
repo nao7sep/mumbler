@@ -309,6 +309,14 @@ describe("settings store", () => {
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ theme: "dark", concurrencyLimit: 5, skipIntervalSec: 20 });
   });
 
+  it("ignores an old timestampPatterns list and drops it at the next write", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ timestampPatterns: ["(?<year>\\d{4})"] }));
+    const store = createSettingsStore(settingsPath());
+    expect((await store.load()).value).toEqual(createDefaultSettings());
+    await store.save({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
+  });
+
   it("drops retired model-selection keys without migrating them into role sets", async () => {
     await writeFile(settingsPath(), JSON.stringify({ geminiModels: ["old"], transcriptionModel: "old", metadataModel: "old" }));
     const store = createSettingsStore(settingsPath());

@@ -69,15 +69,15 @@ describe("applySettingsDraft — happy path", () => {
     expect(result.uiFontFamily).toBe("Iosevka, monospace");
   });
 
-  it("trims directories to null when blank and parses pattern text", () => {
+  it("trims directories to null when blank and cleans the timestamp pattern as a single line", () => {
     const draft = freshDraft();
     draft.outputDirectory = "   ";
     draft.backupDirectory = join(TEST_HOME, "custom", "backups");
-    draft.timestampPatternsText = "  pat-a  \n pat-b \n pat-a ";
+    draft.timestampPattern = "  (?<year>\\d{4})|(?<year>\\d{2})  ";
     const result = applySettingsDraft(createDefaultSettings(), draft, TEST_HOME);
     expect(result.outputDirectory).toBeNull();
     expect(result.backupDirectory).toBe(join(TEST_HOME, "custom", "backups"));
-    expect(result.timestampPatterns).toEqual(["pat-a", "pat-b"]); // trimmed + de-duplicated
+    expect(result.timestampPattern).toBe("(?<year>\\d{4})|(?<year>\\d{2})");
   });
 
   it("expands and absolutizes typed directories against HOME, never cwd", () => {
@@ -166,10 +166,16 @@ describe("applySettingsDraft — validation", () => {
     expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow(/timezone/i);
   });
 
-  it("rejects an empty set of timestamp patterns", () => {
+  it("rejects an empty timestamp pattern", () => {
     const draft = freshDraft();
-    draft.timestampPatternsText = "   \n  ";
-    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow(/pattern/i);
+    draft.timestampPattern = "   ";
+    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow("Timestamp pattern is required.");
+  });
+
+  it("rejects a timestamp pattern that is not a valid regular expression", () => {
+    const draft = freshDraft();
+    draft.timestampPattern = "(?<year>\\d{4}";
+    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow("Timestamp pattern must be a valid regular expression.");
   });
 
   it("requires the {transcript} placeholder in the structured prompt", () => {
@@ -269,7 +275,6 @@ describe("summarizeSettings", () => {
     const absent = summarizeSettings(createDefaultSettings(), OUT, BACKUP, false);
     expect(absent.hasGeminiApiKey).toBe(false);
     expect(absent.defaultOutputDirectory).toBe(OUT);
-    expect(absent.timestampPatternCount).toBe(1);
     expect(absent.extraModelIds.gemini).toEqual(createDefaultSettings().extraModelIds.gemini);
   });
 });

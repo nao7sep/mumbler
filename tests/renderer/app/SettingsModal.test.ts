@@ -35,7 +35,7 @@ function draft(): SettingsDraft {
     backupDirectory: "",
     defaultBackupDirectory: "/backup",
     defaultTimezone: "Asia/Tokyo",
-    timestampPatternsText: "",
+    timestampPattern: "",
     skipIntervalSec: 0,
     previewSnippetSeconds: 10,
     hasGeminiApiKey: false,

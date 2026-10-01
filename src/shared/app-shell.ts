@@ -139,7 +139,7 @@ export interface MumblerSettings {
   // Import — the zone a filename's local time is read in at import: "system"
   // (SYSTEM_TIMEZONE) follows the computer's zone, or an IANA zone the user chose.
   defaultTimezone: string;
-  timestampPatterns: string[];
+  timestampPattern: string;
   // Player
   skipIntervalSec: number;
   previewSnippetSeconds: number;
@@ -326,7 +326,6 @@ export interface SettingsSummary {
   defaultBackupDirectory: string;
   // Import — the resolved IANA zone (System already resolved to the computer's).
   defaultTimezone: string;
-  timestampPatternCount: number;
   // Player
   skipIntervalSec: number;
   previewSnippetSeconds: number;
@@ -354,7 +353,7 @@ export interface SettingsDraft {
   defaultBackupDirectory: string;
   // Import — "system" or an IANA zone, as saved.
   defaultTimezone: string;
-  timestampPatternsText: string;
+  timestampPattern: string;
   // Player
   skipIntervalSec: number;
   previewSnippetSeconds: number;

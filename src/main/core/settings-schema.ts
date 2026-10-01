@@ -8,6 +8,7 @@ import type {
 } from "@shared/app-shell";
 import { homedir } from "node:os";
 import {
+  DEFAULT_TIMESTAMP_PATTERN,
   SYSTEM_TIMEZONE,
   formatUtcIsoCompact,
   isValidTimezone,
@@ -62,7 +63,7 @@ const SETTINGS_SETS = {
   outputDirectory: isPath,
   backupDirectory: isPath,
   defaultTimezone: (value) => typeof value === "string" && (value === SYSTEM_TIMEZONE || isValidTimezone(value)),
-  timestampPatterns: isStrings,
+  timestampPattern: isString,
   skipIntervalSec: isPositive,
   previewSnippetSeconds: isPositive,
   provider: (value) => value === "gemini",
@@ -381,9 +382,7 @@ export function createDefaultSettings(): MumblerSettings {
     // Import
     // Follows the computer's zone; a zone the user picks is kept instead.
     defaultTimezone: SYSTEM_TIMEZONE,
-    timestampPatterns: [
-      "(?<year>\\d{2}(?:\\d{2})?)(?<month>\\d{2})(?<day>\\d{2})[-_](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})?",
-    ],
+    timestampPattern: DEFAULT_TIMESTAMP_PATTERN,
     // Player
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,
@@ -509,7 +508,6 @@ export function summarizeSettings(
     defaultBackupDirectory,
     // Import
     defaultTimezone: resolveTimezone(settings.defaultTimezone),
-    timestampPatternCount: settings.timestampPatterns.length,
     // Player
     skipIntervalSec: settings.skipIntervalSec,
     previewSnippetSeconds: settings.previewSnippetSeconds,
@@ -542,7 +540,7 @@ export function buildSettingsDraft(
     defaultBackupDirectory,
     // Import
     defaultTimezone: settings.defaultTimezone,
-    timestampPatternsText: settings.timestampPatterns.join("\n"),
+    timestampPattern: settings.timestampPattern,
     // Player
     skipIntervalSec: settings.skipIntervalSec,
     previewSnippetSeconds: settings.previewSnippetSeconds,
@@ -575,7 +573,7 @@ export function applySettingsDraft(
   const outputDirectory = draft.outputDirectory.trim();
   const backupDirectory = draft.backupDirectory.trim();
   const defaultTimezone = singleLine(draft.defaultTimezone);
-  const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
+  const timestampPattern = singleLine(draft.timestampPattern);
   const extraModelIds = { gemini: deduplicateStrings(parseSettingsEntries(draft.extraModelIdsText)) };
   const geminiEndpoint = singleLine(draft.geminiEndpoint);
   const outlineModel = draft.outlineModel.trim();
@@ -598,8 +596,13 @@ export function applySettingsDraft(
     throw new OperationError("Default timezone must be a valid IANA timezone.");
   }
 
-  if (timestampPatterns.length === 0) {
-    throw new OperationError("Add at least one timestamp regex pattern.");
+  if (timestampPattern.length === 0) {
+    throw new OperationError("Timestamp pattern is required.");
+  }
+  try {
+    new RegExp(timestampPattern);
+  } catch {
+    throw new OperationError("Timestamp pattern must be a valid regular expression.");
   }
 
   if (draft.provider !== "gemini") throw new OperationError("Choose a supported provider.");
@@ -662,7 +665,7 @@ export function applySettingsDraft(
         : resolvePathFromHome(backupDirectory, homeDirectory),
     // Import
     defaultTimezone,
-    timestampPatterns,
+    timestampPattern,
     // Player
     skipIntervalSec,
     previewSnippetSeconds,

@@ -7,6 +7,7 @@ import {
   getSupportedTimezones,
   getUtcTimestampError,
   isValidTimezone,
+  DEFAULT_TIMESTAMP_PATTERN,
   normalizeUtcMs,
   parseTimestampFromFilename,
   parseUtcFromDisplay,
@@ -14,13 +15,9 @@ import {
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 
-// The default filename pattern shipped in createDefaultSettings.
-const DEFAULT_PATTERN =
-  "(?<year>\\d{2}(?:\\d{2})?)(?<month>\\d{2})(?<day>\\d{2})[-_](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})?";
-
 describe("parseTimestampFromFilename", () => {
   it("parses a full four-digit-year stem with seconds", () => {
-    const result = parseTimestampFromFilename("20260422-094400", [DEFAULT_PATTERN]);
+    const result = parseTimestampFromFilename("20260422-094400", DEFAULT_TIMESTAMP_PATTERN);
     expect(result).toEqual({
       localTimestampText: "2026-04-22 09:44:00",
       parseStatus: "parsed",
@@ -28,34 +25,38 @@ describe("parseTimestampFromFilename", () => {
   });
 
   it("defaults the optional seconds group to 00", () => {
-    const result = parseTimestampFromFilename("20260422-0944", [DEFAULT_PATTERN]);
+    const result = parseTimestampFromFilename("20260422-0944", DEFAULT_TIMESTAMP_PATTERN);
     expect(result.localTimestampText).toBe("2026-04-22 09:44:00");
     expect(result.parseStatus).toBe("parsed");
   });
 
   it("expands a two-digit year below the 70 pivot into the 2000s", () => {
-    const result = parseTimestampFromFilename("690101-0000", [DEFAULT_PATTERN]);
+    const result = parseTimestampFromFilename("690101-0000", DEFAULT_TIMESTAMP_PATTERN);
     expect(result.localTimestampText).toBe("2069-01-01 00:00:00");
   });
 
   it("expands a two-digit year at/above the 70 pivot into the 1900s", () => {
-    const result = parseTimestampFromFilename("700101-0000", [DEFAULT_PATTERN]);
+    const result = parseTimestampFromFilename("700101-0000", DEFAULT_TIMESTAMP_PATTERN);
     expect(result.localTimestampText).toBe("1970-01-01 00:00:00");
   });
 
   it("rejects an out-of-range month and reports manual-required", () => {
-    const result = parseTimestampFromFilename("20261322-0944", [DEFAULT_PATTERN]);
+    const result = parseTimestampFromFilename("20261322-0944", DEFAULT_TIMESTAMP_PATTERN);
     expect(result).toEqual({ localTimestampText: "", parseStatus: "manual-required" });
   });
 
-  it("skips an invalid regex pattern without throwing", () => {
-    const result = parseTimestampFromFilename("20260422-094400", ["(", DEFAULT_PATTERN]);
-    expect(result.localTimestampText).toBe("2026-04-22 09:44:00");
-    expect(result.parseStatus).toBe("parsed");
+  it("parses each shape of an alternation whose alternatives use the named groups", () => {
+    const pattern = `${DEFAULT_TIMESTAMP_PATTERN}|(?<day>\\d{2})\\.(?<month>\\d{2})\\.(?<year>\\d{4}) (?<hour>\\d{2})h(?<minute>\\d{2})`;
+    expect(parseTimestampFromFilename("20260422-094400", pattern).localTimestampText).toBe("2026-04-22 09:44:00");
+    expect(parseTimestampFromFilename("rec 22.04.2026 09h44", pattern).localTimestampText).toBe("2026-04-22 09:44:00");
+  });
+
+  it("reports manual-required for a pattern that does not compile, without throwing", () => {
+    expect(parseTimestampFromFilename("20260422-094400", "(")).toEqual({ localTimestampText: "", parseStatus: "manual-required" });
   });
 
   it("returns manual-required when no pattern matches", () => {
-    const result = parseTimestampFromFilename("not-a-timestamp", [DEFAULT_PATTERN]);
+    const result = parseTimestampFromFilename("not-a-timestamp", DEFAULT_TIMESTAMP_PATTERN);
     expect(result).toEqual({ localTimestampText: "", parseStatus: "manual-required" });
   });
 });

@@ -6,7 +6,7 @@ import {
   getSettingsNumberIssues,
   type NumericSettingField,
 } from "@shared/settings-validation";
-import { SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
+import { DEFAULT_TIMESTAMP_PATTERN, SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
 import { CATALOGUES } from "@shared/i18n/catalogues";
 import { LANGUAGES, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { useI18n } from "../i18n/I18nContext";
@@ -173,7 +173,6 @@ export function SettingsModal({
     onSelect: setActiveTab,
     idBase: "settings",
   });
-  const patternEntries = useMemo(() => parseEntries(draft.timestampPatternsText), [draft.timestampPatternsText]);
   const geminiModelEntries = useMemo(() => parseEntries(draft.extraModelIdsText), [draft.extraModelIdsText]);
   const timezoneOptions = useMemo(() => getSupportedTimezones(), []);
   const systemTimezone = useMemo(() => getSystemTimezone(), []);
@@ -395,22 +394,32 @@ export function SettingsModal({
                     {text(timezoneLinkError)}
                   </InlineError>
                 ) : null}
-                <div className="field">
-                  <span>{t("settings.timestampPatterns")}</span>
-                  <p className="field-hint">{i18n.rich("settings.timestampPatternsHint", {
-                    year: <code>year</code>,
-                    month: <code>month</code>,
-                    day: <code>day</code>,
-                    hour: <code>hour</code>,
-                    minute: <code>minute</code>,
-                    second: <code>second</code>,
-                  })}</p>
-                  <EditableList
-                    monospace
-                    entries={patternEntries}
-                    onChange={(entries) => onChange({ ...draft, timestampPatternsText: entriesToText(entries) })}
-                    placeholder={t("settings.addPattern")}
+                <label className="field">
+                  <span>{t("settings.timestampPattern")}</span>
+                  <input
+                    style={{ fontFamily: "var(--font-mono)", fontSize: "1.05em" }}
+                    spellCheck={false}
+                    value={draft.timestampPattern}
+                    onChange={(event) => onChange({ ...draft, timestampPattern: event.target.value })}
                   />
+                </label>
+                <p className="field-hint">{i18n.rich("settings.timestampPatternHint", {
+                  year: <code>year</code>,
+                  month: <code>month</code>,
+                  day: <code>day</code>,
+                  hour: <code>hour</code>,
+                  minute: <code>minute</code>,
+                  second: <code>second</code>,
+                })}</p>
+                <div>
+                  <button
+                    type="button"
+                    className="button button--danger"
+                    onClick={() => onChange({ ...draft, timestampPattern: DEFAULT_TIMESTAMP_PATTERN })}
+                    disabled={isSaving}
+                  >
+                    {t("settings.resetTimestampPattern")}
+                  </button>
                 </div>
               </div>
             </section>
