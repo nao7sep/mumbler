@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppLogger } from "@main/core/logger";
-import type { AppPaths, MumblerCard, MumblerState, PendingImportReviewItem } from "@shared/app-shell";
+import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
 
 // The filesystem is real throughout — these functions are about what actually
 // lands on disk. The single exception is a removal the OS refuses: `rm` fails
@@ -105,7 +105,7 @@ function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
   };
 }
 
-function makeState(overrides: Partial<MumblerState> = {}): MumblerState {
+function makeState(overrides: Partial<MumblerQueue> = {}): MumblerQueue {
   return { schemaVersion: 2, pendingImports: [], cards: [], ...overrides };
 }
 

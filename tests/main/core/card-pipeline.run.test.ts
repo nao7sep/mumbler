@@ -39,7 +39,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { executeCardPipeline, type CardPipelineContext } from "@main/core/card-pipeline";
-import { createDefaultSettings, createEmptyState } from "@main/core/settings-schema";
+import { createDefaultSettings, createEmptyQueue } from "@main/core/settings-schema";
 
 function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
   return {
@@ -88,7 +88,8 @@ function makePaths(): AppPaths {
   return {
     homeDir: "/tmp/.mumbler",
     settingsPath: "/tmp/.mumbler/config.json",
-    statePath: "/tmp/.mumbler/state.json",
+    queuePath: "/tmp/.mumbler/queue.json",
+    legacyQueuePath: "/tmp/.mumbler/state.json",
     transcriptsDir: "/tmp/.mumbler/transcripts",
     layoutPath: "/tmp/.mumbler/layout.json",
     apiKeysPath: "/tmp/.mumbler/api-keys.json",
@@ -103,7 +104,7 @@ function makePaths(): AppPaths {
 }
 
 function makeContext(card: MumblerCard, signal: AbortSignal): CardPipelineContext {
-  const state = createEmptyState();
+  const state = createEmptyQueue();
   state.cards = [card];
   const settings = createDefaultSettings();
   // The key is now resolved by the runtime and passed in via ctx.apiKey; a

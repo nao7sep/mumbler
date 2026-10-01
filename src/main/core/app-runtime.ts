@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
-import { chmod, mkdir, rm, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, rename, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -17,7 +17,7 @@ import {
   type MumblerLayout,
   type DefaultModels,
   type MumblerSettings,
-  type MumblerState,
+  type MumblerQueue,
   type PendingImportReviewItem,
   type RendererErrorReport,
   type SaveCardResult,
@@ -51,7 +51,7 @@ import { closeBackupStore, setBackupStoreWarn } from "./backupStore";
 import { CorruptStateError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
-import { preserveAside } from "./file-io";
+import { isMissingFileError, preserveAside } from "./file-io";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState } from "./working-files";
 import {
   buildMarkdownContent,
@@ -64,7 +64,7 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
-import { applySettingsDraft, buildSettingsDraft, changedSettingsSets, createDefaultSettings, createEmptyState, createSettingsStore, createStateStore, recoverInterruptedCards, summarizeSettings, type SettingsStore } from "./settings-schema";
+import { applySettingsDraft, buildSettingsDraft, changedSettingsSets, createDefaultSettings, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type SettingsStore } from "./settings-schema";
 import {
   clampQueueWidth,
   createDefaultLayout,
@@ -135,12 +135,12 @@ type SaveOutcome =
 interface AppRuntimeState {
   paths: AppPaths | null;
   settings: MumblerSettings | null;
-  state: MumblerState | null;
+  state: MumblerQueue | null;
   // Disposable presentation state (pane width and last-selected card). Loaded
   // leniently: a corrupt layout file self-heals rather than failing startup.
   layout: MumblerLayout | null;
   settingsStore: SettingsStore | null;
-  stateStore: JsonStore<MumblerState> | null;
+  queueStore: JsonStore<MumblerQueue> | null;
   // Each card's transcription and structured outline, in its own file.
   transcriptStore: TranscriptStore | null;
   layoutStore: JsonStore<MumblerLayout> | null;
@@ -214,7 +214,7 @@ export class ApplicationRuntime {
         state: null,
         layout: null,
         settingsStore: null,
-        stateStore: null,
+        queueStore: null,
         transcriptStore: null,
         layoutStore: null,
         logger,
@@ -249,7 +249,7 @@ export class ApplicationRuntime {
     const settingsStore = createSettingsStore(paths.settingsPath, homedir(), (key) => {
       void logger.warn("settings.invalid-set", "Invalid settings set; using the built-in.", { key });
     });
-    const stateStore = createStateStore(paths.statePath);
+    const queueStore = createQueueStore(paths.queuePath);
 
     try {
       await ensureDirectories(paths, logger);
@@ -264,13 +264,18 @@ export class ApplicationRuntime {
         makeApiKeyWarn(logger),
       );
 
-      const stateLoad = await stateStore.load();
+      if (await renameLegacyQueue(paths)) {
+        await logger.info("app.queue-rename", "Renamed the legacy card queue store.", {
+          from: paths.legacyQueuePath, to: paths.queuePath,
+        });
+      }
+      const stateLoad = await queueStore.load();
       const recovered = recoverInterruptedCards(stateLoad.value);
       const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
 
-      // Each card's text lives in its own file. Bodies a version-1 state.json
+      // Each card's text lives in its own file. Bodies a version-1 queue.json
       // still carries are written out to those files first, so the rewrite of
-      // state.json below never drops text that is not yet safe elsewhere.
+      // queue.json below never drops text that is not yet safe elsewhere.
       const transcriptStore = new TranscriptStore(paths.transcriptsDir);
       const transcripts = await transcriptStore.open(reconciliation.state.cards.map((card) => card.id));
       for (const card of reconciliation.state.cards) {
@@ -283,7 +288,7 @@ export class ApplicationRuntime {
       const movedTranscripts = await transcriptStore.writeChanged(reconciliation.state.cards);
 
       // Persist startup fix-ups (interrupted-card recovery, text moved out of a
-      // version-1 state.json, and working-file reconciliation) only. state.json holds precious queue/work data, so a
+      // version-1 queue.json, and working-file reconciliation) only. queue.json holds precious queue/work data, so a
       // fresh empty queue has nothing to materialize and an unchanged existing
       // store is never rewritten.
       const stateChanged =
@@ -293,7 +298,7 @@ export class ApplicationRuntime {
         reconciliation.droppedPendingImports > 0 ||
         reconciliation.missingWorkingCards > 0;
       if (stateChanged) {
-        await stateStore.save(reconciliation.state);
+        await queueStore.save(reconciliation.state);
       }
 
       // Presentation state (disposable, volatile). A missing layout loads defaults
@@ -350,7 +355,7 @@ export class ApplicationRuntime {
         state: reconciliation.state,
         layout,
         settingsStore,
-        stateStore,
+        queueStore,
         transcriptStore,
         layoutStore,
         logger,
@@ -419,7 +424,7 @@ export class ApplicationRuntime {
         state: null,
         layout: null,
         settingsStore: null,
-        stateStore: null,
+        queueStore: null,
         transcriptStore: null,
         layoutStore: null,
         logger,
@@ -622,18 +627,19 @@ export class ApplicationRuntime {
   async resetState(): Promise<AppSnapshot> {
     const paths = this.runtime.paths ?? getAppPaths();
     const settingsStore = createSettingsStore(paths.settingsPath);
-    const stateStore = createStateStore(paths.statePath);
+    const queueStore = createQueueStore(paths.queuePath);
     const layoutStore = createLayoutStore(paths.layoutPath);
     const settings = createDefaultSettings();
-    const state = createEmptyState();
+    const state = createEmptyQueue();
     const layout = createDefaultLayout();
 
     try {
       await ensureDirectories(paths, this.runtime.logger);
       // Preserve each store before the user-commanded reset returns to built-ins.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
-      const preservedStateFiles = await stateStore.preserveExistingFiles();
-      // The preserved state.json keeps its cards' text beside it.
+      const preservedStateFiles = await queueStore.preserveExistingFiles();
+      const preservedLegacyQueue = await preserveAside(paths.legacyQueuePath);
+      // The preserved queue.json keeps its cards' text beside it.
       const preservedTranscripts = await preserveAside(paths.transcriptsDir);
       const preservedLayoutFiles = await layoutStore.preserveExistingFiles();
       // Reuse the per-launch session logger rather than building a new one, so a
@@ -644,6 +650,7 @@ export class ApplicationRuntime {
         workingDir: paths.workingDir,
         preservedSettingsFiles,
         preservedStateFiles,
+        preservedLegacyQueue,
         preservedTranscripts,
         preservedLayoutFiles,
         deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
@@ -655,7 +662,7 @@ export class ApplicationRuntime {
       this.runtime.state = reconciliation.state;
       this.runtime.layout = layout;
       this.runtime.settingsStore = settingsStore;
-      this.runtime.stateStore = stateStore;
+      this.runtime.queueStore = queueStore;
       this.runtime.transcriptStore = new TranscriptStore(paths.transcriptsDir);
       this.runtime.layoutStore = layoutStore;
       this.runtime.startupDiagnostic = null;
@@ -1322,7 +1329,7 @@ export class ApplicationRuntime {
         Promise.allSettled([...this.activeSaves.values()]),
         this.pipeline.shutdown(),
       ]);
-      await this.runtime.stateStore?.flush();
+      await this.runtime.queueStore?.flush();
       await this.runtime.transcriptStore?.flush();
       await this.runtime.settingsStore?.flush();
       await this.runtime.layoutStore?.flush();
@@ -1738,12 +1745,12 @@ export class ApplicationRuntime {
   private async persistState(): Promise<void> {
     const state = this.runtime.state!;
     const cards = state.cards;
-    // Text reaches its own file before state.json stops needing it, and a file
-    // is deleted only after state.json no longer refers to it. Each store
+    // Text reaches its own file before queue.json stops needing it, and a file
+    // is deleted only after queue.json no longer refers to it. Each store
     // serializes its writes, so overlapping persistState calls never interleave
     // on disk, and unchanged text is not written again.
     await this.runtime.transcriptStore!.writeChanged(cards);
-    await this.runtime.stateStore!.save(state);
+    await this.runtime.queueStore!.save(state);
     await this.runtime.transcriptStore!.removeAbsent(cards);
     const selectedCardId = selectExistingCardId(
       state.cards.map((card) => card.id),
@@ -1825,7 +1832,8 @@ export function getAppPaths(): AppPaths {
   return {
     homeDir,
     settingsPath: join(homeDir, "config.json"),
-    statePath: join(homeDir, "state.json"),
+    queuePath: join(homeDir, "queue.json"),
+    legacyQueuePath: join(homeDir, "state.json"),
     transcriptsDir: join(homeDir, "transcripts"),
     layoutPath: join(homeDir, "layout.json"),
     apiKeysPath: join(homeDir, "api-keys.json"),
@@ -1837,6 +1845,24 @@ export function getAppPaths(): AppPaths {
     dependenciesPath: join(homeDir, "dependencies.json"),
     tempDir: join(homeDir, "temp"),
   };
+}
+
+// The rename preserves the original bytes. A present queue (even unreadable)
+// always wins; only the missing-file branch may consume the legacy filename.
+async function renameLegacyQueue(paths: AppPaths): Promise<boolean> {
+  try {
+    await lstat(paths.queuePath);
+    return false;
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error;
+  }
+  try {
+    await rename(paths.legacyQueuePath, paths.queuePath);
+    return true;
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error;
+    return false;
+  }
 }
 
 // Adapts the per-launch logger into the warn sink the secrets module calls when

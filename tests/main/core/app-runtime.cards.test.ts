@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -95,7 +95,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
 });
 
 const { ApplicationRuntime } = await import("@main/core/app-runtime");
-const { createStateStore } = await import("@main/core/settings-schema");
+const { createQueueStore } = await import("@main/core/settings-schema");
 const { TranscriptStore } = await import("@main/core/transcript-store");
 
 type Runtime = Awaited<ReturnType<typeof ApplicationRuntime.initialize>>;
@@ -163,6 +163,55 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
+describe("the durable queue store", () => {
+  it("renames a legacy queue without reinterpreting or rewriting its bytes", async () => {
+    const [pending] = await dropIn("take.wav");
+    await runtime.confirmPendingImports([review(pending)]);
+    await runtime.shutdown();
+    const queue = join(home, "queue.json");
+    const legacy = join(home, "state.json");
+    const original = await readFile(queue, "utf8");
+    await rename(queue, legacy);
+    runtime = await ApplicationRuntime.initialize();
+    expect(cards(runtime.getSnapshot())).toHaveLength(1);
+    expect(await readFile(queue, "utf8")).toBe(original);
+    expect(await exists(legacy)).toBe(false);
+  });
+
+  it("keeps an existing queue authoritative and leaves the legacy file intact", async () => {
+    const [pending] = await dropIn("take.wav");
+    await runtime.confirmPendingImports([review(pending)]);
+    await runtime.shutdown();
+    const legacy = join(home, "state.json");
+    await writeFile(legacy, "legacy bytes must stay here");
+    runtime = await ApplicationRuntime.initialize();
+    expect(cards(runtime.getSnapshot())).toHaveLength(1);
+    expect(await readFile(legacy, "utf8")).toBe("legacy bytes must stay here");
+  });
+
+  it("preserves both queue filenames on reset so legacy work cannot reappear", async () => {
+    const [pending] = await dropIn("take.wav");
+    await runtime.confirmPendingImports([review(pending)]);
+    await writeFile(join(home, "state.json"), "legacy bytes");
+    await runtime.resetState();
+    expect(await exists(join(home, "queue.json"))).toBe(false);
+    expect(await exists(join(home, "state.json"))).toBe(false);
+    const preserved = (await readdir(home)).find((name) => /^state-.*\.invalid$/.test(name));
+    expect(preserved).toBeDefined();
+    expect(await readFile(join(home, preserved!), "utf8")).toBe("legacy bytes");
+  });
+
+  it("does not replace an unreadable present queue with legacy data", async () => {
+    await runtime.shutdown();
+    await writeFile(join(home, "queue.json"), "broken queue");
+    await writeFile(join(home, "state.json"), "legacy bytes");
+    runtime = await ApplicationRuntime.initialize();
+    expect(runtime.getSnapshot().startupDiagnostic).not.toBeNull();
+    expect(await readFile(join(home, "queue.json"), "utf8")).toBe("broken queue");
+    expect(await readFile(join(home, "state.json"), "utf8")).toBe("legacy bytes");
+  });
+});
+
 describe("confirming what was dropped in", () => {
   it("turns each pending import into a card with the reviewed time, and selects the first", async () => {
     const [pending] = await dropIn("take.wav");
@@ -189,7 +238,7 @@ describe("confirming what was dropped in", () => {
     });
     expect(snapshot.queueSummary?.selectedCardId).toBe(card.id);
 
-    const persisted = await createStateStore(join(home, "state.json")).load();
+    const persisted = await createQueueStore(join(home, "queue.json")).load();
     expect(persisted.value.cards.map((entry) => entry.id)).toEqual([card.id]);
   });
 
@@ -312,7 +361,7 @@ describe("working with a card", () => {
   async function transcribedOnDisk(cardId: string): Promise<void> {
     const run = { provider: "gemini" as const, model: "gemini-3.7-flash", generatedAtUtc: Date.now() };
     await runtime.shutdown();
-    const store = createStateStore(join(home, "state.json"));
+    const store = createQueueStore(join(home, "queue.json"));
     const loaded = await store.load();
     const transcribed = loaded.value.cards.map((card) =>
         card.id === cardId
@@ -325,7 +374,7 @@ describe("working with a card", () => {
             }
           : card,
     );
-    // The long text lives in each card's own file, not in state.json.
+    // The long text lives in each card's own file, not in queue.json.
     await new TranscriptStore(join(home, "transcripts")).writeChanged(transcribed);
     await store.save({ ...loaded.value, cards: transcribed });
     runtime = await ApplicationRuntime.initialize();
@@ -418,7 +467,7 @@ describe("working with a card", () => {
 
     expect(cards(runtime.getSnapshot())[0].trim.frontMarkerSec).toBe(9);
     await runtime.shutdown();
-    const persisted = await createStateStore(join(home, "state.json")).load();
+    const persisted = await createQueueStore(join(home, "queue.json")).load();
     expect(persisted.value.cards[0].trim.frontMarkerSec).toBe(9);
   });
 
@@ -433,7 +482,7 @@ describe("working with a card", () => {
     await runtime.shutdown();
 
     expect(await outcome).toBe("stopped");
-    const persisted = await createStateStore(join(home, "state.json")).load();
+    const persisted = await createQueueStore(join(home, "queue.json")).load();
     expect(persisted.value.cards.map((entry) => entry.status)).toEqual(["Ready to Save"]);
     expect(await exists(card.sourceFilePath), "the working audio is kept").toBe(true);
     expect(await readdir(join(home, "output")).catch(() => []), "nothing was published").toEqual([]);
@@ -443,11 +492,11 @@ describe("working with a card", () => {
   it("reports a save as saved once its files are out, even when the queue then cannot be written", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
-    const stateStore = (runtime as unknown as { runtime: { stateStore: { save(value: unknown): Promise<void> } } })
-      .runtime.stateStore;
-    const realSave = stateStore.save.bind(stateStore);
+    const queueStore = (runtime as unknown as { runtime: { queueStore: { save(value: unknown): Promise<void> } } })
+      .runtime.queueStore;
+    const realSave = queueStore.save.bind(queueStore);
     let saves = 0;
-    vi.spyOn(stateStore, "save").mockImplementation(async (value) => {
+    vi.spyOn(queueStore, "save").mockImplementation(async (value) => {
       saves += 1;
       // The first write claims the card as Saving; the next one follows publication.
       if (saves === 2) throw new Error("disk full");
@@ -537,7 +586,7 @@ describe("working with a card", () => {
 
     expect(cards(runtime.getSnapshot())).toHaveLength(3);
     await runtime.shutdown();
-    const persisted = await createStateStore(join(home, "state.json")).load();
+    const persisted = await createQueueStore(join(home, "queue.json")).load();
     expect(persisted.value.cards).toHaveLength(3);
     expect(persisted.value.cards.find((card) => card.id === second.id)?.trim.frontMarkerSec).toBe(1);
   });
@@ -615,12 +664,12 @@ describe("working with a card", () => {
 });
 
 describe("each card's text in its own file", () => {
-  it("moves the text a version-1 state.json carries into per-card files on first launch", async () => {
+  it("moves the text a version-1 queue.json carries into per-card files on first launch", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
     await runtime.shutdown();
-    // The state.json an earlier build wrote: version 1, text inside each card.
-    const current = JSON.parse(await readFile(join(home, "state.json"), "utf8"));
+    // A version-1 queue record carries text inside each card.
+    const current = JSON.parse(await readFile(join(home, "queue.json"), "utf8"));
     const legacy = {
       ...current,
       schemaVersion: 1,
@@ -632,7 +681,7 @@ describe("each card's text in its own file", () => {
         metadata: { structured: "## what it was about", title: "A title", slug: "a-title" },
       })),
     };
-    await writeFile(join(home, "state.json"), JSON.stringify(legacy), "utf8");
+    await writeFile(join(home, "queue.json"), JSON.stringify(legacy), "utf8");
 
     runtime = await ApplicationRuntime.initialize();
 
@@ -642,9 +691,9 @@ describe("each card's text in its own file", () => {
       transcription: { text: "every word that was said" },
       metadata: { structured: "## what it was about", title: "A title", slug: "a-title" },
     });
-    const onDisk = await readFile(join(home, "state.json"), "utf8");
+    const onDisk = await readFile(join(home, "queue.json"), "utf8");
     expect(JSON.parse(onDisk).schemaVersion).toBe(2);
-    expect(onDisk, "state.json no longer carries the text").not.toContain("every word that was said");
+    expect(onDisk, "queue.json no longer carries the text").not.toContain("every word that was said");
     const [file] = await readdir(join(home, "transcripts"));
     expect(JSON.parse(await readFile(join(home, "transcripts", file), "utf8"))).toMatchObject({
       cardId: card.id,
@@ -662,10 +711,10 @@ describe("each card's text in its own file", () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
     await runtime.shutdown();
-    const current = JSON.parse(await readFile(join(home, "state.json"), "utf8"));
+    const current = JSON.parse(await readFile(join(home, "queue.json"), "utf8"));
     current.schemaVersion = 1;
     current.cards[0].transcription = { text: "words" };
-    await writeFile(join(home, "state.json"), JSON.stringify(current), "utf8");
+    await writeFile(join(home, "queue.json"), JSON.stringify(current), "utf8");
     runtime = await ApplicationRuntime.initialize();
     expect(await readdir(join(home, "transcripts"))).toHaveLength(1);
 
@@ -786,7 +835,7 @@ describe("settings, secrets and the window's own state", () => {
     expect(snapshot.settingsSummary?.defaultTimezone).not.toBe("Europe/Berlin");
     expect(await exists(join(home, "config.json"))).toBe(false);
     expect(await exists(join(home, "layout.json"))).toBe(false);
-    expect(await exists(join(home, "state.json"))).toBe(false);
+    expect(await exists(join(home, "queue.json"))).toBe(false);
     expect(await exists(pending.workingFilePath), "the orphaned working copy is swept").toBe(false);
     expect(await exists(pending.originalSourcePath), "the user's own file is untouched").toBe(true);
   });

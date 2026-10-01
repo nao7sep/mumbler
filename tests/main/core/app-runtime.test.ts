@@ -51,7 +51,7 @@ const {
   resetFailureDiagnostic,
 } = await import("@main/core/app-runtime");
 
-const { createStateStore } = await import("@main/core/settings-schema");
+const { createQueueStore } = await import("@main/core/settings-schema");
 
 describe("reset failure presentation", () => {
   it("keeps exception, IPC, and internal path diagnostics out of the retained snapshot message", () => {
@@ -258,7 +258,7 @@ describe("getAppPaths standard layout", () => {
   // getAppPaths is the single source of truth for every stored-file name under the
   // storage root. These assertions pin the filename mapping so a rename of any
   // store cannot silently drift: durable user settings live in config.json, and
-  // that file stays distinct from the volatile state.json and layout.json stores.
+  // that file stays distinct from durable queue data and volatile layout.json.
   const ROOT = join(parse(process.cwd()).root, "data", "mumbler-paths-test");
 
   function withRoot<T>(run: () => T): T {
@@ -278,17 +278,18 @@ describe("getAppPaths standard layout", () => {
     expect(paths.settingsPath).toBe(join(ROOT, "config.json"));
   });
 
-  it("keeps config.json separate from the state, layout, and secrets stores", () => {
+  it("keeps config.json separate from the queue, layout, and secrets stores", () => {
     const paths = withRoot(() => getAppPaths());
-    expect(paths.statePath).toBe(join(ROOT, "state.json"));
+    expect(paths.queuePath).toBe(join(ROOT, "queue.json"));
+    expect(paths.legacyQueuePath).toBe(join(ROOT, "state.json"));
     expect(paths.layoutPath).toBe(join(ROOT, "layout.json"));
     expect(paths.apiKeysPath).toBe(join(ROOT, "api-keys.json"));
 
     // Distinct roles, distinct files: durable settings must never collide with the
-    // volatile state, the self-healing layout, or the 0600 secrets file.
+    // durable queue, the self-healing layout, or the 0600 secrets file.
     const distinct = new Set([
       paths.settingsPath,
-      paths.statePath,
+      paths.queuePath,
       paths.layoutPath,
       paths.apiKeysPath,
     ]);
@@ -360,7 +361,7 @@ describe("ApplicationRuntime dropped-path import authority", () => {
         expect((await stat(item.workingFilePath)).isFile()).toBe(true);
       }
 
-      const persisted = await createStateStore(join(process.env.MUMBLER_DATA_DIR, "state.json")).load();
+      const persisted = await createQueueStore(join(process.env.MUMBLER_DATA_DIR, "queue.json")).load();
       expect(persisted.value.pendingImports.map((item) => item.originalSourcePath)).toEqual([
         firstAudio,
         secondAudio,

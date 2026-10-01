@@ -1,6 +1,6 @@
 /**
  * The single storage-root resolver — the one place that decides where mumbler keeps its own files, per
- * the storage-path conventions. Every subpath (config.json, state.json, logs/, working/, and the backup
+ * the storage-path conventions. Every subpath (config.json, queue.json, logs/, working/, and the backup
  * store) is derived from the root this module returns and from nowhere else, so one variable moves the
  * whole tree and two derivations can never disagree.
  *

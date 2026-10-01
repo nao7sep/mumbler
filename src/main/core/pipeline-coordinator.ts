@@ -2,7 +2,7 @@ import {
   type AppPaths,
   type MumblerCard,
   type MumblerSettings,
-  type MumblerState,
+  type MumblerQueue,
 } from "@shared/app-shell";
 import { isCardBusy } from "@shared/card-status";
 
@@ -25,7 +25,7 @@ import {
 // coordinator and the runtime always see the same cards — the coordinator owns
 // no app state of its own, only the concurrency bookkeeping below.
 export interface PipelineRuntimeView {
-  state: MumblerState | null;
+  state: MumblerQueue | null;
   settings: MumblerSettings | null;
   paths: AppPaths | null;
   logger: AppLogger;

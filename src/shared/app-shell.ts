@@ -309,7 +309,8 @@ export interface MumblerCard {
   updatedAtUtc: number;
 }
 
-export interface MumblerState {
+/** The user's durable card queue and pending imports; presentation is in MumblerLayout. */
+export interface MumblerQueue {
   schemaVersion: 2;
   pendingImports: PendingImportReviewItem[];
   cards: MumblerCard[];
@@ -318,12 +319,14 @@ export interface MumblerState {
 export interface AppPaths {
   homeDir: string;
   settingsPath: string;
-  statePath: string;
+  queuePath: string;
+  // The earlier queue filename, renamed only when queuePath is absent.
+  legacyQueuePath: string;
   // One file per card holding its transcription and structured outline, kept out
-  // of statePath so the queue's frequent saves stay small.
+  // of queuePath so the queue's frequent saves stay small.
   transcriptsDir: string;
   // Disposable presentation state (pane width and last selection). Its own file,
-  // apart from settingsPath/statePath, so it self-heals independently.
+  // apart from settingsPath/queuePath, so it self-heals independently.
   layoutPath: string;
   // The secrets file. The Gemini API key lives here in its own 0600 file, not in
   // settingsPath (storage-path-conventions, "Secrets and keys").
@@ -521,7 +524,7 @@ export interface DependencyStatus {
   transient: ToolTransient;
 }
 
-// Disposable presentation state, separate from config.json and state.json (which
+// Disposable presentation state, separate from config.json and queue.json (which
 // holds precious card data). queueWidth is the user's dragged intent in CSS
 // pixels; selectedCardId remembers where the user left the queue view.
 export interface MumblerLayout {
@@ -545,7 +548,7 @@ export interface AppSnapshot {
   commands: CommandDefinition[];
   startupDiagnostic: StartupDiagnostic | null;
   appWideError: StartupDiagnostic | null;
-  state: MumblerState | null;
+  state: MumblerQueue | null;
   // Disposable presentation state. Null until the runtime is ready, like the
   // other snapshot slices.
   layout: MumblerLayout | null;

@@ -1,7 +1,7 @@
 import type {
   MumblerCard,
   MumblerSettings,
-  MumblerState,
+  MumblerQueue,
   PendingImportReviewItem,
   SettingsDraft,
   SettingsSummary,
@@ -23,9 +23,9 @@ import { resolvePathFromHome } from "./storage-root";
 import { multiline } from "./text-cleanup";
 
 // Version 2 keeps each card's transcription and structured outline in the card's
-// own file under transcripts/ (TranscriptStore), not in state.json. Version 1
+// own file under transcripts/ (TranscriptStore), not in queue.json. Version 1
 // files still load: their bodies are read here and moved out on first launch.
-const STATE_SCHEMA_VERSION = 2;
+const QUEUE_SCHEMA_VERSION = 2;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -200,9 +200,9 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
   };
 }
 
-function normalizeState(raw: Record<string, unknown>, defaults: MumblerState): MumblerState {
+function normalizeQueue(raw: Record<string, unknown>, defaults: MumblerQueue): MumblerQueue {
   return {
-    schemaVersion: STATE_SCHEMA_VERSION,
+    schemaVersion: QUEUE_SCHEMA_VERSION,
     pendingImports: Array.isArray(raw.pendingImports)
       ? (raw.pendingImports as PendingImportReviewItem[]).map(normalizePendingImportRecord)
       : defaults.pendingImports,
@@ -217,7 +217,7 @@ function normalizeState(raw: Record<string, unknown>, defaults: MumblerState): M
 // canonical ISO-8601 string, while everything else passes through unchanged.
 // The model keeps epoch-ms for arithmetic/sorting; this converts only at the
 // persistence edge. The read path (normalizeUtcMs) accepts both ISO and
-// epoch-ms, so a legacy numeric state.json keeps loading and is rewritten as ISO
+// epoch-ms, so a legacy numeric queue.json keeps loading and is rewritten as ISO
 // on the next save — no migration step.
 function serializeUtcInstants(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -237,9 +237,9 @@ function serializeUtcInstants(value: unknown): unknown {
 }
 
 // The transcription and structured outline are written by TranscriptStore into
-// each card's own file, so state.json stays small and its frequent saves record
+// each card's own file, so queue.json stays small and its frequent saves record
 // small rows in the backup history.
-export function serializeState(state: MumblerState): unknown {
+export function serializeQueue(state: MumblerQueue): unknown {
   return serializeUtcInstants({
     ...state,
     cards: state.cards.map(({ transcription: _bodyInOwnFile, metadata, ...card }) => ({
@@ -250,8 +250,8 @@ export function serializeState(state: MumblerState): unknown {
 }
 
 export function recoverInterruptedCards(
-  state: MumblerState,
-): { state: MumblerState; recoveredInterruptedCards: number; restoredSavingCards: number } {
+  state: MumblerQueue,
+): { state: MumblerQueue; recoveredInterruptedCards: number; restoredSavingCards: number } {
   let recoveredInterruptedCards = 0;
   let restoredSavingCards = 0;
 
@@ -453,19 +453,19 @@ export function changedSettingsSets(current: MumblerSettings, next: MumblerSetti
   ).map((key) => [key, next[key]]));
 }
 
-export function createStateStore(path: string): JsonStore<MumblerState> {
-  return new JsonStore<MumblerState>({
+export function createQueueStore(path: string): JsonStore<MumblerQueue> {
+  return new JsonStore<MumblerQueue>({
     path,
-    schemaVersion: STATE_SCHEMA_VERSION,
-    validate: (raw) => normalizeState(raw, createEmptyState()),
-    createDefault: () => createEmptyState(),
-    serialize: serializeState,
+    schemaVersion: QUEUE_SCHEMA_VERSION,
+    validate: (raw) => normalizeQueue(raw, createEmptyQueue()),
+    createDefault: () => createEmptyQueue(),
+    serialize: serializeQueue,
   });
 }
 
-export function createEmptyState(): MumblerState {
+export function createEmptyQueue(): MumblerQueue {
   return {
-    schemaVersion: STATE_SCHEMA_VERSION,
+    schemaVersion: QUEUE_SCHEMA_VERSION,
     pendingImports: [],
     cards: [],
   };

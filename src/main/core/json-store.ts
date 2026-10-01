@@ -17,7 +17,7 @@ export class CorruptStateError extends Error {
 }
 
 export interface JsonStoreOptions<T> {
-  /** Absolute path to the canonical file (e.g. ~/.mumbler/state.json). */
+  /** Absolute path to the canonical file (e.g. ~/.mumbler/queue.json). */
   path: string;
   /** When declared, newer schema versions are refused; settings maps omit it. */
   schemaVersion?: number;

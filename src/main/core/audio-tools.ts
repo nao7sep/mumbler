@@ -290,7 +290,7 @@ export async function prepareAudioForTranscription(params: {
 
   const extension = extname(params.sourceFilePath) || ".audio";
   // not recorded: derived/ holds disposable audio binaries produced for the
-  // current pipeline; the durable decisions and text remain in state.json.
+  // current pipeline; the durable decisions and text remain in queue.json.
   const outputPath = join(derivedDir, `${nanoid()}${extension}`);
 
   if (params.trimDecision?.kind === "stream-copy") {

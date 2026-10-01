@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { MumblerCard, MumblerState } from "@shared/app-shell";
+import type { MumblerCard, MumblerQueue } from "@shared/app-shell";
 import type { AppLogger } from "@main/core/logger";
 
 // The coordinator spawns executeCardPipeline fire-and-forget; stub it with a
@@ -23,7 +23,7 @@ vi.mock("@main/core/card-pipeline", async (importOriginal) => {
 });
 
 const { PipelineCoordinator } = await import("@main/core/pipeline-coordinator");
-const { createDefaultSettings, createEmptyState } = await import("@main/core/settings-schema");
+const { createDefaultSettings, createEmptyQueue } = await import("@main/core/settings-schema");
 const { OperationError } = await import("@main/core/operation-error");
 
 const noopLogger: AppLogger = {
@@ -77,7 +77,7 @@ async function settle(cardId: string): Promise<void> {
 }
 
 function harness(cards: MumblerCard[], concurrencyLimit = 1) {
-  const state: MumblerState = { ...createEmptyState(), cards };
+  const state: MumblerQueue = { ...createEmptyQueue(), cards };
   const settings = { ...createDefaultSettings(), concurrencyLimit };
   const persistState = vi.fn(async () => {});
   const resolveApiKey = vi.fn(async (): Promise<string | null> => "test-key");

@@ -5,7 +5,7 @@ import type {
   CardProcessingStep,
   MumblerCard,
   MumblerSettings,
-  MumblerState,
+  MumblerQueue,
 } from "@shared/app-shell";
 
 import type { AppLogger } from "./logger";
@@ -24,7 +24,7 @@ import { CancelledError, isCancelledError } from "./cancellation";
 import { multiline } from "./text-cleanup";
 
 export interface CardPipelineContext {
-  state: MumblerState;
+  state: MumblerQueue;
   settings: MumblerSettings;
   paths: AppPaths;
   logger: AppLogger;

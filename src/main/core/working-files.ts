@@ -2,13 +2,13 @@ import { access, copyFile, mkdir, readdir, rm, unlink } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { basename, join } from "node:path";
 
-import type { AppPaths, MumblerCard, MumblerState, PendingImportReviewItem } from "@shared/app-shell";
+import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
 import { fileExists, formatError, uniquePathInDirectory } from "./file-io";
 
 import { type AppLogger } from "./logger";
 
 export interface WorkingReconciliationResult {
-  state: MumblerState;
+  state: MumblerQueue;
   droppedPendingImports: number;
   missingWorkingCards: number;
   deletedOrphanedFiles: number;
@@ -28,7 +28,7 @@ export async function copyIntoWorking(
   const workingFilePath = await uniquePathInDirectory(workingDir, preferredName);
 
   try {
-    // not recorded: working/ contains managed audio binaries; state.json records
+    // not recorded: working/ contains managed audio binaries; queue.json records
     // the durable queue/work metadata that gives those copies meaning.
     await copyFile(sourcePath, workingFilePath);
     await access(workingFilePath, fsConstants.R_OK);
@@ -124,7 +124,7 @@ export async function listWorkingFiles(workingDir: string): Promise<string[]> {
 
 export async function reconcileWorkingState(
   paths: AppPaths,
-  state: MumblerState,
+  state: MumblerQueue,
   logger: AppLogger,
 ): Promise<WorkingReconciliationResult> {
   const referencedPaths = new Set<string>();

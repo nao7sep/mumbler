@@ -8,7 +8,7 @@ import { CorruptStateError } from "./json-store";
 
 const TRANSCRIPT_SCHEMA_VERSION = 1;
 
-/** A card's two long text bodies, kept in the card's own file rather than in state.json. */
+/** A card's two long text bodies, kept in the card's own file rather than in queue.json. */
 export interface CardTranscript {
   transcription: string | null;
   structured: string | null;
@@ -73,7 +73,7 @@ export class TranscriptStore {
   /**
    * Reads the transcript of every card in `cardIds`, and deletes files that no
    * card refers to any more (the card was removed or saved before its file could
-   * be). A file that cannot be read halts like a corrupt state.json: it is left
+   * be). A file that cannot be read halts like a corrupt queue.json: it is left
    * in place for the user.
    */
   async open(cardIds: readonly string[]): Promise<Map<string, CardTranscript>> {

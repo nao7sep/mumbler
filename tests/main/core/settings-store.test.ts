@@ -4,12 +4,12 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { MumblerCard, MumblerState } from "@shared/app-shell";
+import type { MumblerCard, MumblerQueue } from "@shared/app-shell";
 import { CorruptStateError } from "@main/core/json-store";
 import {
   createDefaultSettings,
   createSettingsStore,
-  createStateStore,
+  createQueueStore,
   recoverInterruptedCards,
 } from "@main/core/settings-schema";
 
@@ -23,8 +23,8 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function statePath(): string {
-  return join(dir, "state.json");
+function queuePath(): string {
+  return join(dir, "queue.json");
 }
 
 function settingsPath(): string {
@@ -65,7 +65,7 @@ function card(overrides: Partial<MumblerCard> = {}): MumblerCard {
   };
 }
 
-function stateWith(cards: MumblerCard[]): MumblerState {
+function stateWith(cards: MumblerCard[]): MumblerQueue {
   return {
     schemaVersion: 2,
     pendingImports: [],
@@ -73,30 +73,30 @@ function stateWith(cards: MumblerCard[]): MumblerState {
   };
 }
 
-describe("state store", () => {
+describe("queue data store", () => {
   it("returns an empty state in memory when no file exists, without writing it", async () => {
-    const store = createStateStore(statePath());
+    const store = createQueueStore(queuePath());
     const { value, origin } = await store.load();
     expect(origin).toBe("created");
     expect(value.cards).toEqual([]);
     // load() is non-destructive: it must not have created the file.
-    await expect(readFile(statePath(), "utf8")).rejects.toThrow();
+    await expect(readFile(queuePath(), "utf8")).rejects.toThrow();
   });
 
   it("normalizes a present state file on load", async () => {
     await writeFile(
-      statePath(),
+      queuePath(),
       JSON.stringify({ ...stateWith([card({ id: "x" })]), selectedCardId: "x" }),
       "utf8",
     );
-    const { value, origin } = await createStateStore(statePath()).load();
+    const { value, origin } = await createQueueStore(queuePath()).load();
     expect(origin).toBe("loaded");
     expect(value.cards.map((c) => c.id)).toEqual(["x"]);
     expect(value).not.toHaveProperty("selectedCardId");
   });
 
-  it("keeps each card's transcription and outline out of state.json", async () => {
-    const store = createStateStore(statePath());
+  it("keeps each card's transcription and outline out of queue.json", async () => {
+    const store = createQueueStore(queuePath());
     await store.save(
       stateWith([
         card({
@@ -107,7 +107,7 @@ describe("state store", () => {
       ]),
     );
 
-    const raw = JSON.parse(await readFile(statePath(), "utf8"));
+    const raw = JSON.parse(await readFile(queuePath(), "utf8"));
     expect(raw.schemaVersion).toBe(2);
     expect(raw).not.toHaveProperty("updatedAtUtc");
     expect(raw.cards[0]).not.toHaveProperty("transcription");
@@ -124,16 +124,16 @@ describe("state store", () => {
       pendingImports: [],
       cards: [{ ...card({ id: "old" }), transcription: { text: "old words" }, metadata: { structured: "old outline", title: "T", slug: "t" } }],
     };
-    await writeFile(statePath(), JSON.stringify(legacy), "utf8");
+    await writeFile(queuePath(), JSON.stringify(legacy), "utf8");
 
-    const { value } = await createStateStore(statePath()).load();
+    const { value } = await createQueueStore(queuePath()).load();
 
     expect(value.cards[0].transcription.text).toBe("old words");
     expect(value.cards[0].metadata.structured).toBe("old outline");
   });
 
   it("writes UTC instants as canonical ISO strings and reads epoch-ms back", async () => {
-    const store = createStateStore(statePath());
+    const store = createQueueStore(queuePath());
     await store.save(
       stateWith([
         card({
@@ -154,7 +154,7 @@ describe("state store", () => {
 
     // On disk: every *Utc instant is the canonical exactly-3-digit Z form,
     // including a deeply nested one the generic serializer must recurse into.
-    const raw = JSON.parse(await readFile(statePath(), "utf8"));
+    const raw = JSON.parse(await readFile(queuePath(), "utf8"));
     const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
     expect(raw.cards[0].createdAtUtc).toMatch(ISO);
     expect(raw.cards[0].updatedAtUtc).toMatch(ISO);
@@ -175,7 +175,7 @@ describe("state store", () => {
   });
 
   it("keeps a queued card resumable across an ISO save/reload (regression)", async () => {
-    const store = createStateStore(statePath());
+    const store = createQueueStore(queuePath());
     await store.save(
       stateWith([
         card({
@@ -188,7 +188,7 @@ describe("state store", () => {
     );
 
     // On disk the queue time is the canonical ISO string...
-    const raw = JSON.parse(await readFile(statePath(), "utf8"));
+    const raw = JSON.parse(await readFile(queuePath(), "utf8"));
     expect(raw.cards[0].queuedAtUtc).toBe("2026-04-22T03:00:00.000Z");
 
     // ...and it must round-trip back to a usable epoch-ms number — NOT null, or
@@ -198,10 +198,10 @@ describe("state store", () => {
     expect(value.cards[0].queuedAtUtc).toBe(Date.UTC(2026, 3, 22, 3, 0, 0));
   });
 
-  it("loads a legacy epoch-ms state.json and rewrites it as ISO on save", async () => {
+  it("loads a legacy epoch-ms queue.json and rewrites it as ISO on save", async () => {
     // Legacy on-disk shape: numeric *Utc fields.
-    await writeFile(statePath(), JSON.stringify(stateWith([card({ id: "old" })])), "utf8");
-    const store = createStateStore(statePath());
+    await writeFile(queuePath(), JSON.stringify(stateWith([card({ id: "old" })])), "utf8");
+    const store = createQueueStore(queuePath());
 
     const { value, origin } = await store.load();
     expect(origin).toBe("loaded");
@@ -209,15 +209,15 @@ describe("state store", () => {
 
     // Saving canonicalizes the file to ISO without changing the instant.
     await store.save(value);
-    const raw = JSON.parse(await readFile(statePath(), "utf8"));
+    const raw = JSON.parse(await readFile(queuePath(), "utf8"));
     expect(raw.cards[0].createdAtUtc).toBe("2026-04-22T00:00:00.000Z");
   });
 
   it("refuses (does not overwrite) a state file from a newer schema version", async () => {
     const newer = JSON.stringify({ ...stateWith([card()]), schemaVersion: 99 });
-    await writeFile(statePath(), newer, "utf8");
-    await expect(createStateStore(statePath()).load()).rejects.toBeInstanceOf(CorruptStateError);
-    expect(await readFile(statePath(), "utf8")).toBe(newer);
+    await writeFile(queuePath(), newer, "utf8");
+    await expect(createQueueStore(queuePath()).load()).rejects.toBeInstanceOf(CorruptStateError);
+    expect(await readFile(queuePath(), "utf8")).toBe(newer);
   });
 });
 
