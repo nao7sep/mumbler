@@ -113,11 +113,12 @@ export class JsonStore<T> {
     return this.queue;
   }
 
-  /** Serialize a read-modify-write; null removes the file in the same queue. */
-  async update(change: (current: T) => T | null): Promise<void> {
+  /** Serialize a read-modify-write; null removes the file in the same queue, undefined leaves it as it is. */
+  async update(change: (current: T) => T | null | undefined): Promise<void> {
     const work = async (): Promise<void> => {
       const { value } = await this.load();
       const next = change(value);
+      if (next === undefined) return;
       if (next === null) {
         await rm(this.options.path, { force: true });
         await syncDirectory(dirname(this.options.path));

@@ -342,10 +342,7 @@ export interface SettingsSummary {
   checkUpdatesAtLaunch: boolean;
 }
 
-export type ResetSettingsSet = "extraModelIds" | "gemini.transcription" | "gemini.outline" | "gemini.metadata" | "prompts";
-
 export interface SettingsDraft {
-  resetSets?: ResetSettingsSet[];
   language: LanguagePreference;
   // Appearance
   theme: ThemePreference;

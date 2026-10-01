@@ -231,31 +231,52 @@ describe("settings store", () => {
     expect(await readFile(settingsPath(), "utf8")).toBe(raw);
   });
 
-  it("keeps a fresh install without a file when model and prompt copies are reset", async () => {
+  it("keeps a fresh install without a file when every set saved equals its built-in", async () => {
     const store = createSettingsStore(settingsPath());
-    await store.save({}, ["extraModelIds", "gemini.transcription", "gemini.outline", "gemini.metadata", "prompts"]);
+    await store.save(createDefaultSettings());
 
     await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect((await store.load()).value).toEqual(createDefaultSettings());
   });
 
-  it("deletes the file when its final set is reset, dropping unknown keys too", async () => {
+  it("deletes the file when its final set is saved equal to its built-in, dropping unknown keys too", async () => {
     await writeFile(settingsPath(), JSON.stringify({
       prompts: { structured: "custom", title: "custom", slug: "custom" },
       schemaVersion: 1,
       retired: true,
     }));
     const store = createSettingsStore(settingsPath());
-    await store.save({}, ["prompts"]);
+    await store.save({ prompts: createDefaultSettings().prompts });
 
     await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect((await store.load()).value).toEqual(createDefaultSettings());
   });
 
-  it.each(["reset-first", "save-first"])("keeps another set across an overlapping reset (%s)", async (order) => {
-    await writeFile(settingsPath(), JSON.stringify({ prompts: createDefaultSettings().prompts }));
+  it("removes a set's key when it changes back to its built-in and keeps the others", async () => {
     const store = createSettingsStore(settingsPath());
-    const reset = () => store.save({}, ["prompts"]);
+    await store.save({ concurrencyLimit: 5, theme: "dark" });
+    await store.save({ concurrencyLimit: createDefaultSettings().concurrencyLimit });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ theme: "dark" });
+  });
+
+  it("compares a model id with its built-in trimmed and case-insensitively", async () => {
+    const store = createSettingsStore(settingsPath());
+    await store.save({ "gemini.outline": "custom-model" });
+    await store.save({ "gemini.outline": ` ${createDefaultSettings()["gemini.outline"].toUpperCase()} ` });
+    await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("writes nothing when removing a key that is already absent", async () => {
+    const raw = JSON.stringify({ concurrencyLimit: 5 });
+    await writeFile(settingsPath(), raw, "utf8");
+    await createSettingsStore(settingsPath()).save({ prompts: createDefaultSettings().prompts });
+    expect(await readFile(settingsPath(), "utf8")).toBe(raw);
+  });
+
+  it.each(["reset-first", "save-first"])("keeps another set across an overlapping removal (%s)", async (order) => {
+    await writeFile(settingsPath(), JSON.stringify({ prompts: { structured: "custom", title: "custom", slug: "custom" } }));
+    const store = createSettingsStore(settingsPath());
+    const reset = () => store.save({ prompts: createDefaultSettings().prompts });
     const save = () => store.save({ concurrencyLimit: 5 });
     await Promise.all(order === "reset-first" ? [reset(), save()] : [save(), reset()]);
 

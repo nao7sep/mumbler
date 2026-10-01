@@ -65,7 +65,7 @@ import {
 } from "./file-output";
 
 import { ModelLists } from "./model-lists";
-import { applySettingsDraft, buildSettingsDraft, changedSettingsSets, createDefaultSettings, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type SettingsStore } from "./settings-schema";
+import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type SettingsStore } from "./settings-schema";
 import {
   clampQueueWidth,
   createDefaultLayout,
@@ -1234,14 +1234,7 @@ export class ApplicationRuntime {
     const previousPreference = this.languagePreference();
     const previousLanguage = this.interfaceLanguage().language;
     const nextSettings = applySettingsDraft(this.runtime.settings!, draft);
-    const defaults = createDefaultSettings();
-    const resets = (draft.resetSets ?? []).filter((key) =>
-      ["extraModelIds", "gemini.transcription", "gemini.outline", "gemini.metadata", "prompts"].includes(key) &&
-      JSON.stringify(nextSettings[key]) === JSON.stringify(defaults[key]),
-    );
-    const changes = changedSettingsSets(this.runtime.settings!, nextSettings);
-    for (const key of resets) delete changes[key];
-    await this.runtime.settingsStore!.save(changes, resets);
+    await this.runtime.settingsStore!.save(nextSettings);
     this.runtime.settings = nextSettings;
     applyThemePreference(nextSettings.theme);
     if (nextSettings.language !== previousPreference) {

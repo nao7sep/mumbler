@@ -741,7 +741,7 @@ describe("settings, secrets and the window's own state", () => {
     expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ checkUpdatesAtLaunch: false });
   });
 
-  it("deletes reset model and prompt copies instead of writing built-ins", async () => {
+  it("removes model and prompt copies when Save holds their built-ins, as after a reset", async () => {
     await runtime.saveSettingsDraft({
       ...runtime.getSettingsDraft(), extraModelIdsText: "custom-model",
       transcriptionModel: "custom-model", metadataModel: "custom-model",
@@ -753,17 +753,14 @@ describe("settings, secrets and the window's own state", () => {
       ...runtime.getSettingsDraft(), extraModelIdsText: models.extraModelIdsText,
       transcriptionModel: models.transcriptionModel, outlineModel: models.outlineModel, metadataModel: models.metadataModel,
       structuredPrompt: prompts.structured, titlePrompt: prompts.title, slugPrompt: prompts.slug,
-      resetSets: ["extraModelIds", "gemini.transcription", "gemini.outline", "gemini.metadata", "prompts"],
     });
     expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ concurrencyLimit: 5 });
   });
 
-  it("keeps edits made after requesting a reset", async () => {
-    await runtime.saveSettingsDraft({
-      ...runtime.getSettingsDraft(), extraModelIdsText: "later-model",
-      resetSets: ["extraModelIds", "gemini.transcription", "gemini.outline", "gemini.metadata"],
-    });
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ extraModelIds: { gemini: ["later-model"] } });
+  it("does not store a prompt that differs from its built-in only by line endings and trailing spaces", async () => {
+    const { structured } = runtime.getDefaultPrompts();
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), structuredPrompt: `${structured.replaceAll("\n", "  \r\n")}\r\n` });
+    expect(await exists(join(home, "config.json"))).toBe(false);
   });
 
   it("keeps the queue pane width the user dragged to, within what the window allows", async () => {

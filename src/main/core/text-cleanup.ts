@@ -7,11 +7,28 @@
 // which are multi-line. Cleanup runs at commit time — when a pipeline result is
 // stored or a settings draft is applied — never while the user is editing.
 //
-// Only the `multiline` pattern is needed here; the previews mumbler renders are of
-// audio, not text, so multiline-truncation has no use, and the single-line need is
-// already met by the domain-specific `sanitizeTitle`/`sanitizeSlug` in
-// card-pipeline.ts (which do Markdown/quote stripping and slugify+validation that
-// reach well past the whitespace half this helper covers).
+// `multiline` cleans those bodies and `singleLine` the scalar settings text; the
+// previews mumbler renders are of audio, not text, so multiline-truncation has no
+// use. Generated titles and slugs go through the domain-specific
+// `sanitizeTitle`/`sanitizeSlug` in card-pipeline.ts, which reach well past the
+// whitespace half these helpers cover.
+
+/**
+ * Clean a scalar value. Always trims the ends.
+ *
+ * - `flattenLineBreaks` (default true): every whitespace run containing a line break
+ *   becomes one ASCII space, so a value pasted across lines becomes one line.
+ * - `minify` (default false): every whitespace run becomes one ASCII space.
+ */
+export function singleLine(
+  text: string,
+  opts: { flattenLineBreaks?: boolean; minify?: boolean } = {},
+): string {
+  const { flattenLineBreaks = true, minify = false } = opts;
+  if (minify) return text.replace(/\s+/g, " ").trim();
+  if (flattenLineBreaks) return text.replace(/\s*[\r\n]+\s*/g, " ").trim();
+  return text.trim();
+}
 
 /**
  * Clean a multi-line body where line structure carries meaning.

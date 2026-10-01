@@ -9,11 +9,25 @@ import type { MumblerShellApi } from "@shared/app-shell";
 let root: Root | null = null;
 let state: ReturnType<typeof useSettingsModal>;
 const getModelList = vi.fn<MumblerShellApi["getModelList"]>();
+const saveSettingsDraft = vi.fn<MumblerShellApi["saveSettingsDraft"]>();
 const initial = () => buildSettingsDraft(createDefaultSettings(), "", "", true);
+let opened = initial;
 function Harness() { state = useSettingsModal({ onSnapshotUpdate: vi.fn(), onError: vi.fn(), onNotice: vi.fn() }); return null; }
 beforeEach(async () => {
   getModelList.mockReset();
-  Object.defineProperty(window, "mumbler", { configurable: true, value: { getSettingsDraft: vi.fn(async () => initial()), getModelList } satisfies Partial<MumblerShellApi> });
+  getModelList.mockResolvedValue([]);
+  saveSettingsDraft.mockReset();
+  saveSettingsDraft.mockResolvedValue({} as Awaited<ReturnType<MumblerShellApi["saveSettingsDraft"]>>);
+  opened = initial;
+  Object.defineProperty(window, "mumbler", {
+    configurable: true,
+    value: {
+      getSettingsDraft: vi.fn(async () => opened()),
+      getModelList,
+      getDefaultPrompts: vi.fn(async () => createDefaultSettings().prompts),
+      saveSettingsDraft,
+    } satisfies Partial<MumblerShellApi>,
+  });
   const node = document.createElement("div"); document.body.append(node); root = createRoot(node);
   await act(async () => root?.render(React.createElement(Harness)));
 });
@@ -39,5 +53,30 @@ describe("Settings model-list refresh", () => {
     await act(async () => resolve(["gemini-from-old-endpoint"]));
     expect(state.fetchedModelIds).toEqual([]);
     expect(state.settingsDraft?.geminiEndpoint).toBe("https://new.example");
+  });
+});
+
+describe("Reset prompts", () => {
+  const custom = () => ({ ...initial(), structuredPrompt: "Custom {transcript}", titlePrompt: "Custom {structured}", slugPrompt: "Custom {title}" });
+
+  it("fills the draft with the built-ins, and Save sends them for the built-in comparison", async () => {
+    opened = custom;
+    await act(async () => state.handleOpenSettings());
+    await act(async () => state.handleRestoreDefaultPrompts());
+    const { prompts } = createDefaultSettings();
+    expect(state.settingsDraft).toMatchObject({ structuredPrompt: prompts.structured, titlePrompt: prompts.title, slugPrompt: prompts.slug });
+    expect(saveSettingsDraft).not.toHaveBeenCalled();
+    await act(async () => state.handleSaveSettings());
+    expect(saveSettingsDraft).toHaveBeenCalledWith({ ...custom(), structuredPrompt: prompts.structured, titlePrompt: prompts.title, slugPrompt: prompts.slug });
+  });
+
+  it("is discarded with the other edits when Settings is cancelled", async () => {
+    opened = custom;
+    await act(async () => state.handleOpenSettings());
+    await act(async () => state.handleRestoreDefaultPrompts());
+    await act(async () => state.handleRequestCloseSettings());
+    await act(async () => state.handleConfirmDiscardSettings());
+    expect(state.settingsDraft).toBeNull();
+    expect(saveSettingsDraft).not.toHaveBeenCalled();
   });
 });

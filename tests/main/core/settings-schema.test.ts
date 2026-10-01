@@ -8,6 +8,7 @@ import {
   createDefaultSettings,
   summarizeSettings,
 } from "@main/core/settings-schema";
+import { multiline } from "@main/core/text-cleanup";
 
 const OUT = "/home/user/.mumbler/output";
 const BACKUP = "/home/user/.mumbler/backups";
@@ -53,14 +54,19 @@ describe("applySettingsDraft — happy path", () => {
     expect(result).toEqual(current);
   });
 
-  it("keeps untouched copies when saving another set", () => {
-    const current = createDefaultSettings();
-    current.extraModelIds.gemini = ["  custom-model  ", "custom-model"];
-    current.prompts.title = "  {structured}  ";
-    const result = applySettingsDraft(current, { ...buildSettingsDraft(current, OUT, BACKUP, false), concurrencyLimit: 5 });
-    expect(result.extraModelIds.gemini).toEqual(current.extraModelIds.gemini);
-    expect(result.prompts).toEqual(current.prompts);
-    expect(result.concurrencyLimit).toBe(5);
+  it("keeps the built-in prompts in their cleaned form", () => {
+    for (const prompt of Object.values(createDefaultSettings().prompts)) expect(prompt).toBe(multiline(prompt));
+  });
+
+  it("cleans prompts as multiline bodies and scalars as single lines", () => {
+    const defaults = createDefaultSettings();
+    const result = applySettingsDraft(defaults, {
+      ...freshDraft(),
+      structuredPrompt: `\r\n${defaults.prompts.structured.replaceAll("\n", "  \r\n")}  \r\n`,
+      uiFontFamily: "  Iosevka,\r\n  monospace  ",
+    });
+    expect(result.prompts).toEqual(defaults.prompts);
+    expect(result.uiFontFamily).toBe("Iosevka, monospace");
   });
 
   it("trims directories to null when blank and parses pattern text", () => {

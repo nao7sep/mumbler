@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { multiline } from "@main/core/text-cleanup";
+import { multiline, singleLine } from "@main/core/text-cleanup";
 
 // Covers the multiline behaviors mumbler relies on at its commit points
 // (transcript + structured outline storage, prompt-template saves): trailing-end
@@ -59,5 +59,20 @@ describe("multiline", () => {
 
     expect(body.trim()).toBe("first line  \n        second line");
     expect(multiline(body)).toBe("    first line\n        second line");
+  });
+});
+
+// Covers the single-line behaviors the scalar settings text relies on at Save.
+describe("singleLine", () => {
+  it("trims the ends and flattens a line break run into one space", () => {
+    expect(singleLine("  hello  ")).toBe("hello");
+    expect(singleLine("aaa\n \n\nbbb")).toBe("aaa bbb");
+    expect(singleLine("\n\n  \n")).toBe("");
+  });
+
+  it("keeps horizontal spacing unless minifying", () => {
+    expect(singleLine("a    b")).toBe("a    b");
+    expect(singleLine("a\u3000\u3000b", { minify: true })).toBe("a b");
+    expect(singleLine("  a\nb  ", { flattenLineBreaks: false })).toBe("a\nb");
   });
 });

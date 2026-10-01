@@ -17,11 +17,11 @@ import {
 import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
 import { THEME_PREFERENCES } from "@shared/app-shell";
-import { defaultModelFor, GEMINI_ENDPOINT } from "@shared/ai-models";
+import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT } from "@shared/ai-models";
 import { JsonStore } from "./json-store";
 import { OperationError } from "./operation-error";
 import { resolvePathFromHome } from "./storage-root";
-import { multiline } from "./text-cleanup";
+import { multiline, singleLine } from "./text-cleanup";
 
 // Version 2 keeps each card's transcription and structured outline in the card's
 // own file under transcripts/ (TranscriptStore), not in queue.json. Version 1
@@ -84,6 +84,23 @@ const SETTINGS_SET_KEYS = Object.keys(SETTINGS_SETS) as (keyof MumblerSettings)[
 
 function knownSettings(raw: Record<string, unknown>): Partial<MumblerSettings> {
   return Object.fromEntries(SETTINGS_SET_KEYS.filter((key) => Object.hasOwn(raw, key)).map((key) => [key, raw[key]]));
+}
+
+const MODEL_SET_KEYS: ReadonlySet<string> = new Set(AI_ROLES.map((role) => `gemini.${role.id}`));
+
+// Values arrive cleaned (applySettingsDraft cleans text at Save); a model id is its
+// own key, so it is compared trimmed and case-insensitively.
+function equalsBuiltIn(key: keyof MumblerSettings, value: unknown, builtIn: MumblerSettings): boolean {
+  if (MODEL_SET_KEYS.has(key)) {
+    return typeof value === "string" && value.trim().toLowerCase() === String(builtIn[key]).toLowerCase();
+  }
+  return JSON.stringify(value) === JSON.stringify(builtIn[key]);
+}
+
+function sameSets(a: Partial<MumblerSettings>, b: Partial<MumblerSettings>): boolean {
+  const keys = Object.keys(a) as (keyof MumblerSettings)[];
+  return keys.length === Object.keys(b).length &&
+    keys.every((key) => Object.hasOwn(b, key) && JSON.stringify(a[key]) === JSON.stringify(b[key]));
 }
 
 function normalizeSettings(
@@ -427,11 +444,18 @@ export class SettingsStore {
     }) };
   }
 
-  async save(sets: Partial<MumblerSettings>, reset: readonly (keyof MumblerSettings)[] = []): Promise<void> {
-    if (Object.keys(sets).length === 0 && reset.length === 0) return;
+  // The one owner of what a save stores: each given set is removed while it equals
+  // its built-in and written whole otherwise. A save that changes nothing on disk
+  // writes nothing, and one that leaves no set deletes the file.
+  async save(sets: Partial<MumblerSettings>): Promise<void> {
+    const builtIn = createDefaultSettings();
     await this.store.update((current) => {
-      const next = { ...current, ...knownSettings(sets) };
-      for (const key of reset) delete next[key];
+      const next = { ...current };
+      for (const [key, value] of Object.entries(knownSettings(sets)) as [keyof MumblerSettings, unknown][]) {
+        if (equalsBuiltIn(key, value, builtIn)) delete next[key];
+        else Object.assign(next, { [key]: value });
+      }
+      if (sameSets(current, next)) return undefined;
       return Object.keys(next).length === 0 ? null : next;
     });
   }
@@ -446,12 +470,6 @@ export function createSettingsStore(
   warn: (key: keyof MumblerSettings) => void = (key) => console.warn(`Invalid settings set: ${key}`),
 ): SettingsStore {
   return new SettingsStore(path, homeDirectory, warn);
-}
-
-export function changedSettingsSets(current: MumblerSettings, next: MumblerSettings): Partial<MumblerSettings> {
-  return Object.fromEntries(SETTINGS_SET_KEYS.filter((key) =>
-    JSON.stringify(current[key]) !== JSON.stringify(next[key]),
-  ).map((key) => [key, next[key]]));
 }
 
 export function createQueueStore(path: string): JsonStore<MumblerQueue> {
@@ -556,10 +574,10 @@ export function applySettingsDraft(
 ): MumblerSettings {
   const outputDirectory = draft.outputDirectory.trim();
   const backupDirectory = draft.backupDirectory.trim();
-  const defaultTimezone = draft.defaultTimezone.trim();
+  const defaultTimezone = singleLine(draft.defaultTimezone);
   const timestampPatterns = deduplicateStrings(parseSettingsEntries(draft.timestampPatternsText));
   const extraModelIds = { gemini: deduplicateStrings(parseSettingsEntries(draft.extraModelIdsText)) };
-  const geminiEndpoint = draft.geminiEndpoint.trim();
+  const geminiEndpoint = singleLine(draft.geminiEndpoint);
   const outlineModel = draft.outlineModel.trim();
   const transcriptionModel = draft.transcriptionModel.trim();
   const metadataModel = draft.metadataModel.trim();
@@ -626,13 +644,13 @@ export function applySettingsDraft(
     throw new OperationError("Retry max delay must be greater than or equal to retry initial delay.");
   }
 
-  const next: MumblerSettings = {
+  return {
     ...current,
     language: normalizeLanguagePreference(draft.language),
     // Appearance
     theme: draft.theme,
     // Free text; blank means the built-in default stack.
-    uiFontFamily: draft.uiFontFamily.trim(),
+    uiFontFamily: singleLine(draft.uiFontFamily),
     // Files
     outputDirectory:
       outputDirectory.length === 0
@@ -672,28 +690,4 @@ export function applySettingsDraft(
       metadataMs: metadataTimeoutMs,
     },
   };
-
-  // An unchanged form field must not rewrite its set merely because Save trims
-  // editable text. In particular, keep an untouched stored cluster whole.
-  const baseline = buildSettingsDraft(current, "", "", draft.hasGeminiApiKey);
-  const fields: Partial<Record<keyof MumblerSettings, readonly (keyof SettingsDraft)[]>> = {
-    timestampPatterns: ["timestampPatternsText"],
-    extraModelIds: ["extraModelIdsText"],
-    "gemini.endpoint": ["geminiEndpoint"],
-    "gemini.transcription": ["transcriptionModel"],
-    "gemini.outline": ["outlineModel"],
-    "gemini.metadata": ["metadataModel"],
-    prompts: ["structuredPrompt", "titlePrompt", "slugPrompt"],
-    retryPolicy: ["retryMaxRetries", "retryInitialDelayMs", "retryMaxDelayMs", "retryJitterRatio"],
-    timeouts: ["transcriptionTimeoutMs", "metadataTimeoutMs"],
-    checkUpdatesAtLaunch: [],
-  };
-  for (const key of SETTINGS_SET_KEYS) {
-    if (draft.resetSets?.some((reset) => reset === key)) continue;
-    const draftFields = fields[key] ?? [key as keyof SettingsDraft];
-    if (draftFields.every((field) => draft[field] === baseline[field])) {
-      Object.assign(next, { [key]: current[key] });
-    }
-  }
-  return next;
 }

@@ -219,6 +219,8 @@ export function useSettingsModal({
     }
   }
 
+  // A reset only fills the draft with the built-ins: Save then stores nothing for a
+  // set equal to its built-in, and Cancel discards it with every other edit.
   async function handleRestoreDefaultPrompts(): Promise<void> {
     try {
       const defaults = await window.mumbler.getDefaultPrompts();
@@ -227,7 +229,6 @@ export function useSettingsModal({
           ? current
           : {
               ...current,
-              resetSets: [...new Set([...(current.resetSets ?? []), "prompts" as const])],
               structuredPrompt: defaults.structured,
               titlePrompt: defaults.title,
               slugPrompt: defaults.slug,
@@ -239,7 +240,6 @@ export function useSettingsModal({
     }
   }
 
-  // Reset intent stays in the draft until Save, so Cancel keeps the user's copy.
   async function handleRestoreDefaultModels(): Promise<void> {
     try {
       const defaults = await window.mumbler.getDefaultModels();
@@ -248,7 +248,6 @@ export function useSettingsModal({
           ? current
           : {
               ...current,
-              resetSets: [...new Set([...(current.resetSets ?? []), "extraModelIds" as const, "gemini.transcription" as const, "gemini.outline" as const, "gemini.metadata" as const])],
               extraModelIdsText: defaults.extraModelIdsText,
               outlineModel: defaults.outlineModel,
               transcriptionModel: defaults.transcriptionModel,
