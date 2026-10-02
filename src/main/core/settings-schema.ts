@@ -35,46 +35,117 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function asPositiveInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+// One validator per set serves the reader and applySettingsDraft
+// (config-sets-conventions, "Reading and healing"): it returns why a value is not
+// valid, or null.
+type SetValidator = (value: unknown) => string | null;
+
+function isText(value: unknown): value is string {
+  return typeof value === "string";
 }
 
-type SettingsValidator = (value: unknown) => boolean;
-const isString: SettingsValidator = (value) => typeof value === "string";
-const isPath: SettingsValidator = (value) => value === null || isString(value);
-const isPositive: SettingsValidator = (value) => asPositiveInteger(value) !== null;
-function hasMembers(value: unknown, members: Record<string, SettingsValidator>): boolean {
-  const record = asRecord(value);
-  return record !== null && Object.entries(members).every(([key, valid]) => valid(record[key]));
+function text(label: string): SetValidator {
+  return (value) => (isText(value) ? null : `${label} must be text.`);
+}
+
+function path(label: string): SetValidator {
+  return (value) => (value === null || isText(value) ? null : `${label} must be a path.`);
+}
+
+function positiveInteger(label: string, value: unknown): string | null {
+  return typeof value === "number" && isPositiveIntegerSetting(value) ? null : `${label} must be a positive integer.`;
+}
+
+function positive(label: string): SetValidator {
+  return (value) => positiveInteger(label, value);
+}
+
+function model(label: string): SetValidator {
+  return (value) => (isText(value) && value.trim().length > 0 ? null : `${label} model is required.`);
+}
+
+function timestampPatternIssue(value: unknown): string | null {
+  if (!isText(value) || value.length === 0) return "Timestamp pattern is required.";
+  try {
+    new RegExp(value);
+    return null;
+  } catch {
+    return "Timestamp pattern must be a valid regular expression.";
+  }
+}
+
+function endpointIssue(value: unknown): string | null {
+  try {
+    const url = new URL(String(value));
+    if (isText(value) && ["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash) {
+      return null;
+    }
+  } catch { /* reported below */ }
+  return "Endpoint must be an HTTP or HTTPS URL without credentials, query, or fragment.";
+}
+
+function promptIssue(prompt: string, placeholders: readonly string[], label: string): string | null {
+  if (prompt.length === 0) return `${label} is required.`;
+  if (placeholders.some((placeholder) => prompt.includes(placeholder))) return null;
+  return placeholders.length === 1
+    ? `${label} must include ${placeholders[0]}.`
+    : `${label} must include one of ${placeholders.join(" or ")}.`;
+}
+
+function promptsIssue(value: unknown): string | null {
+  const prompts = asRecord(value);
+  if (prompts === null || ![prompts.structured, prompts.title, prompts.slug].every(isText)) {
+    return "Prompts must be text.";
+  }
+  return promptIssue(prompts.structured as string, ["{transcript}"], "Structured prompt") ??
+    promptIssue(prompts.title as string, ["{transcript}", "{structured}"], "Title prompt") ??
+    promptIssue(prompts.slug as string, ["{title}"], "Slug prompt");
+}
+
+function retryPolicyIssue(value: unknown): string | null {
+  const policy = asRecord(value);
+  if (policy === null) return "Retry policy must be a set of numbers.";
+  const issue = positiveInteger("Retry max retries", policy.maxRetries) ??
+    positiveInteger("Retry initial delay", policy.initialDelayMs) ??
+    positiveInteger("Retry max delay", policy.maxDelayMs) ??
+    (typeof policy.jitterRatio === "number" && isRatioSetting(policy.jitterRatio) ? null : "Retry jitter ratio must be between 0 and 1.");
+  if (issue !== null) return issue;
+  return (policy.maxDelayMs as number) < (policy.initialDelayMs as number)
+    ? "Retry max delay must be greater than or equal to retry initial delay."
+    : null;
+}
+
+function timeoutsIssue(value: unknown): string | null {
+  const timeouts = asRecord(value);
+  if (timeouts === null) return "Timeouts must be a set of numbers.";
+  return positiveInteger("Transcription timeout", timeouts.transcriptionMs) ??
+    positiveInteger("Metadata timeout", timeouts.metadataMs);
 }
 
 // The declared set keys also own the shape boundary and unknown-key filtering.
 const SETTINGS_SETS = {
-  language: (value) => value === "system" || isLanguage(value),
-  theme: (value) => THEME_PREFERENCES.some(({ value: theme }) => theme === value),
-  uiFontFamily: isString,
-  outputDirectory: isPath,
-  backupDirectory: isPath,
-  defaultTimezone: (value) => typeof value === "string" && (value === SYSTEM_TIMEZONE || isValidTimezone(value)),
-  timestampPattern: isString,
-  skipIntervalSec: isPositive,
-  previewSnippetSeconds: isPositive,
-  "gemini.endpoint": isString,
-  "gemini.transcription": isString,
-  "gemini.outline": isString,
-  "gemini.metadata": isString,
-  "gemini.thinking.transcription": isString,
-  "gemini.thinking.outline": isString,
-  "gemini.thinking.metadata": isString,
-  concurrencyLimit: isPositive,
-  prompts: (value) => hasMembers(value, { structured: isString, title: isString, slug: isString }),
-  retryPolicy: (value) => hasMembers(value, {
-    maxRetries: isPositive, initialDelayMs: isPositive, maxDelayMs: isPositive,
-    jitterRatio: (ratio) => typeof ratio === "number" && isRatioSetting(ratio),
-  }),
-  timeouts: (value) => hasMembers(value, { transcriptionMs: isPositive, metadataMs: isPositive }),
-  checkUpdatesAtLaunch: (value) => typeof value === "boolean",
-} satisfies Record<keyof MumblerSettings, SettingsValidator>;
+  language: (value) => (value === "system" || isLanguage(value) ? null : "Language must be System or a supported language."),
+  theme: (value) => (THEME_PREFERENCES.some(({ value: theme }) => theme === value) ? null : "Theme must be System, Light, or Dark."),
+  uiFontFamily: text("UI font"),
+  outputDirectory: path("Output directory"),
+  backupDirectory: path("Backup directory"),
+  defaultTimezone: (value) => (isText(value) && (value === SYSTEM_TIMEZONE || isValidTimezone(value)) ? null : "Default timezone must be a valid IANA timezone."),
+  timestampPattern: timestampPatternIssue,
+  skipIntervalSec: positive("Skip interval"),
+  previewSnippetSeconds: positive("Preview snippet seconds"),
+  "gemini.endpoint": endpointIssue,
+  "gemini.transcription": model("Transcription"),
+  "gemini.outline": model("Outline"),
+  "gemini.metadata": model("Metadata"),
+  "gemini.thinking.transcription": text("Transcription thinking"),
+  "gemini.thinking.outline": text("Outline thinking"),
+  "gemini.thinking.metadata": text("Metadata thinking"),
+  concurrencyLimit: positive("Concurrency limit"),
+  prompts: promptsIssue,
+  retryPolicy: retryPolicyIssue,
+  timeouts: timeoutsIssue,
+  checkUpdatesAtLaunch: (value) => (typeof value === "boolean" ? null : "Check for updates at launch must be on or off."),
+} satisfies Record<keyof MumblerSettings, SetValidator>;
 const SETTINGS_SET_KEYS = Object.keys(SETTINGS_SETS) as (keyof MumblerSettings)[];
 
 function knownSettings(raw: Record<string, unknown>): Partial<MumblerSettings> {
@@ -88,22 +159,25 @@ const THINKING_SET_ROLES: ReadonlyMap<string, AiRole> = new Map(AI_ROLES.map((ro
 // own key, so it is compared trimmed and case-insensitively. A role's thinking
 // equals its built-in while the value it sends is the default for the model the
 // role selects, and always for a model with no row.
-function equalsBuiltIn(
-  key: keyof MumblerSettings,
-  value: unknown,
-  builtIn: MumblerSettings,
-  sets: Partial<MumblerSettings>,
-): boolean {
+function equalsBuiltIn(key: keyof MumblerSettings, settings: MumblerSettings, builtIn: MumblerSettings): boolean {
+  const value = settings[key];
   const role = THINKING_SET_ROLES.get(key);
   if (role) {
-    const model = sets[`gemini.${role}`] ?? builtIn[`gemini.${role}`];
-    const row = rowFor(model);
-    return !row || thinkingFor(model, role, String(value)) === defaultThinkingFor(row, role);
+    const row = rowFor(settings[`gemini.${role}`]);
+    return !row || thinkingFor(row.id, role, String(value)) === defaultThinkingFor(row, role);
   }
   if (MODEL_SET_KEYS.has(key)) {
     return typeof value === "string" && value.trim().toLowerCase() === String(builtIn[key]).toLowerCase();
   }
   return JSON.stringify(value) === JSON.stringify(builtIn[key]);
+}
+
+// What the file holds for these settings: every set that differs from its built-in.
+function storedSets(settings: MumblerSettings): Partial<MumblerSettings> {
+  const builtIn = createDefaultSettings();
+  return Object.fromEntries(
+    SETTINGS_SET_KEYS.filter((key) => !equalsBuiltIn(key, settings, builtIn)).map((key) => [key, settings[key]]),
+  );
 }
 
 function sameSets(a: Partial<MumblerSettings>, b: Partial<MumblerSettings>): boolean {
@@ -120,7 +194,7 @@ function normalizeSettings(
   const settings = createDefaultSettings();
   for (const key of SETTINGS_SET_KEYS) {
     if (!Object.hasOwn(raw, key)) continue;
-    if (!SETTINGS_SETS[key](raw[key])) {
+    if (SETTINGS_SETS[key](raw[key]) !== null) {
       warn(key);
       continue;
     }
@@ -321,52 +395,6 @@ export function recoverInterruptedCards(
   };
 }
 
-function requirePromptPlaceholders(
-  prompt: string,
-  requiredPlaceholders: string[],
-  label: string,
-): void {
-  if (prompt.length === 0) {
-    throw new OperationError(`${label} is required.`);
-  }
-
-  for (const placeholder of requiredPlaceholders) {
-    if (!prompt.includes(placeholder)) {
-      throw new OperationError(`${label} must include ${placeholder}.`);
-    }
-  }
-}
-
-function requirePromptAnyPlaceholder(
-  prompt: string,
-  acceptedPlaceholders: string[],
-  label: string,
-): void {
-  if (prompt.length === 0) {
-    throw new OperationError(`${label} is required.`);
-  }
-
-  if (!acceptedPlaceholders.some((placeholder) => prompt.includes(placeholder))) {
-    throw new OperationError(`${label} must include one of ${acceptedPlaceholders.join(" or ")}.`);
-  }
-}
-
-function requirePositiveInteger(value: number, label: string): number {
-  if (!isPositiveIntegerSetting(value)) {
-    throw new OperationError(`${label} must be a positive integer.`);
-  }
-
-  return value;
-}
-
-function requireRatio(value: number, label: string): number {
-  if (!isRatioSetting(value)) {
-    throw new OperationError(`${label} must be between 0 and 1.`);
-  }
-
-  return value;
-}
-
 export function createDefaultSettings(): MumblerSettings {
   return {
     language: "system",
@@ -416,11 +444,10 @@ export function createDefaultSettings(): MumblerSettings {
   };
 }
 
-// Settings keep the user map separate from effective built-ins. All patches
-// re-read inside the JsonStore write queue; the app holds a single-instance lock.
+// Settings keep the user map separate from effective built-ins. Saves run inside
+// the JsonStore write queue; the app holds a single-instance lock.
 export class SettingsStore {
   private readonly store: JsonStore<Partial<MumblerSettings>>;
-  private readonly warned = new Set<keyof MumblerSettings>();
 
   constructor(
     path: string,
@@ -434,26 +461,15 @@ export class SettingsStore {
 
   async load() {
     const loaded = await this.store.load();
-    return { ...loaded, value: normalizeSettings(loaded.value, this.homeDirectory, (key) => {
-      if (this.warned.has(key)) return;
-      this.warned.add(key);
-      this.warn(key);
-    }) };
+    return { ...loaded, value: normalizeSettings(loaded.value, this.homeDirectory, this.warn) };
   }
 
-  // The one owner of what a save stores: each given set is removed while it equals
-  // its built-in and written whole otherwise. A save that changes nothing on disk
-  // writes nothing, and one that leaves no set writes `{}`.
-  async save(sets: Partial<MumblerSettings>): Promise<void> {
-    const builtIn = createDefaultSettings();
-    await this.store.update((current) => {
-      const next = { ...current };
-      for (const [key, value] of Object.entries(knownSettings(sets)) as [keyof MumblerSettings, unknown][]) {
-        if (equalsBuiltIn(key, value, builtIn, sets)) delete next[key];
-        else Object.assign(next, { [key]: value });
-      }
-      return sameSets(current, next) ? undefined : next;
-    });
+  // The one owner of what a save stores: the file is built from the full settings
+  // the app holds, every set that differs from its built-in written whole. A save
+  // that changes nothing on disk writes nothing, and one that leaves no set writes `{}`.
+  async save(settings: MumblerSettings): Promise<void> {
+    const next = storedSets(settings);
+    await this.store.update((current) => (sameSets(current, next) ? undefined : next));
   }
 
   flush(): Promise<void> { return this.store.flush(); }
@@ -575,80 +591,7 @@ export function applySettingsDraft(
 ): MumblerSettings {
   const outputDirectory = draft.outputDirectory.trim();
   const backupDirectory = draft.backupDirectory.trim();
-  const defaultTimezone = singleLine(draft.defaultTimezone);
-  const timestampPattern = singleLine(draft.timestampPattern);
-  const geminiEndpoint = singleLine(draft.geminiEndpoint);
-  const outlineModel = draft.outlineModel.trim();
-  const transcriptionModel = draft.transcriptionModel.trim();
-  const metadataModel = draft.metadataModel.trim();
-  // Prompt templates are multi-line bodies (instructions plus <transcript>/<source>/
-  // <title> blocks). A scalar .trim() eats the first line's indentation and leaves
-  // interior trailing whitespace, so clean them as multiline bodies. They are plain
-  // LLM instructions, not Markdown relying on two-trailing-spaces hard breaks, so the
-  // defaults (trim line ends, drop edge blanks, keep interior blanks) are correct.
-  const structuredPrompt = multiline(draft.structuredPrompt);
-  const titlePrompt = multiline(draft.titlePrompt);
-  const slugPrompt = multiline(draft.slugPrompt);
-
-  if (!THEME_PREFERENCES.some(({ value }) => value === draft.theme)) {
-    throw new OperationError("Theme must be System, Light, or Dark.");
-  }
-
-  if (defaultTimezone !== SYSTEM_TIMEZONE && !isValidTimezone(defaultTimezone)) {
-    throw new OperationError("Default timezone must be a valid IANA timezone.");
-  }
-
-  if (timestampPattern.length === 0) {
-    throw new OperationError("Timestamp pattern is required.");
-  }
-  try {
-    new RegExp(timestampPattern);
-  } catch {
-    throw new OperationError("Timestamp pattern must be a valid regular expression.");
-  }
-
-  try {
-    const url = new URL(geminiEndpoint);
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
-  } catch { throw new OperationError("Endpoint must be an HTTP or HTTPS URL without credentials, query, or fragment."); }
-  if (!outlineModel) throw new OperationError("Outline model is required.");
-
-  if (transcriptionModel.length === 0) {
-    throw new OperationError("Transcription model is required.");
-  }
-
-  if (metadataModel.length === 0) {
-    throw new OperationError("Metadata model is required.");
-  }
-
-  requirePromptPlaceholders(structuredPrompt, ["{transcript}"], "Structured prompt");
-  requirePromptAnyPlaceholder(titlePrompt, ["{transcript}", "{structured}"], "Title prompt");
-  requirePromptPlaceholders(slugPrompt, ["{title}"], "Slug prompt");
-
-  const skipIntervalSec = requirePositiveInteger(draft.skipIntervalSec, "Skip interval");
-  const previewSnippetSeconds = requirePositiveInteger(
-    draft.previewSnippetSeconds,
-    "Preview snippet seconds",
-  );
-  const concurrencyLimit = requirePositiveInteger(draft.concurrencyLimit, "Concurrency limit");
-  const retryMaxRetries = requirePositiveInteger(draft.retryMaxRetries, "Retry max retries");
-  const retryInitialDelayMs = requirePositiveInteger(
-    draft.retryInitialDelayMs,
-    "Retry initial delay",
-  );
-  const retryMaxDelayMs = requirePositiveInteger(draft.retryMaxDelayMs, "Retry max delay");
-  const retryJitterRatio = requireRatio(draft.retryJitterRatio, "Retry jitter ratio");
-  const transcriptionTimeoutMs = requirePositiveInteger(
-    draft.transcriptionTimeoutMs,
-    "Transcription timeout",
-  );
-  const metadataTimeoutMs = requirePositiveInteger(draft.metadataTimeoutMs, "Metadata timeout");
-
-  if (retryMaxDelayMs < retryInitialDelayMs) {
-    throw new OperationError("Retry max delay must be greater than or equal to retry initial delay.");
-  }
-
-  return {
+  const next: MumblerSettings = {
     ...current,
     language: normalizeLanguagePreference(draft.language),
     // Appearance
@@ -665,34 +608,44 @@ export function applySettingsDraft(
         ? null
         : resolvePathFromHome(backupDirectory, homeDirectory),
     // Import
-    defaultTimezone,
-    timestampPattern,
+    defaultTimezone: singleLine(draft.defaultTimezone),
+    timestampPattern: singleLine(draft.timestampPattern),
     // Player
-    skipIntervalSec,
-    previewSnippetSeconds,
+    skipIntervalSec: draft.skipIntervalSec,
+    previewSnippetSeconds: draft.previewSnippetSeconds,
     // AI (the Gemini key is set via its own IPC path, not this draft)
-    "gemini.endpoint": geminiEndpoint,
-    "gemini.transcription": transcriptionModel,
-    "gemini.outline": outlineModel,
-    "gemini.metadata": metadataModel,
+    "gemini.endpoint": singleLine(draft.geminiEndpoint),
+    "gemini.transcription": draft.transcriptionModel.trim(),
+    "gemini.outline": draft.outlineModel.trim(),
+    "gemini.metadata": draft.metadataModel.trim(),
     "gemini.thinking.transcription": draft.transcriptionThinking,
     "gemini.thinking.outline": draft.outlineThinking,
     "gemini.thinking.metadata": draft.metadataThinking,
-    concurrencyLimit,
+    concurrencyLimit: draft.concurrencyLimit,
+    // Prompt templates are multi-line bodies (instructions plus <transcript>/<source>/
+    // <title> blocks). A scalar .trim() eats the first line's indentation and leaves
+    // interior trailing whitespace, so clean them as multiline bodies. They are plain
+    // LLM instructions, not Markdown relying on two-trailing-spaces hard breaks, so the
+    // defaults (trim line ends, drop edge blanks, keep interior blanks) are correct.
     prompts: {
-      structured: structuredPrompt,
-      title: titlePrompt,
-      slug: slugPrompt,
+      structured: multiline(draft.structuredPrompt),
+      title: multiline(draft.titlePrompt),
+      slug: multiline(draft.slugPrompt),
     },
     retryPolicy: {
-      maxRetries: retryMaxRetries,
-      initialDelayMs: retryInitialDelayMs,
-      maxDelayMs: retryMaxDelayMs,
-      jitterRatio: retryJitterRatio,
+      maxRetries: draft.retryMaxRetries,
+      initialDelayMs: draft.retryInitialDelayMs,
+      maxDelayMs: draft.retryMaxDelayMs,
+      jitterRatio: draft.retryJitterRatio,
     },
     timeouts: {
-      transcriptionMs: transcriptionTimeoutMs,
-      metadataMs: metadataTimeoutMs,
+      transcriptionMs: draft.transcriptionTimeoutMs,
+      metadataMs: draft.metadataTimeoutMs,
     },
   };
+  for (const key of SETTINGS_SET_KEYS) {
+    const issue = SETTINGS_SETS[key](next[key]);
+    if (issue !== null) throw new OperationError(issue);
+  }
+  return next;
 }

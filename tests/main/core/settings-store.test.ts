@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { MumblerCard, MumblerQueue } from "@shared/app-shell";
+import type { MumblerCard, MumblerQueue, MumblerSettings } from "@shared/app-shell";
 import { CorruptStateError } from "@main/core/json-store";
 import {
   createDefaultSettings,
@@ -25,6 +25,10 @@ afterEach(async () => {
 
 function queuePath(): string {
   return join(dir, "queue.json");
+}
+
+function settings(patch: Partial<MumblerSettings> = {}): MumblerSettings {
+  return { ...createDefaultSettings(), ...patch };
 }
 
 function settingsPath(): string {
@@ -246,7 +250,7 @@ describe("settings store", () => {
       retired: true,
     }));
     const store = createSettingsStore(settingsPath());
-    await store.save({ prompts: createDefaultSettings().prompts });
+    await store.save(createDefaultSettings());
 
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({});
     expect((await store.load()).value).toEqual(createDefaultSettings());
@@ -254,15 +258,15 @@ describe("settings store", () => {
 
   it("removes a set's key when it changes back to its built-in and keeps the others", async () => {
     const store = createSettingsStore(settingsPath());
-    await store.save({ concurrencyLimit: 5, theme: "dark" });
-    await store.save({ concurrencyLimit: createDefaultSettings().concurrencyLimit });
+    await store.save(settings({ concurrencyLimit: 5, theme: "dark" }));
+    await store.save(settings({ theme: "dark" }));
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ theme: "dark" });
   });
 
   it("compares a model id with its built-in trimmed and case-insensitively", async () => {
     const store = createSettingsStore(settingsPath());
-    await store.save({ "gemini.outline": "custom-model" });
-    await store.save({ "gemini.outline": ` ${createDefaultSettings()["gemini.outline"].toUpperCase()} ` });
+    await store.save(settings({ "gemini.outline": "custom-model" }));
+    await store.save(settings({ "gemini.outline": ` ${createDefaultSettings()["gemini.outline"].toUpperCase()} ` }));
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({});
   });
 
@@ -276,54 +280,44 @@ describe("settings store", () => {
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "custom-model" });
   });
 
-  it("writes nothing when removing a key that is already absent", async () => {
+  it("writes nothing when the file already holds what the settings store", async () => {
     const raw = JSON.stringify({ concurrencyLimit: 5 });
     await writeFile(settingsPath(), raw, "utf8");
-    await createSettingsStore(settingsPath()).save({ prompts: createDefaultSettings().prompts });
+    await createSettingsStore(settingsPath()).save(settings({ concurrencyLimit: 5 }));
     expect(await readFile(settingsPath(), "utf8")).toBe(raw);
-  });
-
-  it.each(["reset-first", "save-first"])("keeps another set across an overlapping removal (%s)", async (order) => {
-    await writeFile(settingsPath(), JSON.stringify({ prompts: { structured: "custom", title: "custom", slug: "custom" } }));
-    const store = createSettingsStore(settingsPath());
-    const reset = () => store.save({ prompts: createDefaultSettings().prompts });
-    const save = () => store.save({ concurrencyLimit: 5 });
-    await Promise.all(order === "reset-first" ? [reset(), save()] : [save(), reset()]);
-
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
-    expect((await store.load()).value).toEqual({ ...createDefaultSettings(), concurrencyLimit: 5 });
   });
 
   it("loads no file without seeding and writes just one changed set", async () => {
     const store = createSettingsStore(settingsPath());
     expect((await store.load()).value).toEqual(createDefaultSettings());
     await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await store.save({ concurrencyLimit: 5 });
+    await store.save(settings({ concurrencyLimit: 5 }));
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
-    expect((await store.load()).value).toEqual({ ...createDefaultSettings(), concurrencyLimit: 5 });
+    expect((await store.load()).value).toEqual(settings({ concurrencyLimit: 5 }));
   });
 
   it("accepts an old version key and drops it and other unknown keys at the next write", async () => {
     await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 99, version: 99, theme: "dark", retired: true }));
     const store = createSettingsStore(settingsPath());
-    expect((await store.load()).value.theme).toBe("dark");
-    await store.save({ concurrencyLimit: 5 });
+    const loaded = (await store.load()).value;
+    expect(loaded.theme).toBe("dark");
+    await store.save({ ...loaded, concurrencyLimit: 5 });
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ theme: "dark", concurrencyLimit: 5 });
   });
 
-  it("retains sets changed on disk since load and serializes overlapping patches", async () => {
+  it("builds the file from the settings it is given, not onto the stored bytes, one save after another", async () => {
     const store = createSettingsStore(settingsPath());
     await store.load();
     await writeFile(settingsPath(), JSON.stringify({ theme: "dark" }));
-    await Promise.all([store.save({ concurrencyLimit: 5 }), store.save({ skipIntervalSec: 20 })]);
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ theme: "dark", concurrencyLimit: 5, skipIntervalSec: 20 });
+    await Promise.all([store.save(settings({ concurrencyLimit: 5 })), store.save(settings({ skipIntervalSec: 20 }))]);
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ skipIntervalSec: 20 });
   });
 
   it("ignores an old timestampPatterns list and drops it at the next write", async () => {
     await writeFile(settingsPath(), JSON.stringify({ timestampPatterns: ["(?<year>\\d{4})"] }));
     const store = createSettingsStore(settingsPath());
     expect((await store.load()).value).toEqual(createDefaultSettings());
-    await store.save({ concurrencyLimit: 5 });
+    await store.save(settings({ concurrencyLimit: 5 }));
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
   });
 
@@ -331,18 +325,18 @@ describe("settings store", () => {
     await writeFile(settingsPath(), JSON.stringify({ geminiModels: ["old"], transcriptionModel: "old", metadataModel: "old" }));
     const store = createSettingsStore(settingsPath());
     expect((await store.load()).value).toEqual(createDefaultSettings());
-    await store.save({ "gemini.outline": "unknown-model" });
+    await store.save(settings({ "gemini.outline": "unknown-model" }));
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "unknown-model" });
   });
   it("ignores the retired provider and extra-model keys and drops them at the next write", async () => {
     await writeFile(settingsPath(), JSON.stringify({ provider: "gemini", extraModelIds: { gemini: ["custom"] } }));
     const store = createSettingsStore(settingsPath());
     expect((await store.load()).value).toEqual(createDefaultSettings());
-    await store.save({ concurrencyLimit: 5 });
+    await store.save(settings({ concurrencyLimit: 5 }));
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
   });
 
-  it("falls back for a malformed whole set and warns once with its key", async () => {
+  it("falls back for a malformed whole set, warns with its key, and heals at the next save", async () => {
     const warnings: string[] = [];
     await writeFile(settingsPath(), JSON.stringify({
       prompts: { structured: "custom" },
@@ -351,15 +345,32 @@ describe("settings store", () => {
       theme: "sepia",
     }));
     const store = createSettingsStore(settingsPath(), dir, (key) => warnings.push(key));
-    expect((await store.load()).value).toEqual(createDefaultSettings());
-    await store.load();
+    const loaded = (await store.load()).value;
+    expect(loaded).toEqual(createDefaultSettings());
     expect(warnings).toEqual(["theme", "prompts", "retryPolicy", "timeouts"]);
-    await store.save({ concurrencyLimit: 5 });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8")).prompts).toEqual({ structured: "custom" });
+    await store.save({ ...loaded, concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
+  });
+
+  it.each([
+    ["timestampPattern", ""],
+    ["timestampPattern", "(?<year>"],
+    ["gemini.endpoint", "ftp://example.test"],
+    ["gemini.endpoint", "https://user:secret@example.test"],
+    ["gemini.outline", "  "],
+    ["prompts", { structured: "No placeholder", title: "{transcript}", slug: "{title}" }],
+    ["prompts", { structured: "{transcript}", title: "No placeholder", slug: "{title}" }],
+    ["prompts", { structured: "{transcript}", title: "{structured}", slug: "No placeholder" }],
+    ["retryPolicy", { maxRetries: 3, initialDelayMs: 5000, maxDelayMs: 1000, jitterRatio: 0.2 }],
+  ])("reads %s %j, which Save refuses, as its built-in", async (key, value) => {
+    const warnings: string[] = [];
+    await writeFile(settingsPath(), JSON.stringify({ [key]: value }));
+    expect((await createSettingsStore(settingsPath(), dir, (warned) => warnings.push(warned)).load()).value).toEqual(createDefaultSettings());
+    expect(warnings).toEqual([key]);
   });
 
   it("keeps complete clusters without filling members from built-ins", async () => {
-    const prompts = { structured: "", title: "custom", slug: "custom", extra: "kept" };
+    const prompts = { structured: "{transcript}", title: "{structured}", slug: "{title}", extra: "kept" };
     await writeFile(settingsPath(), JSON.stringify({ prompts }));
     expect((await createSettingsStore(settingsPath()).load()).value.prompts).toEqual(prompts);
   });

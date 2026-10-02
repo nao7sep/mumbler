@@ -736,9 +736,12 @@ describe("settings, secrets and the window's own state", () => {
     expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ concurrencyLimit: 5 });
   });
 
-  it("writes only the Audio Tools update toggle", async () => {
+  it("writes the Audio Tools update toggle with the other sets the app holds", async () => {
     await runtime.saveToolSettings(false);
     expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ checkUpdatesAtLaunch: false });
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), concurrencyLimit: 5 });
+    await runtime.saveToolSettings(true);
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ concurrencyLimit: 5 });
   });
 
   it("removes model and prompt copies when Save holds their built-ins, as after a reset", async () => {

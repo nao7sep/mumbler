@@ -504,11 +504,9 @@ export class ApplicationRuntime {
 
   async saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot> {
     this.ensureReady();
-    this.runtime.settings = {
-      ...this.runtime.settings!,
-      checkUpdatesAtLaunch,
-    };
-    await this.runtime.settingsStore!.save({ checkUpdatesAtLaunch });
+    const nextSettings = { ...this.runtime.settings!, checkUpdatesAtLaunch };
+    await this.runtime.settingsStore!.save(nextSettings);
+    this.runtime.settings = nextSettings;
     await this.runtime.logger.info("settings.tool-gates", "Updated audio tool settings.", {
       checkUpdatesAtLaunch,
     });
@@ -1327,15 +1325,9 @@ export class ApplicationRuntime {
       return this.getSnapshot();
     }
 
-    const previousOutputDirectory = this.runtime.settings!.outputDirectory;
-    this.runtime.settings!.outputDirectory = outputDirectory;
-
-    try {
-      await this.runtime.settingsStore!.save({ outputDirectory });
-    } catch (error: unknown) {
-      this.runtime.settings!.outputDirectory = previousOutputDirectory;
-      throw error;
-    }
+    const nextSettings = { ...this.runtime.settings!, outputDirectory };
+    await this.runtime.settingsStore!.save(nextSettings);
+    this.runtime.settings = nextSettings;
 
     await this.runtime.logger.info("settings.output-directory", "Updated output directory.", {
       outputDirectory: this.runtime.settings!.outputDirectory,
