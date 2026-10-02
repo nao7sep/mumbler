@@ -1,4 +1,4 @@
-import { Fragment, createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, createContext, createElement, useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 
 import { loadCatalogue, type MessageKey } from "@shared/i18n/catalogues";
 import { isLanguage, type InterfaceLanguage, type Language } from "@shared/i18n/languages";
@@ -61,8 +61,8 @@ export function I18nProvider({
 
   // <html lang> picks the right glyphs for Chinese, Japanese and Korean text and
   // tells the last-resort error boundary, which sits outside this provider,
-  // which language to speak.
-  useEffect(() => {
+  // which language to speak. It changes before paint, with the text it describes.
+  useLayoutEffect(() => {
     document.documentElement.lang = shown.language;
   }, [shown.language]);
 
