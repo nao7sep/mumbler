@@ -31,6 +31,8 @@ const AUDIO_MIME_TYPES: Record<string, string> = {
   ".opus": "audio/ogg",
 };
 
+const QUIT_TIMEOUT_MS = 15_000;
+
 // Set once bootstrap finishes so the before-quit handler can reach the runtime.
 let runtimeForShutdown: ApplicationRuntime | null = null;
 let shuttingDown = false;
@@ -193,8 +195,8 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   // Graceful shutdown: hold the quit once, flush pending state + abort in-flight
-  // pipelines via the runtime, then exit deterministically with app.exit(0). A
-  // second quit during shutdown falls through (force-quit escape hatch).
+  // pipelines via the runtime, then exit with app.exit(0) once it finishes or
+  // QUIT_TIMEOUT_MS passes (PLAYBOOK, Own the work in flight).
   app.on("before-quit", (event) => {
     if (shuttingDown) {
       return;
@@ -206,10 +208,19 @@ if (!app.requestSingleInstanceLock()) {
       app.exit(0);
       return;
     }
-    runtime.shutdown()
-      .catch((error: unknown) => {
-        console.error("[mumbler] Shutdown error:", error instanceof Error ? error.stack : String(error));
-      })
-      .finally(() => app.exit(0));
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        console.error(`[mumbler] Shutdown did not finish within ${QUIT_TIMEOUT_MS} ms; exiting.`);
+        resolve();
+      }, QUIT_TIMEOUT_MS);
+    });
+    const finished = runtime.shutdown().catch((error: unknown) => {
+      console.error("[mumbler] Shutdown error:", error instanceof Error ? error.stack : String(error));
+    });
+    void Promise.race([finished, timedOut]).finally(() => {
+      clearTimeout(timer);
+      app.exit(0);
+    });
   });
 }

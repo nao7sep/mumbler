@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   exits: [] as number[],
   relaunches: 0,
   loggerErrors: [] as unknown[][],
+  shutdown: () => Promise.resolve() as Promise<void>,
+  dependenciesWatched: false,
 }));
 
 vi.mock("electron", () => ({
@@ -33,6 +35,9 @@ const runtime = vi.hoisted(() => ({
   translator: () => ({ t: (key: string) => key, language: "en" }),
   onLanguageChanged: vi.fn(),
   alignAppKit: vi.fn(),
+  onPipelineProgress: vi.fn(),
+  onDependenciesChanged: () => { state.dependenciesWatched = true; },
+  shutdown: () => state.shutdown(),
 }));
 
 vi.mock("@main/core/app-runtime", () => ({
@@ -64,6 +69,8 @@ beforeEach(() => {
   state.exits.length = 0;
   state.relaunches = 0;
   state.loggerErrors.length = 0;
+  state.shutdown = () => Promise.resolve();
+  state.dependenciesWatched = false;
 });
 
 describe("main startup recovery", () => {
@@ -92,5 +99,30 @@ describe("main startup recovery", () => {
     await import("@main/index");
     await vi.waitFor(() => expect(state.exits).toEqual([1]));
     expect(state.relaunches).toBe(0);
+  });
+});
+
+describe("quit", () => {
+  it("exits once the shutdown bound passes even when shutdown never finishes", async () => {
+    vi.spyOn(process, "on").mockImplementation(() => process);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    state.shutdown = () => new Promise<void>(() => undefined);
+    await import("@main/index");
+    await vi.waitFor(() => expect(state.dependenciesWatched).toBe(true));
+    const { app } = await import("electron");
+    const calls = vi.mocked(app.on).mock.calls as unknown as [string, (event: { preventDefault: () => void }) => void][];
+    const beforeQuit = calls.filter(([event]) => event === "before-quit").at(-1)?.[1];
+
+    vi.useFakeTimers();
+    try {
+      beforeQuit!({ preventDefault: vi.fn() });
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(state.exits).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(state.exits).toEqual([0]);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
   });
 });

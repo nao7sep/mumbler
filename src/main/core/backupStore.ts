@@ -13,6 +13,9 @@ let warn: BackupWarn = (message, details) => {
   console.warn(message, details);
 };
 
+// Closing is bounded on its own (PLAYBOOK, Bound every external wait).
+const CLOSE_TIMEOUT_MS = 5_000;
+
 let worker: Worker | null = null;
 let closing: Promise<void> | null = null;
 let disabled = false;
@@ -46,7 +49,8 @@ export function record(absolutePath: string, bytes: Buffer): void {
 
 // Drain every queued record and close its SQLite handle. The close message sits
 // behind prior record messages in the same FIFO worker channel. Tests use this
-// to inspect the store; graceful app shutdown uses it before process exit.
+// to inspect the store; graceful app shutdown uses it before process exit. A
+// worker that does not answer in time is terminated.
 export async function closeBackupStore(): Promise<void> {
   if (closing !== null) return closing;
   const current = worker;
@@ -60,8 +64,16 @@ export async function closeBackupStore(): Promise<void> {
     const settle = (): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       resolve();
     };
+    const timer = setTimeout(() => {
+      warn("backup store: close timed out; records still queued were not written", {
+        file: storeFile(),
+        timeoutMs: CLOSE_TIMEOUT_MS,
+      });
+      settle();
+    }, CLOSE_TIMEOUT_MS);
     current.once("error", settle);
     current.once("exit", settle);
     current.on("message", (message: WorkerResponse) => {
