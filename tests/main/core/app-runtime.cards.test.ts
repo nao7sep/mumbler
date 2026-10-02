@@ -834,6 +834,17 @@ describe("settings, secrets and the window's own state", () => {
     expect(warn).toHaveBeenCalledWith("settings.invalid-set", expect.any(String), { key: "theme" });
   });
 
+  it("rebuilds what speaks the interface language when a reset returns to System", async () => {
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), language: "ja" });
+    const languageChanged = vi.fn();
+    runtime.onLanguageChanged(languageChanged);
+
+    await runtime.resetState();
+
+    expect(runtime.interfaceLanguage().language).toBe("en");
+    expect(languageChanged).toHaveBeenCalledOnce();
+  });
+
   it("starts over on request, keeping the files the user made", async () => {
     const [pending] = await dropIn("take.wav");
     await runtime.confirmPendingImports([review(pending)]);

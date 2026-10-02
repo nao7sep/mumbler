@@ -622,6 +622,8 @@ export class ApplicationRuntime {
   }
 
   async resetState(): Promise<AppSnapshot> {
+    const previousPreference = this.languagePreference();
+    const previousLanguage = this.interfaceLanguage().language;
     const paths = this.runtime.paths ?? getAppPaths();
     const settingsStore = createLoggedSettingsStore(paths.settingsPath, this.runtime.logger);
     const queueStore = createQueueStore(paths.queuePath);
@@ -666,6 +668,7 @@ export class ApplicationRuntime {
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
       this.runtime.recoveredInterruptedCards = 0;
+      this.followLanguageChange(previousPreference, previousLanguage);
 
       return this.getSnapshot();
     } catch (error: unknown) {
@@ -1197,6 +1200,17 @@ export class ApplicationRuntime {
     });
   }
 
+  // Hands a changed language preference to AppKit and rebuilds what speaks the
+  // interface language once the language itself changed.
+  private followLanguageChange(previousPreference: LanguagePreference, previousLanguage: string): void {
+    if (this.languagePreference() !== previousPreference) {
+      this.alignAppKit();
+    }
+    if (this.interfaceLanguage().language !== previousLanguage) {
+      this.onLanguageChangedCallback?.();
+    }
+  }
+
   onLanguageChanged(callback: () => void): void {
     this.onLanguageChangedCallback = callback;
   }
@@ -1216,12 +1230,7 @@ export class ApplicationRuntime {
     await this.runtime.settingsStore!.save(nextSettings);
     this.runtime.settings = nextSettings;
     applyThemePreference(nextSettings.theme);
-    if (nextSettings.language !== previousPreference) {
-      this.alignAppKit();
-    }
-    if (this.interfaceLanguage().language !== previousLanguage) {
-      this.onLanguageChangedCallback?.();
-    }
+    this.followLanguageChange(previousPreference, previousLanguage);
     await this.runtime.logger.info("settings.save", "Updated application settings.", {
       outputDirectory: nextSettings.outputDirectory,
       backupDirectory: nextSettings.backupDirectory,
