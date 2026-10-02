@@ -295,7 +295,7 @@ export interface AppPaths {
   logsDir: string;
   workingDir: string;
   outputDir: string;
-  backupsDir: string;
+  originalsDir: string;
   // Managed audio tools: the installed executables live in binDir; their persisted
   // facts in dependenciesPath. Per the storage-path-conventions, under the app root.
   binDir: string;

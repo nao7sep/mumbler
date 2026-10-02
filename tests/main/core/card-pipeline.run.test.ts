@@ -98,7 +98,7 @@ function makePaths(): AppPaths {
     logsDir: "/tmp/.mumbler/logs",
     workingDir: "/tmp/.mumbler/working",
     outputDir: "/tmp/.mumbler/output",
-    backupsDir: "/tmp/.mumbler/backups",
+    originalsDir: "/tmp/.mumbler/originals",
     binDir: "/tmp/.mumbler/bin",
     dependenciesPath: "/tmp/.mumbler/dependencies.json",
     tempDir: "/tmp/.mumbler/temp",

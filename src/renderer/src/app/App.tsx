@@ -1710,7 +1710,7 @@ function LoadedShell({
           backupDirectoryLabel={
             snapshot?.settingsSummary?.backupDirectory ??
             snapshot?.settingsSummary?.defaultBackupDirectory ??
-            "~/.mumbler/backups"
+            "~/.mumbler/originals"
           }
           isSubmitting={importFlow.isConfirmingReview}
         />

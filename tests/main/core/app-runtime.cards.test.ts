@@ -258,7 +258,7 @@ describe("confirming what was dropped in", () => {
 
     await runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true })]);
 
-    expect(await readFile(join(home, "backups", "take.wav"), "utf8")).toBe("audio for take.wav");
+    expect(await readFile(join(home, "originals", "take.wav"), "utf8")).toBe("audio for take.wav");
     expect(await exists(pending.originalSourcePath), "the original is left where it was").toBe(true);
   });
 

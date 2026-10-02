@@ -330,7 +330,7 @@ export class ApplicationRuntime {
         debugLogging: DEBUG_LOGGING_ENABLED,
         // Key effective configuration, secrets redacted: summarizeSettings reports
         // the API key only as a presence boolean, never the value.
-        config: summarizeSettings(settings, paths.outputDir, paths.backupsDir, hasGeminiApiKey),
+        config: summarizeSettings(settings, paths.outputDir, paths.originalsDir, hasGeminiApiKey),
         cardCount: reconciliation.state.cards.length,
         pendingImportCount: reconciliation.state.pendingImports.length,
         recoveredInterruptedCards: recovered.recoveredInterruptedCards,
@@ -543,7 +543,7 @@ export class ApplicationRuntime {
           ? summarizeSettings(
               settings,
               paths.outputDir,
-              paths.backupsDir,
+              paths.originalsDir,
               this.runtime.hasGeminiApiKey,
             )
           : null,
@@ -680,7 +680,7 @@ export class ApplicationRuntime {
     return buildSettingsDraft(
       this.runtime.settings!,
       this.runtime.paths!.outputDir,
-      this.runtime.paths!.backupsDir,
+      this.runtime.paths!.originalsDir,
       this.runtime.hasGeminiApiKey,
     );
   }
@@ -834,7 +834,7 @@ export class ApplicationRuntime {
 
       let backupSucceeded = true;
       if (merged.copyToBackupOnConfirm) {
-        const backupDir = this.runtime.settings!.backupDirectory ?? paths.backupsDir;
+        const backupDir = this.runtime.settings!.backupDirectory ?? paths.originalsDir;
         try {
           const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir);
           await this.runtime.logger.info("import.backup-original", "Copied original to backup directory.", {
@@ -1823,7 +1823,7 @@ export function getAppPaths(): AppPaths {
     logsDir: join(homeDir, "logs"),
     workingDir: join(homeDir, "working"),
     outputDir: join(homeDir, "output"),
-    backupsDir: join(homeDir, "backups"),
+    originalsDir: join(homeDir, "originals"),
     binDir: join(homeDir, "bin"),
     dependenciesPath: join(homeDir, "dependencies.json"),
     tempDir: join(homeDir, "temp"),
