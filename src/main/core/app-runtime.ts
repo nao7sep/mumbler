@@ -324,7 +324,7 @@ export class ApplicationRuntime {
         appVersion: __APP_VERSION__,
         isPackaged: app.isPackaged,
         debugLogging: DEBUG_LOGGING_ENABLED,
-        // Key effective configuration, secrets redacted: summarizeSettings reports
+        // Key effective configuration: summarizeSettings reports
         // the API key only as a presence boolean, never the value.
         config: summarizeSettings(settings, paths.outputDir, paths.originalsDir, hasGeminiApiKey),
         cardCount: reconciliation.state.cards.length,

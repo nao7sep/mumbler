@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createLogger, redactSecrets, serializeError } from "@main/core/logger";
+import { createLogger, serializeError } from "@main/core/logger";
 
 let dir: string;
 
@@ -58,28 +58,13 @@ describe("createLogger", () => {
     expect(typeof (line.error as { stack: unknown }).stack).toBe("string");
   });
 
-  it("redacts only exact, case-insensitive denied field names — never substrings or the message", async () => {
+  it("keeps every field as given, secrets included", async () => {
     const logger = createLogger(dir, { debugEnabled: true });
-    await logger.info("auth", "configured the key", {
-      apiKey: "AIzaSECRET",
-      Authorization: "Bearer t",
-      tokenCount: 42,
-      broken: "fine",
-      nested: { password: "pw", note: "kept" },
-    });
+    const details = { apiKey: "AIzaSECRET", Authorization: "Bearer t", nested: { password: "pw" } };
+    await logger.info("auth", "configured the key", details);
 
     const [line] = await readLines();
-    // The envelope message is prose and is never edited.
-    expect(line.message).toBe("configured the key");
-    const details = line.details as Record<string, unknown>;
-    expect(details.apiKey).toBe("[redacted]");
-    expect(details.Authorization).toBe("[redacted]");
-    // Substring matches are not redacted — `token` must not hit `tokenCount`, nor
-    // `broken`.
-    expect(details.tokenCount).toBe(42);
-    expect(details.broken).toBe("fine");
-    // Redaction recurses into nested objects.
-    expect(details.nested).toEqual({ password: "[redacted]", note: "kept" });
+    expect(line.details).toEqual(details);
   });
 
   it("does not write debug lines when debug is disabled, but does when enabled", async () => {
@@ -166,47 +151,6 @@ describe("createLogger", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-});
-
-describe("redactSecrets", () => {
-  it("is non-destructive: replaces only matched values, recurses arrays, and preserves the rest", () => {
-    const input = {
-      message: "key is abc",
-      apiKey: "secret-value",
-      keepMe: 7,
-      items: [{ secret: "s", count: 1 }, { ok: true }],
-    };
-    expect(redactSecrets(input)).toEqual({
-      message: "key is abc",
-      apiKey: "[redacted]",
-      keepMe: 7,
-      items: [{ secret: "[redacted]", count: 1 }, { ok: true }],
-    });
-  });
-
-  it("guards against a genuine cycle without throwing, replacing the back-edge with the circular marker", () => {
-    const cyclic: Record<string, unknown> = { a: 1 };
-    cyclic.self = cyclic;
-    let result: unknown;
-    expect(() => {
-      result = redactSecrets(cyclic);
-    }).not.toThrow();
-    expect(result).toEqual({ a: 1, self: "[circular]" });
-  });
-
-  it("keeps a shared-but-acyclic sub-object intact at every position it appears, not just the marker", () => {
-    // The same reference reachable twice through two different paths is NOT a
-    // cycle (it never appears among its own ancestors), so it must be redacted
-    // in full in both positions rather than collapsed to "[circular]" on its
-    // second occurrence.
-    const shared = { keepMe: "value", nested: { alsoKeep: 1 } };
-    const input = { first: shared, second: shared };
-
-    const result = redactSecrets(input) as Record<string, unknown>;
-    const expected = { keepMe: "value", nested: { alsoKeep: 1 } };
-    expect(result.first).toEqual(expected);
-    expect(result.second).toEqual(expected);
   });
 });
 

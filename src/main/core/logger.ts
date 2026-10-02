@@ -19,69 +19,10 @@ export interface LoggerOptions {
   debugEnabled: boolean;
 }
 
-// This app's own denied-key set (the conventions forbid a cross-app taxonomy).
-// Matched by EXACT, case-insensitive field name — never by substring — so
-// `token` redacts a field literally named "token" but leaves "tokenCount" and
-// "broken" alone. Stored lower-cased for the case-insensitive compare.
-const REDACTED_KEYS = new Set([
-  "apikey",
-  "authorization",
-  "token",
-  "password",
-  "secret",
-]);
-
-const REDACTION_MARKER = "[redacted]";
 const MAX_ERROR_CAUSE_DEPTH = 8;
 
 function isFileExistsError(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "EEXIST";
-}
-
-// The mandatory non-destructive redaction backstop. It is a pure, total,
-// type-preserving function over the structured log object (before serialization):
-//   - replaces only the VALUE of an exact, case-insensitive denied-key match with
-//     a fixed marker; every other field stays byte-identical,
-//   - recurses through nested objects and arrays,
-//   - never regex-scans string values and never edits the envelope `message`
-//     (because "message" is not a denied key),
-//   - cannot throw: primitives pass through, and a cycle guard keeps a malformed
-//     (self-referential) object from recursing forever.
-// The primary defense against logging secrets remains "summarize, don't dump";
-// this only catches the day someone logs a whole object that holds one.
-export function redactSecrets(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
-  if (Array.isArray(value)) {
-    if (seen.has(value)) {
-      return "[circular]";
-    }
-    // Track only the current descent path: add before recursing, remove on
-    // unwind. A shared-but-acyclic object (the same reference reachable twice,
-    // but never through itself) is then redacted in full at every position it
-    // appears; only a true cycle — the object reappearing among its own
-    // ancestors — ever hits the guard above.
-    seen.add(value);
-    const result = value.map((item) => redactSecrets(item, seen));
-    seen.delete(value);
-    return result;
-  }
-
-  if (value !== null && typeof value === "object") {
-    if (seen.has(value)) {
-      return "[circular]";
-    }
-    seen.add(value);
-    const result = Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, fieldValue]) =>
-        REDACTED_KEYS.has(key.toLowerCase())
-          ? [key, REDACTION_MARKER]
-          : [key, redactSecrets(fieldValue, seen)],
-      ),
-    );
-    seen.delete(value);
-    return result;
-  }
-
-  return value;
 }
 
 // Captures the full exception — type, message, stack — and follows the `cause`
@@ -196,7 +137,7 @@ export function createLogger(logsDir: string, options: LoggerOptions): AppLogger
 
     let line: string;
     try {
-      line = `${JSON.stringify(redactSecrets(payload))}\n`;
+      line = `${JSON.stringify(payload)}\n`;
     } catch (serializationFailure: unknown) {
       // The payload could not be serialized (e.g. a BigInt in details). Never
       // lose the event: fall back to a minimal, always-serializable envelope.

@@ -48,8 +48,8 @@ export type PipelineMode = "generate";
 export type PipelineStartStep = Exclude<CardProcessingStep, null>;
 
 // Reduce the Gemini SDK's opaque usageMetadata to its scalar token counts for
-// logging. "Summarize, don't dump": logging the whole SDK object risks a future
-// field carrying content or a secret under a name the redactor doesn't know.
+// logging. "Summarize, don't dump": the whole SDK object may grow fields that
+// carry content.
 function summarizeUsage(usageMetadata: unknown): Record<string, number> | null {
   if (typeof usageMetadata !== "object" || usageMetadata === null) {
     return null;
