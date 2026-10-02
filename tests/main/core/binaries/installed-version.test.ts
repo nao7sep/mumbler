@@ -65,12 +65,19 @@ describe("the sidecar", () => {
     expect(versionSidecarPath(binDir, "ffmpeg")).toBe(join(binDir, "ffmpeg.json"));
   });
 
-  it("round-trips the recorded version", async () => {
-    await writeVersionSidecar(binDir, "ffmpeg", "Latest Auto-Build (2026-08-19 19:21)", 1_700_000_000_000);
+  it("round-trips the recorded build tag", async () => {
+    await writeVersionSidecar(binDir, "ffmpeg", "autobuild-2026-08-19-19-21", 1_700_000_000_000);
     const read = await readInstalledVersion("ffmpeg", join(binDir, "ffmpeg.exe"), binDir, {
       kind: "sidecar",
     });
-    expect(read).toBe("Latest Auto-Build (2026-08-19 19:21)");
+    expect(read).toBe("autobuild-2026-08-19-19-21");
+  });
+
+  it("reads anything but a build tag as version unreadable", async () => {
+    for (const stored of ["Latest Auto-Build (2026-08-19 19:21)", "latest", "autobuild-next", ""]) {
+      await writeVersionSidecar(binDir, "ffmpeg", stored, 1_700_000_000_000);
+      expect(await readInstalledVersion("ffmpeg", join(binDir, "ffmpeg.exe"), binDir, { kind: "sidecar" }), stored).toBeNull();
+    }
   });
 
   it("records when it was installed, in canonical UTC", async () => {

@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { nanoid } from "nanoid";
 
 import type { ToolName } from "@shared/app-shell";
+import { FFMPEG_BUILD_TAG } from "@shared/dependency-status";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 
 import { normalizeToolVersion } from "./registry";
@@ -31,8 +32,9 @@ const execFileAsync = promisify(execFile);
 //            binary's banner names that same release — one namespace, so the
 //            artifact can answer for itself.
 //   sidecar  Windows. BtbN ships rolling master builds (`N-119123-g…`) under a
-//            release whose name is a build timestamp; the two never meet, so the
-//            resolved version is recorded beside the binary at install instead.
+//            release tagged with its build time; the two never meet, so the
+//            build tag is recorded beside the binary at install instead, and a
+//            sidecar holding anything else reads as version unreadable.
 //
 // A probe is a subprocess spawn, so callers hold the answer for the process (the
 // manager's map) and re-read only after an install replaces the binary — it must
@@ -124,10 +126,7 @@ async function readSidecar(binDir: string, name: ToolName): Promise<string | nul
   try {
     const raw: unknown = JSON.parse(await readFile(versionSidecarPath(binDir, name), "utf8"));
     const version = (raw as Partial<VersionSidecar> | null)?.version;
-    if (typeof version !== "string" || version.trim().length === 0) {
-      return null;
-    }
-    return normalizeToolVersion(version);
+    return typeof version === "string" && FFMPEG_BUILD_TAG.test(version) ? version : null;
   } catch {
     return null;
   }

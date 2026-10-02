@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 
 import type { DependencyState, DependencyStatus, StatusRole, ToolName } from "@shared/app-shell";
+import { identityLabel } from "@shared/dependency-status";
 
 import type { MessageKey } from "@shared/i18n/catalogues";
 import type { Message, Translator } from "@shared/i18n/translate";
@@ -81,10 +82,6 @@ function lastCheckedHint(i18n: Translator, dependencies: DependencyStatus[], isC
   return i18n.t("tools.lastChecked", { when: relativeTime(i18n, Math.max(...stamps)) });
 }
 
-function displayArtifactIdentity(identity: string | null): string | null {
-  return identity?.match(/^Latest Auto-Build \((.+)\)$/)?.[1] ?? identity;
-}
-
 export function AudioToolsModal({
   dependencies,
   checkUpdatesAtLaunch,
@@ -159,10 +156,11 @@ export function AudioToolsModal({
                     <span className={ROLE_CLASS[status.role]}>{t(STATUS_LABEL[status.state])}</span>
                   </td>
                   <td>
-                    {displayArtifactIdentity(status.installedVersion) ??
-                      (status.state === "not-installed" ? "—" : t("tools.versionUnreadable"))}
+                    {status.installedVersion !== null
+                      ? identityLabel(status.installedVersion)
+                      : status.state === "not-installed" ? "—" : t("tools.versionUnreadable")}
                   </td>
-                  <td>{displayArtifactIdentity(status.desiredVersion) ?? (isChecking ? "…" : t("common.unknown"))}</td>
+                  <td>{status.desiredVersion !== null ? identityLabel(status.desiredVersion) : isChecking ? "…" : t("common.unknown")}</td>
                   <td className="tools-table__action">
                     {running ? (
                       <span className="tools-table__actions">

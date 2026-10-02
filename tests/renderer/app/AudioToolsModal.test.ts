@@ -102,7 +102,7 @@ describe("AudioToolsModal update check", () => {
     expect(document.body.textContent).toContain("Working…");
   });
 
-  it("uses the fleet management title and presents rolling builds by date", async () => {
+  it("uses the fleet management title and shows a build tag as its date and time", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -113,8 +113,8 @@ describe("AudioToolsModal update check", () => {
           dependencies: [{
             ...dependency,
             state: "update-available",
-            installedVersion: "Latest Auto-Build (2026-08-23 13:03)",
-            desiredVersion: "Latest Auto-Build (2026-08-24 14:04)",
+            installedVersion: "autobuild-2026-08-23-13-03",
+            desiredVersion: "autobuild-2026-08-24-14-04",
             transient: { kind: "idle" },
           }],
           checkUpdatesAtLaunch: true,
@@ -134,7 +134,7 @@ describe("AudioToolsModal update check", () => {
     expect(document.body.textContent).toContain("Managed tools");
     expect(document.body.textContent).toContain("2026-08-23 13:03");
     expect(document.body.textContent).toContain("2026-08-24 14:04");
-    expect(document.body.textContent).not.toContain("Latest Auto-Build");
+    expect(document.body.textContent).not.toContain("autobuild");
   });
 
   it("keeps a thrown tool operation failure inside the open modal as an alert", async () => {

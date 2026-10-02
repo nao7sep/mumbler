@@ -1,4 +1,5 @@
 import type { ToolName } from "@shared/app-shell";
+import { FFMPEG_BUILD_TAG } from "@shared/dependency-status";
 
 import { fetchText, resolveRedirectLocation } from "./http";
 
@@ -29,7 +30,7 @@ export interface ResolvedTool {
 }
 
 export interface ResolvedTools {
-  version: string; // normalized; shared by both tools (one upstream build)
+  version: string; // shared by both tools (one upstream build)
   tools: Record<ToolName, ResolvedTool>;
 }
 
@@ -89,17 +90,23 @@ interface GithubAsset {
 }
 interface GithubRelease {
   tag_name: string;
-  name?: string;
   assets: GithubAsset[];
 }
 
+// BtbN's win64 GPL asset inside an `autobuild-…` release is named after the build
+// it carries (`ffmpeg-N-<rev>-g<hash>-win64-gpl.zip`); anchored so the `-shared`
+// variant published beside it never matches.
+const BTBN_WIN64_GPL_ASSET = /^ffmpeg-N-\d+-g[0-9a-f]+-win64-gpl\.zip$/;
+
+// The newest immutable `autobuild-…` release, never the rolling `latest`, whose
+// tag GitHub keeps repointing so the same name can fetch different bytes later.
+// The releases list is newest first; one GPL zip carries both .exe's.
 async function resolveBtbNWindows(arch: string, signal?: AbortSignal): Promise<ResolvedTools> {
   if (arch !== "x64") {
     throw new Error(`Mumbler ships Windows x64 only; unsupported Windows architecture "${arch}".`);
   }
-  // BtbN publishes a rolling `latest` release; one GPL zip carries both .exe's.
   const raw = await fetchText(
-    "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest",
+    "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases?per_page=10",
     {
       "User-Agent": "mumbler",
       Accept: "application/vnd.github+json",
@@ -108,28 +115,26 @@ async function resolveBtbNWindows(arch: string, signal?: AbortSignal): Promise<R
     signal,
     TOOL_METADATA_MAX_BYTES,
   );
-  const release = JSON.parse(raw) as GithubRelease;
-  const zipName = "ffmpeg-master-latest-win64-gpl.zip";
-  const zip = release.assets.find((asset) => asset.name === zipName);
+  const release = (JSON.parse(raw) as GithubRelease[]).find((candidate) => FFMPEG_BUILD_TAG.test(candidate.tag_name));
+  if (!release) {
+    throw new Error("No BtbN autobuild release found");
+  }
+  const zip = release.assets.find((asset) => BTBN_WIN64_GPL_ASSET.test(asset.name));
   const sums = release.assets.find((asset) => asset.name === "checksums.sha256");
   if (!zip || !sums) {
-    throw new Error(`BtbN latest release is missing ${zipName} or checksums.sha256`);
+    throw new Error(`BtbN release ${release.tag_name} is missing its win64 GPL zip or checksums.sha256`);
   }
   const tool = (exe: string): ResolvedTool => ({
     downloadUrl: zip.browser_download_url,
     sha256Url: sums.browser_download_url,
-    sha256AssetName: zipName,
+    sha256AssetName: zip.name,
     innerName: exe,
   });
-  // The release TAG is the constant string `latest` — a rolling pointer, not a
-  // version, so comparing it to itself would read "up to date" forever and no
-  // Windows user would ever be offered an ffmpeg update. The release NAME carries
-  // the build moment ("Latest Auto-Build (2026-08-19 19:21)") and does change,
-  // which is the only version-shaped fact this source publishes. It is also why
-  // Windows reads its installed version from a sidecar rather than the binary: the
-  // .exe reports its master build (`N-119123-g…`), a different namespace entirely.
+  // The build tag is the identity: the .exe reports its master build
+  // (`N-119123-g…`), a different namespace, so the tag is recorded in a sidecar
+  // beside the binary at install and compared as a string.
   return {
-    version: normalizeToolVersion(release.name?.trim() || release.tag_name),
+    version: release.tag_name,
     tools: { ffmpeg: tool("ffmpeg.exe"), ffprobe: tool("ffprobe.exe") },
   };
 }

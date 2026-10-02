@@ -96,3 +96,14 @@ export function rollUpRole(statuses: DependencyStatus[]): StatusRole {
     "none",
   );
 }
+
+// Windows ffmpeg's identity: the immutable BtbN release tag
+// (`autobuild-2026-08-19-19-21`), stored in its sidecar and compared as a string.
+export const FFMPEG_BUILD_TAG = /^autobuild-(\d{4}-\d{2}-\d{2})-(\d{2})-(\d{2})$/;
+
+// How a tool's identity is shown: a build tag as the build's date and time
+// (`2026-08-19 19:21`), any other identity as it is.
+export function identityLabel(identity: string): string {
+  const build = FFMPEG_BUILD_TAG.exec(identity);
+  return build ? `${build[1]} ${build[2]}:${build[3]}` : identity;
+}
