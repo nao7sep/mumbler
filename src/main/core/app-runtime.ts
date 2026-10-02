@@ -245,9 +245,7 @@ export class ApplicationRuntime {
       void logger.warn("backup.record", message, details);
     });
 
-    const settingsStore = createSettingsStore(paths.settingsPath, homedir(), (key) => {
-      void logger.warn("settings.invalid-set", "Invalid settings set; using the built-in.", { key });
-    });
+    const settingsStore = createLoggedSettingsStore(paths.settingsPath, logger);
     const queueStore = createQueueStore(paths.queuePath);
 
     try {
@@ -625,7 +623,7 @@ export class ApplicationRuntime {
 
   async resetState(): Promise<AppSnapshot> {
     const paths = this.runtime.paths ?? getAppPaths();
-    const settingsStore = createSettingsStore(paths.settingsPath);
+    const settingsStore = createLoggedSettingsStore(paths.settingsPath, this.runtime.logger);
     const queueStore = createQueueStore(paths.queuePath);
     const layoutStore = createLayoutStore(paths.layoutPath);
     const settings = createDefaultSettings();
@@ -1844,6 +1842,12 @@ async function renameLegacyQueue(paths: AppPaths): Promise<boolean> {
     if (!isMissingFileError(error)) throw error;
     return false;
   }
+}
+
+function createLoggedSettingsStore(settingsPath: string, logger: AppLogger): SettingsStore {
+  return createSettingsStore(settingsPath, homedir(), (key) => {
+    void logger.warn("settings.invalid-set", "Invalid settings set; using the built-in.", { key });
+  });
 }
 
 // Adapts the per-launch logger into the warn sink the secrets module calls when

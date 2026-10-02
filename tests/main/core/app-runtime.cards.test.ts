@@ -823,6 +823,17 @@ describe("settings, secrets and the window's own state", () => {
     expect((await runtime.dismissAppWideError()).appWideError).toBeNull();
   });
 
+  it("logs an invalid settings set the store reads after a reset", async () => {
+    await runtime.resetState();
+    const warn = vi.spyOn(runtime.currentLogger(), "warn");
+    await writeFile(join(home, "config.json"), JSON.stringify({ theme: "sepia" }));
+    const { settingsStore } = (runtime as unknown as { runtime: { settingsStore: { load(): Promise<unknown> } } }).runtime;
+
+    await settingsStore.load();
+
+    expect(warn).toHaveBeenCalledWith("settings.invalid-set", expect.any(String), { key: "theme" });
+  });
+
   it("starts over on request, keeping the files the user made", async () => {
     const [pending] = await dropIn("take.wav");
     await runtime.confirmPendingImports([review(pending)]);
