@@ -8,6 +8,8 @@ import {
   fallbackLine,
   reportRecordsFailure,
   type RecordEntry,
+  type RecordsRead,
+  type RecordsReadResults,
   type RecordsTarget,
   type RecordsWorkerRequest,
   type RecordsWorkerResponse,
@@ -41,6 +43,10 @@ export interface AppLogger {
 }
 
 export interface SessionLogger extends AppLogger {
+  // This launch's session, as every record of it carries.
+  readonly session: string;
+  // Reads the records database after every entry already given.
+  readRecords<R extends RecordsRead>(read: R): Promise<RecordsReadResults[R["op"]]>;
   // Writes every entry already given, then releases the database.
   close(): Promise<void>;
 }
@@ -116,6 +122,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
   let closing: Promise<void> | null = null;
   let nextId = 1;
   const pending = new Map<number, { entry: RecordEntry; resolve: () => void }>();
+  const reads = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>();
   let fallbackTail: Promise<void> = Promise.resolve();
 
   const appendFallback = (entry: RecordEntry): Promise<void> => {
@@ -142,12 +149,19 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
     }
   };
 
+  const failReads = (): void => {
+    const unanswered = [...reads.values()];
+    reads.clear();
+    for (const { reject } of unanswered) reject(new Error("The records database could not be read."));
+  };
+
   const failWorker = (error: unknown): void => {
     if (!workerFailed) {
       workerFailed = true;
       reportRecordsFailure(error);
     }
     fallBackPending();
+    failReads();
     void worker?.terminate();
     worker = null;
   };
@@ -163,6 +177,11 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
       if (message.type === "written") {
         pending.get(message.id)?.resolve();
         pending.delete(message.id);
+      } else if (message.type === "read") {
+        const read = reads.get(message.id);
+        reads.delete(message.id);
+        if (message.ok) read?.resolve(message.value as never);
+        else read?.reject(new Error(message.error));
       }
     });
     created.on("error", failWorker);
@@ -184,6 +203,21 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
       pending.set(id, { entry, resolve });
       try {
         ensureWorker().postMessage({ type: "write", id, entry } satisfies RecordsWorkerRequest);
+      } catch (error: unknown) {
+        failWorker(error);
+      }
+    });
+  };
+
+  const readRecords = <R extends RecordsRead>(read: R): Promise<RecordsReadResults[R["op"]]> => {
+    if (workerFailed || closing !== null) {
+      return Promise.reject(new Error("The records database could not be read."));
+    }
+    return new Promise((resolve, reject) => {
+      const id = nextId++;
+      reads.set(id, { resolve: resolve as (value: never) => void, reject });
+      try {
+        ensureWorker().postMessage({ type: "read", id, read } satisfies RecordsWorkerRequest);
       } catch (error: unknown) {
         failWorker(error);
       }
@@ -233,12 +267,15 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
       worker = null;
       await current.terminate().catch(() => undefined);
       fallBackPending();
+      failReads();
       await fallbackTail;
     });
     return closing;
   };
 
   return {
+    session,
+    readRecords,
     debug: (op, message, details) => log("debug", op, message, details),
     info: (op, message, details) => log("info", op, message, details),
     warn: (op, message, details) => log("warn", op, message, details),

@@ -98,15 +98,25 @@ export async function createMainWindow(runtime: ApplicationRuntime): Promise<Bro
     window.show();
   });
 
+  await loadRendererPage(window, runtime, "index.html");
+  return window;
+}
+
+// The renderer pages never legitimately navigate their top-level frame or open a
+// window of their own. Any attempt to replace the page (a stray link, a
+// redirect, injected content) is blocked; a same-URL reload is left alone so dev
+// full-reloads still work, and a real external link is opened in the browser.
+// The page's own context menu over text speaks the interface language.
+export async function loadRendererPage(
+  window: BrowserWindow,
+  runtime: ApplicationRuntime,
+  page: "index.html" | "records.html",
+): Promise<void> {
   window.webContents.setWindowOpenHandler(({ url }) => {
     openExternalIfAllowed(url);
     return { action: "deny" };
   });
 
-  // The renderer is a single-page app that never legitimately navigates the
-  // top-level frame. Block any attempt to replace it with other content (a stray
-  // link, a redirect, injected content); a same-URL reload is left alone so dev
-  // full-reloads still work, and a real external link is opened in the browser.
   window.webContents.on("will-navigate", (event, url) => {
     if (url === window.webContents.getURL()) {
       return;
@@ -125,15 +135,14 @@ export async function createMainWindow(runtime: ApplicationRuntime): Promise<Bro
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    await window.loadURL(process.env.ELECTRON_RENDERER_URL);
+    await window.loadURL(new URL(page, `${process.env.ELECTRON_RENDERER_URL}/`).toString());
   } else {
     // Packaged build only: enforce the CSP via a response header. (Re-registering
     // on a subsequent window replaces the single handler, which is harmless.)
     window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
       callback({ responseHeaders: withContentSecurityPolicy(details.responseHeaders) });
     });
-    await window.loadFile(join(__dirname, "../renderer/index.html"));
+    await window.loadFile(join(__dirname, "../renderer", page));
   }
-
-  return window;
 }
+

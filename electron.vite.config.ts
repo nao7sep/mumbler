@@ -63,6 +63,12 @@ export default defineConfig({
       outDir: resolve("out/renderer"),
       emptyOutDir: true,
       minify: true,
+      rollupOptions: {
+        input: {
+          index: resolve("src/renderer/index.html"),
+          records: resolve("src/renderer/records.html"),
+        },
+      },
     },
     resolve: {
       alias: {

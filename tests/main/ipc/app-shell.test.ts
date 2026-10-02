@@ -34,10 +34,11 @@ const RUNTIME_METHODS = [
   "setGeminiApiKey", "clearGeminiApiKey", "chooseOutputDirectory", "saveCard", "removeCard",
   "reportRendererError", "reportRendererDiagnostic", "dismissAppWideError", "resetState",
   "cancelPendingImports", "provisionTool", "cancelToolProvision", "checkTools", "cancelToolCheck",
-  "saveToolSettings", "saveLayout",
+  "saveToolSettings", "saveLayout", "readRecordsPage", "readRecordDetail", "readRecordSources",
 ] as const;
 
 const logger = { debug: vi.fn(async () => {}), error: vi.fn(async () => {}) };
+const windows = { openRecords: vi.fn(async () => {}) };
 let runtime: Record<string, ReturnType<typeof vi.fn>>;
 
 /** A draft as the review pane sends it back, with the fields main reads. */
@@ -51,6 +52,11 @@ function draft(overrides: Record<string, unknown> = {}): PendingImportReviewItem
     copyToBackupOnConfirm: true,
     ...overrides,
   } as PendingImportReviewItem;
+}
+
+/** A records query as the records window sends it, with every filter off. */
+function recordsQuery(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return { session: null, kind: null, level: null, cardId: null, search: "", after: null, ...overrides };
 }
 
 /** Invokes a channel the way the renderer does, through the registered handler. */
@@ -68,7 +74,7 @@ beforeEach(() => {
   logger.error.mockClear();
   runtime = Object.fromEntries(RUNTIME_METHODS.map((name) => [name, vi.fn(async () => `${name} result`)]));
   runtime.currentLogger = vi.fn(() => logger);
-  registerAppShellIpc(runtime as never);
+  registerAppShellIpc(runtime as never, windows);
 });
 
 describe("the app-shell IPC boundary", () => {
@@ -110,6 +116,13 @@ describe("the app-shell IPC boundary", () => {
     ["cancelToolCheck", "cancelToolCheck", []],
     ["saveToolSettings", "saveToolSettings", [true]],
     ["saveLayout", "saveLayout", [320]],
+    ["readRecordsPage", "readRecordsPage", [recordsQuery()]],
+    ["readRecordsPage", "readRecordsPage", [recordsQuery({
+      session: "2026-10-02T00:00:00.000Z", kind: "log", level: "warn", cardId: "card-1", search: "quota",
+      after: { time: "2026-10-02T00:00:01.000Z", kind: "provider-call", id: 7 },
+    })]],
+    ["readRecordDetail", "readRecordDetail", ["provider-call", 7]],
+    ["readRecordSources", "readRecordSources", []],
   ] as const)("carries %s to the runtime and answers with its result", async (channel, method, args) => {
     const result = await invoke(APP_SHELL_CHANNELS[channel], ...args);
     expect(runtime[method]).toHaveBeenCalledExactlyOnceWith(...args);
@@ -129,6 +142,12 @@ describe("the app-shell IPC boundary", () => {
       expect(runtime[channel]).toHaveBeenCalledOnce();
     },
   );
+
+  it("opens the records window through main's window owner", async () => {
+    windows.openRecords.mockClear();
+    await invoke(APP_SHELL_CHANNELS.openRecordsWindow);
+    expect(windows.openRecords).toHaveBeenCalledOnce();
+  });
 
   it("opens an allowed external URL through the OS and refuses a local one", async () => {
     await invoke(APP_SHELL_CHANNELS.openExternal, "https://example.com");
@@ -167,6 +186,14 @@ describe("the app-shell IPC boundary", () => {
     ["saveToolSettings", ["yes"], /checkUpdatesAtLaunch must be a boolean/],
     ["saveLayout", ["320"], /queueWidth must be a finite number/],
     ["saveLayout", [Number.NaN], /queueWidth must be a finite number/],
+    ["readRecordsPage", [null], /query must be an object/],
+    ["readRecordsPage", [recordsQuery({ session: 7 })], /query.session must be a string or null/],
+    ["readRecordsPage", [recordsQuery({ kind: "notice" })], /kind must be a record kind/],
+    ["readRecordsPage", [recordsQuery({ level: "fatal" })], /query.level must be a record level or null/],
+    ["readRecordsPage", [recordsQuery({ search: null })], /query.search must be a string/],
+    ["readRecordsPage", [recordsQuery({ after: { time: "t", kind: "log", id: 1.5 } })], /query.after must be a record cursor/],
+    ["readRecordDetail", ["notice", 7], /kind must be a record kind/],
+    ["readRecordDetail", ["log", "7"], /id must be an integer/],
   ] as const)("refuses %s with a malformed argument, before the runtime", async (channel, args, message) => {
     await expect(invoke(APP_SHELL_CHANNELS[channel], ...args)).rejects.toThrow(message);
     expect(runtime[channel]).not.toHaveBeenCalled();

@@ -21,6 +21,22 @@ port.on("message", (message: RecordsWorkerRequest) => {
     return;
   }
 
+  if (message.type === "read") {
+    let response: RecordsWorkerResponse;
+    try {
+      response = { type: "read", id: message.id, ok: true, value: engine.read(message.read) };
+    } catch (error: unknown) {
+      response = {
+        type: "read",
+        id: message.id,
+        ok: false,
+        error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+      };
+    }
+    port.postMessage(response);
+    return;
+  }
+
   engine.close();
   port.postMessage({ type: "closed" } satisfies RecordsWorkerResponse);
   port.close();

@@ -10,6 +10,7 @@ import { applyThemePreference, followOsThemeChanges } from "./core/theme";
 import { showStartupFailureDialog } from "./startup-failure-dialog";
 import { loadInterfaceCatalogue, mainTranslator } from "./i18n";
 import { installApplicationMenu } from "./app-menu";
+import { openRecordsWindow } from "./records-window";
 
 app.setName("Mumbler");
 
@@ -35,6 +36,18 @@ const QUIT_TIMEOUT_MS = 15_000;
 
 // Set once bootstrap finishes so the before-quit handler can reach the runtime.
 let runtimeForShutdown: ApplicationRuntime | null = null;
+// The main window, apart from the records window beside it: closing it quits
+// on Windows and Linux, and on macOS the Dock reopens it.
+let mainWindow: BrowserWindow | null = null;
+
+async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
+  const window = await createMainWindow(runtime);
+  mainWindow = window;
+  window.once("closed", () => {
+    if (mainWindow === window) mainWindow = null;
+    if (process.platform !== "darwin") app.quit();
+  });
+}
 let shuttingDown = false;
 
 async function bootstrap(): Promise<void> {
@@ -80,17 +93,24 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  registerAppShellIpc(runtime);
+  registerAppShellIpc(runtime, { openRecords: () => openRecordsWindow(runtime) });
   // The native menu speaks the interface language, and is rebuilt when a
-  // language saved in Settings changes it.
+  // language saved in Settings changes it; the other windows are told so.
   installApplicationMenu(runtime.translator(), app.getName());
   runtime.alignAppKit();
-  runtime.onLanguageChanged(() => installApplicationMenu(runtime.translator(), app.getName()));
+  runtime.onLanguageChanged(() => {
+    installApplicationMenu(runtime.translator(), app.getName());
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(APP_SHELL_EVENTS.interfaceLanguageChanged);
+      }
+    }
+  });
   // Before the window exists, so its first frame, title bar, and background
   // already match the saved choice.
   applyThemePreference(runtime.themePreference());
   followOsThemeChanges();
-  await createMainWindow(runtime);
+  await openMainWindow(runtime);
 
   // The data backup is now write-through (data-backup conventions): every managed
   // text save records itself into ~/.mumbler/backups.sqlite3 the instant its atomic
@@ -134,8 +154,8 @@ async function bootstrap(): Promise<void> {
   });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      void createMainWindow(runtime).catch(handleBootstrapFailure);
+    if (mainWindow === null || mainWindow.isDestroyed()) {
+      void openMainWindow(runtime).catch(handleBootstrapFailure);
     }
   });
 }
@@ -177,7 +197,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    const [existing] = BrowserWindow.getAllWindows();
+    const existing = mainWindow ?? BrowserWindow.getAllWindows()[0];
     if (existing) {
       if (existing.isMinimized()) {
         existing.restore();

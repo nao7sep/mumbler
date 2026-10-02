@@ -45,6 +45,7 @@ export default defineConfig({
         "src/main/index.ts", // Electron main entry / bootstrap
         "src/preload/**", // contextBridge wiring
         "src/renderer/src/main.tsx", // React DOM mount
+        "src/renderer/src/records.tsx", // React DOM mount of the records window
         "**/*.d.ts",
       ],
     },

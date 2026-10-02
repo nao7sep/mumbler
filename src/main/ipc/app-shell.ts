@@ -10,6 +10,13 @@ import {
   type SettingsDraft,
   type ToolName,
 } from "@shared/app-shell";
+import {
+  RECORD_KINDS,
+  RECORD_LEVELS,
+  type RecordKind,
+  type RecordLevel,
+  type RecordsQuery,
+} from "@shared/records";
 
 import type { ApplicationRuntime } from "../core/app-runtime";
 import { OperationError } from "../core/operation-error";
@@ -92,7 +99,42 @@ function assertToolName(value: unknown): asserts value is ToolName {
   }
 }
 
-export function registerAppShellIpc(runtime: ApplicationRuntime): void {
+function assertRecordKind(value: unknown): asserts value is RecordKind {
+  if (!RECORD_KINDS.includes(value as RecordKind)) {
+    throw new Error("Invalid IPC parameter: kind must be a record kind.");
+  }
+}
+
+function assertRecordsQuery(value: unknown): asserts value is RecordsQuery {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Invalid IPC parameter: query must be an object.");
+  }
+  const query = value as Record<string, unknown>;
+  for (const name of ["session", "cardId"] as const) {
+    if (query[name] !== null && typeof query[name] !== "string") {
+      throw new Error(`Invalid IPC parameter: query.${name} must be a string or null.`);
+    }
+  }
+  if (query.kind !== null) assertRecordKind(query.kind);
+  if (query.level !== null && !RECORD_LEVELS.includes(query.level as RecordLevel)) {
+    throw new Error("Invalid IPC parameter: query.level must be a record level or null.");
+  }
+  assertString(query.search, "query.search");
+  if (query.after !== null) {
+    const after = query.after as Record<string, unknown> | undefined;
+    if (typeof after !== "object" || typeof after.time !== "string" || !Number.isInteger(after.id)) {
+      throw new Error("Invalid IPC parameter: query.after must be a record cursor or null.");
+    }
+    assertRecordKind(after.kind);
+  }
+}
+
+// The windows main owns beside the main one, opened at the renderer's request.
+export interface AppShellWindows {
+  openRecords(): Promise<void>;
+}
+
+export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShellWindows): void {
   // Single chokepoint for every IPC handler: registers it and wraps it so that
   // any failure is logged in main before it propagates back to the renderer. An
   // expected, user-facing rejection (OperationError) is traced at debug —
@@ -269,6 +311,20 @@ export function registerAppShellIpc(runtime: ApplicationRuntime): void {
     }
     return runtime.saveToolSettings(checkUpdatesAtLaunch);
   });
+
+  handle(APP_SHELL_CHANNELS.openRecordsWindow, () => windows.openRecords());
+  handle(APP_SHELL_CHANNELS.readRecordsPage, (_event, query: RecordsQuery) => {
+    assertRecordsQuery(query);
+    return runtime.readRecordsPage(query);
+  });
+  handle(APP_SHELL_CHANNELS.readRecordDetail, (_event, kind: RecordKind, id: number) => {
+    assertRecordKind(kind);
+    if (!Number.isInteger(id)) {
+      throw new Error("Invalid IPC parameter: id must be an integer.");
+    }
+    return runtime.readRecordDetail(kind, id);
+  });
+  handle(APP_SHELL_CHANNELS.readRecordSources, () => runtime.readRecordSources());
 
   handle(APP_SHELL_CHANNELS.saveLayout, (_event, queueWidth: number) => {
     if (typeof queueWidth !== "number" || !Number.isFinite(queueWidth)) {

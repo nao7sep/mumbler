@@ -47,9 +47,10 @@ vi.mock("@main/core/app-runtime", () => ({
 }));
 vi.mock("@main/ipc/app-shell", () => ({ registerAppShellIpc: vi.fn() }));
 vi.mock("@main/app-menu", () => ({ installApplicationMenu: vi.fn() }));
+vi.mock("@main/records-window", () => ({ openRecordsWindow: vi.fn() }));
 vi.mock("@main/core/theme", () => ({ applyThemePreference: vi.fn(), followOsThemeChanges: vi.fn() }));
 vi.mock("@main/window", () => ({
-  createMainWindow: () => state.windowLoadFailure ? Promise.reject(state.windowLoadFailure) : Promise.resolve({}),
+  createMainWindow: () => state.windowLoadFailure ? Promise.reject(state.windowLoadFailure) : Promise.resolve({ once: vi.fn() }),
 }));
 vi.mock("@main/startup-failure-dialog", () => ({
   showStartupFailureDialog: async () => {

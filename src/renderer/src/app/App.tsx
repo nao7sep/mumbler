@@ -1079,6 +1079,23 @@ function LoadedShell({
               </MenuItem>
               <MenuItem
                 className="app-menu-item"
+                onSelect={() => {
+                  void window.mumbler
+                    .openRecordsWindow()
+                    .then(() => clearPersistent("records-open"))
+                    .catch((error: unknown) =>
+                      addPersistent(
+                        "records-open",
+                        presentFailure(error, message("error.openRecords"), "records window open failed"),
+                        "error",
+                      ),
+                    );
+                }}
+              >
+                {t("menu.records")}
+              </MenuItem>
+              <MenuItem
+                className="app-menu-item"
                 disabled={snapshot === null}
                 onSelect={() => setShowShortcutsHelp(true)}
               >

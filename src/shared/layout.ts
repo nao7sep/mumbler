@@ -87,3 +87,25 @@ export function clampSplitter(
   const ceiling = Math.max(min, Math.min(max, room));
   return Math.max(min, Math.min(ceiling, Math.round(desired)));
 }
+
+// The records window: a fixed-width list pane (filters above the record list)
+// beside the detail pane, which takes the rest. Mirrors `.records-*` in
+// src/renderer/src/styles.css.
+export const RECORDS_PADDING = 16;
+export const RECORDS_GAP = 16;
+export const RECORDS_LIST_WIDTH = 380;
+export const RECORDS_DETAIL_MIN_WIDTH = 420;
+// The filter band: 12px padding above and below a search field and two rows of
+// selects (three 36px controls, 8px apart), and the line below it.
+export const RECORDS_FILTERS_HEIGHT = 12 * 2 + 36 * 3 + 8 * 2 + 1;
+export const RECORDS_LIST_MIN_HEIGHT = 160;
+// A pane's own border, top and bottom or left and right.
+const RECORDS_PANE_BORDERS = 2;
+
+// Derived — do not hand-edit.
+export const RECORDS_WINDOW_MIN_WIDTH =
+  RECORDS_PADDING * 2 + RECORDS_LIST_WIDTH + RECORDS_GAP + RECORDS_DETAIL_MIN_WIDTH + RECORDS_PANE_BORDERS * 2;
+
+// Derived — do not hand-edit.
+export const RECORDS_WINDOW_MIN_HEIGHT =
+  RECORDS_PADDING * 2 + RECORDS_PANE_BORDERS + RECORDS_FILTERS_HEIGHT + RECORDS_LIST_MIN_HEIGHT;

@@ -1,6 +1,14 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+
+import type {
+  RecordDetail,
+  RecordKind,
+  RecordsPage,
+  RecordsQuery,
+  RecordSummary,
+} from "@shared/records";
 
 // The records database (data-lifecycle-conventions, Records): one row per log
 // line or provider call, each carrying its session, its time and the card it
@@ -70,13 +78,38 @@ export interface ProviderCallEntry {
 
 export type RecordEntry = LogEntry | ProviderCallEntry;
 
+// What the records window asks of the database. Reads go through the same
+// worker as writes, so a read sees every entry given before it.
+export type RecordsRead =
+  | { op: "page"; query: RecordsQuery }
+  | { op: "sources" }
+  | { op: "detail"; kind: RecordKind; id: number };
+
+export interface RecordsReadResults {
+  page: RecordsPage;
+  sources: { sessions: string[]; cardIds: string[] };
+  detail: RecordDetail | null;
+}
+
 export type RecordsWorkerRequest =
   | { type: "write"; id: number; entry: RecordEntry }
+  | { type: "read"; id: number; read: RecordsRead }
   | { type: "close" };
 
 export type RecordsWorkerResponse =
   | { type: "written"; id: number }
+  | { type: "read"; id: number; ok: true; value: RecordsReadResults[RecordsRead["op"]] }
+  | { type: "read"; id: number; ok: false; error: string }
   | { type: "closed" };
+
+export const RECORDS_PAGE_SIZE = 200;
+
+// A provider call has no level of its own; a failed one reads as an error.
+const CALL_LEVEL = "CASE WHEN error IS NULL THEN 'info' ELSE 'error' END";
+const LOG_SEARCHED = ["op", "message", "card_id", "details", "error"];
+const CALL_SEARCHED = [
+  "provider", "operation", "endpoint", "model", "step", "card_id", "request", "response", "error",
+];
 
 export interface RecordsTarget {
   databasePath: string;
@@ -117,6 +150,13 @@ export class RecordsEngine {
       reportRecordsFailure(error);
       this.writeFallback(entry);
     }
+  }
+
+  read(read: RecordsRead): RecordsReadResults[RecordsRead["op"]] {
+    const db = this.open();
+    if (read.op === "page") return readPage(db, read.query);
+    if (read.op === "sources") return readSources(db);
+    return readDetail(db, read.kind, read.id);
   }
 
   close(): void {
@@ -172,6 +212,89 @@ export class RecordsEngine {
       reportRecordsFailure(error, line);
     }
   }
+}
+
+function likePattern(search: string): string | null {
+  const trimmed = search.trim();
+  return trimmed === "" ? null : `%${trimmed.replace(/[\\%_]/g, (match) => `\\${match}`)}%`;
+}
+
+function readPage(db: DatabaseSync, query: RecordsQuery): RecordsPage {
+  const pattern = likePattern(query.search);
+  const parts: string[] = [];
+  const params: SQLInputValue[] = [];
+  const table = (select: string, from: string, level: string, searched: string[]): void => {
+    const where = ["1 = 1"];
+    if (query.session !== null) {
+      where.push("session = ?");
+      params.push(query.session);
+    }
+    if (query.level !== null) {
+      where.push(`${level} = ?`);
+      params.push(query.level);
+    }
+    if (query.cardId !== null) {
+      where.push("card_id = ?");
+      params.push(query.cardId);
+    }
+    if (pattern !== null) {
+      where.push(`(${searched.map((column) => `${column} LIKE ? ESCAPE '\\'`).join(" OR ")})`);
+      params.push(...searched.map(() => pattern));
+    }
+    parts.push(`${select} FROM ${from} WHERE ${where.join(" AND ")}`);
+  };
+  if (query.kind !== "provider-call") {
+    table(
+      "SELECT 'log' AS kind, id, session, time, level, op AS title, message AS text, card_id AS cardId",
+      "logs", "level", LOG_SEARCHED,
+    );
+  }
+  if (query.kind !== "log") {
+    table(
+      `SELECT 'provider-call' AS kind, id, session, started_at AS time, ${CALL_LEVEL} AS level,
+        provider || ' ' || operation AS title, model AS text, card_id AS cardId`,
+      "provider_calls", CALL_LEVEL, CALL_SEARCHED,
+    );
+  }
+  let after = "";
+  if (query.after !== null) {
+    const { time, kind, id } = query.after;
+    after = "WHERE time < ? OR (time = ? AND (kind < ? OR (kind = ? AND id < ?)))";
+    params.push(time, time, kind, kind, id);
+  }
+  params.push(RECORDS_PAGE_SIZE + 1);
+  const rows = db.prepare(
+    `SELECT * FROM (${parts.join(" UNION ALL ")}) ${after} ORDER BY time DESC, kind DESC, id DESC LIMIT ?`,
+  ).all(...params) as unknown as RecordSummary[];
+  return { records: rows.slice(0, RECORDS_PAGE_SIZE), more: rows.length > RECORDS_PAGE_SIZE };
+}
+
+function readSources(db: DatabaseSync): RecordsReadResults["sources"] {
+  const sessions = db.prepare(
+    "SELECT session FROM logs UNION SELECT session FROM provider_calls ORDER BY session DESC",
+  ).all() as { session: string }[];
+  const cards = db.prepare(
+    `SELECT card_id AS cardId, MAX(time) AS last FROM (
+      SELECT card_id, time FROM logs UNION ALL SELECT card_id, started_at FROM provider_calls
+    ) WHERE card_id IS NOT NULL GROUP BY card_id ORDER BY last DESC`,
+  ).all() as { cardId: string }[];
+  return { sessions: sessions.map((row) => row.session), cardIds: cards.map((row) => row.cardId) };
+}
+
+function readDetail(db: DatabaseSync, kind: RecordKind, id: number): RecordDetail | null {
+  if (kind === "log") {
+    const row = db.prepare(
+      `SELECT 'log' AS kind, id, session, time, level, op, message, card_id AS cardId, details, error
+        FROM logs WHERE id = ?`,
+    ).get(id);
+    return (row as unknown as RecordDetail | undefined) ?? null;
+  }
+  const row = db.prepare(
+    `SELECT 'provider-call' AS kind, id, session, started_at AS startedAt, finished_at AS finishedAt,
+      card_id AS cardId, step, attempt, provider, operation, endpoint, model, request, response, error
+      FROM provider_calls WHERE id = ?`,
+  ).get(id);
+  return (row as unknown as RecordDetail | undefined) ?? null;
 }
 
 function errorInfo(error: unknown): string {

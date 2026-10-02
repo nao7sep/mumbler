@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createLogger, serializeError, type SessionLogger } from "@main/core/logger";
+import type { RecordsQuery } from "@shared/records";
 
 let dir: string;
 let recordsPath: string;
@@ -209,5 +210,97 @@ describe("serializeError", () => {
     expect(serialized.message).toBe("outer");
     expect(typeof serialized.stack).toBe("string");
     expect(serialized.cause).toMatchObject({ name: "Error", message: "inner" });
+  });
+});
+
+describe("readRecords", () => {
+  const query = (overrides: Partial<RecordsQuery> = {}): RecordsQuery => ({
+    session: null, kind: null, level: null, cardId: null, search: "", after: null, ...overrides,
+  });
+
+  async function seed(): Promise<{ earlier: string; later: SessionLogger }> {
+    const first = open();
+    await first.info("app.startup", "Started.");
+    await first.close();
+    const later = open();
+    await later.warn("pipeline.step", "Careful with 50% of it.", { cardId: "c1" });
+    await later.providerCall({
+      provider: "gemini",
+      operation: "models.generateContent",
+      endpoint: null,
+      model: "gemini-x",
+      cardId: "c1",
+      step: "title",
+      attempt: 1,
+      startedAt: new Date(Date.now() + 1000).toISOString(),
+      finishedAt: new Date(Date.now() + 2000).toISOString(),
+      request: { contents: "say hello", apiKey: "sk-test" },
+      response: null,
+      error: new Error("quota"),
+    });
+    return { earlier: first.session, later };
+  }
+
+  it("pages every record newest first, a failed provider call reading as an error", async () => {
+    const { earlier, later } = await seed();
+    const page = await later.readRecords({ op: "page", query: query() });
+
+    expect(page.more).toBe(false);
+    expect(page.records.map((record) => [record.kind, record.level, record.title])).toEqual([
+      ["provider-call", "error", "gemini models.generateContent"],
+      ["log", "warn", "pipeline.step"],
+      ["log", "info", "app.startup"],
+    ]);
+    expect(page.records[2]!.session).toBe(earlier);
+    expect(page.records[0]).toMatchObject({ text: "gemini-x", cardId: "c1", session: later.session });
+  });
+
+  it("filters by launch, kind, level, card and search", async () => {
+    const { earlier, later } = await seed();
+    const titles = async (overrides: Partial<RecordsQuery>) =>
+      (await later.readRecords({ op: "page", query: query(overrides) })).records.map((record) => record.title);
+
+    expect(await titles({ session: earlier })).toEqual(["app.startup"]);
+    expect(await titles({ kind: "log" })).toEqual(["pipeline.step", "app.startup"]);
+    expect(await titles({ level: "error" })).toEqual(["gemini models.generateContent"]);
+    expect(await titles({ cardId: "c1", kind: "log" })).toEqual(["pipeline.step"]);
+    // Search reaches the stored request, key included, and takes % literally.
+    expect(await titles({ search: "SK-TEST" })).toEqual(["gemini models.generateContent"]);
+    expect(await titles({ search: "50%" })).toEqual(["pipeline.step"]);
+    expect(await titles({ search: "5_%" })).toEqual([]);
+  });
+
+  it("continues a long list from the last record of the page before", async () => {
+    const logger = open();
+    await Promise.all(Array.from({ length: 205 }, (_, index) => logger.info("tick", `Tick ${index}.`)));
+
+    const first = await logger.readRecords({ op: "page", query: query() });
+    const last = first.records.at(-1)!;
+    const second = await logger.readRecords({ op: "page", query: query({ after: last }) });
+
+    expect(first.records).toHaveLength(200);
+    expect(first.more).toBe(true);
+    expect(second.records).toHaveLength(5);
+    expect(second.more).toBe(false);
+    expect(new Set([...first.records, ...second.records].map((record) => record.id)).size).toBe(205);
+  });
+
+  it("returns a record whole, and the launches and cards the filters offer", async () => {
+    const { earlier, later } = await seed();
+    const [call] = (await later.readRecords({ op: "page", query: query({ kind: "provider-call" }) })).records;
+
+    const detail = await later.readRecords({ op: "detail", kind: "provider-call", id: call!.id });
+    expect(detail).toMatchObject({ kind: "provider-call", provider: "gemini", step: "title", attempt: 1, response: "null" });
+    expect(JSON.parse((detail as { request: string }).request)).toEqual({ contents: "say hello", apiKey: "sk-test" });
+    expect(JSON.parse((detail as { error: string }).error)).toMatchObject({ message: "quota" });
+    expect(await later.readRecords({ op: "detail", kind: "log", id: 999 })).toBeNull();
+
+    expect(await later.readRecords({ op: "sources" })).toEqual({ sessions: [later.session, earlier], cardIds: ["c1"] });
+  });
+
+  it("refuses to read once the logger is closed", async () => {
+    const logger = open();
+    await logger.close();
+    await expect(logger.readRecords({ op: "sources" })).rejects.toThrow();
   });
 });

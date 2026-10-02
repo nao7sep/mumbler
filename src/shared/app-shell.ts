@@ -1,6 +1,7 @@
 import type { InterfaceLanguage, LanguagePreference } from "./i18n/languages";
 import type { MessageKey } from "./i18n/catalogues";
 import type { Message } from "./i18n/translate";
+import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery } from "./records";
 
 export const APP_SHELL_CHANNELS = {
   getInterfaceLanguage: "app-shell:get-interface-language",
@@ -37,12 +38,17 @@ export const APP_SHELL_CHANNELS = {
   cancelToolCheck: "app-shell:cancel-tool-check",
   saveToolSettings: "app-shell:save-tool-settings",
   saveLayout: "app-shell:save-layout",
+  openRecordsWindow: "app-shell:open-records-window",
+  readRecordsPage: "app-shell:read-records-page",
+  readRecordDetail: "app-shell:read-record-detail",
+  readRecordSources: "app-shell:read-record-sources",
 } as const;
 
 export const APP_SHELL_EVENTS = {
   appWideErrorUpdated: "app-shell:event-app-wide-error-updated",
   pipelineProgressUpdated: "app-shell:event-pipeline-progress-updated",
   dependenciesUpdated: "app-shell:event-dependencies-updated",
+  interfaceLanguageChanged: "app-shell:event-interface-language-changed",
 } as const;
 
 export type CardStatus =
@@ -601,8 +607,14 @@ export interface MumblerShellApi {
   // a fresh snapshot. Called only on a splitter drag-commit; a window resize
   // re-derives the displayed width in the renderer and persists nothing.
   saveLayout(queueWidth: number): Promise<AppSnapshot>;
+  // The records window: opened from the main window, it reads records.sqlite3.
+  openRecordsWindow(): Promise<void>;
+  readRecordsPage(query: RecordsQuery): Promise<RecordsPage>;
+  readRecordDetail(kind: RecordKind, id: number): Promise<RecordDetail | null>;
+  readRecordSources(): Promise<RecordSources>;
   getPathForFile(file: File): string;
   onAppWideErrorChanged(listener: () => void): () => void;
   onPipelineProgressUpdated(listener: () => void): () => void;
   onDependenciesUpdated(listener: () => void): () => void;
+  onInterfaceLanguageChanged(listener: () => void): () => void;
 }

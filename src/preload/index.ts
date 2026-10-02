@@ -17,6 +17,7 @@ import {
   type ToolName,
 } from "@shared/app-shell";
 import type { InterfaceLanguage } from "@shared/i18n/languages";
+import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery } from "@shared/records";
 
 const api: MumblerShellApi = {
   getInterfaceLanguage: () =>
@@ -96,6 +97,13 @@ const api: MumblerShellApi = {
     ) as Promise<AppSnapshot>,
   saveLayout: (queueWidth: number) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.saveLayout, queueWidth) as Promise<AppSnapshot>,
+  openRecordsWindow: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.openRecordsWindow) as Promise<void>,
+  readRecordsPage: (query: RecordsQuery) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.readRecordsPage, query) as Promise<RecordsPage>,
+  readRecordDetail: (kind: RecordKind, id: number) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.readRecordDetail, kind, id) as Promise<RecordDetail | null>,
+  readRecordSources: () =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.readRecordSources) as Promise<RecordSources>,
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   onAppWideErrorChanged: (listener: () => void) => {
     const wrapped = () => {
@@ -122,6 +130,15 @@ const api: MumblerShellApi = {
     ipcRenderer.on(APP_SHELL_EVENTS.dependenciesUpdated, wrapped);
     return () => {
       ipcRenderer.removeListener(APP_SHELL_EVENTS.dependenciesUpdated, wrapped);
+    };
+  },
+  onInterfaceLanguageChanged: (listener: () => void) => {
+    const wrapped = () => {
+      listener();
+    };
+    ipcRenderer.on(APP_SHELL_EVENTS.interfaceLanguageChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(APP_SHELL_EVENTS.interfaceLanguageChanged, wrapped);
     };
   },
 };

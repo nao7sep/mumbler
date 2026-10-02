@@ -76,6 +76,7 @@ import { OperationError } from "./operation-error";
 import { applyThemePreference } from "./theme";
 import { alignAppKit, loadInterfaceCatalogue, mainTranslator, resolveInterfaceLanguage } from "../i18n";
 import type { InterfaceLanguage, LanguagePreference } from "@shared/i18n/languages";
+import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery } from "@shared/records";
 import { createTranslator, message, type Message, type Translator } from "@shared/i18n/translate";
 import type { MessageKey } from "@shared/i18n/catalogues";
 import { clearCardResultsFromStep, resolveGenerateStartStep } from "./card-pipeline";
@@ -523,6 +524,24 @@ export class ApplicationRuntime {
   // the whole launch — never null, never swapped.
   currentLogger(): AppLogger {
     return this.runtime.logger;
+  }
+
+  readRecordsPage(query: RecordsQuery): Promise<RecordsPage> {
+    return this.runtime.logger.readRecords({ op: "page", query });
+  }
+
+  readRecordDetail(kind: RecordKind, id: number): Promise<RecordDetail | null> {
+    return this.runtime.logger.readRecords({ op: "detail", kind, id });
+  }
+
+  async readRecordSources(): Promise<RecordSources> {
+    const { sessions, cardIds } = await this.runtime.logger.readRecords({ op: "sources" });
+    const names = new Map((this.runtime.state?.cards ?? []).map((card) => [card.id, card.originalFilename]));
+    return {
+      currentSession: this.runtime.logger.session,
+      sessions,
+      cards: cardIds.map((cardId) => ({ cardId, name: names.get(cardId) ?? null })),
+    };
   }
 
   getSnapshot(): AppSnapshot {

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from "@shared/layout";
+import {
+  RECORDS_WINDOW_MIN_HEIGHT,
+  RECORDS_WINDOW_MIN_WIDTH,
+  WINDOW_MIN_HEIGHT,
+  WINDOW_MIN_WIDTH,
+} from "@shared/layout";
 
 // window.ts imports electron at module load; stub it so the pure helpers can be
 // verified under the node test environment. createMainWindow is exercised here
@@ -124,6 +129,21 @@ describe("buildWindowOptions", () => {
     expect(options.height).toBe(940);
     expect(options.width).toBeGreaterThanOrEqual(WINDOW_MIN_WIDTH);
     expect(options.height).toBeGreaterThanOrEqual(WINDOW_MIN_HEIGHT);
+  });
+});
+
+describe("buildRecordsWindowOptions", () => {
+  it("is a durable window of its own, sized from the shared layout", async () => {
+    const { buildRecordsWindowOptions } = await import("@main/records-window");
+    const options = buildRecordsWindowOptions("Records");
+    expect(options.name).toBe("records");
+    expect(options.title).toBe("Records");
+    expect(options.windowStatePersistence).toEqual({ bounds: true, displayMode: process.platform === "win32" });
+    expect(options.minWidth).toBe(RECORDS_WINDOW_MIN_WIDTH);
+    expect(options.minHeight).toBe(RECORDS_WINDOW_MIN_HEIGHT);
+    expect(options.width).toBeGreaterThanOrEqual(RECORDS_WINDOW_MIN_WIDTH);
+    expect(options.height).toBeGreaterThanOrEqual(RECORDS_WINDOW_MIN_HEIGHT);
+    expect(options.webPreferences).toMatchObject({ contextIsolation: true, nodeIntegration: false, sandbox: true });
   });
 });
 
