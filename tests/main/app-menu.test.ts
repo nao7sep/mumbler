@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { MenuItemConstructorOptions } from "electron";
 
 vi.mock("electron", () => ({ Menu: { setApplicationMenu: vi.fn(), buildFromTemplate: vi.fn() } }));
 
 import { buildApplicationMenuTemplate, buildContextMenuTemplate } from "@main/app-menu";
-import { CATALOGUES } from "@shared/i18n/catalogues";
+import { ENGLISH, loadCatalogue } from "@shared/i18n/catalogues";
 import { LANGUAGES } from "@shared/i18n/languages";
 import { createTranslator } from "@shared/i18n/translate";
 
@@ -15,7 +15,9 @@ function labels(items: MenuItemConstructorOptions[]): string[] {
   ]);
 }
 
-const KEYS = new Set(Object.keys(CATALOGUES.en));
+const KEYS = new Set(Object.keys(ENGLISH));
+
+beforeAll(() => Promise.all(LANGUAGES.map(loadCatalogue)));
 
 describe("application menu", () => {
   it("titles the Edit menu and every item in the interface language on macOS", () => {

@@ -1,8 +1,10 @@
-import { Fragment, createContext, createElement, useContext, useEffect, useMemo, type ReactNode } from "react";
+import { Fragment, createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import type { MessageKey } from "@shared/i18n/catalogues";
-import { isLanguage, type Language } from "@shared/i18n/languages";
+import { loadCatalogue, type MessageKey } from "@shared/i18n/catalogues";
+import { isLanguage, type InterfaceLanguage, type Language } from "@shared/i18n/languages";
 import { createTranslator, type Translator } from "@shared/i18n/translate";
+
+import { reportRendererDiagnostic } from "../app/presentFailure";
 
 // The renderer's translator: the shared one, plus `rich`, which fills markup
 // (a <code> path, say) into a placeholder so a sentence is never glued together
@@ -29,6 +31,8 @@ export function createRendererTranslator(language: Language, locale: string = la
 // (in a test, say) still has text.
 const I18nContext = createContext<RendererTranslator>(createRendererTranslator("en"));
 
+// The first language given must already be loaded. A later one, saved in
+// Settings, replaces it once its catalogue has loaded.
 export function I18nProvider({
   language,
   locale,
@@ -38,14 +42,29 @@ export function I18nProvider({
   locale: string;
   children: ReactNode;
 }) {
-  const translator = useMemo(() => createRendererTranslator(language, locale), [language, locale]);
+  const [shown, setShown] = useState<InterfaceLanguage>({ language, locale });
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadCatalogue(language).then(
+      () => {
+        if (!cancelled) setShown({ language, locale });
+      },
+      (error: unknown) => reportRendererDiagnostic(error, "interface catalogue load failed"),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [language, locale]);
+
+  const translator = useMemo(() => createRendererTranslator(shown.language, shown.locale), [shown.language, shown.locale]);
 
   // <html lang> picks the right glyphs for Chinese, Japanese and Korean text and
   // tells the last-resort error boundary, which sits outside this provider,
   // which language to speak.
   useEffect(() => {
-    document.documentElement.lang = language;
-  }, [language]);
+    document.documentElement.lang = shown.language;
+  }, [shown.language]);
 
   return <I18nContext.Provider value={translator}>{children}</I18nContext.Provider>;
 }

@@ -7,8 +7,7 @@ import {
   type NumericSettingField,
 } from "@shared/settings-validation";
 import { DEFAULT_TIMESTAMP_PATTERN, SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
-import { CATALOGUES } from "@shared/i18n/catalogues";
-import { LANGUAGES, normalizeLanguagePreference } from "@shared/i18n/languages";
+import { LANGUAGE_NAMES, LANGUAGES, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { useI18n } from "../i18n/I18nContext";
 import type { MessageKey } from "@shared/i18n/catalogues";
 import { message, type Message } from "@shared/i18n/translate";
@@ -206,7 +205,7 @@ export function SettingsModal({
                     <option value="system">{t("settings.languageSystem")}</option>
                     {LANGUAGES.map((language) => (
                       <option key={language} value={language} lang={language}>
-                        {CATALOGUES[language]["language.name"] as string}
+                        {LANGUAGE_NAMES[language]}
                       </option>
                     ))}
                   </select>

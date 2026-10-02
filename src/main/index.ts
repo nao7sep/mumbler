@@ -8,7 +8,7 @@ import { createMainWindow } from "./window";
 import { createMediaResponse } from "./media-response";
 import { applyThemePreference, followOsThemeChanges } from "./core/theme";
 import { showStartupFailureDialog } from "./startup-failure-dialog";
-import { mainTranslator } from "./i18n";
+import { loadInterfaceCatalogue, mainTranslator } from "./i18n";
 import { installApplicationMenu } from "./app-menu";
 
 app.setName("Mumbler");
@@ -154,7 +154,12 @@ async function handleBootstrapFailure(error: unknown): Promise<void> {
   }
   let choice: "close" | "restart" = "close";
   try {
-    choice = await showStartupFailureDialog(runtimeForShutdown?.translator() ?? mainTranslator("system"));
+    let translator = runtimeForShutdown?.translator();
+    if (translator === undefined) {
+      await loadInterfaceCatalogue("system");
+      translator = mainTranslator("system");
+    }
+    choice = await showStartupFailureDialog(translator);
   } catch (dialogError) {
     console.error("[mumbler] Could not show the startup failure window:", dialogError);
   }

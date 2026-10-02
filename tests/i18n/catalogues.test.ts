@@ -1,8 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { CATALOGUES } from "@shared/i18n/catalogues";
-import { LANGUAGES, type Language } from "@shared/i18n/languages";
+import { beforeAll, describe, expect, it } from "vitest";
+import { loadCatalogue, loadedCatalogue } from "@shared/i18n/catalogues";
+import { LANGUAGE_NAMES, LANGUAGES, type Language } from "@shared/i18n/languages";
 
 // The catalogue gate. English defines the key set; every other language must
 // carry every key, keep every placeholder, supply exactly its own CLDR plural
@@ -12,11 +12,18 @@ import { LANGUAGES, type Language } from "@shared/i18n/languages";
 type Entry = string | Record<string, string>;
 type Catalogue = Record<string, Entry>;
 
-// Read through the app's own imports, so a change to any catalogue selects
+// Read through the app's own loaders, so a change to any catalogue selects
 // this gate as a related test.
-const catalogues = CATALOGUES as unknown as Record<Language, Catalogue>;
+const catalogues = {} as Record<Language, Catalogue>;
+let english: Catalogue;
 
-const english = catalogues.en;
+beforeAll(async () => {
+  for (const language of LANGUAGES) {
+    await loadCatalogue(language);
+    catalogues[language] = loadedCatalogue(language) as unknown as Catalogue;
+  }
+  english = catalogues.en;
+});
 const translations = LANGUAGES.filter((language) => language !== "en");
 
 // Keys whose text is the same word in that language as in English.
@@ -118,7 +125,7 @@ describe("catalogues", () => {
   });
 
   it("names every language differently, in its own words", () => {
-    const names = LANGUAGES.map((language) => catalogues[language]["language.name"]);
+    const names = LANGUAGES.map((language) => LANGUAGE_NAMES[language]);
     expect(new Set(names).size).toBe(LANGUAGES.length);
   });
 

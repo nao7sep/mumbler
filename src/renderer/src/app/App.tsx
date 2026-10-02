@@ -56,7 +56,7 @@ import { CloseIcon } from "./Icon";
 import { presentFailure, reportRendererDiagnostic } from "./presentFailure";
 import { I18nProvider, useI18n } from "../i18n/I18nContext";
 import { isLanguage, type InterfaceLanguage } from "@shared/i18n/languages";
-import type { MessageKey } from "@shared/i18n/catalogues";
+import { loadCatalogue, type MessageKey } from "@shared/i18n/catalogues";
 import { message, type Message } from "@shared/i18n/translate";
 import { CardActionResults, type CardActionError } from "./CardActionResults";
 import { ConfiguredModels } from "./ConfiguredModels";
@@ -149,7 +149,8 @@ const DETAIL_TAB_LABELS: Record<DetailTab, MessageKey> = {
 };
 
 // The first text on screen is already in the interface language, so nothing is
-// drawn until the main process has said which language that is.
+// drawn until the main process has said which language that is and its
+// catalogue has loaded.
 export function App(): ReactElement {
   const [startupLanguage, setStartupLanguage] = useState<InterfaceLanguage | null>(null);
 
@@ -157,8 +158,10 @@ export function App(): ReactElement {
     let cancelled = false;
     void window.mumbler
       .getInterfaceLanguage()
-      .then((resolved) => {
-        if (!cancelled) setStartupLanguage(isLanguage(resolved?.language) ? resolved : ENGLISH);
+      .then(async (resolved) => {
+        const language = isLanguage(resolved?.language) ? resolved : ENGLISH;
+        await loadCatalogue(language.language);
+        if (!cancelled) setStartupLanguage(language);
       })
       .catch((error: unknown) => {
         reportRendererDiagnostic(error, "interface language load failed");

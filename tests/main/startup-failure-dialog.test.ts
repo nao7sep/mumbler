@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 const hostile = new Error("EACCES /private/tmp/startup-dialog.html");
 
@@ -21,7 +21,10 @@ vi.mock("electron", () => ({
 }));
 
 import { renderStartupFailureHtml, showStartupFailureDialog } from "@main/startup-failure-dialog";
+import { loadCatalogue } from "@shared/i18n/catalogues";
 import { createTranslator } from "@shared/i18n/translate";
+
+beforeAll(() => loadCatalogue("ja"));
 
 const english = createTranslator("en");
 

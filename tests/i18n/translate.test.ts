@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { isValidElement, type ReactElement } from "react";
-import { describe, expect, it } from "vitest";
+import { act, createElement, isValidElement, type ReactElement } from "react";
+import { createRoot } from "react-dom/client";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { MessageKey } from "@shared/i18n/catalogues";
+import { loadCatalogue, type MessageKey } from "@shared/i18n/catalogues";
 import { createTranslator, message } from "@shared/i18n/translate";
-import { createRendererTranslator } from "@renderer/i18n/I18nContext";
+import type { Language } from "@shared/i18n/languages";
+import { createRendererTranslator, I18nProvider, useI18n } from "@renderer/i18n/I18nContext";
+
+beforeAll(() => Promise.all((["de", "ru", "fr", "ja"] as const).map(loadCatalogue)));
 
 describe("createTranslator", () => {
   it("fills placeholders and formats numbers for the locale", () => {
@@ -64,5 +68,34 @@ describe("createRendererTranslator", () => {
       isValidElement(part) ? (part as ReactElement<{ children: unknown }>).props.children : part,
     );
     expect(filled.join("")).toBe("Backups are saved to P. Configure the location in Settings.");
+  });
+});
+
+describe("catalogue loading", () => {
+  it("builds a translator only for a language whose catalogue is loaded", async () => {
+    expect(() => createTranslator("ko")).toThrow();
+    await loadCatalogue("ko");
+    expect(createTranslator("ko").t("settings.language")).toBe("언어");
+  });
+
+  it("keeps the language on screen until a newly chosen one has loaded", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    function Heading() {
+      return createElement("h1", null, useI18n().t("settings.language"));
+    }
+    const render = (language: Language) =>
+      root.render(createElement(I18nProvider, { language, locale: language, children: createElement(Heading) }));
+    try {
+      await act(async () => render("en"));
+      expect(host.textContent).toBe("Language");
+      act(() => render("es"));
+      expect(host.textContent).toBe("Language");
+      await vi.waitFor(() => expect(host.textContent).toBe("Idioma"));
+      expect(document.documentElement.lang).toBe("es");
+    } finally {
+      act(() => root.unmount());
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach } from "vitest";
-import { CATALOGUES } from "@shared/i18n/catalogues";
+import { ENGLISH } from "@shared/i18n/catalogues";
 
 // Every spec that renders the interface doubles as a check that no catalogue
 // key reaches the screen untranslated: a key rendered as text or given to an
@@ -7,7 +7,7 @@ import { CATALOGUES } from "@shared/i18n/catalogues";
 // because a key is a string and React renders any string. The specs mount
 // their own roots, so an observer watches the document while each one runs.
 
-const KEYS = new Set(Object.keys(CATALOGUES.en));
+const KEYS = new Set(Object.keys(ENGLISH));
 const READ_ATTRIBUTES = ["title", "aria-label", "aria-description", "placeholder", "alt", "label"];
 const KEY_LIKE = /[A-Za-z]\w*(?:\.\w+)+/g;
 

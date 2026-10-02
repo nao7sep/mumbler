@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import type { CardStatus, MumblerCard, TrimDecision, TrimDecisionKind } from "@shared/app-shell";
 import {
@@ -11,7 +11,10 @@ import {
   getRemoveConfirmBody,
   getSaveDisabledReason,
 } from "@renderer/app/generate-rules";
+import { loadCatalogue } from "@shared/i18n/catalogues";
 import { createTranslator, type Message } from "@shared/i18n/translate";
+
+beforeAll(() => loadCatalogue("de"));
 
 const english = createTranslator("en");
 function en(message: Message | null): string | null {

@@ -8,6 +8,7 @@ import {
   type Language,
   type LanguagePreference,
 } from "@shared/i18n/languages";
+import { loadCatalogue } from "@shared/i18n/catalogues";
 import { createTranslator, type Translator } from "@shared/i18n/translate";
 
 // The computer's language, read once, at launch: System resolves against this
@@ -62,6 +63,11 @@ export function resolveInterfaceLanguage(preference: LanguagePreference): Interf
   const { language: system, locale } = readComputerLanguage();
   const language = effectiveLanguage(preference, system);
   return { language, locale: formattingLocale(language, locale) };
+}
+
+/** Loads the catalogue a saved preference settles on, before its translator is built. */
+export async function loadInterfaceCatalogue(preference: LanguagePreference): Promise<void> {
+  await loadCatalogue(resolveInterfaceLanguage(preference).language);
 }
 
 /** The translator for text the main process draws itself. */

@@ -74,7 +74,7 @@ import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
 import { type AppLogger, createLogger, serializeError, type SessionLogger } from "./logger";
 import { OperationError } from "./operation-error";
 import { applyThemePreference } from "./theme";
-import { alignAppKit, mainTranslator, resolveInterfaceLanguage } from "../i18n";
+import { alignAppKit, loadInterfaceCatalogue, mainTranslator, resolveInterfaceLanguage } from "../i18n";
 import type { InterfaceLanguage, LanguagePreference } from "@shared/i18n/languages";
 import { createTranslator, message, type Message, type Translator } from "@shared/i18n/translate";
 import type { MessageKey } from "@shared/i18n/catalogues";
@@ -206,6 +206,7 @@ export class ApplicationRuntime {
         { debugEnabled: DEBUG_LOGGING_ENABLED },
       );
       await logger.error("app.startup-failed", "Storage location could not be resolved.", error);
+      await loadInterfaceCatalogue("system");
       return new ApplicationRuntime({
         paths: null,
         settings: null,
@@ -254,6 +255,7 @@ export class ApplicationRuntime {
 
       const settingsLoad = await settingsStore.load();
       const settings = settingsLoad.value;
+      await loadInterfaceCatalogue(settings.language);
       // Resolve whether a Gemini key is available (env-first, then the dedicated
       // secrets file) once, so the snapshot can report presence without async I/O.
       const hasGeminiApiKey = await hasApiKey(
@@ -416,6 +418,7 @@ export class ApplicationRuntime {
       // here even when the failure was ensureDirectories() itself — in which case
       // the append simply degrades to stderr.
       await logger.error("app.startup-failed", "Application runtime failed to start.", error);
+      await loadInterfaceCatalogue("system");
       return new ApplicationRuntime({
         paths,
         settings: null,
@@ -630,6 +633,7 @@ export class ApplicationRuntime {
     const layout = createDefaultLayout();
 
     try {
+      await loadInterfaceCatalogue(settings.language);
       await ensureDirectories(paths, this.runtime.logger);
       // Preserve each store before the user-commanded reset returns to built-ins.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
@@ -1210,6 +1214,7 @@ export class ApplicationRuntime {
     const previousPreference = this.languagePreference();
     const previousLanguage = this.interfaceLanguage().language;
     const nextSettings = applySettingsDraft(this.runtime.settings!, draft);
+    await loadInterfaceCatalogue(nextSettings.language);
     await this.runtime.settingsStore!.save(nextSettings);
     this.runtime.settings = nextSettings;
     applyThemePreference(nextSettings.theme);

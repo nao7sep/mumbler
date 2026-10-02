@@ -1,4 +1,4 @@
-import { CATALOGUES, type Catalogue, type MessageKey } from "./catalogues";
+import { loadedCatalogue, type Catalogue, type MessageKey } from "./catalogues";
 import type { Language } from "./languages";
 
 // A value filled into a placeholder: a number (formatted for the locale), a
@@ -48,7 +48,7 @@ export type Translator = {
 const BYTE_UNITS = ["kilobyte", "megabyte", "gigabyte"] as const;
 
 export function createTranslator(language: Language, locale: string = language): Translator {
-  const catalogue: Catalogue = CATALOGUES[language];
+  const catalogue: Catalogue = loadedCatalogue(language);
   const numberFormat = new Intl.NumberFormat(locale);
   const percentFormat = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 });
   const listFormat = new Intl.ListFormat(language, { style: "narrow", type: "conjunction" });
