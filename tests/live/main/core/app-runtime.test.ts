@@ -169,6 +169,13 @@ beforeAll(async () => {
     for (const tool of tools().filter((entry) => entry.state === "not-installed")) {
       await runtime.provisionTool(tool.name);
     }
+    // Opening the runtime may start the launch check in the background; the
+    // explicit check below would be refused while it runs.
+    const deadline = Date.now() + 2 * 60_000;
+    while (tools().some((tool) => tool.transient.kind === "running" && tool.transient.operation === "check")) {
+      if (Date.now() > deadline) throw new Error("The launch check was still running after two minutes.");
+      await delay(100);
+    }
     await runtime.checkTools();
     for (const tool of tools()) {
       if (tool.transient.kind === "failed") toolCheckFailure = JSON.stringify(tool.transient);
