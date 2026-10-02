@@ -1,15 +1,48 @@
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { appendFile, mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { Worker } from "node:worker_threads";
 
 import { formatUtcMarkerMs } from "@shared/timestamps";
 
+import {
+  fallbackLine,
+  reportRecordsFailure,
+  type RecordEntry,
+  type RecordsTarget,
+  type RecordsWorkerRequest,
+  type RecordsWorkerResponse,
+} from "./records-engine";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
+
+// One call to an outside provider, recorded whole (data-lifecycle-conventions,
+// Records). `error` is the raw failure; the logger serializes it.
+export interface ProviderCallRecord {
+  provider: string;
+  operation: string;
+  endpoint: string | null;
+  model: string | null;
+  cardId: string | null;
+  step: string | null;
+  attempt: number | null;
+  startedAt: string;
+  finishedAt: string;
+  request: unknown;
+  response: unknown;
+  error: unknown;
+}
 
 export interface AppLogger {
   debug(op: string, message: string, details?: unknown): Promise<void>;
   info(op: string, message: string, details?: unknown): Promise<void>;
   warn(op: string, message: string, details?: unknown): Promise<void>;
   error(op: string, message: string, error: unknown, details?: unknown): Promise<void>;
+  providerCall(record: ProviderCallRecord): Promise<void>;
+}
+
+export interface SessionLogger extends AppLogger {
+  // Writes every entry already given, then releases the database.
+  close(): Promise<void>;
 }
 
 export interface LoggerOptions {
@@ -19,11 +52,13 @@ export interface LoggerOptions {
   debugEnabled: boolean;
 }
 
-const MAX_ERROR_CAUSE_DEPTH = 8;
-
-function isFileExistsError(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "EEXIST";
+export interface LoggerPaths {
+  recordsPath: string;
+  logsDir: string;
 }
+
+const MAX_ERROR_CAUSE_DEPTH = 8;
+const CLOSE_TIMEOUT_MS = 5_000;
 
 // Captures the full exception — type, message, stack — and follows the `cause`
 // chain for wrapped errors, so a log line carries enough to reconstruct the
@@ -48,118 +83,183 @@ export function serializeError(error: unknown, depth = 0): unknown {
   return error;
 }
 
-export function createLogger(logsDir: string, options: LoggerOptions): AppLogger {
-  // One file per launch, named with the full UTC session-start timestamp, to
-  // millisecond precision so two launches in the same second never collide (see
-  // timestamp-conventions). The stamp is captured once here — not per write — so
-  // every line of a session lands in the same file.
-  const filePath = join(logsDir, `${formatUtcMarkerMs(new Date())}.log`);
+// A value that cannot be serialized (a BigInt, a cycle) is replaced by the
+// reason, so the entry itself is never lost.
+function toJson(value: unknown): string | null {
+  try {
+    return JSON.stringify(value) ?? null;
+  } catch (failure: unknown) {
+    return JSON.stringify({ serializationError: failure instanceof Error ? failure.message : String(failure) });
+  }
+}
 
-  // Serialize appends through a promise chain so concurrent log calls (e.g. from
-  // parallel pipelines) can never interleave a partial line. Every line is
-  // appended immediately — nothing is buffered in memory — so the last lines
-  // before a crash are already on disk without any flush-on-exit machinery, and
-  // warn/error/debug get the "flush now" the conventions ask for for free.
-  let tail: Promise<void> = Promise.resolve();
+function cardIdOf(details: unknown): string | null {
+  if (typeof details !== "object" || details === null) return null;
+  const { cardId } = details as { cardId?: unknown };
+  return typeof cardId === "string" ? cardId : null;
+}
 
-  // The session file is claimed with an exclusive create (`flag: "wx"`) on the
-  // very first line only; every later line then uses a plain append. A
-  // same-millisecond clash with another launch's file (see timestamp-conventions)
-  // makes that first create fail with EEXIST — and this session must never fall
-  // through to a plain append in that case, which would silently interleave its
-  // lines into the other launch's file. Instead the whole session degrades to
-  // the console fallback below, exactly as if the file could not be opened at all.
-  let fileClaimed = false;
-  let sessionDegraded = false;
-
-  const attemptWrite = (line: string): Promise<void> => {
-    if (sessionDegraded) {
-      return Promise.reject(new Error(`log file claimed by another session: ${filePath}`));
-    }
-    if (!fileClaimed) {
-      return writeFile(filePath, line, { encoding: "utf8", flag: "wx" }).then(
-        () => {
-          fileClaimed = true;
-        },
-        (error: unknown) => {
-          if (isFileExistsError(error)) {
-            sessionDegraded = true;
-          }
-          throw error;
-        },
-      );
-    }
-    return writeFile(filePath, line, { encoding: "utf8", flag: "a" });
+// Every entry of this process launch goes to the records database through one
+// worker thread (logging-conventions, Where logs go); a write it cannot make
+// lands in this session's text file under logs/. Each call resolves once its
+// entry is written.
+export function createLogger(paths: LoggerPaths, options: LoggerOptions): SessionLogger {
+  const sessionStart = new Date();
+  const session = sessionStart.toISOString();
+  const target: RecordsTarget = {
+    databasePath: paths.recordsPath,
+    fallbackPath: join(paths.logsDir, `${formatUtcMarkerMs(sessionStart)}.log`),
   };
 
-  const append = (line: string): Promise<void> => {
-    const writeOnce = (): Promise<void> => attemptWrite(line);
-    tail = tail.then(writeOnce, writeOnce).then(
-      () => undefined,
-      (error: unknown) => {
-        // File logging failed (disk full, permissions, or a same-millisecond
-        // session clash). Degrade to stderr, best-effort and dependency-free;
-        // never crash and never silently swallow the failure — surface it
-        // somewhere, even if only the console.
-        try {
-          process.stderr.write(
-            `[mumbler:log] failed to write log line: ${error instanceof Error ? error.message : String(error)}\n${line}`,
-          );
-        } catch {
-          // Last resort: if even stderr is unavailable there is nothing more we
-          // can safely do, and logging must never take the app down.
-        }
-      },
-    );
-    return tail;
+  let worker: Worker | null = null;
+  let workerFailed = false;
+  let closing: Promise<void> | null = null;
+  let nextId = 1;
+  const pending = new Map<number, { entry: RecordEntry; resolve: () => void }>();
+  let fallbackTail: Promise<void> = Promise.resolve();
+
+  const appendFallback = (entry: RecordEntry): Promise<void> => {
+    const line = fallbackLine(entry);
+    const append = async (): Promise<void> => {
+      try {
+        await mkdir(dirname(target.fallbackPath), { recursive: true });
+        await appendFile(target.fallbackPath, line, "utf8");
+      } catch (error: unknown) {
+        reportRecordsFailure(error, line);
+      }
+    };
+    fallbackTail = fallbackTail.then(append);
+    return fallbackTail;
   };
 
-  const write = (
-    level: LogLevel,
-    op: string,
-    message: string,
-    details?: unknown,
-    error?: unknown,
-  ): Promise<void> => {
-    // The debug firehose is developer-only: drop it entirely in a release build.
+  // Entries the worker had not confirmed go to the fallback file, so a worker
+  // that fails or does not close in time loses none of them.
+  const fallBackPending = (): void => {
+    const unwritten = [...pending.values()];
+    pending.clear();
+    for (const { entry, resolve } of unwritten) {
+      void appendFallback(entry).then(resolve);
+    }
+  };
+
+  const failWorker = (error: unknown): void => {
+    if (!workerFailed) {
+      workerFailed = true;
+      reportRecordsFailure(error);
+    }
+    fallBackPending();
+    void worker?.terminate();
+    worker = null;
+  };
+
+  const ensureWorker = (): Worker => {
+    if (worker !== null) return worker;
+    // Tests run the source with Node's TypeScript stripping; the app runs
+    // electron-vite's records-worker.js entry.
+    const workerModule = import.meta.url.endsWith(".ts") ? "./records-worker.ts" : "./records-worker.js";
+    const created = new Worker(new URL(workerModule, import.meta.url), { workerData: target });
+    created.unref();
+    created.on("message", (message: RecordsWorkerResponse) => {
+      if (message.type === "written") {
+        pending.get(message.id)?.resolve();
+        pending.delete(message.id);
+      }
+    });
+    created.on("error", failWorker);
+    created.on("exit", (code) => {
+      if (closing === null && worker === created) {
+        failWorker(new Error(`records worker exited with code ${code}`));
+      }
+    });
+    worker = created;
+    return created;
+  };
+
+  const writeEntry = (entry: RecordEntry): Promise<void> => {
+    if (workerFailed || closing !== null) {
+      return appendFallback(entry);
+    }
+    return new Promise<void>((resolve) => {
+      const id = nextId++;
+      pending.set(id, { entry, resolve });
+      try {
+        ensureWorker().postMessage({ type: "write", id, entry } satisfies RecordsWorkerRequest);
+      } catch (error: unknown) {
+        failWorker(error);
+      }
+    });
+  };
+
+  const log = (level: LogLevel, op: string, message: string, details?: unknown, error?: unknown): Promise<void> => {
     if (level === "debug" && !options.debugEnabled) {
       return Promise.resolve();
     }
-
-    const payload = {
+    return writeEntry({
+      kind: "log",
+      session,
       time: new Date().toISOString(),
       level,
       op,
       message,
-      ...(details === undefined ? {} : { details }),
-      ...(error === undefined ? {} : { error: serializeError(error) }),
-    };
+      cardId: cardIdOf(details),
+      details: toJson(details),
+      error: error === undefined ? null : toJson(serializeError(error)),
+    });
+  };
 
-    let line: string;
-    try {
-      line = `${JSON.stringify(payload)}\n`;
-    } catch (serializationFailure: unknown) {
-      // The payload could not be serialized (e.g. a BigInt in details). Never
-      // lose the event: fall back to a minimal, always-serializable envelope.
-      line = `${JSON.stringify({
-        time: new Date().toISOString(),
-        level,
-        op,
-        message,
-        serializationError:
-          serializationFailure instanceof Error
-            ? serializationFailure.message
-            : String(serializationFailure),
-      })}\n`;
+  const close = (): Promise<void> => {
+    if (closing !== null) return closing;
+    const current = worker;
+    if (current === null) {
+      closing = Promise.resolve();
+      return closing;
     }
-
-    return append(line);
+    closing = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, CLOSE_TIMEOUT_MS);
+      const settle = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      current.once("exit", settle);
+      current.on("message", (message: RecordsWorkerResponse) => {
+        if (message.type === "closed") settle();
+      });
+      try {
+        current.postMessage({ type: "close" } satisfies RecordsWorkerRequest);
+      } catch {
+        settle();
+      }
+    }).then(async () => {
+      worker = null;
+      await current.terminate().catch(() => undefined);
+      fallBackPending();
+      await fallbackTail;
+    });
+    return closing;
   };
 
   return {
-    debug: (op, message, details) => write("debug", op, message, details),
-    info: (op, message, details) => write("info", op, message, details),
-    warn: (op, message, details) => write("warn", op, message, details),
-    error: (op, message, error, details) => write("error", op, message, details, error),
+    debug: (op, message, details) => log("debug", op, message, details),
+    info: (op, message, details) => log("info", op, message, details),
+    warn: (op, message, details) => log("warn", op, message, details),
+    error: (op, message, error, details) => log("error", op, message, details, error),
+    providerCall: (record) =>
+      writeEntry({
+        kind: "provider-call",
+        session,
+        startedAt: record.startedAt,
+        finishedAt: record.finishedAt,
+        cardId: record.cardId,
+        step: record.step,
+        attempt: record.attempt,
+        provider: record.provider,
+        operation: record.operation,
+        endpoint: record.endpoint,
+        model: record.model,
+        request: toJson(record.request) ?? "null",
+        response: toJson(record.response),
+        error: record.error === null || record.error === undefined ? null : toJson(serializeError(record.error)),
+      }),
+    close,
   };
 }

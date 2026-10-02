@@ -96,6 +96,7 @@ function fakeLogger(): AppLogger {
     info: vi.fn(async () => undefined),
     warn: vi.fn(async () => undefined),
     error: vi.fn(async () => undefined),
+    providerCall: vi.fn(async () => undefined),
   };
 }
 

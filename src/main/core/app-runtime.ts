@@ -71,7 +71,7 @@ import {
   selectExistingCardId,
 } from "./layout-store";
 import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
-import { type AppLogger, createLogger, serializeError } from "./logger";
+import { type AppLogger, createLogger, serializeError, type SessionLogger } from "./logger";
 import { OperationError } from "./operation-error";
 import { applyThemePreference } from "./theme";
 import { alignAppKit, mainTranslator, resolveInterfaceLanguage } from "../i18n";
@@ -139,7 +139,7 @@ interface AppRuntimeState {
   // Each card's transcription and structured outline, in its own file.
   transcriptStore: TranscriptStore | null;
   layoutStore: JsonStore<MumblerLayout> | null;
-  logger: AppLogger;
+  logger: SessionLogger;
   startupDiagnostic: AppSnapshot["startupDiagnostic"];
   appWideError: AppSnapshot["appWideError"];
   recoveredInterruptedCards: number;
@@ -196,12 +196,15 @@ export class ApplicationRuntime {
     try {
       paths = getAppPaths();
     } catch (error: unknown) {
-      // No usable storage root means no resolved logs directory either, so the
-      // diagnostic logger writes into the *default* root's logs dir; createLogger
-      // never throws on a missing directory (its append degrades to stderr), so
-      // the failure is still recorded somewhere.
-      const fallbackLogsDir = join(homedir(), ".mumbler", "logs");
-      const logger = createLogger(fallbackLogsDir, { debugEnabled: DEBUG_LOGGING_ENABLED });
+      // No usable storage root means no resolved records database either, so the
+      // diagnostic logger writes into the *default* root's; createLogger never
+      // throws (a failed write degrades to a text file, then stderr), so the
+      // failure is still recorded somewhere.
+      const fallbackRoot = join(homedir(), ".mumbler");
+      const logger = createLogger(
+        { recordsPath: join(fallbackRoot, "records.sqlite3"), logsDir: join(fallbackRoot, "logs") },
+        { debugEnabled: DEBUG_LOGGING_ENABLED },
+      );
       await logger.error("app.startup-failed", "Storage location could not be resolved.", error);
       return new ApplicationRuntime({
         paths: null,
@@ -227,13 +230,13 @@ export class ApplicationRuntime {
 
     // The session logger is a per-launch singleton: built once here, before any
     // fallible startup step, and never rebuilt for the life of the launch — so a
-    // launch's lines always land in a single file (createLogger stamps the
-    // filename from the current time, so rebuilding it would fork a new file). It
-    // is created before ensureDirectories() deliberately: createLogger touches no
-    // filesystem until its first append, and that append degrades to stderr
-    // without throwing if the directory is missing — so the logger is on hand to
-    // record a startup failure on the very path that could not create it.
-    const logger = createLogger(paths.logsDir, { debugEnabled: DEBUG_LOGGING_ENABLED });
+    // launch's records all carry one session (createLogger stamps it from the
+    // current time, so rebuilding it would fork a new session). It is created
+    // before ensureDirectories() deliberately: createLogger touches no filesystem
+    // until its first write, and that write creates the root it needs or degrades
+    // without throwing — so the logger is on hand to record a startup failure on
+    // the very path that could not create it.
+    const logger = createLogger(paths, { debugEnabled: DEBUG_LOGGING_ENABLED });
 
     // Point the write-through backup store's single failure log at this launch's session log. The store
     // logs only failures (a record failure or a store that could not be opened), never a line per save.
@@ -1315,6 +1318,7 @@ export class ApplicationRuntime {
         reason: "before-quit",
         cardCount: this.runtime.state?.cards.length ?? 0,
       });
+      await this.runtime.logger.close();
     })();
     return this.shutdownPromise;
   }
@@ -1808,6 +1812,7 @@ export function getAppPaths(): AppPaths {
     transcriptsDir: join(homeDir, "transcripts"),
     layoutPath: join(homeDir, "layout.json"),
     apiKeysPath: join(homeDir, "api-keys.json"),
+    recordsPath: join(homeDir, "records.sqlite3"),
     logsDir: join(homeDir, "logs"),
     workingDir: join(homeDir, "working"),
     outputDir: join(homeDir, "output"),
@@ -1875,7 +1880,6 @@ async function secureRoot(rootDir: string, logger: AppLogger): Promise<void> {
 async function ensureDirectories(paths: AppPaths, logger: AppLogger): Promise<void> {
   await mkdir(paths.homeDir, { recursive: true, mode: 0o700 });
   await secureRoot(paths.homeDir, logger);
-  await mkdir(paths.logsDir, { recursive: true });
   await mkdir(paths.workingDir, { recursive: true });
   await mkdir(paths.binDir, { recursive: true });
   // temp/ is disposable download staging: clear it on launch so a download

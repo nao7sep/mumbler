@@ -20,6 +20,7 @@ import {
   GeminiResultError,
   INLINE_AUDIO_LIMIT_BYTES,
   isRetryableGeminiError,
+  type RecordProviderCall,
   transcribeWithGemini,
 } from "./gemini-adapter";
 import { CancelledError, isCancelledError } from "./cancellation";
@@ -125,7 +126,7 @@ export async function executeCardPipeline(
           cardId,
           step: "transcription",
           op: "gemini.transcription",
-          execute: () =>
+          execute: (recordCall) =>
             transcribeWithGemini({
               apiKey,
               endpoint: settings["gemini.endpoint"],
@@ -136,6 +137,7 @@ export async function executeCardPipeline(
               timeoutMs: settings.timeouts.transcriptionMs,
               signal: ctx.signal,
               logger,
+              recordCall,
             }),
         }, ctx);
 
@@ -184,7 +186,7 @@ export async function executeCardPipeline(
         cardId,
         step: "structured",
         op: "gemini.structured",
-        execute: () =>
+        execute: (recordCall) =>
           generateTextWithGemini({
             apiKey,
             endpoint: settings["gemini.endpoint"],
@@ -193,6 +195,7 @@ export async function executeCardPipeline(
             thinking: thinkingFor(settings["gemini.outline"], "outline", settings["gemini.thinking.outline"]),
             timeoutMs: settings.timeouts.transcriptionMs,
             signal: ctx.signal,
+            recordCall,
           }),
       }, ctx);
 
@@ -232,7 +235,7 @@ export async function executeCardPipeline(
         cardId,
         step: "title",
         op: "gemini.title",
-        execute: () =>
+        execute: (recordCall) =>
           generateTextWithGemini({
             apiKey,
             endpoint: settings["gemini.endpoint"],
@@ -241,6 +244,7 @@ export async function executeCardPipeline(
             thinking: thinkingFor(settings["gemini.metadata"], "metadata", settings["gemini.thinking.metadata"]),
             timeoutMs: settings.timeouts.metadataMs,
             signal: ctx.signal,
+            recordCall,
           }),
       }, ctx);
 
@@ -273,7 +277,7 @@ export async function executeCardPipeline(
         cardId,
         step: "slug",
         op: "gemini.slug",
-        execute: () =>
+        execute: (recordCall) =>
           generateTextWithGemini({
             apiKey,
             endpoint: settings["gemini.endpoint"],
@@ -282,6 +286,7 @@ export async function executeCardPipeline(
             thinking: thinkingFor(settings["gemini.metadata"], "metadata", settings["gemini.thinking.metadata"]),
             timeoutMs: settings.timeouts.metadataMs,
             signal: ctx.signal,
+            recordCall,
           }),
       }, ctx);
 
@@ -380,7 +385,7 @@ async function executeWithRetry<T>(params: {
   cardId: string;
   step: Exclude<CardProcessingStep, null>;
   op: string;
-  execute: () => Promise<T>;
+  execute: (recordCall: RecordProviderCall) => Promise<T>;
 }, ctx: CardPipelineContext): Promise<T> {
   const { retryPolicy } = ctx.settings;
   const logger = ctx.logger;
@@ -389,7 +394,9 @@ async function executeWithRetry<T>(params: {
   while (true) {
     throwIfCancelled(ctx.signal);
     try {
-      return await params.execute();
+      const callAttempt = attempt;
+      return await params.execute((call) =>
+        logger.providerCall({ ...call, cardId: params.cardId, step: params.step, attempt: callAttempt }));
     } catch (error: unknown) {
       const retryable = isRetryableGeminiError(error);
       const exhausted = attempt > retryPolicy.maxRetries;

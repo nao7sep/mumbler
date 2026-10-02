@@ -31,6 +31,7 @@ const noopLogger: AppLogger = {
   info: async () => {},
   warn: async () => {},
   error: async () => {},
+  providerCall: async () => {},
 };
 
 function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {

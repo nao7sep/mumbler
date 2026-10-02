@@ -4,7 +4,7 @@ import { ApiError, GoogleGenAI, type GenerateContentResponse } from "@google/gen
 
 import { supportedModelConfig } from "@shared/model-branches";
 
-import { type AppLogger } from "./logger";
+import { type AppLogger, type ProviderCallRecord } from "./logger";
 import { CancelledError } from "./cancellation";
 
 // Inline audio travels as base64 (4 bytes per 3) in a request of at most 20,000,000 bytes that also carries the prompt.
@@ -23,6 +23,11 @@ function singleAttemptHttpOptions(timeoutMs: number): { timeout: number; retryOp
   return { timeout: timeoutMs, retryOptions: { attempts: 1 } };
 }
 
+// The pipeline binds the card, step and attempt; the adapter supplies the rest.
+export type RecordProviderCall = (
+  call: Omit<ProviderCallRecord, "cardId" | "step" | "attempt">,
+) => Promise<void>;
+
 export interface GeminiAudioTranscriptionParams {
   apiKey: string;
   endpoint?: string;
@@ -34,6 +39,7 @@ export interface GeminiAudioTranscriptionParams {
   timeoutMs: number;
   signal?: AbortSignal;
   logger?: AppLogger;
+  recordCall?: RecordProviderCall;
 }
 
 export interface GeminiTextGenerationParams {
@@ -45,6 +51,7 @@ export interface GeminiTextGenerationParams {
   thinking?: string;
   timeoutMs: number;
   signal?: AbortSignal;
+  recordCall?: RecordProviderCall;
 }
 
 export interface GeminiRunResult {
@@ -92,6 +99,7 @@ export async function transcribeWithGemini(
     apiKey: params.apiKey,
     httpOptions: { baseUrl: params.endpoint, ...singleAttemptHttpOptions(params.timeoutMs) },
   });
+  const record = callRecorder(params);
   const abortState = createGeminiAbortState(params.timeoutMs, params.signal);
   let uploadedFileName: string | null = null;
   let transport: GeminiRunResult["transport"] = "inline";
@@ -100,67 +108,58 @@ export async function transcribeWithGemini(
     throwIfExternallyCancelled(params.signal);
     const fileStats = await stat(params.filePath);
     const prompt = buildTranscriptionPrompt();
+    const config = supportedModelConfig(params.model, params.thinking);
 
     let response: GenerateContentResponse;
     if (fileStats.size <= INLINE_AUDIO_LIMIT_BYTES) {
       const inlineData = await readFile(params.filePath, { encoding: "base64" });
       throwIfExternallyCancelled(params.signal);
-      response = await ai.models.generateContent({
+      const request = {
         model: params.model,
+        contents: [
+          { role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: params.mimeType, data: inlineData } }] },
+        ],
+        config,
+      };
+      // The audio bytes stay in their file; the record names that file instead.
+      const recordedRequest = {
+        ...request,
         contents: [
           {
             role: "user",
             parts: [
               { text: prompt },
-              {
-                inlineData: {
-                  mimeType: params.mimeType,
-                  data: inlineData,
-                },
-              },
+              { inlineData: { mimeType: params.mimeType, filePath: params.filePath, byteSize: fileStats.size } },
             ],
           },
         ],
-        config: {
-          abortSignal: abortState.signal,
-          ...supportedModelConfig(params.model, params.thinking),
-        },
-      });
+      };
+      response = await record("models.generateContent", params.model, recordedRequest, () =>
+        ai.models.generateContent({ ...request, config: { abortSignal: abortState.signal, ...config } }),
+      );
     } else {
       transport = "files-api";
       throwIfExternallyCancelled(params.signal);
-      const uploadedFile = await ai.files.upload({
-        file: params.filePath,
-        config: { mimeType: params.mimeType },
-      });
+      const upload = { file: params.filePath, config: { mimeType: params.mimeType } };
+      const uploadedFile = await record("files.upload", null, upload, () => ai.files.upload(upload));
       uploadedFileName = uploadedFile.name ?? null;
-      await params.logger?.debug("gemini.upload", "Uploaded audio via Files API.", {
-        uploadedFileName,
-        fileUri: uploadedFile.uri,
-        mimeType: uploadedFile.mimeType ?? params.mimeType,
-      });
 
-      response = await ai.models.generateContent({
+      const request = {
         model: params.model,
         contents: [
           {
             role: "user",
             parts: [
               { text: prompt },
-              {
-                fileData: {
-                  fileUri: uploadedFile.uri,
-                  mimeType: uploadedFile.mimeType ?? params.mimeType,
-                },
-              },
+              { fileData: { fileUri: uploadedFile.uri, mimeType: uploadedFile.mimeType ?? params.mimeType } },
             ],
           },
         ],
-        config: {
-          abortSignal: abortState.signal,
-          ...supportedModelConfig(params.model, params.thinking),
-        },
-      });
+        config,
+      };
+      response = await record("models.generateContent", params.model, request, () =>
+        ai.models.generateContent({ ...request, config: { abortSignal: abortState.signal, ...config } }),
+      );
     }
 
     const text = readResponseText(response);
@@ -175,23 +174,59 @@ export async function transcribeWithGemini(
   } finally {
     abortState.cleanup();
     if (uploadedFileName !== null) {
-      void deleteUploadedFile(ai, uploadedFileName, params.logger);
+      void deleteUploadedFile(ai, uploadedFileName, record, params.logger);
     }
   }
+}
+
+type CallRecorder = <T>(operation: string, model: string | null, request: unknown, call: () => Promise<T>) => Promise<T>;
+
+// Wraps one SDK call so its request, its answer or failure, and its timing are
+// recorded (data-lifecycle-conventions, Records).
+function callRecorder(params: { endpoint?: string; recordCall?: RecordProviderCall }): CallRecorder {
+  return async (operation, model, request, call) => {
+    const startedAt = new Date().toISOString();
+    const write = (response: unknown, error: unknown): Promise<void> =>
+      params.recordCall?.({
+        provider: "gemini",
+        operation,
+        endpoint: params.endpoint ?? null,
+        model,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        request,
+        response,
+        error,
+      }) ?? Promise.resolve();
+    let response: Awaited<ReturnType<typeof call>>;
+    try {
+      response = await call();
+    } catch (error: unknown) {
+      await write(null, error);
+      throw error;
+    }
+    await write(response, null);
+    return response;
+  };
 }
 
 // Removing the upload is best-effort: Gemini expires uploads by itself. So the
 // delete runs beside the result instead of in front of it, and its own bound
 // ends it on a stalled connection rather than leaving it pending.
-async function deleteUploadedFile(ai: GoogleGenAI, name: string, logger: AppLogger | undefined): Promise<void> {
+async function deleteUploadedFile(
+  ai: GoogleGenAI,
+  name: string,
+  record: CallRecorder,
+  logger: AppLogger | undefined,
+): Promise<void> {
+  const httpOptions = singleAttemptHttpOptions(FILES_API_CLEANUP_TIMEOUT_MS);
   try {
-    await ai.files.delete({
-      name,
-      config: {
-        abortSignal: AbortSignal.timeout(FILES_API_CLEANUP_TIMEOUT_MS),
-        httpOptions: singleAttemptHttpOptions(FILES_API_CLEANUP_TIMEOUT_MS),
-      },
-    });
+    await record("files.delete", null, { name, config: { httpOptions } }, () =>
+      ai.files.delete({
+        name,
+        config: { abortSignal: AbortSignal.timeout(FILES_API_CLEANUP_TIMEOUT_MS), httpOptions },
+      }),
+    );
   } catch (cleanupError: unknown) {
     await logger?.warn(
       "gemini.upload-cleanup",
@@ -211,23 +246,20 @@ export async function generateTextWithGemini(
     apiKey: params.apiKey,
     httpOptions: { baseUrl: params.endpoint, ...singleAttemptHttpOptions(params.timeoutMs) },
   });
+  const record = callRecorder(params);
   const abortState = createGeminiAbortState(params.timeoutMs, params.signal);
 
   try {
     throwIfExternallyCancelled(params.signal);
-    const response = await ai.models.generateContent({
+    const config = supportedModelConfig(params.model, params.thinking);
+    const request = {
       model: params.model,
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: params.prompt }],
-        },
-      ],
-      config: {
-        abortSignal: abortState.signal,
-        ...supportedModelConfig(params.model, params.thinking),
-      },
-    });
+      contents: [{ role: "user", parts: [{ text: params.prompt }] }],
+      config,
+    };
+    const response = await record("models.generateContent", params.model, request, () =>
+      ai.models.generateContent({ ...request, config: { abortSignal: abortState.signal, ...config } }),
+    );
 
     return {
       text: readResponseText(response),

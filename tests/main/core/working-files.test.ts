@@ -43,6 +43,7 @@ function makeLogger(): AppLogger {
     info: vi.fn().mockResolvedValue(undefined),
     warn: vi.fn().mockResolvedValue(undefined),
     error: vi.fn().mockResolvedValue(undefined),
+    providerCall: vi.fn().mockResolvedValue(undefined),
   };
 }
 

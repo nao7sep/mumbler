@@ -308,3 +308,60 @@ describe("generateTextWithGemini", () => {
     expect(generateContent).not.toHaveBeenCalled();
   });
 });
+
+describe("every provider call is recorded whole", () => {
+  it("records the inline request with the audio file named instead of its bytes, and the response as returned", async () => {
+    stat.mockResolvedValue({ size: 1234 });
+    const response = { text: "hi", modelVersion: "v1", usageMetadata: { totalTokenCount: 5 } };
+    generateContent.mockResolvedValue(response);
+    const recordCall = vi.fn().mockResolvedValue(undefined);
+
+    await transcribeWithGemini({ ...baseParams(), endpoint: "https://proxy.example", recordCall });
+
+    expect(recordCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      provider: "gemini",
+      operation: "models.generateContent",
+      endpoint: "https://proxy.example",
+      model: "gemini-3.8-flash",
+      response,
+      error: null,
+    }));
+    const { request } = recordCall.mock.calls[0]![0];
+    expect(request.contents[0].parts[1]).toEqual({
+      inlineData: { mimeType: "audio/mp4", filePath: "/tmp/rec.m4a", byteSize: 1234 },
+    });
+    expect(request.config).toEqual({ thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } });
+  });
+
+  it("records the upload, the generation and the delete of a Files-API transcription", async () => {
+    stat.mockResolvedValue({ size: SAFE + 1 });
+    upload.mockResolvedValue({ name: "files/abc", uri: "gs://u", mimeType: "audio/mp4" });
+    generateContent.mockResolvedValue({ text: "done" });
+    const recordCall = vi.fn().mockResolvedValue(undefined);
+
+    await transcribeWithGemini({ ...baseParams(), recordCall });
+    await vi.waitFor(() => expect(recordCall).toHaveBeenCalledTimes(3));
+
+    expect(recordCall.mock.calls.map(([call]) => call.operation)).toEqual([
+      "files.upload",
+      "models.generateContent",
+      "files.delete",
+    ]);
+  });
+
+  it("records a failed call with the provider's error", async () => {
+    const failure = new ApiError({ message: "quota", status: 429 });
+    generateContent.mockRejectedValue(failure);
+    const recordCall = vi.fn().mockResolvedValue(undefined);
+
+    await expect(generateTextWithGemini({
+      apiKey: "k", prompt: "title", model: "unknown", timeoutMs: 1000, recordCall,
+    })).rejects.toBe(failure);
+
+    expect(recordCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      request: { model: "unknown", contents: [{ role: "user", parts: [{ text: "title" }] }], config: undefined },
+      response: null,
+      error: failure,
+    }));
+  });
+});

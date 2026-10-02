@@ -83,6 +83,7 @@ function makeLogger(): AppLogger {
     info: vi.fn().mockResolvedValue(undefined),
     warn: vi.fn().mockResolvedValue(undefined),
     error: vi.fn().mockResolvedValue(undefined),
+    providerCall: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -95,6 +96,7 @@ function makePaths(): AppPaths {
     transcriptsDir: "/tmp/.mumbler/transcripts",
     layoutPath: "/tmp/.mumbler/layout.json",
     apiKeysPath: "/tmp/.mumbler/api-keys.json",
+    recordsPath: "/tmp/.mumbler/records.sqlite3",
     logsDir: "/tmp/.mumbler/logs",
     workingDir: "/tmp/.mumbler/working",
     outputDir: "/tmp/.mumbler/output",
@@ -186,6 +188,26 @@ describe("executeCardPipeline", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("binds each provider call's record to its card, step and attempt", async () => {
+    mockGenerateText.mockImplementation(async (params: { recordCall: (call: object) => Promise<void> }) => {
+      await params.recordCall({ operation: "models.generateContent" });
+      return { text: "result", modelVersion: "m", usageMetadata: null };
+    });
+    const card = makeCard();
+    const ctx = makeContext(card, new AbortController().signal);
+
+    await executeCardPipeline(card.id, "structured", "generate", ctx);
+
+    expect(vi.mocked(ctx.logger.providerCall).mock.calls.map(([call]) => call)).toEqual(
+      ["structured", "title", "slug"].map((step) => ({
+        operation: "models.generateContent",
+        cardId: card.id,
+        step,
+        attempt: 1,
+      })),
+    );
   });
 
   it("runs the structured -> title -> slug metadata chain and marks the card ready", async () => {

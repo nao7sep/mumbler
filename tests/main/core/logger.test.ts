@@ -1,156 +1,178 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createLogger, serializeError } from "@main/core/logger";
+import { createLogger, serializeError, type SessionLogger } from "@main/core/logger";
 
 let dir: string;
+let recordsPath: string;
+let logsDir: string;
+const opened: SessionLogger[] = [];
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), "mumbler-logs-"));
+  dir = await mkdtemp(join(tmpdir(), "mumbler-records-"));
+  recordsPath = join(dir, "records.sqlite3");
+  logsDir = join(dir, "logs");
 });
 
 afterEach(async () => {
+  await Promise.all(opened.splice(0).map((logger) => logger.close()));
   await rm(dir, { recursive: true, force: true });
 });
 
-async function logFiles(): Promise<string[]> {
-  return (await readdir(dir)).filter((name) => name.endsWith(".log"));
+function open(debugEnabled = true, paths = { recordsPath, logsDir }): SessionLogger {
+  const logger = createLogger(paths, { debugEnabled });
+  opened.push(logger);
+  return logger;
 }
 
-async function readLines(): Promise<Record<string, unknown>[]> {
-  const files = await logFiles();
-  const text = await readFile(join(dir, files[0]), "utf8");
-  return text
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
+function rows(table: "logs" | "provider_calls"): Record<string, unknown>[] {
+  const db = new DatabaseSync(recordsPath);
+  try {
+    return db.prepare(`SELECT * FROM ${table} ORDER BY id`).all() as Record<string, unknown>[];
+  } finally {
+    db.close();
+  }
 }
+
+async function fallbackLines(): Promise<Record<string, unknown>[]> {
+  const files = await readdir(logsDir);
+  expect(files).toHaveLength(1);
+  expect(files[0]).toMatch(/^\d{8}-\d{6}-\d{3}-utc\.log$/);
+  const text = await readFile(join(logsDir, files[0]), "utf8");
+  return text.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+const ISO_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 describe("createLogger", () => {
-  it("writes to one per-launch yyyymmdd-hhmmss-fff-utc.log file with ISO timestamps", async () => {
-    const logger = createLogger(dir, { debugEnabled: true });
+  it("writes each line as a row of one session, with its time and card", async () => {
+    const logger = open();
     await logger.info("startup", "hello");
-    await logger.warn("startup", "careful");
+    await logger.warn("pipeline.step", "careful", { cardId: "c1", attempt: 2 });
+    await logger.close();
 
-    const files = await logFiles();
-    expect(files).toHaveLength(1);
-    expect(files[0]).toMatch(/^\d{8}-\d{6}-\d{3}-utc\.log$/);
-
-    const lines = await readLines();
-    expect(lines).toHaveLength(2);
-    expect(lines[0].time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-    expect(lines[0].op).toBe("startup");
-    expect(lines[0].level).toBe("info");
+    const [first, second] = rows("logs");
+    expect(first).toMatchObject({ level: "info", op: "startup", message: "hello", card_id: null, details: null });
+    expect(first.session).toMatch(ISO_MS);
+    expect(first.time).toMatch(ISO_MS);
+    expect(second.session).toBe(first.session);
+    expect(second.card_id).toBe("c1");
+    expect(JSON.parse(second.details as string)).toEqual({ cardId: "c1", attempt: 2 });
   });
 
-  it("captures details and a serialized error on the error level, with an ISO time", async () => {
-    const logger = createLogger(dir, { debugEnabled: true });
+  it("captures details and a serialized error on the error level", async () => {
+    const logger = open();
     await logger.error("convert", "boom", new Error("nope"), { cardId: "c1" });
+    await logger.close();
 
-    const [line] = await readLines();
-    expect(line.time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-    expect(line.level).toBe("error");
-    expect(line.details).toEqual({ cardId: "c1" });
-    expect(line.error).toMatchObject({ name: "Error", message: "nope" });
-    expect(typeof (line.error as { stack: unknown }).stack).toBe("string");
+    const [row] = rows("logs");
+    expect(row.level).toBe("error");
+    const error = JSON.parse(row.error as string) as Record<string, unknown>;
+    expect(error).toMatchObject({ name: "Error", message: "nope" });
+    expect(typeof error.stack).toBe("string");
   });
 
   it("keeps every field as given, secrets included", async () => {
-    const logger = createLogger(dir, { debugEnabled: true });
+    const logger = open();
     const details = { apiKey: "AIzaSECRET", Authorization: "Bearer t", nested: { password: "pw" } };
     await logger.info("auth", "configured the key", details);
+    await logger.close();
 
-    const [line] = await readLines();
-    expect(line.details).toEqual(details);
+    expect(JSON.parse(rows("logs")[0].details as string)).toEqual(details);
   });
 
   it("does not write debug lines when debug is disabled, but does when enabled", async () => {
-    const off = createLogger(dir, { debugEnabled: false });
+    const off = open(false);
     await off.debug("probe", "dev only");
     await off.info("probe", "always");
-
-    let lines = await readLines();
-    expect(lines).toHaveLength(1);
-    expect(lines[0].level).toBe("info");
-
-    await rm(dir, { recursive: true, force: true });
-    dir = await mkdtemp(join(tmpdir(), "mumbler-logs-"));
-
-    const on = createLogger(dir, { debugEnabled: true });
+    const on = open(true);
     await on.debug("probe", "dev only");
-    lines = await readLines();
-    expect(lines).toHaveLength(1);
-    expect(lines[0].level).toBe("debug");
+    await off.close();
+    await on.close();
+
+    expect(rows("logs").map((row) => row.level)).toEqual(["info", "debug"]);
   });
 
-  it("never throws when the log file cannot be written, degrading to stderr", async () => {
-    // Point the logger at a path whose parent is a file, so every append fails.
-    const notADir = join(dir, "blocker");
-    await writeFile(notADir, "x", "utf8");
-    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  it("records a provider call whole, request and response", async () => {
+    const logger = open();
+    const request = { model: "gemini-x", contents: [{ role: "user", parts: [{ text: "hi" }] }] };
+    const response = { text: "hello", usageMetadata: { totalTokenCount: 5 } };
+    await logger.providerCall({
+      provider: "gemini",
+      operation: "models.generateContent",
+      endpoint: null,
+      model: "gemini-x",
+      cardId: "c1",
+      step: "title",
+      attempt: 1,
+      startedAt: "2026-10-02T00:00:00.000Z",
+      finishedAt: "2026-10-02T00:00:01.000Z",
+      request,
+      response,
+      error: null,
+    });
+    await logger.providerCall({
+      provider: "gemini",
+      operation: "models.generateContent",
+      endpoint: "https://proxy.example",
+      model: "gemini-x",
+      cardId: "c1",
+      step: "title",
+      attempt: 2,
+      startedAt: "2026-10-02T00:00:02.000Z",
+      finishedAt: "2026-10-02T00:00:03.000Z",
+      request,
+      response: null,
+      error: new Error("quota"),
+    });
+    await logger.close();
 
+    const [ok, failed] = rows("provider_calls");
+    expect(ok).toMatchObject({ card_id: "c1", step: "title", attempt: 1, operation: "models.generateContent", error: null });
+    expect(JSON.parse(ok.request as string)).toEqual(request);
+    expect(JSON.parse(ok.response as string)).toEqual(response);
+    expect(failed).toMatchObject({ attempt: 2, endpoint: "https://proxy.example", response: "null" });
+    expect(JSON.parse(failed.error as string)).toMatchObject({ name: "Error", message: "quota" });
+  });
+
+  it("falls back to this session's text file under logs/ when the database cannot be written", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     try {
-      const logger = createLogger(notADir, { debugEnabled: true });
+      // A directory where the database file should be makes every open fail.
+      const logger = open(true, { recordsPath: dir, logsDir });
+      await expect(logger.info("startup", "kept anyway", { cardId: "c1" })).resolves.toBeUndefined();
+      await logger.close();
+
+      const [line] = await fallbackLines();
+      expect(line).toMatchObject({ kind: "log", message: "kept anyway", cardId: "c1", details: { cardId: "c1" } });
+      expect(stderr).toHaveBeenCalled();
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("never throws when neither the database nor the fallback file can be written", async () => {
+    const blocker = join(dir, "blocker");
+    await writeFile(blocker, "x", "utf8");
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      const logger = open(true, { recordsPath: join(blocker, "records.sqlite3"), logsDir: join(blocker, "logs") });
       await expect(logger.error("io", "should not throw", new Error("x"))).resolves.toBeUndefined();
-      expect(stderr).toHaveBeenCalled();
+      await logger.close();
+      expect(stderr.mock.calls.some(([text]) => String(text).includes("should not throw"))).toBe(true);
     } finally {
       stderr.mockRestore();
     }
   });
 
-  it("constructs on a not-yet-existing directory without touching the filesystem", async () => {
-    // The runtime builds the session logger before it creates the logs directory,
-    // so construction must perform no I/O, and the first append must degrade to
-    // stderr rather than throw while the directory is still missing.
-    const missingDir = join(dir, "not-created-yet");
-    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-
-    try {
-      const logger = createLogger(missingDir, { debugEnabled: true });
-      // Merely constructing the logger created nothing on disk.
-      await expect(readdir(missingDir)).rejects.toThrow();
-      await expect(logger.info("startup", "before the directory exists")).resolves.toBeUndefined();
-      expect(stderr).toHaveBeenCalled();
-    } finally {
-      stderr.mockRestore();
-    }
-  });
-
-  it("claims the session file with an exclusive create; a same-millisecond clash degrades that session to the console instead of interleaving", async () => {
-    // Freeze the clock so two separately constructed loggers stamp the exact
-    // same yyyymmdd-hhmmss-fff-utc filename, reproducing the same-millisecond
-    // clash the timestamp-conventions call out.
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
-
-    try {
-      const first = createLogger(dir, { debugEnabled: true });
-      const second = createLogger(dir, { debugEnabled: true });
-
-      await first.info("startup", "first session");
-
-      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-      try {
-        // The second session's exclusive create collides with the first's file;
-        // it must degrade to the console rather than append into that file.
-        await expect(second.info("startup", "second session")).resolves.toBeUndefined();
-        expect(stderr).toHaveBeenCalled();
-      } finally {
-        stderr.mockRestore();
-      }
-
-      // Only one session file exists, and it holds only the first session's line.
-      const files = await logFiles();
-      expect(files).toHaveLength(1);
-      const lines = await readLines();
-      expect(lines).toHaveLength(1);
-      expect(lines[0].message).toBe("first session");
-    } finally {
-      vi.useRealTimers();
-    }
+  it("constructs without touching the filesystem", async () => {
+    const missing = join(dir, "not-created-yet");
+    open(true, { recordsPath: join(missing, "records.sqlite3"), logsDir: join(missing, "logs") });
+    await expect(readdir(missing)).rejects.toThrow();
   });
 });
 

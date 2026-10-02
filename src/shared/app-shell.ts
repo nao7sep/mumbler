@@ -292,6 +292,8 @@ export interface AppPaths {
   // The secrets file. The Gemini API key lives here in its own 0600 file, not in
   // settingsPath (storage-path-conventions, "Secrets and keys").
   apiKeysPath: string;
+  recordsPath: string;
+  // Only for records the database could not take.
   logsDir: string;
   workingDir: string;
   outputDir: string;
