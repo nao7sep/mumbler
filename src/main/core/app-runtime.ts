@@ -668,6 +668,7 @@ export class ApplicationRuntime {
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
       this.runtime.recoveredInterruptedCards = 0;
+      applyThemePreference(settings.theme);
       this.followLanguageChange(previousPreference, previousLanguage);
 
       return this.getSnapshot();

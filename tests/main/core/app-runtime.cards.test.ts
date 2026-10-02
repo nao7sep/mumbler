@@ -845,6 +845,16 @@ describe("settings, secrets and the window's own state", () => {
     expect(languageChanged).toHaveBeenCalledOnce();
   });
 
+  it("returns the app to the System theme on a reset", async () => {
+    const { nativeTheme } = await import("electron");
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), theme: "dark" });
+    expect(nativeTheme.themeSource).toBe("dark");
+
+    await runtime.resetState();
+
+    expect(nativeTheme.themeSource).toBe("system");
+  });
+
   it("starts over on request, keeping the files the user made", async () => {
     const [pending] = await dropIn("take.wav");
     await runtime.confirmPendingImports([review(pending)]);
