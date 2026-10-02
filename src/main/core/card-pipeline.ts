@@ -47,31 +47,6 @@ export interface CardPipelineContext {
 export type PipelineMode = "generate";
 export type PipelineStartStep = Exclude<CardProcessingStep, null>;
 
-// Reduce the Gemini SDK's opaque usageMetadata to its scalar token counts for
-// logging. "Summarize, don't dump": the whole SDK object may grow fields that
-// carry content.
-function summarizeUsage(usageMetadata: unknown): Record<string, number> | null {
-  if (typeof usageMetadata !== "object" || usageMetadata === null) {
-    return null;
-  }
-  const source = usageMetadata as Record<string, unknown>;
-  const summary: Record<string, number> = {};
-  for (const key of [
-    "promptTokenCount",
-    "candidatesTokenCount",
-    "thoughtsTokenCount",
-    "cachedContentTokenCount",
-    "toolUsePromptTokenCount",
-    "totalTokenCount",
-  ]) {
-    const value = source[key];
-    if (typeof value === "number") {
-      summary[key] = value;
-    }
-  }
-  return Object.keys(summary).length > 0 ? summary : null;
-}
-
 export async function executeCardPipeline(
   cardId: string,
   startStep: PipelineStartStep,
@@ -184,7 +159,7 @@ export async function executeCardPipeline(
           cardId,
           modelVersion: transcriptionResult.modelVersion,
           transport: transcriptionResult.transport,
-          usage: summarizeUsage(transcriptionResult.usageMetadata),
+          usage: transcriptionResult.usageMetadata,
         });
       } finally {
         await preparedAudio.cleanup();
@@ -239,7 +214,7 @@ export async function executeCardPipeline(
       await logger.info("pipeline.structured-complete", "Generated structured outline.", {
         cardId,
         modelVersion: structuredResult.modelVersion,
-        usage: summarizeUsage(structuredResult.usageMetadata),
+        usage: structuredResult.usageMetadata,
       });
 
       activeStep = "title";
@@ -280,7 +255,7 @@ export async function executeCardPipeline(
       await logger.info("pipeline.title-complete", "Generated title metadata.", {
         cardId,
         modelVersion: titleResult.modelVersion,
-        usage: summarizeUsage(titleResult.usageMetadata),
+        usage: titleResult.usageMetadata,
       });
 
       activeStep = "slug";
@@ -328,7 +303,7 @@ export async function executeCardPipeline(
       await logger.info("pipeline.slug-complete", "Generated slug metadata.", {
         cardId,
         modelVersion: slugResult.modelVersion,
-        usage: summarizeUsage(slugResult.usageMetadata),
+        usage: slugResult.usageMetadata,
       });
     }
   } catch (error: unknown) {

@@ -160,6 +160,33 @@ describe("executeCardPipeline", () => {
     }
   });
 
+  it("records the provider's usage as returned", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mumbler-run-"));
+    try {
+      const source = join(dir, "rec.m4a");
+      await writeFile(source, "audio");
+      const usageMetadata = {
+        promptTokenCount: 10,
+        promptTokensDetails: [{ modality: "AUDIO", tokenCount: 8 }],
+        trafficType: "ON_DEMAND",
+      };
+      mockTranscribe.mockResolvedValue({ text: "words", modelVersion: "m", usageMetadata, transport: "inline" });
+      mockGenerateText.mockResolvedValue({ text: "result", modelVersion: "m", usageMetadata: null });
+      mockAnalyzeTrim.mockResolvedValue({ kind: "not-needed" });
+
+      const card = makeCard({ sourceFilePath: source });
+      const ctx = makeContext(card, new AbortController().signal);
+      await executeCardPipeline(card.id, "transcription", "generate", ctx);
+
+      expect(vi.mocked(ctx.logger.info)).toHaveBeenCalledWith(
+        "pipeline.transcription-complete",
+        expect.any(String),
+        expect.objectContaining({ usage: usageMetadata }),
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 
   it("runs the structured -> title -> slug metadata chain and marks the card ready", async () => {
     mockGenerateText.mockResolvedValue({ text: "result", modelVersion: "m", usageMetadata: null });
