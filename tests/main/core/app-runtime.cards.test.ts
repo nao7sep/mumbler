@@ -28,7 +28,7 @@ vi.mock("@main/core/binaries/manager", () => ({
     listStatuses(): [] {
       return [];
     }
-    checkIsStale(): boolean {
+    launchCheckDue(): boolean {
       return false;
     }
     resolveToolPath(name: string): string {

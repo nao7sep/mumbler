@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createDependenciesStore } from "@main/core/binaries/store";
+import { createDependenciesStore, launchCheckDue } from "@main/core/binaries/store";
 import { closeBackupStore } from "@main/core/backupStore";
 
 let dir: string;
@@ -89,5 +89,29 @@ describe("dependencies store — timestamp persistence", () => {
     const reloaded = (await createDependenciesStore(storePath()).load()).value;
     expect(reloaded.tools.ffmpeg.lastCheckedAtUtc).toBe(1_699_000_000_000);
     expect(reloaded.tools.ffprobe.lastCheckedAtUtc).toBeNull();
+  });
+});
+
+describe("the launch check's last attempt", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const NOW = 1_700_000_000_000;
+
+  it("is due when the attempt is missing, in the future, or at least a day old", () => {
+    expect(launchCheckDue(null, NOW)).toBe(true);
+    expect(launchCheckDue(NOW + 1, NOW)).toBe(true);
+    expect(launchCheckDue(NOW - DAY, NOW)).toBe(true);
+    expect(launchCheckDue(NOW - DAY + 1, NOW)).toBe(false);
+    expect(launchCheckDue(NOW, NOW)).toBe(false);
+  });
+
+  it("is stored as canonical UTC and reads an invalid value as missing", async () => {
+    const store = createDependenciesStore(storePath());
+    const { value } = await store.load();
+    await store.save({ ...value, lastCheckAttemptAtUtc: NOW });
+    expect(JSON.parse(await readFile(storePath(), "utf8")).lastCheckAttemptAtUtc).toBe("2023-11-14T22:13:20.000Z");
+    expect((await createDependenciesStore(storePath()).load()).value.lastCheckAttemptAtUtc).toBe(NOW);
+
+    await writeFile(storePath(), JSON.stringify({ schemaVersion: 1, tools: {}, lastCheckAttemptAtUtc: "not a time" }));
+    expect((await createDependenciesStore(storePath()).load()).value.lastCheckAttemptAtUtc).toBeNull();
   });
 });

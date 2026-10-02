@@ -25,9 +25,13 @@ export interface PersistedToolFacts {
   lastCheckedAtUtc: number | null;
 }
 
+// Beside the per-tool facts sits the one app-wide time of the last check attempt,
+// automatic or manual, written immediately before the check starts
+// (managed-runtime-dependencies-conventions).
 export interface DependenciesValue {
   schemaVersion: 1;
   tools: Record<ToolName, PersistedToolFacts>;
+  lastCheckAttemptAtUtc: number | null;
 }
 
 const SCHEMA_VERSION = 1;
@@ -43,7 +47,16 @@ export function createDefaultDependencies(): DependenciesValue {
   return {
     schemaVersion: SCHEMA_VERSION,
     tools: { ffmpeg: emptyFacts(), ffprobe: emptyFacts() },
+    lastCheckAttemptAtUtc: null,
   };
+}
+
+const LAUNCH_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+// Whether the launch check runs: only when the last attempt is missing, invalid,
+// in the future, or at least a day old (managed-runtime-dependencies-conventions).
+export function launchCheckDue(lastCheckAttemptAtUtc: number | null, nowMs: number): boolean {
+  return lastCheckAttemptAtUtc === null || lastCheckAttemptAtUtc > nowMs || nowMs - lastCheckAttemptAtUtc >= LAUNCH_CHECK_INTERVAL_MS;
 }
 
 function asString(value: unknown): string | null {
@@ -81,6 +94,7 @@ function normalize(raw: Record<string, unknown>): DependenciesValue {
   for (const name of TOOL_NAMES) {
     out.tools[name] = normalizeFacts(tools[name]);
   }
+  out.lastCheckAttemptAtUtc = asUtcMs(raw.lastCheckAttemptAtUtc);
   return out;
 }
 
@@ -96,7 +110,12 @@ function serializeDependencies(value: DependenciesValue): unknown {
         facts.lastCheckedAtUtc === null ? null : formatUtcIsoCompact(facts.lastCheckedAtUtc),
     };
   }
-  return { schemaVersion: SCHEMA_VERSION, tools };
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    tools,
+    lastCheckAttemptAtUtc:
+      value.lastCheckAttemptAtUtc === null ? null : formatUtcIsoCompact(value.lastCheckAttemptAtUtc),
+  };
 }
 
 export function createDependenciesStore(path: string): JsonStore<DependenciesValue> {

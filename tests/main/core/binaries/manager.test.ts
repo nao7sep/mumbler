@@ -454,11 +454,14 @@ describe("checkTools", () => {
     }
   });
 
-  it("writes nothing and rethrows on failure (I3 — a failed check is honest)", async () => {
+  it("writes only the attempt time and rethrows on failure (I3 — a failed check is honest)", async () => {
     const manager = await makeManager();
     vi.mocked(resolveLatest).mockRejectedValueOnce(new Error("offline"));
+    expect(manager.launchCheckDue()).toBe(true);
 
     await expect(manager.checkTools()).rejects.toThrow("offline");
+
+    expect(manager.launchCheckDue()).toBe(false);
 
     for (const status of manager.listStatuses()) {
       expect(status.desiredVersion).toBeNull();

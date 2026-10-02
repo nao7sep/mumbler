@@ -30,7 +30,7 @@ import {
   resolveLatest,
   toolFileName,
 } from "./registry";
-import type { DependenciesValue, PersistedToolFacts } from "./store";
+import { launchCheckDue, type DependenciesValue } from "./store";
 
 const execFileAsync = promisify(execFile);
 
@@ -154,14 +154,10 @@ export class ToolManager {
     );
   }
 
-  // True when any tool has no successful check, or its last check is older than
-  // maxAgeMs — the staleness gate for the startup update check.
-  checkIsStale(maxAgeMs: number): boolean {
-    const now = Date.now();
-    return TOOL_NAMES.some((name) => {
-      const last = this.deps.value.tools[name].lastCheckedAtUtc;
-      return last === null || now - last > maxAgeMs;
-    });
+  // The launch check's gate: the last attempt, not the last success, so a failed
+  // or offline check still waits.
+  launchCheckDue(): boolean {
+    return launchCheckDue(this.deps.value.lastCheckAttemptAtUtc, Date.now());
   }
 
   // The single acquire operation: download the latest build, verify it once, and
@@ -289,12 +285,15 @@ export class ToolManager {
       signal.throwIfAborted();
       // Only the upstream fact is persisted. What is now installed is read back
       // from the binary, so an install has nothing to record about it.
-      await this.mutateFacts((facts) => ({
-        ...facts,
-        [name]: {
-          ...facts[name],
-          desiredVersion: resolved.version,
-          lastCheckedAtUtc: Date.now(),
+      await this.mutateDependencies((value) => ({
+        ...value,
+        tools: {
+          ...value.tools,
+          [name]: {
+            ...value.tools[name],
+            desiredVersion: resolved.version,
+            lastCheckedAtUtc: Date.now(),
+          },
         },
       }));
       await this.deps.logger.info("tools.installed", "Installed audio tool.", {
@@ -341,10 +340,10 @@ export class ToolManager {
   }
 
   // Resolve the latest upstream version for the tool family and record it as the
-  // desired version (→ up-to-date / update-available). A failed check is honest in
-  // the data: it writes NOTHING (the displayed wording stays at the last
-  // successful knowledge), logs the failure, and rethrows so an explicit Check can
-  // show a transient "couldn't check" notice. It never blocks and never persists.
+  // desired version (→ up-to-date / update-available). The attempt time is written
+  // first; beyond it a failed check writes nothing (the displayed wording stays at
+  // the last successful knowledge), logs the failure, and rethrows so an explicit
+  // Check can show a transient "couldn't check" notice.
   async checkTools(): Promise<void> {
     if (this.checkController !== null) {
       throw new OperationError("Audio tool updates are already being checked.");
@@ -360,12 +359,17 @@ export class ToolManager {
       this.setTransient(name, { kind: "running", operation: "check", percent: null });
     }
     try {
+      const attemptedAt = Date.now();
+      await this.mutateDependencies((value) => ({ ...value, lastCheckAttemptAtUtc: attemptedAt }));
       const resolved = await resolveLatest(this.deps.platform, this.deps.arch, controller.signal);
       const now = Date.now();
       controller.signal.throwIfAborted();
-      await this.mutateFacts((facts) => ({
-        ffmpeg: { ...facts.ffmpeg, desiredVersion: resolved.version, lastCheckedAtUtc: now },
-        ffprobe: { ...facts.ffprobe, desiredVersion: resolved.version, lastCheckedAtUtc: now },
+      await this.mutateDependencies((value) => ({
+        ...value,
+        tools: {
+          ffmpeg: { ...value.tools.ffmpeg, desiredVersion: resolved.version, lastCheckedAtUtc: now },
+          ffprobe: { ...value.tools.ffprobe, desiredVersion: resolved.version, lastCheckedAtUtc: now },
+        },
       }));
       await this.deps.logger.info("tools.checked", "Checked audio tool updates.", {
         latest: resolved.version,
@@ -410,19 +414,11 @@ export class ToolManager {
   // last committed value rather than overwriting another operation's update with
   // a stale snapshot. A failed save applies nothing in memory and does not wedge
   // later writes.
-  private async mutateFacts(
-    update: (
-      facts: Record<ToolName, PersistedToolFacts>,
-    ) => Record<ToolName, PersistedToolFacts>,
-  ): Promise<void> {
+  private async mutateDependencies(update: (value: DependenciesValue) => DependenciesValue): Promise<void> {
     const work = async (): Promise<void> => {
-      const nextTools = update(this.deps.value.tools);
-      const nextValue: DependenciesValue = {
-        ...this.deps.value,
-        tools: nextTools,
-      };
+      const nextValue = update(this.deps.value);
       await this.deps.store.save(nextValue);
-      this.deps.value.tools = nextTools;
+      Object.assign(this.deps.value, nextValue);
       this.deps.notify();
     };
     const operation = this.factsQueue.then(work, work);

@@ -87,10 +87,6 @@ import { PipelineCoordinator } from "./pipeline-coordinator";
 // never reaches an end-user's disk.
 const DEBUG_LOGGING_ENABLED = !app.isPackaged || process.env.MUMBLER_DEBUG === "1";
 
-// A managed audio-tool update check is skipped if a successful one ran within
-// this window — keeps the startup check off the network on most launches.
-const TOOL_CHECK_STALE_MS = 24 * 60 * 60 * 1000;
-
 function rendererReportError(report: RendererErrorReport): Error {
   const seen = new WeakSet<object>();
   const build = (diagnostic: { name?: unknown; message?: unknown; stack?: unknown; cause?: unknown }, depth: number): Error => {
@@ -458,8 +454,8 @@ export class ApplicationRuntime {
     this.runtime.toolManager = manager;
   }
 
-  // Background startup maintenance: a staleness-gated latest-version check, gated
-  // by the one toggle (checkUpdatesAtLaunch). It records its own outcome and a
+  // Background startup maintenance: a latest-version check gated by the one toggle
+  // (checkUpdatesAtLaunch) and by the last attempt time. It records its own outcome and a
   // failure here never disturbs the shell (a failed check writes nothing). Nothing
   // is auto-downloaded — a missing required tool is the renderer's concern.
   async startToolMaintenance(): Promise<void> {
@@ -468,7 +464,7 @@ export class ApplicationRuntime {
     if (manager === null || settings === null) {
       return;
     }
-    if (settings.checkUpdatesAtLaunch && manager.checkIsStale(TOOL_CHECK_STALE_MS)) {
+    if (settings.checkUpdatesAtLaunch && manager.launchCheckDue()) {
       try {
         await manager.checkTools();
       } catch (error: unknown) {
