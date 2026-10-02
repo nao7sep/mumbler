@@ -1722,7 +1722,7 @@ select:not([multiple]) {
 }
 
 .modal-card--settings {
-  width: min(1100px, calc(100vw - 48px));
+  width: min(720px, calc(100vw - 48px));
 }
 
 /* A dialog is three bands: a fixed header, the scrolling body, and a fixed
