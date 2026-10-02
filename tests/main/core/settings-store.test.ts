@@ -239,7 +239,7 @@ describe("settings store", () => {
     expect((await store.load()).value).toEqual(createDefaultSettings());
   });
 
-  it("deletes the file when its final set is saved equal to its built-in, dropping unknown keys too", async () => {
+  it("keeps the file as {} when its final set is saved equal to its built-in, dropping unknown keys too", async () => {
     await writeFile(settingsPath(), JSON.stringify({
       prompts: { structured: "custom", title: "custom", slug: "custom" },
       schemaVersion: 1,
@@ -248,7 +248,7 @@ describe("settings store", () => {
     const store = createSettingsStore(settingsPath());
     await store.save({ prompts: createDefaultSettings().prompts });
 
-    await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({});
     expect((await store.load()).value).toEqual(createDefaultSettings());
   });
 
@@ -263,7 +263,7 @@ describe("settings store", () => {
     const store = createSettingsStore(settingsPath());
     await store.save({ "gemini.outline": "custom-model" });
     await store.save({ "gemini.outline": ` ${createDefaultSettings()["gemini.outline"].toUpperCase()} ` });
-    await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({});
   });
 
   it("stores a role's thinking only while it differs from the default for the role's model", async () => {

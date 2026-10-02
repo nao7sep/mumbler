@@ -1,7 +1,5 @@
-import { rm } from "node:fs/promises";
-import { dirname } from "node:path";
 
-import { formatError, preserveAside, readJsonFile, syncDirectory, writeJsonFile } from "./file-io";
+import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 
 // Thrown when a persisted file exists but cannot be safely loaded — malformed
 // JSON, or an on-disk schema version newer than this build understands. The
@@ -113,17 +111,12 @@ export class JsonStore<T> {
     return this.queue;
   }
 
-  /** Serialize a read-modify-write; null removes the file in the same queue, undefined leaves it as it is. */
-  async update(change: (current: T) => T | null | undefined): Promise<void> {
+  /** Serialize a read-modify-write; undefined leaves the file as it is. */
+  async update(change: (current: T) => T | undefined): Promise<void> {
     const work = async (): Promise<void> => {
       const { value } = await this.load();
       const next = change(value);
       if (next === undefined) return;
-      if (next === null) {
-        await rm(this.options.path, { force: true });
-        await syncDirectory(dirname(this.options.path));
-        return;
-      }
       const wire = this.options.serialize ? this.options.serialize(next) : next;
       await writeJsonFile(this.options.path, wire, { record: this.options.record });
     };

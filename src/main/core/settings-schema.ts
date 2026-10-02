@@ -443,7 +443,7 @@ export class SettingsStore {
 
   // The one owner of what a save stores: each given set is removed while it equals
   // its built-in and written whole otherwise. A save that changes nothing on disk
-  // writes nothing, and one that leaves no set deletes the file.
+  // writes nothing, and one that leaves no set writes `{}`.
   async save(sets: Partial<MumblerSettings>): Promise<void> {
     const builtIn = createDefaultSettings();
     await this.store.update((current) => {
@@ -452,8 +452,7 @@ export class SettingsStore {
         if (equalsBuiltIn(key, value, builtIn, sets)) delete next[key];
         else Object.assign(next, { [key]: value });
       }
-      if (sameSets(current, next)) return undefined;
-      return Object.keys(next).length === 0 ? null : next;
+      return sameSets(current, next) ? undefined : next;
     });
   }
 
