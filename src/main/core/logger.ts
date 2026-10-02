@@ -7,6 +7,7 @@ import { formatUtcMarkerMs } from "@shared/timestamps";
 import {
   fallbackLine,
   reportRecordsFailure,
+  writeRecordsReport,
   type RecordEntry,
   type RecordsRead,
   type RecordsReadResults,
@@ -182,6 +183,8 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
         reads.delete(message.id);
         if (message.ok) read?.resolve(message.value as never);
         else read?.reject(new Error(message.error));
+      } else if (message.type === "report") {
+        writeRecordsReport(message.text);
       }
     });
     created.on("error", failWorker);

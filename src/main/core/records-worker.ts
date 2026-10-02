@@ -12,7 +12,9 @@ if (parentPort === null) {
 }
 
 const port = parentPort;
-const engine = new RecordsEngine(workerData as RecordsTarget);
+const engine = new RecordsEngine(workerData as RecordsTarget, (text) => {
+  port.postMessage({ type: "report", text } satisfies RecordsWorkerResponse);
+});
 
 port.on("message", (message: RecordsWorkerRequest) => {
   if (message.type === "write") {

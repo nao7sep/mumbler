@@ -100,7 +100,8 @@ export type RecordsWorkerResponse =
   | { type: "written"; id: number }
   | { type: "read"; id: number; ok: true; value: RecordsReadResults[RecordsRead["op"]] }
   | { type: "read"; id: number; ok: false; error: string }
-  | { type: "closed" };
+  | { type: "closed" }
+  | { type: "report"; text: string };
 
 export const RECORDS_PAGE_SIZE = 200;
 
@@ -126,28 +127,42 @@ export function fallbackLine(entry: RecordEntry): string {
   return `{${fields.join(",")}}\n`;
 }
 
-export function reportRecordsFailure(error: unknown, line?: string): void {
+export function recordsFailureText(error: unknown, line?: string): string {
+  return `[mumbler:records] ${errorInfo(error)}\n${line ?? ""}`;
+}
+
+export function writeRecordsReport(text: string): void {
   try {
-    process.stderr.write(`[mumbler:records] ${errorInfo(error)}\n${line ?? ""}`);
+    process.stderr.write(text);
   } catch {
     // Nothing is left to report to; recording must never take the app down.
   }
+}
+
+export function reportRecordsFailure(error: unknown, line?: string): void {
+  writeRecordsReport(recordsFailureText(error, line));
 }
 
 export class RecordsEngine {
   private db: DatabaseSync | null = null;
   private opened = false;
   private readonly target: RecordsTarget;
+  // Where a failure the engine cannot record is reported. The worker hands it
+  // to the parent over the port its replies use, so a report always arrives
+  // before the reply it precedes; a worker's own stderr can lose its last
+  // writes when the worker is terminated.
+  private readonly report: (text: string) => void;
 
-  constructor(target: RecordsTarget) {
+  constructor(target: RecordsTarget, report: (text: string) => void) {
     this.target = target;
+    this.report = report;
   }
 
   write(entry: RecordEntry): void {
     try {
       this.insert(this.open(), entry);
     } catch (error: unknown) {
-      reportRecordsFailure(error);
+      this.report(recordsFailureText(error));
       this.writeFallback(entry);
     }
   }
@@ -163,7 +178,7 @@ export class RecordsEngine {
     try {
       this.db?.close();
     } catch (error: unknown) {
-      reportRecordsFailure(error);
+      this.report(recordsFailureText(error));
     }
     this.db = null;
     this.opened = false;
@@ -209,7 +224,7 @@ export class RecordsEngine {
       mkdirSync(path.dirname(this.target.fallbackPath), { recursive: true });
       appendFileSync(this.target.fallbackPath, line, "utf8");
     } catch (error: unknown) {
-      reportRecordsFailure(error, line);
+      this.report(recordsFailureText(error, line));
     }
   }
 }
