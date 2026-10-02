@@ -29,6 +29,8 @@ export interface GeminiAudioTranscriptionParams {
   filePath: string;
   mimeType: string;
   model: string;
+  // The role's thinking value from thinkingFor; absent for a model with no row.
+  thinking?: string;
   timeoutMs: number;
   signal?: AbortSignal;
   logger?: AppLogger;
@@ -39,6 +41,8 @@ export interface GeminiTextGenerationParams {
   endpoint?: string;
   prompt: string;
   model: string;
+  // The role's thinking value from thinkingFor; absent for a model with no row.
+  thinking?: string;
   timeoutMs: number;
   signal?: AbortSignal;
 }
@@ -119,7 +123,7 @@ export async function transcribeWithGemini(
         ],
         config: {
           abortSignal: abortState.signal,
-          ...supportedModelConfig(params.model),
+          ...supportedModelConfig(params.model, params.thinking),
         },
       });
     } else {
@@ -154,7 +158,7 @@ export async function transcribeWithGemini(
         ],
         config: {
           abortSignal: abortState.signal,
-          ...supportedModelConfig(params.model),
+          ...supportedModelConfig(params.model, params.thinking),
         },
       });
     }
@@ -221,7 +225,7 @@ export async function generateTextWithGemini(
       ],
       config: {
         abortSignal: abortState.signal,
-        ...supportedModelConfig(params.model),
+        ...supportedModelConfig(params.model, params.thinking),
       },
     });
 

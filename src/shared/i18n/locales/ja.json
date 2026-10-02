@@ -351,6 +351,8 @@
   "settings.structuredTranscriptionModelHint": "文字起こしを、情報をすべて残したまま構造化したMarkdownのアウトラインに整理します。",
   "settings.metadataModelHint": "各録音のタイトルとファイル名のスラッグを作成します。",
   "settings.unsupportedModel": "対応していないモデルです。正しく動作しない可能性があります。",
+  "settings.thinking": "思考",
+  "settings.thinkingHint": "回答する前にモデルがどれだけ考えるかを、プロバイダの用語で指定します。",
   "settings.concurrency": "同時実行",
   "settings.concurrentTranscriptions": "同時文字起こし数",
   "settings.concurrentTranscriptionsHint": "同時に実行できる文字起こしの最大数です。処理ごとに音声ファイル全体をAIのコンテキストに読み込むため、APIの割り当てが多くない限り小さな値にしてください。",

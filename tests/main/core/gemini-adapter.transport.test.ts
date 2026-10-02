@@ -52,6 +52,7 @@ function baseParams() {
     filePath: "/tmp/rec.m4a",
     mimeType: "audio/mp4",
     model: "gemini-3.8-flash",
+    thinking: "high",
     timeoutMs: 60_000,
   };
 }
@@ -63,10 +64,10 @@ beforeEach(() => {
 });
 
 // A supported model's branch reaches every generation call, and nothing else does.
-describe("thinking is stated on every model call", () => {
-  const BRANCH_CONFIG = { abortSignal: expect.any(AbortSignal), thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM } };
+describe("the role's thinking is stated on every model call", () => {
+  const BRANCH_CONFIG = { abortSignal: expect.any(AbortSignal), thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } };
 
-  it("states medium thinking on the inline transcription call", async () => {
+  it("states the role's thinking on the inline transcription call", async () => {
     stat.mockResolvedValue({ size: SAFE - 1 });
     generateContent.mockResolvedValue({ text: "hi", modelVersion: "v1", usageMetadata: null });
 
@@ -75,7 +76,7 @@ describe("thinking is stated on every model call", () => {
     expect(generateContent.mock.calls[0]?.[0].config).toEqual(BRANCH_CONFIG);
   });
 
-  it("states medium thinking on the Files-API transcription call", async () => {
+  it("states the role's thinking on the Files-API transcription call", async () => {
     stat.mockResolvedValue({ size: SAFE + 1 });
     upload.mockResolvedValue({ name: "files/abc", uri: "gs://u", mimeType: "audio/mp4" });
     generateContent.mockResolvedValue({ text: "done", modelVersion: "v1", usageMetadata: null });
@@ -87,13 +88,14 @@ describe("thinking is stated on every model call", () => {
     expect(upload.mock.calls[0]?.[0].config).not.toHaveProperty("thinkingConfig");
   });
 
-  it("states medium thinking on the text-generation call", async () => {
+  it("states the role's thinking on the text-generation call", async () => {
     generateContent.mockResolvedValue({ text: "out", modelVersion: "v1", usageMetadata: null });
 
     await generateTextWithGemini({
       apiKey: "test-key",
       prompt: "hi",
       model: "gemini-3.8-flash",
+      thinking: "high",
       timeoutMs: 60_000,
     });
 

@@ -43,6 +43,9 @@ function draft(): SettingsDraft {
     outlineModel: "gemini-3.8-flash",
     transcriptionModel: "gemini-3.7-flash",
     metadataModel: "gemini-3.7-flash",
+    transcriptionThinking: "medium",
+    outlineThinking: "medium",
+    metadataThinking: "minimal",
     concurrencyLimit: 1,
     structuredPrompt: "Prompt",
     titlePrompt: "Prompt",
@@ -277,7 +280,7 @@ describe("SettingsModal language and time zone", () => {
 });
 
 describe("SettingsModal AI tab", () => {
-  async function renderAiTab(value: SettingsDraft): Promise<HTMLElement> {
+  async function renderAiTab(value: SettingsDraft, onChange = vi.fn()): Promise<HTMLElement> {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -290,7 +293,7 @@ describe("SettingsModal AI tab", () => {
         isPickingOutputDirectory: false,
         isPickingBackupDirectory: false,
         errorMessage: null,
-        onChange: vi.fn(),
+        onChange,
         onClose: vi.fn(),
         onPickOutputDirectory: vi.fn(),
         onPickBackupDirectory: vi.fn(),
@@ -310,9 +313,33 @@ describe("SettingsModal AI tab", () => {
     const labels = Array.from(panel.querySelectorAll("h3, label.field > span")).map((node) => node.textContent);
     expect(labels).toEqual([
       "Gemini", "Endpoint URL", "Gemini API Key", "Transcription Model",
-      "Structured Transcription Model", "Metadata Model", "Concurrency", "Concurrent Transcriptions",
+      "Structured Transcription Model", "Thinking", "Metadata Model", "Concurrency", "Concurrent Transcriptions",
     ]);
-    expect(panel.querySelectorAll("select")).toHaveLength(0);
+    expect(panel.querySelectorAll("select")).toHaveLength(1);
+  });
+
+  it("offers a Thinking field only for a model with a row, listing the row's values", async () => {
+    const panel = await renderAiTab({ ...draft(), transcriptionModel: "custom-model", outlineModel: "gemini-3.8-flash", metadataModel: " GEMINI-3.5-FLASH-LITE " });
+    const selects = Array.from(panel.querySelectorAll("select"));
+    expect(selects.map((select) => Array.from(select.options).map((option) => option.value))).toEqual([
+      ["low", "medium", "high"],
+      ["minimal", "low", "medium", "high"],
+    ]);
+    expect(selects.map((select) => select.value)).toEqual(["medium", "minimal"]);
+  });
+
+  it("resets a role's thinking to the new model's default when the model changes", async () => {
+    const onChange = vi.fn();
+    const panel = await renderAiTab({ ...draft(), metadataModel: "gemini-3.8-flash", metadataThinking: "high" }, onChange);
+    const input = Array.from(panel.querySelectorAll<HTMLLabelElement>("label.field"))
+      .find((label) => label.querySelector("span")?.textContent === "Metadata Model")!
+      .querySelector("input")!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(input, "gemini-3.1-pro-preview");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ metadataModel: "gemini-3.1-pro-preview", metadataThinking: "low" }));
   });
 
   it("warns under a model field whose id has no supported row", async () => {

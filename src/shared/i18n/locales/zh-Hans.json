@@ -351,6 +351,8 @@
   "settings.structuredTranscriptionModelHint": "将转写稿整理为保留全部信息的结构化 Markdown 提纲。",
   "settings.metadataModelHint": "为每段录音撰写标题和文件名别名。",
   "settings.unsupportedModel": "不是受支持的模型，可能无法按预期工作。",
+  "settings.thinking": "思考",
+  "settings.thinkingHint": "模型在回答前思考的程度，使用服务商自己的术语。",
   "settings.concurrency": "并发",
   "settings.concurrentTranscriptions": "同时转写数",
   "settings.concurrentTranscriptionsHint": "可同时运行的音频转写任务的最大数量。每个任务都会将完整音频文件载入 AI 上下文，因此除非你的 API 配额较高，否则请保持较低的值。",

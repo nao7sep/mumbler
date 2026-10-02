@@ -357,6 +357,8 @@
   "settings.structuredTranscriptionModelHint": "Réorganise la transcription en un plan Markdown structuré qui conserve toutes ses informations.",
   "settings.metadataModelHint": "Rédige le titre et le slug de nom de fichier de chaque enregistrement.",
   "settings.unsupportedModel": "Modèle non pris en charge. Il risque de ne pas fonctionner comme prévu.",
+  "settings.thinking": "Réflexion",
+  "settings.thinkingHint": "Combien le modèle réfléchit avant de répondre, dans les termes du fournisseur.",
   "settings.concurrency": "Simultanéité",
   "settings.concurrentTranscriptions": "Transcriptions simultanées",
   "settings.concurrentTranscriptionsHint": "Nombre maximal de transcriptions audio pouvant s’exécuter en même temps. Chaque tâche charge un fichier audio complet dans le contexte de l’IA\u00a0; gardez donc une valeur basse, sauf si vous disposez d’un quota d’API élevé.",

@@ -360,6 +360,8 @@
   "settings.structuredTranscriptionModelHint": "Преобразует расшифровку в структурированный план в Markdown, сохраняя всю информацию.",
   "settings.metadataModelHint": "Пишет заголовок и слаг имени файла для каждой записи.",
   "settings.unsupportedModel": "Модель не поддерживается. Она может работать не так, как ожидается.",
+  "settings.thinking": "Рассуждение",
+  "settings.thinkingHint": "Сколько модель рассуждает перед ответом, в терминах провайдера.",
   "settings.concurrency": "Параллельность",
   "settings.concurrentTranscriptions": "Одновременные расшифровки",
   "settings.concurrentTranscriptionsHint": "Наибольшее число расшифровок, которые могут выполняться одновременно. Каждая задача загружает в контекст ИИ целый аудиофайл, поэтому держите это значение небольшим, если у вас нет высокой квоты API.",

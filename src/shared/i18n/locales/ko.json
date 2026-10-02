@@ -351,6 +351,8 @@
   "settings.structuredTranscriptionModelHint": "전사본을 모든 정보를 유지한 채 구조화된 Markdown 개요로 재구성합니다.",
   "settings.metadataModelHint": "각 녹음의 제목과 파일 이름 슬러그를 작성합니다.",
   "settings.unsupportedModel": "지원되지 않는 모델입니다. 예상대로 작동하지 않을 수 있습니다.",
+  "settings.thinking": "사고",
+  "settings.thinkingHint": "모델이 답하기 전에 얼마나 생각할지를 제공자의 용어로 지정합니다.",
   "settings.concurrency": "동시 실행",
   "settings.concurrentTranscriptions": "동시 전사 수",
   "settings.concurrentTranscriptionsHint": "동시에 실행할 수 있는 오디오 전사 작업의 최대 수입니다. 작업마다 오디오 파일 전체를 AI 컨텍스트에 불러오므로, API 할당량이 많지 않다면 낮게 유지하십시오.",

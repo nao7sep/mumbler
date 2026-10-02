@@ -354,6 +354,8 @@
   "settings.structuredTranscriptionModelHint": "Reorganizes the transcript into a structured Markdown outline that keeps all of its information.",
   "settings.metadataModelHint": "Writes each recording's title and file-name slug.",
   "settings.unsupportedModel": "Not a supported model. It may not work as expected.",
+  "settings.thinking": "Thinking",
+  "settings.thinkingHint": "How much the model reasons before it answers, in the provider's own terms.",
   "settings.concurrency": "Concurrency",
   "settings.concurrentTranscriptions": "Concurrent Transcriptions",
   "settings.concurrentTranscriptionsHint": "Maximum number of audio transcription jobs that can run at once. Each job loads a full audio file into the AI context, so keep this low unless you have a high API quota.",

@@ -266,6 +266,16 @@ describe("settings store", () => {
     await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("stores a role's thinking only while it differs from the default for the role's model", async () => {
+    const store = createSettingsStore(settingsPath());
+    const defaults = createDefaultSettings();
+    await store.save({ ...defaults, "gemini.metadata": "gemini-3.8-flash", "gemini.thinking.metadata": "low", "gemini.thinking.outline": "high" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.metadata": "gemini-3.8-flash", "gemini.thinking.outline": "high" });
+
+    await store.save({ ...defaults, "gemini.outline": "custom-model", "gemini.thinking.outline": "high" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "custom-model" });
+  });
+
   it("writes nothing when removing a key that is already absent", async () => {
     const raw = JSON.stringify({ concurrencyLimit: 5 });
     await writeFile(settingsPath(), raw, "utf8");

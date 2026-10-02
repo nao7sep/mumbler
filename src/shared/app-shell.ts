@@ -140,6 +140,9 @@ export interface MumblerSettings {
   "gemini.transcription": string;
   "gemini.outline": string;
   "gemini.metadata": string;
+  "gemini.thinking.transcription": string;
+  "gemini.thinking.outline": string;
+  "gemini.thinking.metadata": string;
   concurrencyLimit: number;
   prompts: PromptTemplates;
   retryPolicy: RetryPolicy;
@@ -353,6 +356,9 @@ export interface SettingsDraft {
   transcriptionModel: string;
   outlineModel: string;
   metadataModel: string;
+  transcriptionThinking: string;
+  outlineThinking: string;
+  metadataThinking: string;
   concurrencyLimit: number;
   structuredPrompt: string;
   titlePrompt: string;

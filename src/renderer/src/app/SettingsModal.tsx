@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type ReactElement } from "react";
 
 import { THEME_PREFERENCES, type SettingsDraft } from "@shared/app-shell";
-import { isSupportedModel } from "@shared/ai-models";
+import { defaultThinkingFor, rowFor, type AiRole } from "@shared/ai-models";
 import {
   getSettingsNumberIssues,
   type NumericSettingField,
@@ -20,23 +20,48 @@ import { presentFailure } from "./presentFailure";
 
 const TIMEZONE_REFERENCE_URL = "https://en.wikipedia.org/wiki/List_of_tz_database_time_zones";
 
-// One model field: free-typed, with a warning line when the id has no row in SUPPORTED_MODELS.
-function ModelField({ label, hint, value, onChange }: {
+// One model field: free-typed, with a warning line when the id has no row in
+// SUPPORTED_MODELS, and beside it the role's Thinking field per the
+// ai-model-routing-conventions.
+function ModelField({ role, label, hint, value, thinking, onChange }: {
+  role: AiRole;
   label: string;
   hint: string;
   value: string;
-  onChange: (value: string) => void;
+  thinking: string;
+  onChange: (value: string, thinking: string) => void;
 }): ReactElement {
   const { t } = useI18n();
+  const row = rowFor(value);
   return (
-    <div>
-      <label className="field">
-        <span>{label}</span>
-        <input spellCheck={false} value={value} onChange={(event) => onChange(event.target.value)} />
-      </label>
-      <p className="field-hint">{hint}</p>
-      {isSupportedModel(value) ? null : <p className="field-hint field-hint--warning">{t("settings.unsupportedModel")}</p>}
-    </div>
+    <>
+      <div>
+        <label className="field">
+          <span>{label}</span>
+          <input
+            spellCheck={false}
+            value={value}
+            onChange={(event) => {
+              const next = rowFor(event.target.value);
+              onChange(event.target.value, next ? defaultThinkingFor(next, role) : thinking);
+            }}
+          />
+        </label>
+        <p className="field-hint">{hint}</p>
+        {row ? null : <p className="field-hint field-hint--warning">{t("settings.unsupportedModel")}</p>}
+      </div>
+      {row && row.thinking.length > 1 ? (
+        <div>
+          <label className="field">
+            <span>{t("settings.thinking")}</span>
+            <select value={thinking} onChange={(event) => onChange(value, event.target.value)}>
+              {row.thinking.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
+          <p className="field-hint">{t("settings.thinkingHint")}</p>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -434,22 +459,28 @@ export function SettingsModal({
                   {i18n.rich("settings.apiKeyHint", { variable: <code>GEMINI_API_KEY</code> })}
                 </p>
                 <ModelField
+                  role="transcription"
                   label={t("options.transcriptionModel")}
                   hint={t("settings.transcriptionModelHint")}
                   value={draft.transcriptionModel}
-                  onChange={(transcriptionModel) => onChange({ ...draft, transcriptionModel })}
+                  thinking={draft.transcriptionThinking}
+                  onChange={(transcriptionModel, transcriptionThinking) => onChange({ ...draft, transcriptionModel, transcriptionThinking })}
                 />
                 <ModelField
+                  role="outline"
                   label={t("options.structuredTranscriptionModel")}
                   hint={t("settings.structuredTranscriptionModelHint")}
                   value={draft.outlineModel}
-                  onChange={(outlineModel) => onChange({ ...draft, outlineModel })}
+                  thinking={draft.outlineThinking}
+                  onChange={(outlineModel, outlineThinking) => onChange({ ...draft, outlineModel, outlineThinking })}
                 />
                 <ModelField
+                  role="metadata"
                   label={t("options.metadataModel")}
                   hint={t("settings.metadataModelHint")}
                   value={draft.metadataModel}
-                  onChange={(metadataModel) => onChange({ ...draft, metadataModel })}
+                  thinking={draft.metadataThinking}
+                  onChange={(metadataModel, metadataThinking) => onChange({ ...draft, metadataModel, metadataThinking })}
                 />
               </div>
             </section>

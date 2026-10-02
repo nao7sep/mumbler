@@ -18,7 +18,7 @@ import {
 import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
 import { THEME_PREFERENCES } from "@shared/app-shell";
-import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT } from "@shared/ai-models";
+import { AI_ROLES, defaultModelFor, defaultThinkingFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
 import { JsonStore } from "./json-store";
 import { OperationError } from "./operation-error";
 import { resolvePathFromHome } from "./storage-root";
@@ -63,6 +63,9 @@ const SETTINGS_SETS = {
   "gemini.transcription": isString,
   "gemini.outline": isString,
   "gemini.metadata": isString,
+  "gemini.thinking.transcription": isString,
+  "gemini.thinking.outline": isString,
+  "gemini.thinking.metadata": isString,
   concurrencyLimit: isPositive,
   prompts: (value) => hasMembers(value, { structured: isString, title: isString, slug: isString }),
   retryPolicy: (value) => hasMembers(value, {
@@ -79,10 +82,24 @@ function knownSettings(raw: Record<string, unknown>): Partial<MumblerSettings> {
 }
 
 const MODEL_SET_KEYS: ReadonlySet<string> = new Set(AI_ROLES.map((role) => `gemini.${role.id}`));
+const THINKING_SET_ROLES: ReadonlyMap<string, AiRole> = new Map(AI_ROLES.map((role) => [`gemini.thinking.${role.id}`, role.id]));
 
 // Values arrive cleaned (applySettingsDraft cleans text at Save); a model id is its
-// own key, so it is compared trimmed and case-insensitively.
-function equalsBuiltIn(key: keyof MumblerSettings, value: unknown, builtIn: MumblerSettings): boolean {
+// own key, so it is compared trimmed and case-insensitively. A role's thinking
+// equals its built-in while the value it sends is the default for the model the
+// role selects, and always for a model with no row.
+function equalsBuiltIn(
+  key: keyof MumblerSettings,
+  value: unknown,
+  builtIn: MumblerSettings,
+  sets: Partial<MumblerSettings>,
+): boolean {
+  const role = THINKING_SET_ROLES.get(key);
+  if (role) {
+    const model = sets[`gemini.${role}`] ?? builtIn[`gemini.${role}`];
+    const row = rowFor(model);
+    return !row || thinkingFor(model, role, String(value)) === defaultThinkingFor(row, role);
+  }
   if (MODEL_SET_KEYS.has(key)) {
     return typeof value === "string" && value.trim().toLowerCase() === String(builtIn[key]).toLowerCase();
   }
@@ -370,6 +387,9 @@ export function createDefaultSettings(): MumblerSettings {
     "gemini.transcription": defaultModelFor("gemini", "transcription"),
     "gemini.outline": defaultModelFor("gemini", "text-balanced"),
     "gemini.metadata": defaultModelFor("gemini", "text-fast"),
+    "gemini.thinking.transcription": defaultThinkingFor(rowFor(defaultModelFor("gemini", "transcription"))!, "transcription"),
+    "gemini.thinking.outline": defaultThinkingFor(rowFor(defaultModelFor("gemini", "text-balanced"))!, "outline"),
+    "gemini.thinking.metadata": defaultThinkingFor(rowFor(defaultModelFor("gemini", "text-fast"))!, "metadata"),
     concurrencyLimit: 3,
     prompts: {
       structured:
@@ -429,7 +449,7 @@ export class SettingsStore {
     await this.store.update((current) => {
       const next = { ...current };
       for (const [key, value] of Object.entries(knownSettings(sets)) as [keyof MumblerSettings, unknown][]) {
-        if (equalsBuiltIn(key, value, builtIn)) delete next[key];
+        if (equalsBuiltIn(key, value, builtIn, sets)) delete next[key];
         else Object.assign(next, { [key]: value });
       }
       if (sameSets(current, next)) return undefined;
@@ -499,6 +519,12 @@ export function summarizeSettings(
   };
 }
 
+// The draft shows the value a role sends; a model with no row keeps the stored one.
+function draftThinking(settings: MumblerSettings, role: AiRole): string {
+  const chosen = settings[`gemini.thinking.${role}`];
+  return thinkingFor(settings[`gemini.${role}`], role, chosen) ?? chosen;
+}
+
 export function buildSettingsDraft(
   settings: MumblerSettings,
   defaultOutputDirectory: string,
@@ -527,6 +553,9 @@ export function buildSettingsDraft(
     transcriptionModel: settings["gemini.transcription"],
     outlineModel: settings["gemini.outline"],
     metadataModel: settings["gemini.metadata"],
+    transcriptionThinking: draftThinking(settings, "transcription"),
+    outlineThinking: draftThinking(settings, "outline"),
+    metadataThinking: draftThinking(settings, "metadata"),
     concurrencyLimit: settings.concurrencyLimit,
     structuredPrompt: settings.prompts.structured,
     titlePrompt: settings.prompts.title,
@@ -647,6 +676,9 @@ export function applySettingsDraft(
     "gemini.transcription": transcriptionModel,
     "gemini.outline": outlineModel,
     "gemini.metadata": metadataModel,
+    "gemini.thinking.transcription": draft.transcriptionThinking,
+    "gemini.thinking.outline": draft.outlineThinking,
+    "gemini.thinking.metadata": draft.metadataThinking,
     concurrencyLimit,
     prompts: {
       structured: structuredPrompt,

@@ -7,6 +7,7 @@ import type {
   MumblerSettings,
   MumblerQueue,
 } from "@shared/app-shell";
+import { thinkingFor } from "@shared/ai-models";
 
 import type { AppLogger } from "./logger";
 import {
@@ -156,6 +157,7 @@ export async function executeCardPipeline(
               filePath: preparedAudio.filePath,
               mimeType: preparedAudio.mimeType,
               model: settings["gemini.transcription"],
+              thinking: thinkingFor(settings["gemini.transcription"], "transcription", settings["gemini.thinking.transcription"]),
               timeoutMs: settings.timeouts.transcriptionMs,
               signal: ctx.signal,
               logger,
@@ -213,6 +215,7 @@ export async function executeCardPipeline(
             endpoint: settings["gemini.endpoint"],
             prompt: structuredPrompt,
             model: settings["gemini.outline"],
+            thinking: thinkingFor(settings["gemini.outline"], "outline", settings["gemini.thinking.outline"]),
             timeoutMs: settings.timeouts.transcriptionMs,
             signal: ctx.signal,
           }),
@@ -260,6 +263,7 @@ export async function executeCardPipeline(
             endpoint: settings["gemini.endpoint"],
             prompt: titlePrompt,
             model: settings["gemini.metadata"],
+            thinking: thinkingFor(settings["gemini.metadata"], "metadata", settings["gemini.thinking.metadata"]),
             timeoutMs: settings.timeouts.metadataMs,
             signal: ctx.signal,
           }),
@@ -300,6 +304,7 @@ export async function executeCardPipeline(
             endpoint: settings["gemini.endpoint"],
             prompt: slugPrompt,
             model: settings["gemini.metadata"],
+            thinking: thinkingFor(settings["gemini.metadata"], "metadata", settings["gemini.thinking.metadata"]),
             timeoutMs: settings.timeouts.metadataMs,
             signal: ctx.signal,
           }),

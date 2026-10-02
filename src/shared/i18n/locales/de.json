@@ -354,6 +354,8 @@
   "settings.structuredTranscriptionModelHint": "Ordnet das Transkript zu einer strukturierten Markdown-Gliederung, die alle Informationen beibehält.",
   "settings.metadataModelHint": "Schreibt den Titel und den Dateinamen-Slug jeder Aufnahme.",
   "settings.unsupportedModel": "Kein unterstütztes Modell. Es funktioniert möglicherweise nicht wie erwartet.",
+  "settings.thinking": "Denken",
+  "settings.thinkingHint": "Wie viel das Modell vor der Antwort nachdenkt, in den Begriffen des Anbieters.",
   "settings.concurrency": "Parallelität",
   "settings.concurrentTranscriptions": "Gleichzeitige Transkriptionen",
   "settings.concurrentTranscriptionsHint": "Höchstzahl der Transkriptionsaufträge, die gleichzeitig laufen können. Jeder Auftrag lädt eine vollständige Audiodatei in den KI-Kontext, halten Sie den Wert also niedrig, sofern Sie kein hohes API-Kontingent haben.",

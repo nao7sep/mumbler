@@ -194,6 +194,17 @@ describe("executeCardPipeline", () => {
     expect(card.ai.title?.model).toBe("custom-metadata");
   });
 
+  it("sends each role's thinking for a model with a row and none for an id without one", async () => {
+    mockGenerateText.mockResolvedValue({ text: "result", modelVersion: null, usageMetadata: null });
+    const card = makeCard();
+    const ctx = makeContext(card, new AbortController().signal);
+    ctx.settings["gemini.thinking.outline"] = "high";
+    ctx.settings["gemini.metadata"] = "custom-metadata";
+    ctx.settings["gemini.thinking.metadata"] = "high";
+    await executeCardPipeline(card.id, "structured", "generate", ctx);
+    expect(mockGenerateText.mock.calls.map(([params]) => params.thinking)).toEqual(["high", undefined, undefined]);
+  });
+
   it("retries a retryable failure as many times as the retry setting allows", async () => {
     vi.useFakeTimers();
     try {
