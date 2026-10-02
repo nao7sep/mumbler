@@ -359,7 +359,7 @@
   "settings.metadataModelHint": "Escreve o título e o slug do nome de arquivo de cada gravação.",
   "settings.unsupportedModel": "Modelo não compatível. Pode não funcionar como esperado.",
   "settings.thinking": "Raciocínio",
-  "settings.thinkingHint": "Quanto o modelo raciocina antes de responder, nos termos do provedor.",
+  "settings.thinkingHint": "Quanto o modelo raciocina antes de responder, com a terminologia do provedor.",
   "settings.concurrency": "Simultaneidade",
   "settings.concurrentTranscriptions": "Transcrições simultâneas",
   "settings.concurrentTranscriptionsHint": "Número máximo de transcrições de áudio que podem ser executadas ao mesmo tempo. Cada trabalho carrega um arquivo de áudio inteiro no contexto da IA, então mantenha um valor baixo, a menos que você tenha uma cota de API alta.",
