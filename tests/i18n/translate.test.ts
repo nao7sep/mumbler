@@ -3,7 +3,7 @@ import { act, createElement, isValidElement, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import { loadCatalogue, type MessageKey } from "@shared/i18n/catalogues";
+import { loadCatalogue, loadedCatalogue, type MessageKey } from "@shared/i18n/catalogues";
 import { createTranslator, message } from "@shared/i18n/translate";
 import type { Language } from "@shared/i18n/languages";
 import { createRendererTranslator, I18nProvider, useI18n } from "@renderer/i18n/I18nContext";
@@ -55,7 +55,18 @@ describe("createTranslator", () => {
     expect(en.relativeTime(-5, "minute")).toBe("5 min. ago");
   });
 
-  it("shows a key the catalogue lacks instead of failing the render", () => {
+  it("falls back to English for a key the language's catalogue lacks", () => {
+    const ja = loadedCatalogue("ja") as Record<string, unknown>;
+    const kept = ja["about.version"];
+    delete ja["about.version"];
+    try {
+      expect(createTranslator("ja").t("about.version", { version: "1.2.0" })).toBe("Version 1.2.0");
+    } finally {
+      ja["about.version"] = kept;
+    }
+  });
+
+  it("shows a key no catalogue carries instead of failing the render", () => {
     const missing = "gone.missing" as unknown as MessageKey;
     expect(createTranslator("ja").t(missing)).toBe("gone.missing");
   });
