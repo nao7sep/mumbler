@@ -4,8 +4,8 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // Every color pair the stylesheet draws keeps high contrast in both themes,
-// by this app's own floor: 4.5:1 for text, 3:1 for a text field's
-// outline. Light tokens live in the top-level :root block; dark tokens in the
+// by this app's own floor: 4.5:1 for text, and a control edge inside its
+// kind's range. Light tokens live in the top-level :root block; dark tokens in the
 // :root block inside @media (prefers-color-scheme: dark).
 const css = readFileSync(resolve("src/renderer/src/styles.css"), "utf8");
 
@@ -70,12 +70,23 @@ const TEXT_PAIRS: ReadonlyArray<[string, string]> = [
   ["--topbar-muted", "--topbar"],
 ];
 
-const BOUNDARY_PAIRS: ReadonlyArray<[string, string]> = [
-  ["--field-border", "--field-bg"],
-  ["--field-border", "--surface-raised"],
-  ["--field-border", "--surface"],
-  ["--field-border", "--bg"],
+// A control edge over the surface it sits on, read against that surface. The
+// painted check over every surface is scripts/measure-lines.
+const CONTROL_EDGE_PAIRS: ReadonlyArray<[string, string]> = [
+  ["--line-control", "--surface-raised"],
+  ["--line-control-on-muted", "--surface-muted"],
 ];
+
+// A line token is an opaque hex or an rgba() that paints over its surface.
+function paintedOver(block: string, token: string, surface: Rgb): Rgb {
+  const value = block.match(new RegExp(`${token.replaceAll("-", "\\-")}\\s*:\\s*([^;]+);`))?.[1]?.trim();
+  expect(value, `${token} must be defined`).toBeTruthy();
+  if (value!.startsWith("#")) return hexOf(block, token);
+  const rgba = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(value!);
+  expect(rgba, `${token} must be a hex or rgba() color`).not.toBeNull();
+  const alpha = Number(rgba![4]);
+  return [1, 2, 3].map((index, channel) => Math.round(Number(rgba![index]) * alpha + surface[channel]! * (1 - alpha))) as Rgb;
+}
 
 describe("theme token contrast", () => {
   for (const theme of ["light", "dark"] as const) {
@@ -87,11 +98,13 @@ describe("theme token contrast", () => {
       }
     });
 
-    it(`keeps text-field outlines at 3:1 or more in the ${theme} theme`, () => {
+    it(`keeps control edges inside the control-edge range in the ${theme} theme`, () => {
       const block = themeBlock(theme);
-      for (const [foreground, background] of BOUNDARY_PAIRS) {
-        expect(contrast(hexOf(block, foreground), hexOf(block, background)), `${foreground} on ${background}`)
-          .toBeGreaterThanOrEqual(3);
+      for (const [line, surface] of CONTROL_EDGE_PAIRS) {
+        const under = hexOf(block, surface);
+        const ratio = contrast(paintedOver(block, line, under), under);
+        expect(ratio, `${line} on ${surface}`).toBeGreaterThanOrEqual(2);
+        expect(ratio, `${line} on ${surface}`).toBeLessThanOrEqual(2.6);
       }
     });
   }

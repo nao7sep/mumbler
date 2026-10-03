@@ -21,12 +21,30 @@
   --surface-hover: #e8f0e4;
   --surface-active: #dfead8;
   --field-bg: #fbfdf8;
+  /* --border is the base the status edges mix with; --border-subtle draws the
+     waveform placeholder's mesh. Lines take their strength from the --line-*
+     values below. */
   --border: #c7d7c4;
   --border-subtle: #dbe6d6;
-  /* A text field's outline is its only boundary, so it holds 3:1 against the
-     surfaces it sits on; the other borders are decorative dividers. */
-  --field-border: #7a8d77;
   --field-highlight: rgba(255, 255, 255, 0.6);
+  /* One strength per kind of line, each held to its kind's contrast target where
+     it is painted (interface-styling-conventions; scripts/measure-lines). Light
+     section and control lines are translucent, so one over a muted fill reads
+     like one over white; row lines stay opaque, since a collapsed table border
+     straddles the cell edge. A variant covers a surface the base would miss,
+     set by that surface's container. */
+  --line-row: #e2eae1;
+  --line-row-on-muted: #d3e1ce;
+  --line-section: rgba(10, 80, 0, 0.21);
+  /* The outline of a raised surface, read against the darker surface it sits
+     on: a pane on the app background, the active tab on its strip. */
+  --line-section-raised: rgba(10, 80, 0, 0.295);
+  /* The outline of a floating surface, read against its own shadow. */
+  --line-section-popover: rgba(10, 80, 0, 0.245);
+  /* A line drawn on the app background itself: the splitter grip. */
+  --line-section-on-bg: var(--line-section);
+  --line-control: rgba(21, 55, 17, 0.415);
+  --line-control-on-muted: rgba(21, 55, 17, 0.44);
   --text: #17201a;
   --text-secondary: #526255;
   /* Tertiary text still carries information (labels, counts, hints), so it
@@ -65,6 +83,8 @@
   --topbar-end: #214b36;
   --topbar-text: #f4f8ef;
   --topbar-muted: #bfd0bd;
+  --line-section-on-topbar: rgba(224, 237, 219, 0.14);
+  --line-control-on-topbar: rgba(226, 240, 229, 0.37);
   /* Status hues for the top bar, which stays dark in both themes. */
   --topbar-warning: #f2c14e;
   --topbar-warning-text: #f7d488;
@@ -130,8 +150,17 @@
     --field-bg: #131b16;
     --border: #33453a;
     --border-subtle: #26352c;
-    --field-border: #5f7563;
     --field-highlight: rgba(255, 255, 255, 0.03);
+    /* Dark lines are opaque: every surface here sits below the line, so each
+       line is read against the lighter side it touches. */
+    --line-row: #29392f;
+    --line-row-on-muted: var(--line-row);
+    --line-section: #334539;
+    --line-section-raised: var(--line-section);
+    --line-section-popover: var(--line-section);
+    --line-section-on-bg: #29392f;
+    --line-control: #516555;
+    --line-control-on-muted: #4b5e4f;
     --text: #e4ede5;
     --text-secondary: #b0c0b2;
     --text-tertiary: #94a596;
@@ -156,6 +185,8 @@
     --topbar-end: #12301f;
     --topbar-text: #f4f8ef;
     --topbar-muted: #a9bfa9;
+    --line-section-on-topbar: rgba(224, 237, 219, 0.14);
+    --line-control-on-topbar: rgba(226, 240, 229, 0.32);
     --topbar-warning: #f2c14e;
     --topbar-warning-text: #f7d488;
     --topbar-danger: #ff8a75;
@@ -344,7 +375,10 @@ textarea:focus-visible,
   margin-bottom: 20px;
   padding: 14px 20px;
   background: linear-gradient(135deg, var(--topbar) 0%, var(--topbar-end) 100%);
-  border: 1px solid rgba(224, 237, 219, 0.16);
+  /* The gradient spans the border box, so the translucent outline lies over the
+     band beside it rather than over the gradient's wrapped-round far end. */
+  background-origin: border-box;
+  border: 1px solid var(--line-section-on-topbar);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
 }
@@ -356,12 +390,12 @@ textarea:focus-visible,
 .topbar .button--ghost {
   background: rgba(226, 240, 229, 0.08);
   color: var(--topbar-text);
-  border-color: rgba(226, 240, 229, 0.22);
+  border-color: var(--line-control-on-topbar);
 }
 
 .topbar .button--ghost:not(:disabled):hover {
   background: rgba(226, 240, 229, 0.16);
-  border-color: rgba(226, 240, 229, 0.34);
+  border-color: rgba(226, 240, 229, 0.48);
   color: var(--topbar-text);
   opacity: 1;
 }
@@ -486,7 +520,7 @@ textarea:focus-visible,
   height: 2.5rem;
   max-height: 40%;
   border-radius: 2px;
-  background: var(--border);
+  background: var(--line-section);
   transition: background 0.12s ease;
 }
 
@@ -496,10 +530,23 @@ textarea:focus-visible,
 
 .panel,
 .detail-card {
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-section);
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
   box-shadow: var(--shadow-sm);
+}
+
+/* A pane's outline is read against the app background below it, so the
+   containers that lay panes on the background give it the raised variant
+   (interface-styling-conventions). Kept at one class of specificity so a pane's
+   own states, such as the drop target, still win. */
+:where(.workspace, .records-shell) > .panel {
+  border-color: var(--line-section-raised);
+}
+
+/* The splitter grip is drawn on the app background itself. */
+:where(.workspace, .records-shell) > .workspace-splitter {
+  --line-section: var(--line-section-on-bg);
 }
 
 /* A pane is banded like a dialog: a title bar, a line, the padded content, and
@@ -512,12 +559,12 @@ textarea:focus-visible,
 
 .panel__header {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--line-section);
 }
 
 .panel__strip {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--line-section);
 }
 
 .panel__body {
@@ -539,7 +586,7 @@ textarea:focus-visible,
   border-radius: var(--radius-md);
   background: var(--surface-muted);
   box-shadow: none;
-  border-color: var(--border-subtle);
+  border-color: var(--line-section);
 }
 
 .panel__header,
@@ -684,7 +731,7 @@ textarea:focus-visible,
 .queue-import-result--information {
   color: var(--text-secondary);
   background: var(--surface-muted);
-  border-color: var(--border-subtle);
+  border-color: var(--line-section);
 }
 
 .queue-import-result--warning {
@@ -729,7 +776,7 @@ textarea:focus-visible,
 
 .queue-row--imported {
   background: var(--surface-muted);
-  border-color: var(--border-subtle);
+  border-color: var(--line-row);
 }
 
 .queue-row--queued,
@@ -868,7 +915,7 @@ textarea:focus-visible,
 
 .button--ghost {
   background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
-  border-color: var(--border);
+  border-color: var(--line-control);
   color: var(--text);
 }
 
@@ -907,7 +954,7 @@ textarea:focus-visible,
   min-width: 180px;
   max-width: calc(100vw - 16px);
   background: var(--surface-raised);
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-section-popover);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
   padding: 4px;
@@ -953,7 +1000,9 @@ textarea:focus-visible,
    state, Restore defaults — stays outlined and only deepens its own tint. */
 .button--danger {
   background: var(--danger-subtle);
-  border-color: color-mix(in srgb, var(--danger) 24%, var(--border));
+  /* The control edge tinted toward danger. The shares sum below 100%, so the
+     opaque danger adds hue without adding strength. */
+  border-color: color-mix(in srgb, var(--danger) 19%, var(--line-control) 61%);
   color: var(--danger);
 }
 
@@ -1093,7 +1142,7 @@ textarea:focus-visible,
   padding: 3px;
   border-radius: var(--radius-lg);
   background: var(--surface-muted);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  box-shadow: inset 0 0 0 1px var(--line-section);
 }
 
 .app-tab {
@@ -1119,9 +1168,14 @@ textarea:focus-visible,
 .app-tab--active,
 .app-tab--active:hover {
   background: var(--surface-raised);
-  border-color: var(--border);
+  border-color: var(--line-section);
   color: var(--accent);
   box-shadow: var(--shadow-sm);
+}
+
+/* The active tab's outline is read against the strip's muted fill. */
+.app-tabs > .app-tab--active {
+  border-color: var(--line-section-raised);
 }
 
 /* The Settings tab bar: fixed chrome between the modal header and the scrolling
@@ -1140,7 +1194,7 @@ textarea:focus-visible,
   justify-content: flex-end;
   margin: 16px -16px -16px;
   padding: 12px 16px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--line-section);
 }
 
 .detail-grid {
@@ -1183,7 +1237,7 @@ textarea:focus-visible,
   border-radius: var(--radius-md);
   background: var(--surface-muted);
   box-shadow: none;
-  border-color: var(--border-subtle);
+  border-color: var(--line-section);
 }
 
 .detail-card--wide {
@@ -1316,11 +1370,21 @@ textarea:focus-visible,
   font-size: 0.8125rem;
 }
 
+/* A muted surface gives the lines drawn on it their own strengths. */
+.panel--nested,
+.detail-card--nested,
+.trim-editor-card,
+.review-row,
+.queue-row--imported {
+  --line-row: var(--line-row-on-muted);
+  --line-control: var(--line-control-on-muted);
+}
+
 .field input,
 .field select,
 .field textarea {
   width: 100%;
-  border: 1px solid var(--field-border);
+  border: 1px solid var(--line-control);
   border-radius: var(--radius);
   padding: 0.5rem 0.625rem;
   font-size: 0.8125rem;
@@ -1430,7 +1494,7 @@ select:not([multiple]) {
 .trim-analysis {
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--line-section);
 }
 
 .trim-analysis__header {
@@ -1499,7 +1563,7 @@ select:not([multiple]) {
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-section);
   border-radius: 999px;
   font-size: 0.8rem;
   color: var(--text-secondary);
@@ -1509,7 +1573,7 @@ select:not([multiple]) {
 .waveform-canvas {
   overflow: hidden;
   min-height: 160px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-section);
   border-radius: var(--radius);
   background: linear-gradient(180deg, var(--field-bg) 0%, var(--surface-muted) 100%);
   /* WaveSurfer sets no cursor on the drag-to-seek waveform, so it would fall back
@@ -1532,7 +1596,7 @@ select:not([multiple]) {
 .trim-editor-card {
   display: grid;
   gap: 10px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-section);
   border-radius: var(--radius);
   background: var(--surface-muted);
   padding: 12px;
@@ -1555,7 +1619,7 @@ select:not([multiple]) {
   overflow: hidden;
   min-height: 160px;
   margin-top: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-section);
   border-radius: var(--radius);
   background: var(--surface-muted);
 }
@@ -1583,7 +1647,7 @@ select:not([multiple]) {
   padding: 0.2rem 0.5rem;
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-section);
   font-size: 0.75rem;
   font-weight: 500;
 }
@@ -1696,7 +1760,7 @@ select:not([multiple]) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-section);
   border-radius: var(--radius-lg);
   background: var(--surface-raised);
   box-shadow: var(--shadow-lg);
@@ -1751,16 +1815,14 @@ select:not([multiple]) {
 .modal-card__header {
   padding-top: 14px;
   padding-bottom: 14px;
-  /* No fainter than the app's own control borders, so the band stays visible
-     without a tint. */
-  border-bottom: 1px solid var(--field-border);
+  border-bottom: 1px solid var(--line-section);
 }
 
 /* A strip between the title bar and the body — the Settings tabs, a toolbar —
    is its own band, closed by its own line. */
 .modal-card__strip {
   padding: 14px 20px;
-  border-bottom: 1px solid var(--field-border);
+  border-bottom: 1px solid var(--line-section);
 }
 
 /* A hidden heading leaves the close button alone in the header: it keeps its
@@ -1819,7 +1881,7 @@ select:not([multiple]) {
    band, the note and the buttons sit inside it. */
 .modal-footer-note {
   padding: 14px 20px 0;
-  border-top: 1px solid var(--field-border);
+  border-top: 1px solid var(--line-section);
   display: grid;
   gap: 4px;
 }
@@ -1835,14 +1897,14 @@ select:not([multiple]) {
   flex-wrap: wrap;
   gap: 8px;
   padding: 14px 20px;
-  border-top: 1px solid var(--field-border);
+  border-top: 1px solid var(--line-section);
 }
 
 .modal-toolbar {
   margin-top: 0;
   padding-top: 14px;
   padding-bottom: 14px;
-  border-bottom: 1px solid var(--field-border);
+  border-bottom: 1px solid var(--line-section);
 }
 
 .modal-toolbar__field {
@@ -1870,7 +1932,7 @@ select:not([multiple]) {
   display: grid;
   gap: 8px;
   padding: 12px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-row);
   border-radius: var(--radius);
   background: var(--surface-muted);
 }
@@ -1903,7 +1965,7 @@ select:not([multiple]) {
 }
 
 .settings-section {
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--line-section);
   padding-top: 16px;
 }
 
@@ -2027,7 +2089,7 @@ select:not([multiple]) {
 
 .toast--info {
   background: var(--surface-raised);
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-section-popover);
   color: var(--text);
 }
 
@@ -2165,11 +2227,11 @@ select:not([multiple]) {
   font-weight: 600;
   color: var(--text-secondary);
   padding: 6px 8px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--line-row);
 }
 .tools-table td {
   padding: 8px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--line-row);
   vertical-align: middle;
 }
 .tools-table__name {
@@ -2284,7 +2346,7 @@ html.records-page body {
   display: grid;
   gap: 8px;
   padding: 12px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--line-section);
 }
 
 .records-filters__row {
@@ -2434,7 +2496,7 @@ html.records-page body {
 .records-block__text {
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-section);
   border-radius: var(--radius-md);
   background: var(--surface-muted);
   font-size: 0.75rem;
