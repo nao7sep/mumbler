@@ -24,6 +24,7 @@
     "test": "npm run typecheck && vitest run",
     "test:full": "npm test && vitest run --config vitest.live.config.ts",
     "check:release-tag": "node scripts/check-release-tag.mjs",
+    "measure:lines": "electron-vite build && node scripts/measure-lines/run.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
