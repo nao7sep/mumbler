@@ -26,7 +26,6 @@
      values below. */
   --border: #c7d7c4;
   --border-subtle: #dbe6d6;
-  --field-highlight: rgba(255, 255, 255, 0.6);
   /* One strength per kind of line, each held to its kind's contrast target where
      it is painted (interface-styling-conventions; company/tools/measure-lines). Light
      section and control lines are translucent, so one over a muted fill reads
@@ -150,7 +149,6 @@
     --field-bg: #131b16;
     --border: #33453a;
     --border-subtle: #26352c;
-    --field-highlight: rgba(255, 255, 255, 0.03);
     /* Dark lines are opaque: every surface here sits below the line, so each
        line is read against the lighter side it touches. */
     --line-row: #29392f;
@@ -902,7 +900,6 @@ textarea:focus-visible,
 .button--primary {
   background: var(--accent);
   color: var(--on-accent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .button--primary:not(:disabled):hover {
@@ -1390,7 +1387,6 @@ textarea:focus-visible,
   font-size: 0.8125rem;
   background: var(--field-bg);
   color: var(--text);
-  box-shadow: inset 0 1px 0 var(--field-highlight);
   transition:
     background-color var(--motion) ease,
     border-color var(--motion) ease,
@@ -1652,9 +1648,7 @@ select:not([multiple]) {
   font-weight: 500;
 }
 
-.control-row,
-.action-grid,
-.storage-grid {
+.control-row {
   display: grid;
   gap: 8px;
 }
@@ -1671,12 +1665,15 @@ select:not([multiple]) {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
-.action-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.storage-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+/* A player button keeps its column as the label grows: it may take a second
+   line, so it has a minimum height rather than a fixed one, and a Japanese
+   label breaks between phrases, never inside a word. */
+.control-row .button {
+  height: auto;
+  min-height: var(--control-md);
+  padding-block: 6px;
+  white-space: normal;
+  word-break: auto-phrase;
 }
 
 .compact-meta-list {

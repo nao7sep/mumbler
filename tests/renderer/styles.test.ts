@@ -39,4 +39,13 @@ describe("styles.css window chrome", () => {
     expect(css).not.toContain("400px minmax(0, 1fr)");
     expect(css).toContain("minmax(var(--detail-min-width), 1fr)");
   });
+
+  it("lets a player button grow to a second line and break Japanese only between phrases", () => {
+    const rule = css.match(/\.control-row \.button \{([^}]*)\}/)?.[1] ?? "";
+    expect(rule).toContain("height: auto");
+    expect(rule).toContain("min-height: var(--control-md)");
+    expect(rule).toContain("word-break: auto-phrase");
+    expect(css).not.toContain(".action-grid");
+    expect(css).not.toContain(".storage-grid");
+  });
 });
