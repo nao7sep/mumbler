@@ -43,8 +43,8 @@
   --line-section-popover: rgba(10, 80, 0, 0.245);
   /* A line drawn on the app background itself: the splitter grip. */
   --line-section-on-bg: var(--line-section);
-  --line-control: rgba(21, 55, 17, 0.415);
-  --line-control-on-muted: rgba(21, 55, 17, 0.44);
+  --line-control: rgba(21, 55, 17, 0.37);
+  --line-control-on-muted: rgba(21, 55, 17, 0.395);
   --text: #17201a;
   --text-secondary: #526255;
   /* Tertiary text still carries information (labels, counts, hints), so it
