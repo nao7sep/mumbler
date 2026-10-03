@@ -8,14 +8,18 @@
 // check finds a newer build. Each test copies corpus audio into its own
 // throwaway home, where the cached tools are hard-linked.
 
+import { execFile } from "node:child_process";
 import { copyFile, link, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
+import { defaultModelFor } from "@shared/ai-models";
 import type { MumblerCard } from "@shared/app-shell";
+import type { LogRecordDetail, ProviderCallRecordDetail } from "@shared/records";
 
 vi.mock("electron", () => ({
   app: {
@@ -31,6 +35,7 @@ vi.mock("electron", () => ({
 
 const { ApplicationRuntime } = await import("@main/core/app-runtime");
 const { closeBackupStore } = await import("@main/core/backupStore");
+const { INLINE_AUDIO_LIMIT_BYTES } = await import("@main/core/gemini-adapter");
 const { sanitizeSlug } = await import("@main/core/card-pipeline");
 const { isSupportedAudioImportName } = await import("@shared/audio-import");
 
@@ -43,6 +48,7 @@ const CORPUS = join(REPO, "..", "company", "assets", "test-fixtures");
 const TIMESTAMP = "2026-01-01 09:00:00";
 const MINIMUM_RECALL = 0.9;
 const GENERATION_TIMEOUT_MS = 10 * 60_000;
+const execFileAsync = promisify(execFile);
 
 interface ManifestEntry {
   path: string;
@@ -117,7 +123,11 @@ async function importAudio(runtime: Runtime, home: string, relatives: string[]):
     await copyFile(corpusFile(relative), copy);
     copies.push(copy);
   }
-  const imported = await runtime.importDroppedPaths(copies);
+  return importFiles(runtime, copies);
+}
+
+async function importFiles(runtime: Runtime, files: string[]): Promise<MumblerCard[]> {
+  const imported = await runtime.importDroppedPaths(files);
   expect(imported.failedImports).toEqual([]);
   const pending = runtime.getSnapshot().state!.pendingImports;
   await runtime.confirmPendingImports(
@@ -248,6 +258,112 @@ describe("the live application runtime", () => {
         for (const path of [saved.audioPath, saved.jsonPath, saved.markdownPath]) {
           expect((await stat(path)).size, path).toBeGreaterThan(0);
         }
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("transcribes a recording over the inline limit through the Files API", async () => {
+    requireKey("GEMINI_API_KEY");
+    const name = "dialogue-english-alternating";
+    const relative = `audio/dialogue/${name}.flac`;
+    const oracle = JSON.parse(await readFile(corpusFile(`audio/dialogue/${name}.transcript.json`), "utf8")) as {
+      segments: Array<{ text: string }>;
+    };
+    const clipSec = Number((await manifest()).find((entry) => entry.path === relative)?.probe?.format?.duration);
+    expect(clipSec, `${relative} has a recorded duration`).toBeGreaterThan(0);
+
+    // With no trim markers the pipeline sends the imported file itself, so the
+    // limit is measured on the recording's own bytes. Uncompressed 96 kHz
+    // stereo 16-bit PCM is the densest ordinary WAV, which keeps the duration
+    // Gemini bills for as short as the limit allows; the corpus speech repeats
+    // just often enough to pass it, so the whole recording stays real speech.
+    const bytesPerSec = 96_000 * 2 * 2;
+    const copies = Math.ceil((INLINE_AUDIO_LIMIT_BYTES + 1_000) / (bytesPerSec * clipSec));
+    const home = await freshHome("files-api");
+    try {
+      const ffmpeg = (await readdir(join(home, "bin"))).find((entry) => entry.replace(/\.exe$/, "") === "ffmpeg");
+      if (ffmpeg === undefined) throw new Error(`The cached tools in ${TOOL_HOME} hold no ffmpeg.`);
+      const recordings = join(home, "recordings");
+      await mkdir(recordings);
+      const recording = join(recordings, "recording-over-inline-limit.wav");
+      await execFileAsync(join(home, "bin", ffmpeg), [
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-stream_loop", String(copies - 1), "-i", corpusFile(relative),
+        "-vn", "-ar", "96000", "-ac", "2", "-c:a", "pcm_s16le", recording,
+      ]);
+      const builtBytes = (await stat(recording)).size;
+      expect(builtBytes, "the built recording is over the inline limit").toBeGreaterThan(INLINE_AUDIO_LIMIT_BYTES);
+      expect(
+        builtBytes - bytesPerSec * clipSec,
+        "one repetition fewer would be under the limit, so the paid audio is as short as it can be",
+      ).toBeLessThanOrEqual(INLINE_AUDIO_LIMIT_BYTES);
+
+      await withRuntime(home, async (runtime) => {
+        const [imported] = await importFiles(runtime, [recording]);
+        expect(Math.abs(imported!.durationSec! - copies * clipSec), "the recording is the repeated speech").toBeLessThan(0.5);
+        expect((await stat(imported!.sourceFilePath)).size, "the imported file the pipeline sends").toBeGreaterThan(
+          INLINE_AUDIO_LIMIT_BYTES,
+        );
+        await runtime.generateCardStep(imported!.id, "transcription");
+        const card = await settled(runtime, imported!.id);
+        expect(card.lastError).toBeNull();
+        expect(card.status).toBe("Ready to Save");
+
+        // The Files API path, read from what the app recorded.
+        const recordsFor = (kind: "log" | "provider-call") =>
+          runtime.readRecordsPage({ session: null, kind, level: null, cardId: card.id, search: "", after: null });
+        const calls: ProviderCallRecordDetail[] = [];
+        for (const summary of (await recordsFor("provider-call")).records) {
+          const detail = await runtime.readRecordDetail("provider-call", summary.id);
+          if (detail?.kind === "provider-call" && detail.step === "transcription") calls.push(detail);
+        }
+        const upload = calls.filter((call) => call.operation === "files.upload");
+        const generate = calls.filter((call) => call.operation === "models.generateContent");
+        expect(upload, "one upload to the Files API").toHaveLength(1);
+        expect(generate, "one transcription request").toHaveLength(1);
+        expect(upload[0]!.error).toBeNull();
+        expect(JSON.parse(upload[0]!.request).file, "the upload is the imported recording").toBe(imported!.sourceFilePath);
+        const uploaded = JSON.parse(upload[0]!.response!) as { uri?: string };
+        expect(uploaded.uri).toBeTruthy();
+
+        const request = JSON.parse(generate[0]!.request) as {
+          model: string;
+          contents: Array<{ parts: Array<{ fileData?: { fileUri?: string; mimeType?: string } }> }>;
+        };
+        expect(generate[0]!.error).toBeNull();
+        expect(generate[0]!.request, "the audio does not travel inline").not.toContain("inlineData");
+        const fileParts = request.contents.flatMap((content) => content.parts.flatMap((part) => part.fileData ?? []));
+        expect(fileParts.map((part) => part.fileUri)).toEqual([uploaded.uri]);
+        expect(fileParts[0]!.mimeType).toBe("audio/wav");
+        expect(request.model, "the shipped default transcription model").toBe(defaultModelFor("gemini", "transcription"));
+        expect(generate[0]!.model).toBe(defaultModelFor("gemini", "transcription"));
+
+        const logs: LogRecordDetail[] = [];
+        for (const summary of (await recordsFor("log")).records) {
+          const detail = await runtime.readRecordDetail("log", summary.id);
+          if (detail?.kind === "log") logs.push(detail);
+        }
+        const detailsOf = (op: string) => {
+          const entry = logs.find((log) => log.op === op);
+          expect(entry, `${op} is recorded`).toBeDefined();
+          return JSON.parse(entry!.details!) as Record<string, unknown>;
+        };
+        expect(detailsOf("pipeline.audio-input")).toMatchObject({
+          transportCandidate: "files-api",
+          wasDerived: false,
+          preparedFilePath: imported!.sourceFilePath,
+        });
+        expect(detailsOf("pipeline.transcription-complete")).toMatchObject({ transport: "files-api" });
+
+        // Judged by word recovery: each repetition of the dialogue is expected.
+        const spoken = oracle.segments.flatMap((segment) => words(segment.text));
+        const transcript = card.transcription.text ?? "";
+        const recalled = recall(Array.from({ length: copies }, () => spoken).flat(), words(transcript));
+        expect(recalled, `recovered ${recalled.toFixed(2)} of the spoken words:\n${transcript}`).toBeGreaterThanOrEqual(
+          MINIMUM_RECALL,
+        );
       });
     } finally {
       await rm(home, { recursive: true, force: true });
