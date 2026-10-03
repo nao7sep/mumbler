@@ -28,7 +28,7 @@
   --border-subtle: #dbe6d6;
   --field-highlight: rgba(255, 255, 255, 0.6);
   /* One strength per kind of line, each held to its kind's contrast target where
-     it is painted (interface-styling-conventions; scripts/measure-lines). Light
+     it is painted (interface-styling-conventions; company/tools/measure-lines). Light
      section and control lines are translucent, so one over a muted fill reads
      like one over white; row lines stay opaque, since a collapsed table border
      straddles the cell edge. A variant covers a surface the base would miss,
