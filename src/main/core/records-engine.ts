@@ -97,13 +97,14 @@ export type RecordsWorkerRequest =
   | { type: "close" };
 
 export type RecordsWorkerResponse =
-  | { type: "written"; id: number }
+  // `stored` is false when the entry went to the fallback file instead.
+  | { type: "written"; id: number; stored: boolean }
   | { type: "read"; id: number; ok: true; value: RecordsReadResults[RecordsRead["op"]] }
   | { type: "read"; id: number; ok: false; error: string }
   | { type: "closed" }
   | { type: "report"; text: string };
 
-export const RECORDS_PAGE_SIZE = 200;
+export const RECORDS_PAGE_SIZE = 100;
 
 // A provider call has no level of its own; a failed one reads as an error.
 const CALL_LEVEL = "CASE WHEN error IS NULL THEN 'info' ELSE 'error' END";
@@ -158,12 +159,15 @@ export class RecordsEngine {
     this.report = report;
   }
 
-  write(entry: RecordEntry): void {
+  // Whether the entry reached the database.
+  write(entry: RecordEntry): boolean {
     try {
       this.insert(this.open(), entry);
+      return true;
     } catch (error: unknown) {
       this.report(recordsFailureText(error));
       this.writeFallback(entry);
+      return false;
     }
   }
 
@@ -244,7 +248,9 @@ function readPage(db: DatabaseSync, query: RecordsQuery): RecordsPage {
       where.push("session = ?");
       params.push(query.session);
     }
-    if (query.level !== null) {
+    if (query.level === "attention") {
+      where.push(`${level} IN ('warn', 'error')`);
+    } else if (query.level !== null) {
       where.push(`${level} = ?`);
       params.push(query.level);
     }

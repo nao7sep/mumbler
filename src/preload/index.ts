@@ -104,6 +104,10 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.readRecordDetail, kind, id) as Promise<RecordDetail | null>,
   readRecordSources: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.readRecordSources) as Promise<RecordSources>,
+  getRecordsListWidth: () =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.getRecordsListWidth) as Promise<number>,
+  saveRecordsListWidth: (width: number) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.saveRecordsListWidth, width) as Promise<number>,
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   onAppWideErrorChanged: (listener: () => void) => {
     const wrapped = () => {
@@ -139,6 +143,15 @@ const api: MumblerShellApi = {
     ipcRenderer.on(APP_SHELL_EVENTS.interfaceLanguageChanged, wrapped);
     return () => {
       ipcRenderer.removeListener(APP_SHELL_EVENTS.interfaceLanguageChanged, wrapped);
+    };
+  },
+  onRecordsChanged: (listener: () => void) => {
+    const wrapped = () => {
+      listener();
+    };
+    ipcRenderer.on(APP_SHELL_EVENTS.recordsChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(APP_SHELL_EVENTS.recordsChanged, wrapped);
     };
   },
 };

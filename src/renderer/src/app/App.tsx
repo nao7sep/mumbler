@@ -1201,6 +1201,7 @@ function LoadedShell({
           // dragging and persist on commit. The displayed width re-derives from that
           // intent against the live workspace, so a drag that overshoots the room is
           // held back visually while the intent is kept for when the window grows.
+          label={t("queue.resizePane")}
           width={queueWidth}
           min={QUEUE_WIDTH.min}
           max={QUEUE_WIDTH.max}

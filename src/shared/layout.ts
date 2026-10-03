@@ -88,12 +88,14 @@ export function clampSplitter(
   return Math.max(min, Math.min(ceiling, Math.round(desired)));
 }
 
-// The records window: a fixed-width list pane (filters above the record list)
-// beside the detail pane, which takes the rest. Mirrors `.records-*` in
+// The records window: a user-adjustable list pane (filters above the record
+// list) beside the detail pane, which takes the rest. Mirrors `.records-*` in
 // src/renderer/src/styles.css.
 export const RECORDS_PADDING = 16;
 export const RECORDS_GAP = 16;
-export const RECORDS_LIST_WIDTH = 380;
+// The list pane's bounds, kept like QUEUE_WIDTH. `min` still fits two filter
+// selects side by side in a row and feeds the window minimum below.
+export const RECORDS_LIST_WIDTH = { min: 320, default: 380, max: 640 } as const;
 export const RECORDS_DETAIL_MIN_WIDTH = 420;
 // The filter band: 12px padding above and below a search field and two rows of
 // selects (three 36px controls, 8px apart), and the line below it.
@@ -104,7 +106,7 @@ const RECORDS_PANE_BORDERS = 2;
 
 // Derived — do not hand-edit.
 export const RECORDS_WINDOW_MIN_WIDTH =
-  RECORDS_PADDING * 2 + RECORDS_LIST_WIDTH + RECORDS_GAP + RECORDS_DETAIL_MIN_WIDTH + RECORDS_PANE_BORDERS * 2;
+  RECORDS_PADDING * 2 + RECORDS_LIST_WIDTH.min + RECORDS_GAP + RECORDS_DETAIL_MIN_WIDTH + RECORDS_PANE_BORDERS * 2;
 
 // Derived — do not hand-edit.
 export const RECORDS_WINDOW_MIN_HEIGHT =

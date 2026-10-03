@@ -10,7 +10,7 @@ import { applyThemePreference, followOsThemeChanges } from "./core/theme";
 import { showStartupFailureDialog } from "./startup-failure-dialog";
 import { loadInterfaceCatalogue, mainTranslator } from "./i18n";
 import { installApplicationMenu } from "./app-menu";
-import { openRecordsWindow } from "./records-window";
+import { notifyRecordsChanged, openRecordsWindow } from "./records-window";
 
 app.setName("Mumbler");
 
@@ -94,6 +94,7 @@ async function bootstrap(): Promise<void> {
   });
 
   registerAppShellIpc(runtime, { openRecords: () => openRecordsWindow(runtime) });
+  runtime.onRecordsChanged(notifyRecordsChanged);
   // The native menu speaks the interface language, and is rebuilt when a
   // language saved in Settings changes it; the other windows are told so.
   installApplicationMenu(runtime.translator(), app.getName());

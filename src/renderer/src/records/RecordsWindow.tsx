@@ -1,27 +1,43 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 
 import { loadCatalogue } from "@shared/i18n/catalogues";
 import { isLanguage, type InterfaceLanguage } from "@shared/i18n/languages";
+import { RECORDS_DETAIL_MIN_WIDTH, RECORDS_GAP, RECORDS_LIST_WIDTH, RECORDS_PADDING } from "@shared/layout";
 import {
   RECORD_KINDS,
-  RECORD_LEVELS,
+  RECORD_LEVEL_FILTERS,
   type RecordDetail,
   type RecordKind,
   type RecordLevel,
+  type RecordLevelFilter,
   type RecordSources,
   type RecordsQuery,
   type RecordSummary,
 } from "@shared/records";
 
 import { currentCompositeIndex, nextIndex, type NavDirection } from "../app/composite-nav";
+import { PaneSplitter } from "../app/PaneSplitter";
 import { reportRendererDiagnostic } from "../app/presentFailure";
+import { usePaneSize } from "../app/usePaneSize";
 import { I18nProvider, useI18n } from "../i18n/I18nContext";
 import {
   KIND_LABELS,
+  LEVEL_FILTER_LABELS,
   LEVEL_LABELS,
   LEVEL_PILLS,
   cursorAfter,
   durationSeconds,
+  mergeNewestPage,
   prettyJson,
   recordKey,
   stepLabel,
@@ -33,6 +49,7 @@ const ENGLISH: InterfaceLanguage = { language: "en", locale: "en" };
 // follows it when Settings changes it in the main window.
 export function RecordsApp(): ReactElement {
   const [language, setLanguage] = useState<InterfaceLanguage | null>(null);
+  const [listWidth, setListWidth] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,13 +74,30 @@ export function RecordsApp(): ReactElement {
     };
   }, []);
 
-  if (language === null) {
+  // The list pane opens at its saved width, so the first frame already has it.
+  useEffect(() => {
+    let cancelled = false;
+    void window.mumbler.getRecordsListWidth().then(
+      (width) => {
+        if (!cancelled) setListWidth(width);
+      },
+      (error: unknown) => {
+        reportRendererDiagnostic(error, "records list width read failed");
+        if (!cancelled) setListWidth(RECORDS_LIST_WIDTH.default);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (language === null || listWidth === null) {
     return <main className="renderer-failure" role="status" aria-busy="true" />;
   }
 
   return (
     <I18nProvider language={language.language} locale={language.locale}>
-      <RecordsWindow />
+      <RecordsWindow initialListWidth={listWidth} />
     </I18nProvider>
   );
 }
@@ -72,6 +106,10 @@ type Filters = Omit<RecordsQuery, "after">;
 
 const NO_FILTERS: Filters = { session: null, kind: null, level: null, cardId: null, search: "" };
 const SEARCH_DELAY_MS = 300;
+// New records are read at most this often while they keep arriving.
+const LIVE_INTERVAL_MS = 1000;
+// The detail pane's minimum plus everything beside the list pane on its row.
+const LIST_SIBLING_MIN = RECORDS_PADDING * 2 + RECORDS_GAP + RECORDS_DETAIL_MIN_WIDTH;
 
 type ListState =
   | { status: "loading" }
@@ -86,17 +124,45 @@ type DetailState =
 
 type Selection = { kind: RecordKind; id: number };
 
-export function RecordsWindow(): ReactElement {
+// Within about one screen of the end of what is loaded.
+function nearEnd(scroll: HTMLElement): boolean {
+  return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight <= scroll.clientHeight;
+}
+
+function atTop(scroll: HTMLElement): boolean {
+  return scroll.scrollTop < 1;
+}
+
+export function RecordsWindow({ initialListWidth }: { initialListWidth: number }): ReactElement {
   const { t, locale } = useI18n();
   const [sources, setSources] = useState<RecordSources | null>(null);
+  const [sourceReads, setSourceReads] = useState(0);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [searchText, setSearchText] = useState("");
-  const [reloads, setReloads] = useState(0);
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [selected, setSelected] = useState<Selection | null>(null);
   const [detail, setDetail] = useState<DetailState>({ status: "none" });
+  const [listWidth, setListWidth] = useState(initialListWidth);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
   const listGeneration = useRef(0);
+  // The busy claim for the next page (PLAYBOOK, Own the work in flight).
+  const fetchingMore = useRef(false);
+  // The filters the current list was read for, for the live reads below.
+  const filtersRef = useRef(filters);
+  // New records arrived while the list was scrolled away from the top.
+  const newestPending = useRef(false);
+  // A failed read is itself logged as a record, whose signal would start the
+  // next read; live reads stop after a failure and resume after a read succeeds.
+  const liveSuspended = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Pane sizing: window-conventions.
+  const { containerRef: shellRef, displayed: shownListWidth } = usePaneSize(dragWidth ?? listWidth, false, {
+    siblingMin: LIST_SIBLING_MIN,
+    min: RECORDS_LIST_WIDTH.min,
+    max: RECORDS_LIST_WIDTH.max,
+  });
 
   const timeFormat = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "medium" }), [locale]);
 
@@ -117,30 +183,83 @@ export function RecordsWindow(): ReactElement {
       (next) => {
         if (!cancelled) setSources(next);
       },
-      (error: unknown) => reportRendererDiagnostic(error, "record sources read failed"),
+      (error: unknown) => {
+        liveSuspended.current = true;
+        reportRendererDiagnostic(error, "record sources read failed");
+      },
     );
     return () => {
       cancelled = true;
     };
-  }, [reloads]);
+  }, [sourceReads]);
 
   // A page applies only while the filters it was read for are still the
   // newest ones asked for.
   useEffect(() => {
+    filtersRef.current = filters;
     const generation = ++listGeneration.current;
+    fetchingMore.current = false;
+    newestPending.current = false;
     setList({ status: "loading" });
     void window.mumbler.readRecordsPage({ ...filters, after: null }).then(
       (page) => {
         if (generation !== listGeneration.current) return;
+        liveSuspended.current = false;
         setList({ status: "ready", records: page.records, more: page.more, loadingMore: false, moreFailed: false });
       },
       (error: unknown) => {
         if (generation !== listGeneration.current) return;
+        liveSuspended.current = true;
         reportRendererDiagnostic(error, "records read failed");
         setList({ status: "failed" });
       },
     );
-  }, [filters, reloads]);
+  }, [filters]);
+
+  // The newest page read again for new records. It joins the rows already
+  // shown rather than replacing them, so the list never falls back to the
+  // loading note and the pages already read stay. It reads only refs, so one
+  // copy serves the live subscription below.
+  const readNewest = useCallback((): void => {
+    const generation = listGeneration.current;
+    void window.mumbler.readRecordsPage({ ...filtersRef.current, after: null }).then(
+      (page) => {
+        if (generation !== listGeneration.current) return;
+        liveSuspended.current = false;
+        setList((current) =>
+          current.status === "ready"
+            ? { ...current, ...mergeNewestPage(current.records, current.more, page) }
+            : { status: "ready", records: page.records, more: page.more, loadingMore: false, moreFailed: false },
+        );
+      },
+      (error: unknown) => {
+        if (generation !== listGeneration.current) return;
+        liveSuspended.current = true;
+        reportRendererDiagnostic(error, "records read failed");
+      },
+    );
+  }, []);
+
+  // A stored record reaches the list at once while it is scrolled to the top;
+  // otherwise it waits until the list is back there, so the list never moves
+  // under the reader.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = window.mumbler.onRecordsChanged(() => {
+      if (timer !== null || liveSuspended.current) return;
+      timer = setTimeout(() => {
+        timer = null;
+        setSourceReads((count) => count + 1);
+        const scroll = scrollRef.current;
+        if (scroll === null || atTop(scroll)) readNewest();
+        else newestPending.current = true;
+      }, LIVE_INTERVAL_MS);
+    });
+    return () => {
+      unsubscribe();
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [readNewest]);
 
   const selectedKey = selected === null ? null : recordKey(selected);
 
@@ -167,13 +286,18 @@ export function RecordsWindow(): ReactElement {
     // The selection is compared by its key, not by the object holding it.
   }, [selectedKey]);
 
-  const showMore = (): void => {
-    if (list.status !== "ready" || list.loadingMore) return;
+  // Loading more: composite-control-conventions, Integration Points. A failed
+  // page is read again when the end is reached again.
+  const loadMore = (): void => {
+    if (list.status !== "ready" || !list.more || fetchingMore.current) return;
+    fetchingMore.current = true;
     const generation = listGeneration.current;
-    setList({ ...list, loadingMore: true, moreFailed: false });
+    setList((current) => (current.status === "ready" ? { ...current, loadingMore: true, moreFailed: false } : current));
     void window.mumbler.readRecordsPage({ ...filters, after: cursorAfter(list.records) }).then(
       (page) => {
         if (generation !== listGeneration.current) return;
+        fetchingMore.current = false;
+        liveSuspended.current = false;
         setList((current) =>
           current.status === "ready"
             ? { ...current, records: [...current.records, ...page.records], more: page.more, loadingMore: false }
@@ -182,10 +306,31 @@ export function RecordsWindow(): ReactElement {
       },
       (error: unknown) => {
         if (generation !== listGeneration.current) return;
+        fetchingMore.current = false;
+        liveSuspended.current = true;
         reportRendererDiagnostic(error, "records read failed");
         setList((current) => (current.status === "ready" ? { ...current, loadingMore: false, moreFailed: true } : current));
       },
     );
+  };
+
+  // A page that leaves the list short of the end reads the next one; a failed
+  // page waits for the reader instead.
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    if (list.status !== "ready" || list.loadingMore || list.moreFailed || scroll === null) return;
+    if (nearEnd(scroll)) loadMore();
+    // Only a new list state can change what is loaded.
+  }, [list]);
+
+  const onListScroll = (): void => {
+    const scroll = scrollRef.current;
+    if (scroll === null) return;
+    if (newestPending.current && atTop(scroll)) {
+      newestPending.current = false;
+      readNewest();
+    }
+    if (nearEnd(scroll)) loadMore();
   };
 
   const records = list.status === "ready" ? list.records : [];
@@ -221,6 +366,18 @@ export function RecordsWindow(): ReactElement {
     const option = container?.querySelector<HTMLElement>(`[data-record-key="${CSS.escape(keys[target]!)}"]`);
     option?.focus();
     option?.scrollIntoView?.({ block: "nearest" });
+    if (target === keys.length - 1 && (direction === "next" || direction === "page-next" || direction === "last")) {
+      loadMore();
+    }
+  };
+
+  // Drag intent: window-conventions, Content-based minimum size.
+  const commitListWidth = (width: number): void => {
+    setListWidth(width);
+    setDragWidth(null);
+    void window.mumbler.saveRecordsListWidth(width).then(setListWidth, (error: unknown) =>
+      reportRendererDiagnostic(error, "records list width save failed"),
+    );
   };
 
   const launchLabel = (session: string): string => {
@@ -229,7 +386,11 @@ export function RecordsWindow(): ReactElement {
   };
 
   return (
-    <div className="records-shell">
+    <div
+      ref={shellRef}
+      className="records-shell"
+      style={{ "--records-list-width": `${shownListWidth}px` } as CSSProperties}
+    >
       <section className="panel records-list-pane" aria-label={t("records.title")}>
         <div className="records-filters">
           <div className="field">
@@ -269,18 +430,22 @@ export function RecordsWindow(): ReactElement {
               label={t("records.level")}
               value={filters.level}
               allLabel={t("records.allLevels")}
-              options={RECORD_LEVELS.map((level) => ({ value: level, label: t(LEVEL_LABELS[level]) }))}
-              onChange={(level) => setFilters({ ...filters, level: level as RecordLevel | null })}
+              options={RECORD_LEVEL_FILTERS.map((level) => ({ value: level, label: t(LEVEL_FILTER_LABELS[level]) }))}
+              onChange={(level) => setFilters({ ...filters, level: level as RecordLevelFilter | null })}
             />
-            <button type="button" className="button" onClick={() => setReloads((count) => count + 1)}>
-              {t("records.refresh")}
-            </button>
           </div>
         </div>
-        <div className="records-list-scroll" aria-busy={list.status === "loading"}>
+        <div
+          ref={scrollRef}
+          className="records-list-scroll"
+          aria-busy={list.status === "loading"}
+          onScroll={onListScroll}
+        >
           {list.status === "failed" ? (
             <p className="records-note inline-error" role="alert">{t("records.loadFailed")}</p>
-          ) : list.status === "ready" && records.length === 0 ? (
+          ) : list.status === "loading" ? (
+            <p className="records-note">{t("records.loading")}</p>
+          ) : records.length === 0 ? (
             <p className="records-note">{t("records.empty")}</p>
           ) : (
             <div
@@ -315,18 +480,22 @@ export function RecordsWindow(): ReactElement {
               })}
             </div>
           )}
+          {list.status === "ready" && list.loadingMore ? (
+            <p className="records-note">{t("records.loading")}</p>
+          ) : null}
           {list.status === "ready" && list.moreFailed ? (
             <p className="records-note inline-error" role="alert">{t("records.loadFailed")}</p>
           ) : null}
-          {list.status === "ready" && list.more ? (
-            <div className="records-more">
-              <button type="button" className="button" onClick={showMore} disabled={list.loadingMore}>
-                {t("records.showMore")}
-              </button>
-            </div>
-          ) : null}
         </div>
       </section>
+      <PaneSplitter
+        label={t("records.resizeList")}
+        width={shownListWidth}
+        min={RECORDS_LIST_WIDTH.min}
+        max={RECORDS_LIST_WIDTH.max}
+        onResize={setDragWidth}
+        onCommit={commitListWidth}
+      />
       <section className="panel records-detail-pane" aria-busy={detail.status === "loading"}>
         {detail.status === "ready" ? (
           <RecordDetailView record={detail.record} cards={sources?.cards ?? []} launchLabel={launchLabel} />

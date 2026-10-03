@@ -1,9 +1,9 @@
 import { type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
 
-import { useI18n } from "../i18n/I18nContext";
-
 /**
- * The vertical drag handle between the queue and detail panes. It owns only the
+ * The vertical drag handle between an adjustable pane and the pane beside it:
+ * the main window's queue and detail panes, and the records window's list and
+ * detail panes. `label` names it for assistive technology. It owns only the
  * pointer gesture: on pointer-down it captures the start, streams the new width
  * (start width + horizontal delta, clamped to the pane's own bounds) while
  * dragging, and reports the final width on release. The parent owns the width —
@@ -14,19 +14,20 @@ import { useI18n } from "../i18n/I18nContext";
  * gesture, not a frequent interaction.
  */
 export function PaneSplitter({
+  label,
   width,
   min,
   max,
   onResize,
   onCommit,
 }: {
+  label: string;
   width: number;
   min: number;
   max: number;
   onResize: (width: number) => void;
   onCommit: (width: number) => void;
 }): ReactElement {
-  const { t } = useI18n();
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
     event.preventDefault();
     const startX = event.clientX;
@@ -57,7 +58,7 @@ export function PaneSplitter({
       className="workspace-splitter"
       role="separator"
       aria-orientation="vertical"
-      aria-label={t("queue.resizePane")}
+      aria-label={label}
       onPointerDown={onPointerDown}
     >
       <span className="workspace-splitter__grip" aria-hidden="true" />

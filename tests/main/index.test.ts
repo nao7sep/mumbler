@@ -37,6 +37,7 @@ const runtime = vi.hoisted(() => ({
   alignAppKit: vi.fn(),
   onPipelineProgress: vi.fn(),
   onDependenciesChanged: () => { state.dependenciesWatched = true; },
+  onRecordsChanged: vi.fn(),
   shutdown: () => state.shutdown(),
 }));
 
@@ -47,7 +48,8 @@ vi.mock("@main/core/app-runtime", () => ({
 }));
 vi.mock("@main/ipc/app-shell", () => ({ registerAppShellIpc: vi.fn() }));
 vi.mock("@main/app-menu", () => ({ installApplicationMenu: vi.fn() }));
-vi.mock("@main/records-window", () => ({ openRecordsWindow: vi.fn() }));
+const recordsWindow = vi.hoisted(() => ({ openRecordsWindow: vi.fn(), notifyRecordsChanged: vi.fn() }));
+vi.mock("@main/records-window", () => recordsWindow);
 vi.mock("@main/core/theme", () => ({ applyThemePreference: vi.fn(), followOsThemeChanges: vi.fn() }));
 vi.mock("@main/window", () => ({
   createMainWindow: () => state.windowLoadFailure ? Promise.reject(state.windowLoadFailure) : Promise.resolve({ once: vi.fn() }),
@@ -123,6 +125,21 @@ describe("quit", () => {
       expect(state.exits).toEqual([0]);
     } finally {
       vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+});
+
+describe("records", () => {
+  it("passes each record the runtime stores on to the records window", async () => {
+    vi.spyOn(process, "on").mockImplementation(() => process);
+    runtime.onRecordsChanged.mockClear();
+    try {
+      await import("@main/index");
+      await vi.waitFor(() =>
+        expect(runtime.onRecordsChanged).toHaveBeenCalledExactlyOnceWith(recordsWindow.notifyRecordsChanged),
+      );
+    } finally {
       vi.restoreAllMocks();
     }
   });

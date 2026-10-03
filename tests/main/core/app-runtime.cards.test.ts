@@ -773,6 +773,19 @@ describe("settings, secrets and the window's own state", () => {
     expect(JSON.parse(await readFile(join(home, "layout.json"), "utf8")).queueWidth).toBe(clamped);
   });
 
+  it("keeps the records list width beside the queue width, each save keeping the other", async () => {
+    await runtime.saveLayout(420);
+    expect(await runtime.saveRecordsListWidth(450)).toBe(450);
+    await runtime.saveLayout(430);
+
+    expect(runtime.recordsListWidth()).toBe(450);
+    expect(JSON.parse(await readFile(join(home, "layout.json"), "utf8"))).toMatchObject({
+      queueWidth: 430,
+      recordsListWidth: 450,
+    });
+    expect(await runtime.saveRecordsListWidth(10)).toBeGreaterThan(10);
+  });
+
   it("saves an edited settings draft and reports it back", async () => {
     const draft = runtime.getSettingsDraft();
 

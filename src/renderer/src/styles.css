@@ -940,6 +940,11 @@ textarea:focus-visible,
   background: var(--surface-hover);
 }
 
+/* Inside the item, so the next item's hover fill cannot cover it. */
+.app-menu-item:focus-visible {
+  outline-offset: -2px;
+}
+
 .app-menu-item:disabled {
   opacity: 0.5;
 }
@@ -1902,6 +1907,12 @@ select:not([multiple]) {
   padding-top: 16px;
 }
 
+/* Only one tab panel shows at a time, so the gap between panels above never
+   separates the sections inside one. */
+.settings-section + .settings-section {
+  margin-top: 24px;
+}
+
 /* The top border is an inter-section separator. A tab panel's first section
    sits directly under the fixed tab bar, where the line is just noise. */
 .app-tabpanel > .settings-section:first-child {
@@ -2232,10 +2243,12 @@ select:not([multiple]) {
   border-color: color-mix(in srgb, var(--tools-chip-hue) 60%, transparent);
 }
 
-/* The records window: a fixed-width list pane (filters above the record list)
-   beside the detail pane, which takes the rest. Pane sizing: window-conventions;
-   the sizes mirror the RECORDS_* values in @shared/layout. The page itself never
-   scrolls; the list and the detail body do. */
+/* The records window: a user-adjustable list pane (filters above the record
+   list) beside the detail pane, which takes the rest. Pane sizing:
+   window-conventions; the sizes mirror the RECORDS_* values in @shared/layout,
+   and --records-list-width is set inline from the displayed width
+   (RecordsWindow.tsx). The page itself never scrolls; the list and the detail
+   body do. */
 html.records-page,
 html.records-page body {
   height: 100%;
@@ -2246,9 +2259,20 @@ html.records-page body {
 .records-shell {
   height: 100vh;
   display: grid;
-  grid-template-columns: 380px minmax(420px, 1fr);
+  grid-template-columns: var(--records-list-width) minmax(420px, 1fr);
   gap: 16px;
   padding: 16px;
+  /* Positioning context for the splitter in the gap. */
+  position: relative;
+}
+
+/* The splitter overlays the 16px gap, which starts after the shell's padding
+   and the list pane. */
+.records-shell > .workspace-splitter {
+  top: 16px;
+  bottom: 16px;
+  left: calc(16px + var(--records-list-width));
+  width: 16px;
 }
 
 .records-list-pane,
@@ -2267,10 +2291,6 @@ html.records-page body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
-}
-
-.records-filters__row:has(> .button) {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
 }
 
 .records-list-scroll {
@@ -2310,7 +2330,8 @@ html.records-page body {
 
 .records-row:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  /* Inside the row, so the next row's hover fill cannot cover it. */
+  outline-offset: -2px;
 }
 
 .records-row__meta {
@@ -2348,12 +2369,6 @@ html.records-page body {
 
 .records-note.inline-error {
   color: var(--danger);
-}
-
-.records-more {
-  display: flex;
-  justify-content: center;
-  padding: 8px 0;
 }
 
 .records-detail__header {

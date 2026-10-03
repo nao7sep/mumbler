@@ -35,6 +35,7 @@ const RUNTIME_METHODS = [
   "reportRendererError", "reportRendererDiagnostic", "dismissAppWideError", "resetState",
   "cancelPendingImports", "provisionTool", "cancelToolProvision", "checkTools", "cancelToolCheck",
   "saveToolSettings", "saveLayout", "readRecordsPage", "readRecordDetail", "readRecordSources",
+  "recordsListWidth", "saveRecordsListWidth",
 ] as const;
 
 const logger = { debug: vi.fn(async () => {}), error: vi.fn(async () => {}) };
@@ -117,12 +118,15 @@ describe("the app-shell IPC boundary", () => {
     ["saveToolSettings", "saveToolSettings", [true]],
     ["saveLayout", "saveLayout", [320]],
     ["readRecordsPage", "readRecordsPage", [recordsQuery()]],
+    ["readRecordsPage", "readRecordsPage", [recordsQuery({ level: "attention" })]],
     ["readRecordsPage", "readRecordsPage", [recordsQuery({
       session: "2026-10-02T00:00:00.000Z", kind: "log", level: "warn", cardId: "card-1", search: "quota",
       after: { time: "2026-10-02T00:00:01.000Z", kind: "provider-call", id: 7 },
     })]],
     ["readRecordDetail", "readRecordDetail", ["provider-call", 7]],
     ["readRecordSources", "readRecordSources", []],
+    ["getRecordsListWidth", "recordsListWidth", []],
+    ["saveRecordsListWidth", "saveRecordsListWidth", [420]],
   ] as const)("carries %s to the runtime and answers with its result", async (channel, method, args) => {
     const result = await invoke(APP_SHELL_CHANNELS[channel], ...args);
     expect(runtime[method]).toHaveBeenCalledExactlyOnceWith(...args);
@@ -189,11 +193,12 @@ describe("the app-shell IPC boundary", () => {
     ["readRecordsPage", [null], /query must be an object/],
     ["readRecordsPage", [recordsQuery({ session: 7 })], /query.session must be a string or null/],
     ["readRecordsPage", [recordsQuery({ kind: "notice" })], /kind must be a record kind/],
-    ["readRecordsPage", [recordsQuery({ level: "fatal" })], /query.level must be a record level or null/],
+    ["readRecordsPage", [recordsQuery({ level: "fatal" })], /query.level must be a record level filter or null/],
     ["readRecordsPage", [recordsQuery({ search: null })], /query.search must be a string/],
     ["readRecordsPage", [recordsQuery({ after: { time: "t", kind: "log", id: 1.5 } })], /query.after must be a record cursor/],
     ["readRecordDetail", ["notice", 7], /kind must be a record kind/],
     ["readRecordDetail", ["log", "7"], /id must be an integer/],
+    ["saveRecordsListWidth", ["420"], /width must be a finite number/],
   ] as const)("refuses %s with a malformed argument, before the runtime", async (channel, args, message) => {
     await expect(invoke(APP_SHELL_CHANNELS[channel], ...args)).rejects.toThrow(message);
     expect(runtime[channel]).not.toHaveBeenCalled();

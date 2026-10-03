@@ -66,6 +66,7 @@ import {
 import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type SettingsStore } from "./settings-schema";
 import {
   clampQueueWidth,
+  clampRecordsListWidth,
   createDefaultLayout,
   createLayoutStore,
   selectExistingCardId,
@@ -448,6 +449,11 @@ export class ApplicationRuntime {
     this.onDependenciesChangedCallback = callback;
   }
 
+  // Called after each record the records database stores.
+  onRecordsChanged(callback: () => void): void {
+    this.runtime.logger.onStored(callback);
+  }
+
   // Called by the ToolManager whenever dependency state changes (an operation's
   // progress, completion, or failure) so the renderer re-pulls the snapshot.
   emitDependenciesChanged(): void {
@@ -600,6 +606,24 @@ export class ApplicationRuntime {
       queueWidth: next.queueWidth,
     });
     return this.getSnapshot();
+  }
+
+  // The records window's list pane width: its dragged intent, kept beside the
+  // queue pane's in the one in-memory layout and written whole, so a save from
+  // either window keeps the other's width. The records window opens even when
+  // the runtime failed, so this works without a ready runtime.
+  recordsListWidth(): number {
+    return clampRecordsListWidth(this.runtime.layout?.recordsListWidth);
+  }
+
+  async saveRecordsListWidth(width: number): Promise<number> {
+    const next: MumblerLayout = {
+      ...(this.runtime.layout ?? createDefaultLayout()),
+      recordsListWidth: clampRecordsListWidth(width),
+    };
+    this.runtime.layout = next;
+    await this.runtime.layoutStore?.save(next);
+    return next.recordsListWidth;
   }
 
   async reportRendererError(report: RendererErrorReport): Promise<AppSnapshot> {

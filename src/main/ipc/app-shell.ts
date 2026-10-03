@@ -12,9 +12,9 @@ import {
 } from "@shared/app-shell";
 import {
   RECORD_KINDS,
-  RECORD_LEVELS,
+  RECORD_LEVEL_FILTERS,
   type RecordKind,
-  type RecordLevel,
+  type RecordLevelFilter,
   type RecordsQuery,
 } from "@shared/records";
 
@@ -116,8 +116,8 @@ function assertRecordsQuery(value: unknown): asserts value is RecordsQuery {
     }
   }
   if (query.kind !== null) assertRecordKind(query.kind);
-  if (query.level !== null && !RECORD_LEVELS.includes(query.level as RecordLevel)) {
-    throw new Error("Invalid IPC parameter: query.level must be a record level or null.");
+  if (query.level !== null && !RECORD_LEVEL_FILTERS.includes(query.level as RecordLevelFilter)) {
+    throw new Error("Invalid IPC parameter: query.level must be a record level filter or null.");
   }
   assertString(query.search, "query.search");
   if (query.after !== null) {
@@ -325,6 +325,13 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     return runtime.readRecordDetail(kind, id);
   });
   handle(APP_SHELL_CHANNELS.readRecordSources, () => runtime.readRecordSources());
+  handle(APP_SHELL_CHANNELS.getRecordsListWidth, () => runtime.recordsListWidth());
+  handle(APP_SHELL_CHANNELS.saveRecordsListWidth, (_event, width: number) => {
+    if (typeof width !== "number" || !Number.isFinite(width)) {
+      throw new Error("Invalid IPC parameter: width must be a finite number.");
+    }
+    return runtime.saveRecordsListWidth(width);
+  });
 
   handle(APP_SHELL_CHANNELS.saveLayout, (_event, queueWidth: number) => {
     if (typeof queueWidth !== "number" || !Number.isFinite(queueWidth)) {

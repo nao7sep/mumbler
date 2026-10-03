@@ -30,7 +30,7 @@ const translations = LANGUAGES.filter((language) => language !== "en");
 const SAME_AS_ENGLISH: Partial<Record<Language, readonly string[]>> = {
   de: ["settings.languageSystem", "settings.timezoneSystem", "settings.themeSystem", "step.slug", "result.slug", "detail.tabInfo", "audio.title", "audio.format", "audio.bitrate", "units.hertz", "settings.tabPrompts", "settings.import", "settings.gemini", "about.version", "tools.columnStatus", "player.cursor", "player.pause", "records.details", "records.levelDebug", "records.levelInfo"],
   es: ["nativeMenu.zoom", "step.slug", "result.slug", "audio.title", "units.hertz", "settings.tabGeneral", "settings.gemini", "player.cursor", "records.error", "records.levelError"],
-  fr: ["nativeMenu.services", "step.transcription", "step.slug", "result.transcription", "result.slug", "audio.title", "audio.format", "units.hertz", "options.title", "settings.tabPrompts", "settings.gemini", "about.version", "tools.columnActions", "player.pause", "records.message"],
+  fr: ["nativeMenu.services", "step.transcription", "step.slug", "result.transcription", "result.slug", "audio.title", "audio.format", "units.hertz", "options.title", "settings.tabPrompts", "settings.gemini", "about.version", "tools.columnActions", "player.pause"],
   it: ["nativeMenu.file", "step.slug", "result.slug", "detail.tabInfo", "detail.tabOutput", "audio.title", "audio.bitrate", "units.hertz", "settings.gemini", "records.levelDebug", "records.levelInfo"],
   "pt-BR": ["nativeMenu.zoom", "step.slug", "result.slug", "units.hertz", "settings.tabPrompts", "settings.gemini", "tools.columnStatus", "player.cursor"],
   ru: ["settings.gemini"],

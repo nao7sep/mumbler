@@ -10,6 +10,12 @@ export const RECORD_KINDS: readonly RecordKind[] = ["log", "provider-call"];
 
 export const RECORD_LEVELS: readonly RecordLevel[] = ["error", "warn", "info", "debug"];
 
+// What the level filter offers: a record's own level, or `attention`, every
+// record at `warn` or `error`.
+export type RecordLevelFilter = "attention" | RecordLevel;
+
+export const RECORD_LEVEL_FILTERS: readonly RecordLevelFilter[] = ["attention", ...RECORD_LEVELS];
+
 // Where the next page starts: the last summary of the page before it.
 export interface RecordCursor {
   time: string;
@@ -22,7 +28,7 @@ export interface RecordsQuery {
   session: string | null;
   kind: RecordKind | null;
   // A provider call reads as `error` when it failed and `info` otherwise.
-  level: RecordLevel | null;
+  level: RecordLevelFilter | null;
   cardId: string | null;
   search: string;
   after: RecordCursor | null;

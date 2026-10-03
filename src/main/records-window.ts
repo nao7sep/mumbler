@@ -2,6 +2,7 @@ import { BrowserWindow, nativeTheme } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { RECORDS_WINDOW_MIN_HEIGHT, RECORDS_WINDOW_MIN_WIDTH } from "@shared/layout";
 import type { ApplicationRuntime } from "./core/app-runtime";
 import { serializeError } from "./core/logger";
@@ -39,6 +40,13 @@ export function buildRecordsWindowOptions(title: string): Electron.BrowserWindow
       sandbox: true,
     },
   };
+}
+
+// Tells the records window, when it is open, that a record was stored.
+export function notifyRecordsChanged(): void {
+  if (recordsWindow !== null && !recordsWindow.isDestroyed()) {
+    recordsWindow.webContents.send(APP_SHELL_EVENTS.recordsChanged);
+  }
 }
 
 export async function openRecordsWindow(runtime: ApplicationRuntime): Promise<void> {

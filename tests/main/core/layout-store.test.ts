@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { QUEUE_WIDTH } from "@shared/layout";
+import { QUEUE_WIDTH, RECORDS_LIST_WIDTH } from "@shared/layout";
 import {
   clampQueueWidth,
+  clampRecordsListWidth,
   createDefaultLayout,
   LAYOUT_SCHEMA_VERSION,
   normalizeLayout,
@@ -27,11 +28,25 @@ describe("clampQueueWidth", () => {
   });
 });
 
+describe("clampRecordsListWidth", () => {
+  it("keeps an in-range width, rounded, and snaps an out-of-range one to the records list bounds", () => {
+    expect(clampRecordsListWidth(450.6)).toBe(451);
+    expect(clampRecordsListWidth(RECORDS_LIST_WIDTH.min - 50)).toBe(RECORDS_LIST_WIDTH.min);
+    expect(clampRecordsListWidth(RECORDS_LIST_WIDTH.max + 50)).toBe(RECORDS_LIST_WIDTH.max);
+  });
+
+  it("falls back to the default for a missing or non-finite value", () => {
+    expect(clampRecordsListWidth(undefined)).toBe(RECORDS_LIST_WIDTH.default);
+    expect(clampRecordsListWidth(Number.NaN)).toBe(RECORDS_LIST_WIDTH.default);
+  });
+});
+
 describe("createDefaultLayout", () => {
-  it("is the default queue width at the current schema version", () => {
+  it("is the default pane widths at the current schema version", () => {
     expect(createDefaultLayout()).toEqual({
       schemaVersion: LAYOUT_SCHEMA_VERSION,
       queueWidth: QUEUE_WIDTH.default,
+      recordsListWidth: RECORDS_LIST_WIDTH.default,
       selectedCardId: null,
     });
   });
@@ -39,9 +54,10 @@ describe("createDefaultLayout", () => {
 
 describe("normalizeLayout", () => {
   it("clamps a persisted width and stamps the current schema version", () => {
-    expect(normalizeLayout({ schemaVersion: 1, queueWidth: 640 })).toEqual({
+    expect(normalizeLayout({ schemaVersion: 1, queueWidth: 640, recordsListWidth: 9999 })).toEqual({
       schemaVersion: LAYOUT_SCHEMA_VERSION,
       queueWidth: 640,
+      recordsListWidth: RECORDS_LIST_WIDTH.max,
       selectedCardId: null,
     });
   });
@@ -49,6 +65,7 @@ describe("normalizeLayout", () => {
   it("self-heals a missing or garbage width to the default rather than rejecting", () => {
     expect(normalizeLayout({}).queueWidth).toBe(QUEUE_WIDTH.default);
     expect(normalizeLayout({ queueWidth: "wide" }).queueWidth).toBe(QUEUE_WIDTH.default);
+    expect(normalizeLayout({ queueWidth: 500 }).recordsListWidth).toBe(RECORDS_LIST_WIDTH.default);
   });
 
   it("keeps a string selection and resets a missing or invalid one", () => {

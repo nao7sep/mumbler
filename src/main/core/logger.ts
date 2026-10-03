@@ -50,6 +50,9 @@ export interface SessionLogger extends AppLogger {
   readRecords<R extends RecordsRead>(read: R): Promise<RecordsReadResults[R["op"]]>;
   // Writes every entry already given, then releases the database.
   close(): Promise<void>;
+  // Called after each entry the database stored; an entry that went to the
+  // fallback file is not in the database, so it calls nothing.
+  onStored(listener: () => void): void;
 }
 
 export interface LoggerOptions {
@@ -125,6 +128,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
   const pending = new Map<number, { entry: RecordEntry; resolve: () => void }>();
   const reads = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>();
   let fallbackTail: Promise<void> = Promise.resolve();
+  let storedListener: (() => void) | null = null;
 
   const appendFallback = (entry: RecordEntry): Promise<void> => {
     const line = fallbackLine(entry);
@@ -178,6 +182,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
       if (message.type === "written") {
         pending.get(message.id)?.resolve();
         pending.delete(message.id);
+        if (message.stored) storedListener?.();
       } else if (message.type === "read") {
         const read = reads.get(message.id);
         reads.delete(message.id);
@@ -301,5 +306,8 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
         error: record.error === null || record.error === undefined ? null : toJson(serializeError(record.error)),
       }),
     close,
+    onStored: (listener) => {
+      storedListener = listener;
+    },
   };
 }

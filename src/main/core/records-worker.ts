@@ -18,8 +18,8 @@ const engine = new RecordsEngine(workerData as RecordsTarget, (text) => {
 
 port.on("message", (message: RecordsWorkerRequest) => {
   if (message.type === "write") {
-    engine.write(message.entry);
-    port.postMessage({ type: "written", id: message.id } satisfies RecordsWorkerResponse);
+    const stored = engine.write(message.entry);
+    port.postMessage({ type: "written", id: message.id, stored } satisfies RecordsWorkerResponse);
     return;
   }
 

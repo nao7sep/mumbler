@@ -6,6 +6,11 @@ import {
   DETAIL_MIN_WIDTH,
   QUEUE_MIN_WIDTH,
   QUEUE_WIDTH,
+  RECORDS_DETAIL_MIN_WIDTH,
+  RECORDS_GAP,
+  RECORDS_LIST_WIDTH,
+  RECORDS_PADDING,
+  RECORDS_WINDOW_MIN_WIDTH,
   SHELL_PADDING_X,
   VERTICAL_CHROME,
   WINDOW_MIN_HEIGHT,
@@ -80,5 +85,16 @@ describe("clampSplitter", () => {
 
   it("rounds the desired width to a whole pixel", () => {
     expect(clampSplitter(512.6, roomy)).toBe(513);
+  });
+});
+
+describe("records window minimum derivation", () => {
+  it("derives RECORDS_WINDOW_MIN_WIDTH from the list pane's minimum, not its default", () => {
+    // Two panes, each with a 1px border on both sides.
+    expect(RECORDS_WINDOW_MIN_WIDTH).toBe(
+      RECORDS_PADDING * 2 + RECORDS_LIST_WIDTH.min + RECORDS_GAP + RECORDS_DETAIL_MIN_WIDTH + 4,
+    );
+    expect(RECORDS_LIST_WIDTH.min).toBeLessThanOrEqual(RECORDS_LIST_WIDTH.default);
+    expect(RECORDS_LIST_WIDTH.default).toBeLessThanOrEqual(RECORDS_LIST_WIDTH.max);
   });
 });

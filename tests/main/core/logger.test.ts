@@ -170,6 +170,34 @@ describe("createLogger", () => {
     }
   });
 
+  it("calls its stored listener after each entry the database stores", async () => {
+    const logger = open();
+    const stored = vi.fn();
+    logger.onStored(stored);
+    await logger.info("startup", "hello");
+    expect(stored).toHaveBeenCalledOnce();
+    await logger.providerCall({
+      provider: "gemini", operation: "models.generateContent", endpoint: null, model: null, cardId: null,
+      step: null, attempt: null, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+      request: {}, response: null, error: null,
+    });
+    expect(stored).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not call its stored listener for an entry that went to the fallback file", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      const logger = open(true, { recordsPath: dir, logsDir });
+      const stored = vi.fn();
+      logger.onStored(stored);
+      await logger.info("startup", "kept anyway");
+      await logger.close();
+      expect(stored).not.toHaveBeenCalled();
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   it("constructs without touching the filesystem", async () => {
     const missing = join(dir, "not-created-yet");
     open(true, { recordsPath: join(missing, "records.sqlite3"), logsDir: join(missing, "logs") });
@@ -270,19 +298,36 @@ describe("readRecords", () => {
     expect(await titles({ search: "5_%" })).toEqual([]);
   });
 
+  it("filters for attention: warning and error lines and failed provider calls", async () => {
+    const logger = open();
+    const call = (error: unknown, model: string) => logger.providerCall({
+      provider: "gemini", operation: "models.generateContent", endpoint: null, model, cardId: null, step: null,
+      attempt: null, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+      request: {}, response: null, error,
+    });
+    await logger.info("calm", "Fine.");
+    await logger.warn("careful", "Careful.");
+    await logger.error("broken", "Broken.", new Error("x"));
+    await call(null, "succeeded");
+    await call(new Error("quota"), "failed");
+
+    const page = await logger.readRecords({ op: "page", query: query({ level: "attention" }) });
+    expect(page.records.map((record) => record.text).sort()).toEqual(["Broken.", "Careful.", "failed"]);
+  });
+
   it("continues a long list from the last record of the page before", async () => {
     const logger = open();
-    await Promise.all(Array.from({ length: 205 }, (_, index) => logger.info("tick", `Tick ${index}.`)));
+    await Promise.all(Array.from({ length: 105 }, (_, index) => logger.info("tick", `Tick ${index}.`)));
 
     const first = await logger.readRecords({ op: "page", query: query() });
     const last = first.records.at(-1)!;
     const second = await logger.readRecords({ op: "page", query: query({ after: last }) });
 
-    expect(first.records).toHaveLength(200);
+    expect(first.records).toHaveLength(100);
     expect(first.more).toBe(true);
     expect(second.records).toHaveLength(5);
     expect(second.more).toBe(false);
-    expect(new Set([...first.records, ...second.records].map((record) => record.id)).size).toBe(205);
+    expect(new Set([...first.records, ...second.records].map((record) => record.id)).size).toBe(105);
   });
 
   it("returns a record whole, and the launches and cards the filters offer", async () => {

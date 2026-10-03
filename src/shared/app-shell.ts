@@ -42,6 +42,8 @@ export const APP_SHELL_CHANNELS = {
   readRecordsPage: "app-shell:read-records-page",
   readRecordDetail: "app-shell:read-record-detail",
   readRecordSources: "app-shell:read-record-sources",
+  getRecordsListWidth: "app-shell:get-records-list-width",
+  saveRecordsListWidth: "app-shell:save-records-list-width",
 } as const;
 
 export const APP_SHELL_EVENTS = {
@@ -49,6 +51,7 @@ export const APP_SHELL_EVENTS = {
   pipelineProgressUpdated: "app-shell:event-pipeline-progress-updated",
   dependenciesUpdated: "app-shell:event-dependencies-updated",
   interfaceLanguageChanged: "app-shell:event-interface-language-changed",
+  recordsChanged: "app-shell:event-records-changed",
 } as const;
 
 export type CardStatus =
@@ -492,11 +495,13 @@ export interface DependencyStatus {
 }
 
 // Disposable presentation state, separate from config.json and queue.json (which
-// holds precious card data). queueWidth is the user's dragged intent in CSS
-// pixels; selectedCardId remembers where the user left the queue view.
+// holds precious card data). queueWidth and recordsListWidth are the user's
+// dragged intents in CSS pixels, for the main window's queue pane and the records
+// window's list pane; selectedCardId remembers where the user left the queue view.
 export interface MumblerLayout {
   schemaVersion: number;
   queueWidth: number;
+  recordsListWidth: number;
   selectedCardId: string | null;
 }
 
@@ -612,9 +617,15 @@ export interface MumblerShellApi {
   readRecordsPage(query: RecordsQuery): Promise<RecordsPage>;
   readRecordDetail(kind: RecordKind, id: number): Promise<RecordDetail | null>;
   readRecordSources(): Promise<RecordSources>;
+  // The records window's list pane width: the dragged intent, read at open and
+  // saved when a drag ends; the saved width comes back clamped.
+  getRecordsListWidth(): Promise<number>;
+  saveRecordsListWidth(width: number): Promise<number>;
   getPathForFile(file: File): string;
   onAppWideErrorChanged(listener: () => void): () => void;
   onPipelineProgressUpdated(listener: () => void): () => void;
   onDependenciesUpdated(listener: () => void): () => void;
   onInterfaceLanguageChanged(listener: () => void): () => void;
+  // A record was stored in the records database.
+  onRecordsChanged(listener: () => void): () => void;
 }
