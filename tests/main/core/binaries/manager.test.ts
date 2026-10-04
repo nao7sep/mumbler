@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -76,6 +78,8 @@ import { TOOL_INSTALL_WHOLE_TIMEOUT_MS, ToolManager } from "@main/core/binaries/
 import { TOOL_EXTRACTED_MAX_BYTES, resolveLatest } from "@main/core/binaries/registry";
 import { createDependenciesStore } from "@main/core/binaries/store";
 import { JsonStore } from "@main/core/json-store";
+
+const execFileAsync = promisify(execFile);
 
 const RESOLVED = {
   version: "8.2",
@@ -427,6 +431,24 @@ describe("installTool", () => {
     expect(dirname(durabilityEvents[0]!.path)).toBe(tempDir);
     expect(basename(durabilityEvents[0]!.path)).toMatch(/^ffmpeg-[\w-]+\.tmp$/);
     expect(durabilityEvents[1]).toEqual({ kind: "directory", path: binDir });
+  });
+
+  // The real xattr on a real file: the other darwin cases only pass the platform
+  // in, on files that never carried the flag.
+  it("strips the quarantine flag from the binary it publishes on macOS", async (ctx) => {
+    ctx.skip(process.platform !== "darwin", "macOS only: the quarantine flag and xattr exist only there");
+    vi.mocked(extractFileFromZip).mockImplementation(async (_zip, inner, dest) => {
+      await writeFile(dest, banner(inner, RESOLVED.version));
+      await execFileAsync("xattr", ["-w", "com.apple.quarantine", "0081;00000000;Mumbler;", dest]);
+      const { stdout } = await execFileAsync("xattr", [dest]);
+      expect(stdout.split("\n")).toContain("com.apple.quarantine");
+    });
+    const manager = await makeManager();
+
+    await manager.installTool("ffmpeg");
+
+    const { stdout } = await execFileAsync("xattr", [manager.resolveToolPath("ffmpeg")]);
+    expect(stdout.split("\n")).not.toContain("com.apple.quarantine");
   });
 });
 
