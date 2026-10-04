@@ -128,6 +128,41 @@ describe("quit", () => {
       vi.restoreAllMocks();
     }
   });
+
+  it("holds a second quit during shutdown and exits once, after shutdown finishes", async () => {
+    vi.spyOn(process, "on").mockImplementation(() => process);
+    let finishShutdown!: () => void;
+    let shutdownCalls = 0;
+    state.shutdown = () => {
+      shutdownCalls += 1;
+      return new Promise<void>((resolve) => { finishShutdown = resolve; });
+    };
+    try {
+      await import("@main/index");
+      await vi.waitFor(() => expect(state.dependenciesWatched).toBe(true));
+      const { app } = await import("electron");
+      const calls = vi.mocked(app.on).mock.calls as unknown as [string, (event: { preventDefault: () => void }) => void][];
+      const beforeQuit = calls.filter(([event]) => event === "before-quit").at(-1)?.[1];
+
+      const first = { preventDefault: vi.fn() };
+      beforeQuit!(first);
+      const second = { preventDefault: vi.fn() };
+      beforeQuit!(second);
+      await Promise.resolve();
+
+      expect(first.preventDefault).toHaveBeenCalledOnce();
+      expect(second.preventDefault).toHaveBeenCalledOnce();
+      expect(shutdownCalls).toBe(1);
+      expect(state.exits).toEqual([]);
+
+      finishShutdown();
+      await vi.waitFor(() => expect(state.exits).toEqual([0]));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(state.exits).toEqual([0]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });
 
 describe("records", () => {

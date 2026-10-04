@@ -215,15 +215,17 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  // Graceful shutdown: hold the quit once, flush pending state + abort in-flight
-  // pipelines via the runtime, then exit with app.exit(0) once it finishes or
-  // QUIT_TIMEOUT_MS passes (PLAYBOOK, Own the work in flight).
+  // Graceful shutdown: hold every quit, flush pending state + abort in-flight
+  // pipelines via the runtime once, then exit with app.exit(0) once it finishes or
+  // QUIT_TIMEOUT_MS passes (PLAYBOOK, Own the work in flight). A quit arriving
+  // while that runs, such as window-all-closed after the main window's own quit,
+  // is held too, so only that app.exit(0) ends the process.
   app.on("before-quit", (event) => {
+    event.preventDefault();
     if (shuttingDown) {
       return;
     }
     shuttingDown = true;
-    event.preventDefault();
     const runtime = runtimeForShutdown;
     if (runtime === null) {
       app.exit(0);
