@@ -201,6 +201,15 @@ function normalizeSettings(
     }
     Object.assign(settings, { [key]: raw[key] });
   }
+  // A thinking choice is stored only while it differs from the selected model's own
+  // default, so one the file does not hold is that model's default, not the role's
+  // built-in (which belongs to the role's default model).
+  for (const [key, role] of THINKING_SET_ROLES) {
+    const setKey = key as keyof MumblerSettings;
+    const stored = Object.hasOwn(raw, setKey) && SETTINGS_SETS[setKey](raw[setKey]) === null;
+    const row = rowFor(settings[`gemini.${role}`]);
+    if (!stored && row) Object.assign(settings, { [key]: row.defaultThinking });
+  }
   for (const key of ["outputDirectory", "backupDirectory"] as const) {
     const path = settings[key]?.trim() ?? "";
     settings[key] = path.length === 0 ? null : resolvePathFromHome(path, homeDirectory);

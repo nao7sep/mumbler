@@ -295,6 +295,15 @@ describe("settings store", () => {
     expect(buildSettingsDraft(loaded, "", "", false)).toMatchObject({ metadataModel: "custom-model", metadataThinking: "high" });
   });
 
+  it("reads a thinking the file does not hold as the selected model's own default after a relaunch", async () => {
+    // The outline's built-in model is Flash (medium); Flash Lite's own default is minimal, so it is not stored.
+    await createSettingsStore(settingsPath()).save(settings({ "gemini.outline": "gemini-3.5-flash-lite", "gemini.thinking.outline": "minimal" }));
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "gemini-3.5-flash-lite" });
+    const loaded = (await createSettingsStore(settingsPath()).load()).value;
+    expect(loaded["gemini.thinking.outline"]).toBe("minimal");
+    expect(buildSettingsDraft(loaded, "", "", false)).toMatchObject({ outlineModel: "gemini-3.5-flash-lite", outlineThinking: "minimal" });
+  });
+
   it("writes nothing when the file already holds what the settings store", async () => {
     const raw = JSON.stringify({ concurrencyLimit: 5 });
     await writeFile(settingsPath(), raw, "utf8");
