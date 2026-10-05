@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { MumblerCard, MumblerQueue, MumblerSettings } from "@shared/app-shell";
 import { CorruptStateError } from "@main/core/json-store";
 import {
+  buildSettingsDraft,
   createDefaultSettings,
   createSettingsStore,
   createQueueStore,
@@ -280,8 +281,18 @@ describe("settings store", () => {
     await store.save({ ...defaults, "gemini.outline": "gemini-3.5-flash-lite", "gemini.thinking.outline": "minimal" });
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "gemini-3.5-flash-lite" });
 
+    // Under a model with no row the choice is kept, unsent, while it differs from the built-in.
     await store.save({ ...defaults, "gemini.outline": "custom-model", "gemini.thinking.outline": "high" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "custom-model", "gemini.thinking.outline": "high" });
+    await store.save({ ...defaults, "gemini.outline": "custom-model" });
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "custom-model" });
+  });
+
+  it("keeps a thinking saved under a model with no row through a relaunch, in the settings and the draft", async () => {
+    await createSettingsStore(settingsPath()).save(settings({ "gemini.metadata": "custom-model", "gemini.thinking.metadata": "high" }));
+    const loaded = (await createSettingsStore(settingsPath()).load()).value;
+    expect(loaded).toEqual(settings({ "gemini.metadata": "custom-model", "gemini.thinking.metadata": "high" }));
+    expect(buildSettingsDraft(loaded, "", "", false)).toMatchObject({ metadataModel: "custom-model", metadataThinking: "high" });
   });
 
   it("writes nothing when the file already holds what the settings store", async () => {

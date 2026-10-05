@@ -396,9 +396,38 @@ describe("SettingsModal AI tab", () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ transcriptionModel: "gemini-3.8-flash ", transcriptionThinking: "high" }));
     await type("Structured Transcription Model", "GEMINI-3.8-FLASH");
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ outlineModel: "GEMINI-3.8-FLASH", outlineThinking: "low" }));
-    // A field that opened on an unlisted id starts at the first row it reaches.
+    // A field that opened on an unlisted id keeps the stored value at the first row it reaches that lists it.
     await type("Metadata Model", "gemini-3.5-flash-lite");
-    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ metadataModel: "gemini-3.5-flash-lite", metadataThinking: "minimal" }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ metadataModel: "gemini-3.5-flash-lite", metadataThinking: "high" }));
+  });
+
+  describe("reopened on a thinking stored under an unlisted id", () => {
+    async function typeMetadataModel(panel: HTMLElement, value: string): Promise<void> {
+      const input = Array.from(panel.querySelectorAll<HTMLLabelElement>("label.field"))
+        .find((label) => label.querySelector("span")?.textContent === "Metadata Model")!
+        .querySelector("input")!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    }
+
+    it("keeps the stored value on reaching a listed row that offers it, then resets on reaching a different one", async () => {
+      const onChange = vi.fn();
+      const panel = await renderAiTab({ ...draft(), metadataModel: "custom-model", metadataThinking: "high" }, onChange, true);
+      expect(panel.querySelectorAll("select")).toHaveLength(1);
+      await typeMetadataModel(panel, "gemini-3.8-flash");
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ metadataModel: "gemini-3.8-flash", metadataThinking: "high" }));
+      await typeMetadataModel(panel, "gemini-3.5-flash-lite");
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ metadataModel: "gemini-3.5-flash-lite", metadataThinking: "minimal" }));
+    });
+
+    it("takes the reached row's default when that row does not offer the stored value", async () => {
+      const onChange = vi.fn();
+      const panel = await renderAiTab({ ...draft(), metadataModel: "custom-model", metadataThinking: "minimal" }, onChange, true);
+      await typeMetadataModel(panel, "gemini-3.8-flash");
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ metadataModel: "gemini-3.8-flash", metadataThinking: "medium" }));
+    });
   });
 
   it("keeps a role's chosen thinking when a letter of its id is deleted and retyped", async () => {

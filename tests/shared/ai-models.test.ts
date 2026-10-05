@@ -66,8 +66,9 @@ describe("the model registry and committed lineup", () => {
     // An unlisted id keeps the value and the last listed id.
     expect(edit("gemini-3.8-flash", "gemini-3.8-flas", "high")).toEqual({ thinking: "high", lastListedModel: "gemini-3.8-flash" });
     expect(edit("gemini-3.8-flash", "custom-model", "high")).toEqual({ thinking: "high", lastListedModel: "gemini-3.8-flash" });
-    // A field that has held no row starts at the first row it reaches.
-    expect(edit("custom-model", "gemini-3.5-flash-lite", "high").thinking).toBe("minimal");
+    // A field that has held no row keeps the value at the first row it reaches when that row lists it.
+    expect(edit("custom-model", "gemini-3.5-flash-lite", "high")).toEqual({ thinking: "high", lastListedModel: "gemini-3.5-flash-lite" });
+    expect(edit("custom-model", "gemini-3.8-flash", "minimal")).toEqual({ thinking: "medium", lastListedModel: "gemini-3.8-flash" });
   });
 
   it("keeps the choice when a letter of the id is deleted and retyped, and resets it on reaching another row", () => {

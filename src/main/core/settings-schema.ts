@@ -158,13 +158,14 @@ const THINKING_SET_ROLES: ReadonlyMap<string, AiRole> = new Map(AI_ROLES.map((ro
 // Values arrive cleaned (applySettingsDraft cleans text at Save); a model id is its
 // own key, so it is compared trimmed and case-insensitively. A role's thinking
 // equals its built-in while the value it sends is the default for the model the
-// role selects, and always for a model with no row.
+// role selects; under a model with no row it is kept, unsent, while it differs
+// from the built-in.
 function equalsBuiltIn(key: keyof MumblerSettings, settings: MumblerSettings, builtIn: MumblerSettings): boolean {
   const value = settings[key];
   const role = THINKING_SET_ROLES.get(key);
   if (role) {
     const row = rowFor(settings[`gemini.${role}`]);
-    return !row || thinkingFor(row.id, String(value)) === row.defaultThinking;
+    return row ? thinkingFor(row.id, String(value)) === row.defaultThinking : value === builtIn[key];
   }
   if (MODEL_SET_KEYS.has(key)) {
     return typeof value === "string" && value.trim().toLowerCase() === String(builtIn[key]).toLowerCase();
