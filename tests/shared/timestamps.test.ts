@@ -144,8 +144,8 @@ describe("formatUtcIsoCompact", () => {
 });
 
 describe("parseUtcMs", () => {
-  it("returns a finite number input unchanged", () => {
-    expect(parseUtcMs(1_700_000_000_000)).toBe(1_700_000_000_000);
+  it("reads a number as no stored time; instants are stored as text", () => {
+    expect(parseUtcMs(1_700_000_000_000)).toBeNull();
   });
 
   it("parses a display-format string", () => {

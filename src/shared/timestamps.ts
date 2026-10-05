@@ -216,7 +216,6 @@ export function formatUtcMarkerMs(date: Date): string {
 // stands in for an unreadable time is the caller's to decide from the times its
 // item recorded (content-lifecycle-conventions, "A missing time is not made up").
 export function parseUtcMs(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
     const fromDisplay = parseUtcFromDisplay(value);
     if (fromDisplay !== null) return fromDisplay;

@@ -13,6 +13,7 @@ import {
   createSettingsStore,
   createQueueStore,
   recoverInterruptedCards,
+  serializeQueue,
 } from "@main/core/settings-schema";
 
 let dir: string;
@@ -91,7 +92,7 @@ describe("queue data store", () => {
   it("normalizes a present state file on load", async () => {
     await writeFile(
       queuePath(),
-      JSON.stringify({ formatVersion: 1, ...stateWith([card({ id: "x" })]), selectedCardId: "x" }),
+      JSON.stringify({ formatVersion: 1, ...serializeQueue(stateWith([card({ id: "x" })])), selectedCardId: "x" }),
       "utf8",
     );
     const { value, origin } = await createQueueStore(queuePath()).load();
@@ -134,18 +135,6 @@ describe("queue data store", () => {
 
     expect(value.cards[0].transcription.text).toBeNull();
     expect(value.cards[0].metadata).toEqual({ structured: null, title: "T", slug: "t" });
-  });
-
-  it("reads a card's missing transcribedTrim as none, never as its current trim", async () => {
-    const run = { provider: "gemini", model: "m", generatedAtUtc: "2026-04-22T01:00:00.000Z" };
-    const { transcribedTrim: _absent, ...stored } = card({ id: "x" });
-    await writeFile(
-      queuePath(),
-      JSON.stringify({ formatVersion: 1, pendingImports: [], cards: [{ ...stored, ai: { transcription: run, structured: null, title: null, slug: null } }] }),
-      "utf8",
-    );
-    const { value } = await createQueueStore(queuePath()).load();
-    expect(value.cards[0].transcribedTrim).toBeNull();
   });
 
   it("refuses a queue.json without its format version as unreadable, and leaves it untouched", async () => {
@@ -226,7 +215,8 @@ describe("queue data store", () => {
     const EFFECTIVE = Date.UTC(2026, 3, 22, 0, 45, 5);
 
     async function loadRaw(raw: Record<string, unknown>): Promise<MumblerQueue> {
-      await writeFile(queuePath(), JSON.stringify({ formatVersion: 1, pendingImports: [], cards: [], ...raw }), "utf8");
+      const queue = serializeQueue({ pendingImports: [], cards: [], ...raw } as MumblerQueue);
+      await writeFile(queuePath(), JSON.stringify({ formatVersion: 1, ...queue }), "utf8");
       return (await createQueueStore(queuePath()).load()).value;
     }
 

@@ -229,10 +229,10 @@ function cardRecordedTimes(card: MumblerCard): (number | null)[] {
     card.createdAtUtc,
     card.queuedAtUtc,
     card.trimDecision?.analyzedAtUtc,
-    card.ai?.transcription?.generatedAtUtc,
-    card.ai?.structured?.generatedAtUtc,
-    card.ai?.title?.generatedAtUtc,
-    card.ai?.slug?.generatedAtUtc,
+    card.ai.transcription?.generatedAtUtc,
+    card.ai.structured?.generatedAtUtc,
+    card.ai.title?.generatedAtUtc,
+    card.ai.slug?.generatedAtUtc,
     card.lastError?.occurredAtUtc,
     card.timestamps.effectiveUtc,
     card.timestamps.confirmedUtc,
@@ -274,9 +274,6 @@ function normalizePendingImportRecord(
 
   return {
     ...item,
-    originalSourcePath: typeof item.originalSourcePath === 'string' ? item.originalSourcePath : '',
-    deleteOriginalOnConfirm: typeof item.deleteOriginalOnConfirm === 'boolean' ? item.deleteOriginalOnConfirm : false,
-    copyToBackupOnConfirm: typeof item.copyToBackupOnConfirm === 'boolean' ? item.copyToBackupOnConfirm : false,
     createdAtUtc: parseUtcMs(item.createdAtUtc) ?? fallback,
     updatedAtUtc: parseUtcMs(item.updatedAtUtc) ?? fallback,
   };
@@ -297,10 +294,10 @@ function normalizeTrimDecisionRecord(
 }
 
 function normalizeAiRunInfo(
-  run: MumblerCard["ai"]["transcription"] | undefined,
+  run: MumblerCard["ai"]["transcription"],
   fallback: number,
 ): MumblerCard["ai"]["transcription"] {
-  if (run === null || run === undefined) {
+  if (run === null) {
     return null;
   }
 
@@ -333,36 +330,26 @@ function normalizeCardRecord(card: MumblerCard, undatedTime: UndatedItemTime): M
   const confirmedUtc =
     storedConfirmedUtc ?? (storedEffectiveUtc !== null ? storedEffectiveUtc - frontTrimOffsetMs : fallback);
   const queuedMode = card.queuedMode === "generate" ? card.queuedMode : null;
-  // queuedAtUtc is paired with queuedMode: when the card is queued, parse it
-  // through parseUtcMs (which accepts both a number and the canonical ISO
-  // string the store now writes) — the same way every other instant field is
-  // read. A `typeof number` guard here would drop the value to null after a
-  // save/reload now that instants serialize as ISO, and selectNextQueuedCard
-  // would then skip the card forever.
+  // queuedAtUtc is paired with queuedMode and read like every other instant.
   const queuedAtUtc = queuedMode !== null ? (parseUtcMs(card.queuedAtUtc) ?? fallback) : null;
 
   return {
     ...card,
-    audioProfile: card.audioProfile ?? null,
     // Filled from the card's transcript file once it is read.
     transcription: { text: null },
-    transcribedTrim: card.transcribedTrim ?? null,
     timestamps: {
       ...card.timestamps,
       confirmedUtc,
       effectiveUtc: storedEffectiveUtc ?? confirmedUtc + frontTrimOffsetMs,
     },
     trimDecision: normalizeTrimDecisionRecord(card.trimDecision, fallback),
-    metadata: {
-      structured: null,
-      title: card.metadata?.title ?? null,
-      slug: card.metadata?.slug ?? null,
-    },
+    // Filled from the card's transcript file once it is read.
+    metadata: { ...card.metadata, structured: null },
     ai: {
-      transcription: normalizeAiRunInfo(card.ai?.transcription, fallback),
-      structured: normalizeAiRunInfo(card.ai?.structured, fallback),
-      title: normalizeAiRunInfo(card.ai?.title, fallback),
-      slug: normalizeAiRunInfo(card.ai?.slug, fallback),
+      transcription: normalizeAiRunInfo(card.ai.transcription, fallback),
+      structured: normalizeAiRunInfo(card.ai.structured, fallback),
+      title: normalizeAiRunInfo(card.ai.title, fallback),
+      slug: normalizeAiRunInfo(card.ai.slug, fallback),
     },
     queuedMode,
     queuedAtUtc,
