@@ -55,19 +55,31 @@ describe("the model registry and committed lineup", () => {
     expect([settings["gemini.thinking.transcription"], settings["gemini.thinking.outline"], settings["gemini.thinking.metadata"]]).toEqual(["medium", "medium", "minimal"]);
   });
 
-  it("resets thinking on a model edit only when the id resolves to a different row, or between a row and none", () => {
+  it("resets thinking on a model edit only when it reaches a different listed row than the last one the field held", () => {
+    const edit = (lastListed: string, next: string, chosen: string) => thinkingAfterModelEdit(lastListed, next, chosen);
     // The same row, however it is spaced, cased or retyped, keeps the choice.
-    expect(thinkingAfterModelEdit("gemini-3.8-flash", "gemini-3.8-flash ", "high")).toBe("high");
-    expect(thinkingAfterModelEdit("gemini-3.8-flash", " GEMINI-3.8-Flash", "high")).toBe("high");
-    expect(thinkingAfterModelEdit("gemini-3.8-flash", "gemini-3.8-flash", "low")).toBe("low");
+    expect(edit("gemini-3.8-flash", "gemini-3.8-flash ", "high")).toEqual({ thinking: "high", lastListedModel: "gemini-3.8-flash " });
+    expect(edit("gemini-3.8-flash", " GEMINI-3.8-Flash", "high").thinking).toBe("high");
     // A different row starts at that row's own default.
-    expect(thinkingAfterModelEdit("gemini-3.8-flash", "gemini-3.5-flash-lite", "high")).toBe("minimal");
-    expect(thinkingAfterModelEdit("gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "high")).toBe("medium");
-    // From no row to a row starts at the row's default; to no row, nothing is sent and the value stays.
-    expect(thinkingAfterModelEdit("gemini-3.8-flas", "gemini-3.8-flash", "high")).toBe("medium");
-    expect(thinkingAfterModelEdit("custom-model", "gemini-3.5-flash-lite", "high")).toBe("minimal");
-    expect(thinkingAfterModelEdit("gemini-3.8-flash", "gemini-3.8-flas", "high")).toBe("high");
-    expect(thinkingAfterModelEdit("custom-model", "custom-model-2", "high")).toBe("high");
+    expect(edit("gemini-3.8-flash", "gemini-3.5-flash-lite", "high")).toEqual({ thinking: "minimal", lastListedModel: "gemini-3.5-flash-lite" });
+    expect(edit("gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "high").thinking).toBe("medium");
+    // An unlisted id keeps the value and the last listed id.
+    expect(edit("gemini-3.8-flash", "gemini-3.8-flas", "high")).toEqual({ thinking: "high", lastListedModel: "gemini-3.8-flash" });
+    expect(edit("gemini-3.8-flash", "custom-model", "high")).toEqual({ thinking: "high", lastListedModel: "gemini-3.8-flash" });
+    // A field that has held no row starts at the first row it reaches.
+    expect(edit("custom-model", "gemini-3.5-flash-lite", "high").thinking).toBe("minimal");
+  });
+
+  it("keeps the choice when a letter of the id is deleted and retyped, and resets it on reaching another row", () => {
+    let state = { thinking: "high", lastListedModel: "gemini-3.8-flash" };
+    for (const typed of ["gemini-3.8-flas", "gemini-3.8-fla", "gemini-3.8-flas", "gemini-3.8-flash"]) {
+      state = thinkingAfterModelEdit(state.lastListedModel, typed, state.thinking);
+    }
+    expect(state).toEqual({ thinking: "high", lastListedModel: "gemini-3.8-flash" });
+    for (const typed of ["gemini-3.8-", "gemini-3.", "gemini-3.5-flash-lite"]) {
+      state = thinkingAfterModelEdit(state.lastListedModel, typed, state.thinking);
+    }
+    expect(state).toEqual({ thinking: "minimal", lastListedModel: "gemini-3.5-flash-lite" });
   });
 
   it("has exactly one default for every offered kind and a selection field for every role", () => {

@@ -63,10 +63,18 @@ export function thinkingFor(model: string, chosen: string): string | undefined {
   return row.thinking.includes(chosen) ? chosen : row.defaultThinking;
 }
 
-// The Thinking value after a model field edit: it starts at the new row's default
-// only when the id resolves to a different row than before, or to a row from none;
-// an edit that resolves to the same row (spacing, case, a retype) keeps the choice.
-export function thinkingAfterModelEdit(previousModel: string, nextModel: string, chosen: string): string {
+// A model field edit: the Thinking value it leaves, and the last listed id the field
+// has held. The value starts at the new row's default only when the edit reaches a
+// different row than that last listed one; an id with no row, passed through while
+// typing or landed on, keeps both, so the choice stays stored, hidden and unsent,
+// and returning to the same row keeps it. A field that opens on an unlisted id has
+// held no row yet, so the first row it reaches sets its default.
+export function thinkingAfterModelEdit(
+  lastListedModel: string,
+  nextModel: string,
+  chosen: string,
+): { thinking: string; lastListedModel: string } {
   const next = rowFor(nextModel);
-  return next && next !== rowFor(previousModel) ? next.defaultThinking : chosen;
+  if (!next) return { thinking: chosen, lastListedModel };
+  return { thinking: next === rowFor(lastListedModel) ? chosen : next.defaultThinking, lastListedModel: nextModel };
 }

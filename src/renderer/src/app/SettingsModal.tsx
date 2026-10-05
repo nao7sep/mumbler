@@ -31,6 +31,7 @@ function ModelField({ label, hint, value, thinking, onChange }: {
 }): ReactElement {
   const { t } = useI18n();
   const row = rowFor(value);
+  const lastListedModel = useRef(value);
   return (
     <>
       <div>
@@ -39,7 +40,11 @@ function ModelField({ label, hint, value, thinking, onChange }: {
           <input
             spellCheck={false}
             value={value}
-            onChange={(event) => onChange(event.target.value, thinkingAfterModelEdit(value, event.target.value, thinking))}
+            onChange={(event) => {
+              const edit = thinkingAfterModelEdit(lastListedModel.current, event.target.value, thinking);
+              lastListedModel.current = edit.lastListedModel;
+              onChange(event.target.value, edit.thinking);
+            }}
           />
         </label>
         <p className="field-hint">{hint}</p>

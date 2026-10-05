@@ -280,12 +280,34 @@ describe("SettingsModal language and time zone", () => {
 });
 
 describe("SettingsModal AI tab", () => {
-  async function renderAiTab(value: SettingsDraft, onChange = vi.fn()): Promise<HTMLElement> {
+  // The modal is held the way the app holds it: each change becomes the next draft.
+  function HeldSettings({ initial, onChange }: { initial: SettingsDraft; onChange: (draft: SettingsDraft) => void }) {
+    const [held, setHeld] = React.useState(initial);
+    return React.createElement(SettingsModal, {
+      draft: held,
+      isDirty: false,
+      isSaving: false,
+      isSavingApiKey: false,
+      isPickingOutputDirectory: false,
+      isPickingBackupDirectory: false,
+      errorMessage: null,
+      onChange: (next) => { setHeld(next); onChange(next); },
+      onClose: vi.fn(),
+      onPickOutputDirectory: vi.fn(),
+      onPickBackupDirectory: vi.fn(),
+      onSetApiKey: vi.fn(),
+      onClearApiKey: vi.fn(),
+      onRestoreDefaultPrompts: vi.fn(),
+      onSave: vi.fn(),
+    });
+  }
+
+  async function renderAiTab(value: SettingsDraft, onChange = vi.fn(), held = false): Promise<HTMLElement> {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
     await act(async () => {
-      root?.render(React.createElement(SettingsModal, {
+      root?.render(held ? React.createElement(HeldSettings, { initial: value, onChange }) : React.createElement(SettingsModal, {
         draft: value,
         isDirty: false,
         isSaving: false,
@@ -374,9 +396,29 @@ describe("SettingsModal AI tab", () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ transcriptionModel: "gemini-3.8-flash ", transcriptionThinking: "high" }));
     await type("Structured Transcription Model", "GEMINI-3.8-FLASH");
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ outlineModel: "GEMINI-3.8-FLASH", outlineThinking: "low" }));
-    // From an unlisted id to a listed one still starts at the row's default.
+    // A field that opened on an unlisted id starts at the first row it reaches.
     await type("Metadata Model", "gemini-3.5-flash-lite");
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ metadataModel: "gemini-3.5-flash-lite", metadataThinking: "minimal" }));
+  });
+
+  it("keeps a role's chosen thinking when a letter of its id is deleted and retyped", async () => {
+    const onChange = vi.fn();
+    const panel = await renderAiTab({ ...draft(), outlineModel: "gemini-3.8-flash", outlineThinking: "high" }, onChange, true);
+    const input = Array.from(panel.querySelectorAll<HTMLLabelElement>("label.field"))
+      .find((label) => label.querySelector("span")?.textContent === "Structured Transcription Model")!
+      .querySelector("input")!;
+    const type = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await type("gemini-3.8-flas");
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ outlineModel: "gemini-3.8-flas", outlineThinking: "high" }));
+    await type("gemini-3.8-flash");
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ outlineModel: "gemini-3.8-flash", outlineThinking: "high" }));
+    await type("gemini-3.5-flash-lit");
+    await type("gemini-3.5-flash-lite");
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ outlineModel: "gemini-3.5-flash-lite", outlineThinking: "minimal" }));
   });
 
   it("warns under a model field whose id has no supported row", async () => {
