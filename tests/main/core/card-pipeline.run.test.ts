@@ -92,7 +92,6 @@ function makePaths(): AppPaths {
     homeDir: "/tmp/.mumbler",
     settingsPath: "/tmp/.mumbler/config.json",
     queuePath: "/tmp/.mumbler/queue.json",
-    legacyQueuePath: "/tmp/.mumbler/state.json",
     transcriptsDir: "/tmp/.mumbler/transcripts",
     layoutPath: "/tmp/.mumbler/layout.json",
     apiKeysPath: "/tmp/.mumbler/api-keys.json",

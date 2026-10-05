@@ -97,11 +97,11 @@ describe("the sidecar", () => {
     ).toBeNull();
   });
 
-  it("reads a sidecar with no format version as version 1, and one in a newer format as unreadable, untouched", async () => {
+  it("reads a sidecar without its format version, or in a newer format, as unreadable, untouched", async () => {
     const tag = "autobuild-2026-08-19-19-21";
     const read = () => readInstalledVersion("ffmpeg", join(binDir, "ffmpeg.exe"), binDir, { kind: "sidecar" });
     await writeFile(versionSidecarPath(binDir, "ffmpeg"), JSON.stringify({ version: tag }), "utf8");
-    expect(await read()).toBe(tag);
+    expect(await read()).toBeNull();
 
     const newer = JSON.stringify({ formatVersion: 2, version: tag });
     await writeFile(versionSidecarPath(binDir, "ffmpeg"), newer, "utf8");

@@ -289,8 +289,6 @@ export interface AppPaths {
   homeDir: string;
   settingsPath: string;
   queuePath: string;
-  // The earlier queue filename, renamed only when queuePath is absent.
-  legacyQueuePath: string;
   // One file per card holding its transcription and structured outline, kept out
   // of queuePath so the queue's frequent saves stay small.
   transcriptsDir: string;

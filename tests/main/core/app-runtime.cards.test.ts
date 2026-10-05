@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -164,51 +164,26 @@ afterEach(async () => {
 });
 
 describe("the durable queue store", () => {
-  it("renames a legacy queue without reinterpreting or rewriting its bytes", async () => {
+  it("sets queue.json aside on reset", async () => {
     const [pending] = await dropIn("take.wav");
     await runtime.confirmPendingImports([review(pending)]);
-    await runtime.shutdown();
-    const queue = join(home, "queue.json");
-    const legacy = join(home, "state.json");
-    const original = await readFile(queue, "utf8");
-    await rename(queue, legacy);
-    runtime = await ApplicationRuntime.initialize();
-    expect(cards(runtime.getSnapshot())).toHaveLength(1);
-    expect(await readFile(queue, "utf8")).toBe(original);
-    expect(await exists(legacy)).toBe(false);
-  });
-
-  it("keeps an existing queue authoritative and leaves the legacy file intact", async () => {
-    const [pending] = await dropIn("take.wav");
-    await runtime.confirmPendingImports([review(pending)]);
-    await runtime.shutdown();
-    const legacy = join(home, "state.json");
-    await writeFile(legacy, "legacy bytes must stay here");
-    runtime = await ApplicationRuntime.initialize();
-    expect(cards(runtime.getSnapshot())).toHaveLength(1);
-    expect(await readFile(legacy, "utf8")).toBe("legacy bytes must stay here");
-  });
-
-  it("preserves both queue filenames on reset so legacy work cannot reappear", async () => {
-    const [pending] = await dropIn("take.wav");
-    await runtime.confirmPendingImports([review(pending)]);
-    await writeFile(join(home, "state.json"), "legacy bytes");
+    const original = await readFile(join(home, "queue.json"), "utf8");
     await runtime.resetState();
     expect(await exists(join(home, "queue.json"))).toBe(false);
-    expect(await exists(join(home, "state.json"))).toBe(false);
-    const preserved = (await readdir(home)).find((name) => /^state-.*\.invalid$/.test(name));
+    const preserved = (await readdir(home)).find((name) => /^queue-.*\.invalid$/.test(name));
     expect(preserved).toBeDefined();
-    expect(await readFile(join(home, preserved!), "utf8")).toBe("legacy bytes");
+    expect(await readFile(join(home, preserved!), "utf8")).toBe(original);
   });
 
-  it("does not replace an unreadable present queue with legacy data", async () => {
+  it.each([
+    ["unparseable", "broken queue"],
+    ["without its format version", JSON.stringify({ pendingImports: [], cards: [] })],
+  ])("halts on a queue.json that is %s and leaves it untouched", async (_kind, bytes) => {
     await runtime.shutdown();
-    await writeFile(join(home, "queue.json"), "broken queue");
-    await writeFile(join(home, "state.json"), "legacy bytes");
+    await writeFile(join(home, "queue.json"), bytes);
     runtime = await ApplicationRuntime.initialize();
-    expect(runtime.getSnapshot().startupDiagnostic).not.toBeNull();
-    expect(await readFile(join(home, "queue.json"), "utf8")).toBe("broken queue");
-    expect(await readFile(join(home, "state.json"), "utf8")).toBe("legacy bytes");
+    expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({ title: { key: "diagnostic.corruptTitle" }, canReset: true });
+    expect(await readFile(join(home, "queue.json"), "utf8")).toBe(bytes);
   });
 });
 
@@ -387,6 +362,7 @@ describe("working with a card", () => {
               status: "Ready to Save" as const,
               transcription: { text: "the words from the old span" },
               metadata: { structured: "notes", title: "Old title", slug: "old-title" },
+              transcribedTrim: { ...card.trim },
               ai: { transcription: run, structured: run, title: run, slug: run },
             }
           : card,
@@ -947,7 +923,7 @@ describe("settings, secrets and the window's own state", () => {
   it("logs an invalid settings set the store reads after a reset", async () => {
     await runtime.resetState();
     const warn = vi.spyOn(runtime.currentLogger(), "warn");
-    await writeFile(join(home, "config.json"), JSON.stringify({ theme: "sepia" }));
+    await writeFile(join(home, "config.json"), JSON.stringify({ formatVersion: 1, theme: "sepia" }));
     const { settingsStore } = (runtime as unknown as { runtime: { settingsStore: { load(): Promise<unknown> } } }).runtime;
 
     await settingsStore.load();

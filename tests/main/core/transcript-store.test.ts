@@ -119,11 +119,14 @@ describe("TranscriptStore", () => {
     expect(await readFile(join(dir, name), "utf8")).toBe(newer);
   });
 
-  it("reads a file with no format version as version 1", async () => {
+  it("refuses a file without its format version as unreadable and leaves it in place", async () => {
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, `${Buffer.from("take").toString("hex")}.json`), JSON.stringify({ cardId: "take", transcription: "words", structured: null }));
+    const path = join(dir, `${Buffer.from("take").toString("hex")}.json`);
+    const unmarked = JSON.stringify({ cardId: "take", transcription: "words", structured: null });
+    await writeFile(path, unmarked);
 
-    expect((await new TranscriptStore(dir).open(["take"])).get("take")).toEqual({ transcription: "words", structured: null });
+    await expect(new TranscriptStore(dir).open(["take"])).rejects.toBeInstanceOf(CorruptStateError);
+    expect(await readFile(path, "utf8")).toBe(unmarked);
   });
 
   it("ignores files it did not name", async () => {

@@ -60,13 +60,9 @@ function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-// Read a UTC instant written either as canonical ISO-8601 (current) or as a raw
-// epoch-ms number (files written before this store serialized timestamps).
-// Garbage yields null rather than a false "checked just now".
+// Read a UTC instant written as canonical ISO-8601. Garbage yields null rather
+// than a false "checked just now".
 function asUtcMs(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
   if (typeof value === "string") {
     const ms = Date.parse(value);
     return Number.isNaN(ms) ? null : ms;
@@ -76,9 +72,6 @@ function asUtcMs(value: unknown): number | null {
 
 function normalizeFacts(raw: unknown): PersistedToolFacts {
   const record = raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  // Fields from earlier models — installedVersion, and the older installedSha256,
-  // faulted, lastError, lastCheckError — are simply not read here, so they drop on
-  // the next save (the app is pre-release; no migration code).
   return {
     desiredVersion: asString(record.desiredVersion),
     lastCheckedAtUtc: asUtcMs(record.lastCheckedAtUtc),

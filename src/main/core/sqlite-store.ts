@@ -6,10 +6,11 @@ import { NewerFormatError } from "./format-versions.ts";
 
 /**
  * Opens one of Mumbler's SQLite stores in WAL mode with its schema, its format
- * version recorded in `PRAGMA user_version` (store-recovery-conventions; 0, the
- * unset value, reads as 1). A database that records a newer version is closed
- * untouched and throws NewerFormatError. Imported with its extension by the
- * worker engines, which Node runs with type stripping.
+ * version recorded in `PRAGMA user_version` (store-recovery-conventions). A new,
+ * empty database is stamped as it is created; one that holds tables but no
+ * version is unreadable, and one that records a newer version throws
+ * NewerFormatError; either is closed untouched. Imported with its extension by
+ * the worker engines, which Node runs with type stripping.
  */
 export function openVersionedDatabase(file: string, formatVersion: number, schema: string): DatabaseSync {
   mkdirSync(path.dirname(file), { recursive: true });
@@ -19,6 +20,9 @@ export function openVersionedDatabase(file: string, formatVersion: number, schem
     const { user_version: recorded } = db.prepare("PRAGMA user_version").get() as { user_version: number };
     if (recorded > formatVersion) {
       throw new NewerFormatError(file, recorded, formatVersion);
+    }
+    if (recorded === 0 && db.prepare("SELECT 1 FROM sqlite_master LIMIT 1").get() !== undefined) {
+      throw new Error(`${file} records no format version.`);
     }
     db.exec("PRAGMA journal_mode = WAL");
     db.exec(schema);

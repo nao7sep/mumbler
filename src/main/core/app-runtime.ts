@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
-import { chmod, lstat, mkdir, rename, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -52,7 +52,7 @@ import { NewerFormatError } from "./format-versions";
 import { CorruptStateError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
-import { isMissingFileError, preserveAside } from "./file-io";
+import { preserveAside } from "./file-io";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState } from "./working-files";
 import {
   buildMarkdownContent,
@@ -286,11 +286,6 @@ export class ApplicationRuntime {
         makeApiKeyWarn(logger),
       );
 
-      if (await renameLegacyQueue(paths)) {
-        await logger.info("app.queue-rename", "Renamed the legacy card queue store.", {
-          from: paths.legacyQueuePath, to: paths.queuePath,
-        });
-      }
       const stateLoad = await queueStore.load();
       const recovered = recoverInterruptedCards(stateLoad.value);
       const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
@@ -706,7 +701,6 @@ export class ApplicationRuntime {
       // Preserve each store before the user-commanded reset returns to built-ins.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
       const preservedStateFiles = await queueStore.preserveExistingFiles();
-      const preservedLegacyQueue = await preserveAside(paths.legacyQueuePath);
       // The preserved queue.json keeps its cards' text beside it.
       const preservedTranscripts = await preserveAside(paths.transcriptsDir);
       const preservedLayoutFiles = await layoutStore.preserveExistingFiles();
@@ -718,7 +712,6 @@ export class ApplicationRuntime {
         workingDir: paths.workingDir,
         preservedSettingsFiles,
         preservedStateFiles,
-        preservedLegacyQueue,
         preservedTranscripts,
         preservedLayoutFiles,
         deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
@@ -1901,7 +1894,6 @@ export function getAppPaths(): AppPaths {
     homeDir,
     settingsPath: join(homeDir, "config.json"),
     queuePath: join(homeDir, "queue.json"),
-    legacyQueuePath: join(homeDir, "state.json"),
     transcriptsDir: join(homeDir, "transcripts"),
     layoutPath: join(homeDir, "layout.json"),
     apiKeysPath: join(homeDir, "api-keys.json"),
@@ -1914,24 +1906,6 @@ export function getAppPaths(): AppPaths {
     dependenciesPath: join(homeDir, "dependencies.json"),
     tempDir: join(homeDir, "temp"),
   };
-}
-
-// The rename preserves the original bytes. A present queue (even unreadable)
-// always wins; only the missing-file branch may consume the legacy filename.
-async function renameLegacyQueue(paths: AppPaths): Promise<boolean> {
-  try {
-    await lstat(paths.queuePath);
-    return false;
-  } catch (error) {
-    if (!isMissingFileError(error)) throw error;
-  }
-  try {
-    await rename(paths.legacyQueuePath, paths.queuePath);
-    return true;
-  } catch (error) {
-    if (!isMissingFileError(error)) throw error;
-    return false;
-  }
 }
 
 function createLoggedSettingsStore(settingsPath: string, logger: AppLogger): SettingsStore {

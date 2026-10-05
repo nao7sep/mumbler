@@ -340,20 +340,13 @@ function normalizeCardRecord(card: MumblerCard, undatedTime: UndatedItemTime): M
   // save/reload now that instants serialize as ISO, and selectNextQueuedCard
   // would then skip the card forever.
   const queuedAtUtc = queuedMode !== null ? (parseUtcMs(card.queuedAtUtc) ?? fallback) : null;
-  const transcriptionRun = normalizeAiRunInfo(card.ai?.transcription, fallback);
-  // Before a trim kept results, every stored transcription matched the card's
-  // current trim, so a record without transcribedTrim takes it from there. The
-  // text itself lives in the card's transcript file (TranscriptStore), so the run
-  // info is what says a transcription exists.
-  const transcribedTrim =
-    transcriptionRun === null ? null : (card.transcribedTrim ?? { ...card.trim });
 
   return {
     ...card,
     audioProfile: card.audioProfile ?? null,
     // Filled from the card's transcript file once it is read.
     transcription: { text: null },
-    transcribedTrim,
+    transcribedTrim: card.transcribedTrim ?? null,
     timestamps: {
       ...card.timestamps,
       confirmedUtc,
@@ -366,7 +359,7 @@ function normalizeCardRecord(card: MumblerCard, undatedTime: UndatedItemTime): M
       slug: card.metadata?.slug ?? null,
     },
     ai: {
-      transcription: transcriptionRun,
+      transcription: normalizeAiRunInfo(card.ai?.transcription, fallback),
       structured: normalizeAiRunInfo(card.ai?.structured, fallback),
       title: normalizeAiRunInfo(card.ai?.title, fallback),
       slug: normalizeAiRunInfo(card.ai?.slug, fallback),
@@ -393,9 +386,7 @@ function normalizeQueue(raw: Record<string, unknown>, undatedTime: UndatedItemTi
 // epoch-ms number and named with the convention's `*Utc` suffix) becomes the
 // canonical ISO-8601 string, while everything else passes through unchanged.
 // The model keeps epoch-ms for arithmetic/sorting; this converts only at the
-// persistence edge. The read path (parseUtcMs) accepts both ISO and
-// epoch-ms, so a legacy numeric queue.json keeps loading and is rewritten as ISO
-// on the next save — no migration step.
+// persistence edge; the read path (parseUtcMs) turns the ISO back into epoch-ms.
 function serializeUtcInstants(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(serializeUtcInstants);

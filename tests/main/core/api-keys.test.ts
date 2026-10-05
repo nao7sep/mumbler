@@ -140,7 +140,7 @@ describe("API key secrets store", () => {
   });
 
   it("treats an untagged stored value as plaintext (a hand-pasted key)", async () => {
-    await writeFile(apiKeysPath, JSON.stringify({ keys: { gemini: "sk-plain-pasted" } }), "utf8");
+    await writeFile(apiKeysPath, JSON.stringify({ formatVersion: 1, keys: { gemini: "sk-plain-pasted" } }), "utf8");
     expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("sk-plain-pasted");
   });
 
@@ -155,7 +155,7 @@ describe("API key secrets store", () => {
     // non-canonical base64, so it must never reach a provider as a "decoded" key.
     await writeFile(
       apiKeysPath,
-      JSON.stringify({ keys: { gemini: "obf:not-valid-base64!!" } }),
+      JSON.stringify({ formatVersion: 1, keys: { gemini: "obf:not-valid-base64!!" } }),
       "utf8",
     );
 
@@ -168,7 +168,7 @@ describe("API key secrets store", () => {
   });
 
   it("matches stored key ids case-insensitively", async () => {
-    await writeFile(apiKeysPath, JSON.stringify({ keys: { Gemini: "case-key" } }), "utf8");
+    await writeFile(apiKeysPath, JSON.stringify({ formatVersion: 1, keys: { Gemini: "case-key" } }), "utf8");
     expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("case-key");
   });
 
@@ -251,9 +251,16 @@ describe("API key secrets store", () => {
     expect(entries).not.toContain("api-keys.json");
   });
 
-  it("reads a key file with no format version as version 1", async () => {
-    await writeFile(apiKeysPath, JSON.stringify({ keys: { gemini: "hand-pasted" } }), "utf8");
-    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("hand-pasted");
+  it("moves a key file without its format version aside and resolves to no key", async () => {
+    const unmarked = JSON.stringify({ keys: { gemini: "hand-pasted" } });
+    await writeFile(apiKeysPath, unmarked, "utf8");
+    const warn = vi.fn();
+
+    await expect(resolveApiKey(apiKeysPath, "gemini", warn)).resolves.toBeNull();
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("unexpected shape"), expect.objectContaining({ path: apiKeysPath }));
+    const preserved = (await readdir(home)).find((entry) => /^api-keys-.*\.invalid$/.test(entry));
+    expect(await readFile(join(home, preserved!), "utf8")).toBe(unmarked);
   });
 
   it("leaves a key file in a newer format in place, reads no key from it, and refuses to write over it", async () => {

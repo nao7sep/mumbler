@@ -301,7 +301,6 @@ describe("getAppPaths standard layout", () => {
   it("keeps config.json separate from the queue, layout, and secrets stores", () => {
     const paths = withRoot(() => getAppPaths());
     expect(paths.queuePath).toBe(join(ROOT, "queue.json"));
-    expect(paths.legacyQueuePath).toBe(join(ROOT, "state.json"));
     expect(paths.layoutPath).toBe(join(ROOT, "layout.json"));
     expect(paths.apiKeysPath).toBe(join(ROOT, "api-keys.json"));
 

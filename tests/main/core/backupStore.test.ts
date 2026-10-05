@@ -231,10 +231,13 @@ describe("record — format version", () => {
     }
   });
 
-  it("leaves a history in a newer format untouched, warning once and recording nothing", async () => {
-    const newer = new DatabaseSync(storeFilePath);
-    newer.exec("CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 2;");
-    newer.close();
+  it.each([
+    ["in a newer format", "CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 2;", "newer than this build reads"],
+    ["without its format version", "CREATE TABLE backups (id INTEGER PRIMARY KEY);", "records no format version"],
+  ])("leaves a history %s untouched, warning once and recording nothing", async (_kind, setup, reported) => {
+    const existing = new DatabaseSync(storeFilePath);
+    existing.exec(setup);
+    existing.close();
     const before = createHash("sha256").update(readFileSync(storeFilePath)).digest("hex");
     const warn = vi.fn<BackupWarn>();
     setBackupStoreWarn(warn);
@@ -246,7 +249,7 @@ describe("record — format version", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("could not open"),
-      expect.objectContaining({ error: expect.stringContaining("newer than this build reads") }),
+      expect.objectContaining({ error: expect.stringContaining(reported) }),
     );
     expect(createHash("sha256").update(readFileSync(storeFilePath)).digest("hex")).toBe(before);
     expect(readdirSync(root)).not.toContain("backups.sqlite3-wal");

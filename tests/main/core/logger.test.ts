@@ -168,10 +168,13 @@ describe("createLogger", () => {
     }
   });
 
-  it("leaves a database in a newer format untouched, and keeps its lines in the fallback file", async () => {
-    const newer = new DatabaseSync(recordsPath);
-    newer.exec("CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 2;");
-    newer.close();
+  it.each([
+    ["in a newer format", "CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 2;", "newer than this build reads"],
+    ["without its format version", "CREATE TABLE logs (id INTEGER PRIMARY KEY);", "records no format version"],
+  ])("leaves a database %s untouched, and keeps its lines in the fallback file", async (_kind, setup, reported) => {
+    const existing = new DatabaseSync(recordsPath);
+    existing.exec(setup);
+    existing.close();
     const before = await readFile(recordsPath);
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     try {
@@ -180,7 +183,7 @@ describe("createLogger", () => {
       await logger.close();
 
       expect((await fallbackLines())[0]).toMatchObject({ kind: "log", message: "kept anyway" });
-      expect(stderr.mock.calls.some(([text]) => String(text).includes("newer than this build reads"))).toBe(true);
+      expect(stderr.mock.calls.some(([text]) => String(text).includes(reported))).toBe(true);
       expect(await readFile(recordsPath)).toEqual(before);
       expect(await readdir(dir)).not.toContain("records.sqlite3-wal");
     } finally {

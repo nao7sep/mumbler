@@ -73,15 +73,9 @@ describe("JsonStore.load", () => {
     expect((await readdir(dir)).sort()).toEqual(["doc.json"]);
   });
 
-  it("reads a file with no format version as version 1", async () => {
+  it("treats a missing format version, or one that is not a positive integer, as corruption, untouched", async () => {
     const store = makeStore();
-    await writeFile(store.path, JSON.stringify({ value: "unmarked" }), "utf8");
-    expect(await store.load()).toEqual({ value: { value: "unmarked" }, origin: "loaded" });
-  });
-
-  it("treats a format version that is not a positive integer as corruption, untouched", async () => {
-    const store = makeStore();
-    for (const marker of [0, -1, 1.5, "1", null]) {
+    for (const marker of [undefined, 0, -1, 1.5, "1", null]) {
       const text = JSON.stringify({ formatVersion: marker, value: "odd" });
       await writeFile(store.path, text, "utf8");
       await expect(store.load()).rejects.toBeInstanceOf(CorruptStateError);
@@ -106,9 +100,9 @@ describe("JsonStore.save / flush", () => {
 
   it("update() writes the format version with the changed value", async () => {
     const store = makeStore();
-    await writeFile(store.path, JSON.stringify({ value: "unmarked" }), "utf8");
+    await writeFile(store.path, JSON.stringify({ formatVersion: 1, value: "stored" }), "utf8");
     await store.update((current) => ({ value: `${current.value}!` }));
-    expect(await read(store.path)).toEqual({ formatVersion: 1, value: "unmarked!" });
+    expect(await read(store.path)).toEqual({ formatVersion: 1, value: "stored!" });
   });
 
   it("update() refuses a newer file and writes nothing over it", async () => {

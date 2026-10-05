@@ -40,9 +40,9 @@ describe("dependencies store — timestamp persistence", () => {
     expect(reloaded.tools.ffmpeg.desiredVersion).toBe("8.2");
   });
 
-  // The installed version is read from the binary, not from here. An older file
-  // carrying one drops it on the next save rather than being migrated.
-  it("does not persist an installed version, and drops one an older file holds", async () => {
+  // The installed version is read from the binary, not from here; an unknown key
+  // in the file is ignored and dropped on the next save.
+  it("does not persist an installed version, and drops one the file holds", async () => {
     await writeFile(
       storePath(),
       JSON.stringify({
@@ -84,23 +84,6 @@ describe("dependencies store — timestamp persistence", () => {
     await store.save((await store.load()).value);
     await closeBackupStore();
     expect(await readdir(dir)).not.toContain("backups.sqlite3");
-  });
-
-  it("still reads a legacy epoch-ms number from an older file", async () => {
-    await writeFile(
-      storePath(),
-      JSON.stringify({
-        formatVersion: 1,
-        tools: {
-          ffmpeg: { installedVersion: "8.1", desiredVersion: "8.1", lastCheckedAtUtc: 1_699_000_000_000 },
-          ffprobe: {},
-        },
-      }),
-      "utf8",
-    );
-    const reloaded = (await createDependenciesStore(storePath()).load()).value;
-    expect(reloaded.tools.ffmpeg.lastCheckedAtUtc).toBe(1_699_000_000_000);
-    expect(reloaded.tools.ffprobe.lastCheckedAtUtc).toBeNull();
   });
 });
 

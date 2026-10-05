@@ -45,11 +45,11 @@ export class NewerFormatError extends Error {
 }
 
 /**
- * The format version a JSON document records in `formatVersion`. A missing
- * marker reads as 1; null means the marker is not a positive integer.
+ * The format version a JSON document records in `formatVersion`, or null when
+ * the marker is missing or not a positive integer, which makes the store
+ * unreadable.
  */
 export function recordedFormatVersion(document: Record<string, unknown>): number | null {
   const marker = document.formatVersion;
-  if (marker === undefined) return 1;
   return typeof marker === "number" && Number.isSafeInteger(marker) && marker >= 1 ? marker : null;
 }

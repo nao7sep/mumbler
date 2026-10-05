@@ -15,12 +15,12 @@ export class CorruptStateError extends Error {
 }
 
 // Checks the format version a JSON document records against the one this build
-// reads: an unusable marker is corruption, and a newer one is intact data this
-// build leaves alone (store-recovery-conventions).
+// reads: a missing or unusable marker is corruption, and a newer one is intact
+// data this build leaves alone (store-recovery-conventions).
 export function assertReadableFormat(filePath: string, document: Record<string, unknown>, supported: number): void {
   const recorded = recordedFormatVersion(document);
   if (recorded === null) {
-    throw new CorruptStateError(filePath, "formatVersion is not a positive integer");
+    throw new CorruptStateError(filePath, "formatVersion is missing or not a positive integer");
   }
   if (recorded > supported) {
     throw new NewerFormatError(filePath, recorded, supported);
