@@ -42,7 +42,7 @@ Each model field holds its default until you type another model ID. An ID Mumble
 
 ## Tests
 
-`npm test` runs the type check and the whole ordinary suite, the same set every time. `npm run test:full` runs that, then the live lane: the real app runtime against the real Gemini API and the managed ffmpeg and ffprobe, over the shared test-fixture corpus in the company repository, which must be checked out beside this one. Export `GEMINI_API_KEY` first; the lane makes a few paid Gemini calls, and the full run fails without the key. The first run downloads ffmpeg and ffprobe into `node_modules/.cache`, and later runs download them again only when a newer build is available.
+`npm test` runs the type check and the whole ordinary suite, the same set every time. `npm run test:full` runs that, then the live lane: one short request on each supported Gemini model and kind, then the real app runtime against the real Gemini API and the managed ffmpeg and ffprobe, over the shared test-fixture corpus in the company repository, which must be checked out beside this one. Export `GEMINI_API_KEY` first; the lane makes a few paid Gemini calls, and the full run fails without the key. The first run downloads ffmpeg and ffprobe into `node_modules/.cache`, and later runs download them again only when a newer build is available.
 
 ## License
 
