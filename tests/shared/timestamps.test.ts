@@ -10,7 +10,6 @@ import {
   DEFAULT_TIMESTAMP_PATTERN,
   parseUtcMs,
   parseTimestampFromFilename,
-  parseUtcFromDisplay,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
@@ -148,16 +147,20 @@ describe("parseUtcMs", () => {
     expect(parseUtcMs(1_700_000_000_000)).toBeNull();
   });
 
-  it("parses a display-format string", () => {
-    expect(parseUtcMs("2026-04-22 00:44:00")).toBe(parseUtcFromDisplay("2026-04-22 00:44:00"));
+  it("reads the canonical ISO form it writes", () => {
+    expect(parseUtcMs("2026-04-22T00:44:00.007Z")).toBe(Date.UTC(2026, 3, 22, 0, 44, 0, 7));
   });
 
-  it("parses a -utc marker string", () => {
-    expect(parseUtcMs("20260422-004400-utc")).toBe(Date.UTC(2026, 3, 22, 0, 44, 0));
-  });
-
-  it("parses an ISO string via the Date fallback", () => {
-    expect(parseUtcMs("2026-04-22T00:44:00Z")).toBe(Date.UTC(2026, 3, 22, 0, 44, 0));
+  it("reads every other form as no stored time", () => {
+    for (const other of [
+      "2026-04-22 00:44:00",
+      "20260422-004400-utc",
+      "2026-04-22T00:44:00Z",
+      "2026-04-22T00:44:00.000+00:00",
+      "2026-02-30T00:00:00.000Z",
+    ]) {
+      expect(parseUtcMs(other), other).toBeNull();
+    }
   });
 
   it("reads a missing or unparseable value as null, never as the current time", () => {

@@ -17,8 +17,6 @@ interface TimestampParts {
 
 const LOCAL_TIMESTAMP_PATTERN =
   /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2}) (?<hour>\d{2}):(?<minute>\d{2}):(?<second>\d{2})$/;
-const UTC_MARKER_PATTERN =
-  /^(?<year>\d{4})(?<month>\d{2})(?<day>\d{2})-(?<hour>\d{2})(?<minute>\d{2})(?<second>\d{2})-utc$/;
 
 export function getSupportedTimezones(): string[] {
   const intlWithSupportedValues = Intl as typeof Intl & {
@@ -212,19 +210,14 @@ export function formatUtcMarkerMs(date: Date): string {
   );
 }
 
-// Reads a stored UTC instant, or null when it is missing or unreadable. What
-// stands in for an unreadable time is the caller's to decide from the times its
-// item recorded (content-lifecycle-conventions, "A missing time is not made up").
+// Reads a stored UTC instant in the one form formatUtcIsoCompact writes, or null
+// when it is missing or in any other form. What stands in for an unreadable time
+// is the caller's to decide from the times its item recorded
+// (content-lifecycle-conventions, "A missing time is not made up").
 export function parseUtcMs(value: unknown): number | null {
-  if (typeof value === "string") {
-    const fromDisplay = parseUtcFromDisplay(value);
-    if (fromDisplay !== null) return fromDisplay;
-    const markerDate = parseUtcMarker(value.toLowerCase());
-    if (markerDate !== null) return markerDate.getTime();
-    const d = new Date(value);
-    if (!Number.isNaN(d.getTime())) return d.getTime();
-  }
-  return null;
+  if (typeof value !== "string") return null;
+  const ms = Date.parse(value);
+  return !Number.isNaN(ms) && formatUtcIsoCompact(ms) === value ? ms : null;
 }
 
 function parseLocalTimestamp(value: string): TimestampParts | null {
@@ -233,22 +226,6 @@ function parseLocalTimestamp(value: string): TimestampParts | null {
     return null;
   }
   return groupsToTimestampParts(match.groups);
-}
-
-function parseUtcMarker(value: string): Date | null {
-  const match = UTC_MARKER_PATTERN.exec(value);
-  if (!match?.groups) {
-    return null;
-  }
-
-  const parts = groupsToTimestampParts(match.groups);
-  if (parts === null) {
-    return null;
-  }
-
-  return new Date(
-    Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second),
-  );
 }
 
 function groupsToTimestampParts(groups: Record<string, string>): TimestampParts | null {
