@@ -18,7 +18,7 @@ import {
 import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
 import { THEME_PREFERENCES } from "@shared/app-shell";
-import { AI_ROLES, defaultModelFor, defaultThinkingFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
+import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
 import { JsonStore } from "./json-store";
 import { OperationError } from "./operation-error";
 import { resolvePathFromHome } from "./storage-root";
@@ -164,7 +164,7 @@ function equalsBuiltIn(key: keyof MumblerSettings, settings: MumblerSettings, bu
   const role = THINKING_SET_ROLES.get(key);
   if (role) {
     const row = rowFor(settings[`gemini.${role}`]);
-    return !row || thinkingFor(row.id, role, String(value)) === defaultThinkingFor(row, role);
+    return !row || thinkingFor(row.id, String(value)) === row.defaultThinking;
   }
   if (MODEL_SET_KEYS.has(key)) {
     return typeof value === "string" && value.trim().toLowerCase() === String(builtIn[key]).toLowerCase();
@@ -415,9 +415,9 @@ export function createDefaultSettings(): MumblerSettings {
     "gemini.transcription": defaultModelFor("gemini", "transcription"),
     "gemini.outline": defaultModelFor("gemini", "text-balanced"),
     "gemini.metadata": defaultModelFor("gemini", "text-fast"),
-    "gemini.thinking.transcription": defaultThinkingFor(rowFor(defaultModelFor("gemini", "transcription"))!, "transcription"),
-    "gemini.thinking.outline": defaultThinkingFor(rowFor(defaultModelFor("gemini", "text-balanced"))!, "outline"),
-    "gemini.thinking.metadata": defaultThinkingFor(rowFor(defaultModelFor("gemini", "text-fast"))!, "metadata"),
+    "gemini.thinking.transcription": rowFor(defaultModelFor("gemini", "transcription"))!.defaultThinking,
+    "gemini.thinking.outline": rowFor(defaultModelFor("gemini", "text-balanced"))!.defaultThinking,
+    "gemini.thinking.metadata": rowFor(defaultModelFor("gemini", "text-fast"))!.defaultThinking,
     concurrencyLimit: 3,
     prompts: {
       structured:
@@ -537,7 +537,7 @@ export function summarizeSettings(
 // The draft shows the value a role sends; a model with no row keeps the stored one.
 function draftThinking(settings: MumblerSettings, role: AiRole): string {
   const chosen = settings[`gemini.thinking.${role}`];
-  return thinkingFor(settings[`gemini.${role}`], role, chosen) ?? chosen;
+  return thinkingFor(settings[`gemini.${role}`], chosen) ?? chosen;
 }
 
 export function buildSettingsDraft(

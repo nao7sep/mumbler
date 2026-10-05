@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type ReactElement } from "react";
 
 import { THEME_PREFERENCES, type SettingsDraft } from "@shared/app-shell";
-import { defaultThinkingFor, rowFor, type AiRole } from "@shared/ai-models";
+import { rowFor } from "@shared/ai-models";
 import {
   getSettingsNumberIssues,
   type NumericSettingField,
@@ -22,8 +22,7 @@ const TIMEZONE_REFERENCE_URL = "https://en.wikipedia.org/wiki/List_of_tz_databas
 // One model field: free-typed, with a warning line when the id has no row in
 // SUPPORTED_MODELS, and beside it the role's Thinking field per the
 // ai-model-routing-conventions.
-function ModelField({ role, label, hint, value, thinking, onChange }: {
-  role: AiRole;
+function ModelField({ label, hint, value, thinking, onChange }: {
   label: string;
   hint: string;
   value: string;
@@ -42,7 +41,7 @@ function ModelField({ role, label, hint, value, thinking, onChange }: {
             value={value}
             onChange={(event) => {
               const next = rowFor(event.target.value);
-              onChange(event.target.value, next ? defaultThinkingFor(next, role) : thinking);
+              onChange(event.target.value, next ? next.defaultThinking : thinking);
             }}
           />
         </label>
@@ -458,7 +457,6 @@ export function SettingsModal({
                   {i18n.rich("settings.apiKeyHint", { variable: <code>GEMINI_API_KEY</code> })}
                 </p>
                 <ModelField
-                  role="transcription"
                   label={t("options.transcriptionModel")}
                   hint={t("settings.transcriptionModelHint")}
                   value={draft.transcriptionModel}
@@ -466,7 +464,6 @@ export function SettingsModal({
                   onChange={(transcriptionModel, transcriptionThinking) => onChange({ ...draft, transcriptionModel, transcriptionThinking })}
                 />
                 <ModelField
-                  role="outline"
                   label={t("options.structuredTranscriptionModel")}
                   hint={t("settings.structuredTranscriptionModelHint")}
                   value={draft.outlineModel}
@@ -474,7 +471,6 @@ export function SettingsModal({
                   onChange={(outlineModel, outlineThinking) => onChange({ ...draft, outlineModel, outlineThinking })}
                 />
                 <ModelField
-                  role="metadata"
                   label={t("options.metadataModel")}
                   hint={t("settings.metadataModelHint")}
                   value={draft.metadataModel}

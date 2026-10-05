@@ -328,18 +328,35 @@ describe("SettingsModal AI tab", () => {
     expect(selects.map((select) => select.value)).toEqual(["medium", "minimal"]);
   });
 
-  it("resets a role's thinking to the new model's default when the model changes", async () => {
+  it.each([
+    ["gemini-3.1-pro-preview", ["low", "medium", "high"], "medium"],
+    ["gemini-3.8-flash", ["low", "medium", "high"], "medium"],
+    ["gemini-3.5-flash-lite", ["minimal", "low", "medium", "high"], "minimal"],
+  ])("offers %s on the transcription role with its own Thinking list, in order, at its default", async (model, options, thinking) => {
+    const panel = await renderAiTab({ ...draft(), transcriptionModel: model, transcriptionThinking: thinking, outlineModel: "custom-model" });
+    const selects = Array.from(panel.querySelectorAll("select"));
+    expect(selects.map((select) => [Array.from(select.options).map((option) => option.value), select.value])).toEqual([[options, thinking]]);
+  });
+
+  it("resets a role's thinking to the new model's own default when the model changes", async () => {
     const onChange = vi.fn();
-    const panel = await renderAiTab({ ...draft(), metadataModel: "gemini-3.8-flash", metadataThinking: "high" }, onChange);
-    const input = Array.from(panel.querySelectorAll<HTMLLabelElement>("label.field"))
-      .find((label) => label.querySelector("span")?.textContent === "Metadata Model")!
+    const panel = await renderAiTab({ ...draft(), outlineModel: "gemini-3.8-flash", outlineThinking: "high", metadataModel: "gemini-3.5-flash-lite", metadataThinking: "high" }, onChange);
+    const inputFor = (name: string) => Array.from(panel.querySelectorAll<HTMLLabelElement>("label.field"))
+      .find((label) => label.querySelector("span")?.textContent === name)!
       .querySelector("input")!;
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-    await act(async () => {
-      setValue.call(input, "gemini-3.1-pro-preview");
+    const type = async (name: string, value: string) => act(async () => {
+      const input = inputFor(name);
+      setValue.call(input, value);
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ metadataModel: "gemini-3.1-pro-preview", metadataThinking: "low" }));
+
+    // A smart model on the fast role starts at medium, the smart tier's default.
+    await type("Metadata Model", "gemini-3.1-pro-preview");
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ metadataModel: "gemini-3.1-pro-preview", metadataThinking: "medium" }));
+    // A fast model on the balanced role starts at minimal, the fast tier's default.
+    await type("Structured Transcription Model", "gemini-3.5-flash-lite");
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ outlineModel: "gemini-3.5-flash-lite", outlineThinking: "minimal" }));
   });
 
   it("warns under a model field whose id has no supported row", async () => {

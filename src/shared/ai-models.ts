@@ -3,6 +3,9 @@ export type ModelKind = "text-smart" | "text-balanced" | "text-fast" | "transcri
 export type AiRole = "transcription" | "outline" | "metadata";
 export const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com";
 
+// The lineup research these rows and defaults rest on.
+export const MODEL_LINEUP = "ai-model-lineup-20261004";
+
 export interface SupportedModel {
   provider: AiProvider;
   id: string;
@@ -10,12 +13,16 @@ export interface SupportedModel {
   defaultFor: readonly ModelKind[];
   // The thinking values the model accepts, in the provider's own words, ascending.
   thinking: readonly string[];
+  // The value a role's Thinking field starts at with this model, set by the model's own tier.
+  defaultThinking: string;
 }
 
+// Highest tier first; each row's default thinking follows its own tier
+// (ai-model-routing-conventions, Thinking).
 export const SUPPORTED_MODELS: readonly SupportedModel[] = [
-  { provider: "gemini", id: "gemini-3.1-pro-preview", kinds: ["text-smart"], defaultFor: ["text-smart"], thinking: ["low", "medium", "high"] },
-  { provider: "gemini", id: "gemini-3.8-flash", kinds: ["text-balanced", "transcription"], defaultFor: ["text-balanced", "transcription"], thinking: ["low", "medium", "high"] },
-  { provider: "gemini", id: "gemini-3.5-flash-lite", kinds: ["text-fast"], defaultFor: ["text-fast"], thinking: ["minimal", "low", "medium", "high"] },
+  { provider: "gemini", id: "gemini-3.1-pro-preview", kinds: ["text-smart", "transcription"], defaultFor: ["text-smart"], thinking: ["low", "medium", "high"], defaultThinking: "medium" },
+  { provider: "gemini", id: "gemini-3.8-flash", kinds: ["text-balanced", "transcription"], defaultFor: ["text-balanced", "transcription"], thinking: ["low", "medium", "high"], defaultThinking: "medium" },
+  { provider: "gemini", id: "gemini-3.5-flash-lite", kinds: ["text-fast", "transcription"], defaultFor: ["text-fast"], thinking: ["minimal", "low", "medium", "high"], defaultThinking: "minimal" },
 ];
 
 export const AI_ROLES = [
@@ -48,20 +55,10 @@ export function defaultModelFor(provider: AiProvider, kind: ModelKind): string {
   return row.id;
 }
 
-// A fast role thinks as little as the row allows; every other role thinks
-// adaptively where the row offers it, else at medium, else at its first value.
-export function defaultThinkingFor(row: SupportedModel, role: AiRole): string {
-  const definition = AI_ROLES.find(({ id }) => id === role);
-  if (definition && "kind" in definition && definition.kind === "text-fast") {
-    return row.thinking.find((value) => value === "off" || value === "none") ?? row.thinking[0];
-  }
-  return ["adaptive", "medium"].find((value) => row.thinking.includes(value)) ?? row.thinking[0];
-}
-
-// The value a role sends: its chosen value when the model's row lists it, else the
-// role's default for that row; a model with no row sends no thinking value.
-export function thinkingFor(model: string, role: AiRole, chosen: string): string | undefined {
+// The value a role sends: its chosen value when the model's row lists it, else that
+// row's default; a model with no row sends no thinking value.
+export function thinkingFor(model: string, chosen: string): string | undefined {
   const row = rowFor(model);
   if (!row) return undefined;
-  return row.thinking.includes(chosen) ? chosen : defaultThinkingFor(row, role);
+  return row.thinking.includes(chosen) ? chosen : row.defaultThinking;
 }
