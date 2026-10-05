@@ -58,6 +58,15 @@ describe("applySettingsDraft — happy path", () => {
     for (const prompt of Object.values(createDefaultSettings().prompts)) expect(prompt).toBe(multiline(prompt));
   });
 
+  it("leaves the title and slug answer's format to its strict schema and states only the value's rules", () => {
+    const { title, slug } = createDefaultSettings().prompts;
+    for (const prompt of [title, slug]) {
+      expect(prompt).not.toMatch(/output only|reply with|json/i);
+    }
+    expect(title).toContain("in the source's language");
+    expect(slug).toContain("Lowercase a–z, digits, and hyphens only");
+  });
+
   it("cleans prompts as multiline bodies and scalars as single lines", () => {
     const defaults = createDefaultSettings();
     const result = applySettingsDraft(defaults, {
