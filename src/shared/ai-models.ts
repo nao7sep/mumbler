@@ -62,3 +62,11 @@ export function thinkingFor(model: string, chosen: string): string | undefined {
   if (!row) return undefined;
   return row.thinking.includes(chosen) ? chosen : row.defaultThinking;
 }
+
+// The Thinking value after a model field edit: it starts at the new row's default
+// only when the id resolves to a different row than before, or to a row from none;
+// an edit that resolves to the same row (spacing, case, a retype) keeps the choice.
+export function thinkingAfterModelEdit(previousModel: string, nextModel: string, chosen: string): string {
+  const next = rowFor(nextModel);
+  return next && next !== rowFor(previousModel) ? next.defaultThinking : chosen;
+}

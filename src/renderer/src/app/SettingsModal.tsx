@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type ReactElement } from "react";
 
 import { THEME_PREFERENCES, type SettingsDraft } from "@shared/app-shell";
-import { rowFor } from "@shared/ai-models";
+import { rowFor, thinkingAfterModelEdit } from "@shared/ai-models";
 import {
   getSettingsNumberIssues,
   type NumericSettingField,
@@ -39,10 +39,7 @@ function ModelField({ label, hint, value, thinking, onChange }: {
           <input
             spellCheck={false}
             value={value}
-            onChange={(event) => {
-              const next = rowFor(event.target.value);
-              onChange(event.target.value, next ? next.defaultThinking : thinking);
-            }}
+            onChange={(event) => onChange(event.target.value, thinkingAfterModelEdit(value, event.target.value, thinking))}
           />
         </label>
         <p className="field-hint">{hint}</p>

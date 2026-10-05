@@ -359,6 +359,26 @@ describe("SettingsModal AI tab", () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ outlineModel: "gemini-3.5-flash-lite", outlineThinking: "minimal" }));
   });
 
+  it("keeps a role's chosen thinking while the model field still resolves to the same row", async () => {
+    const onChange = vi.fn();
+    const panel = await renderAiTab({ ...draft(), transcriptionModel: "gemini-3.8-flash", transcriptionThinking: "high", outlineModel: "gemini-3.8-flash", outlineThinking: "low", metadataModel: "custom-model", metadataThinking: "high" }, onChange);
+    const type = async (name: string, value: string) => act(async () => {
+      const input = Array.from(panel.querySelectorAll<HTMLLabelElement>("label.field"))
+        .find((label) => label.querySelector("span")?.textContent === name)!
+        .querySelector("input")!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await type("Transcription Model", "gemini-3.8-flash ");
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ transcriptionModel: "gemini-3.8-flash ", transcriptionThinking: "high" }));
+    await type("Structured Transcription Model", "GEMINI-3.8-FLASH");
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ outlineModel: "GEMINI-3.8-FLASH", outlineThinking: "low" }));
+    // From an unlisted id to a listed one still starts at the row's default.
+    await type("Metadata Model", "gemini-3.5-flash-lite");
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ metadataModel: "gemini-3.5-flash-lite", metadataThinking: "minimal" }));
+  });
+
   it("warns under a model field whose id has no supported row", async () => {
     const panel = await renderAiTab({ ...draft(), transcriptionModel: " GEMINI-3.8-FLASH ", outlineModel: "gemini-3.8-flash", metadataModel: "custom-model" });
     const warnings = Array.from(panel.querySelectorAll(".field-hint--warning")).map((node) => node.textContent);
