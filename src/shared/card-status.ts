@@ -18,7 +18,7 @@ export function isCardBusy(card: MumblerCard): boolean {
   );
 }
 
-function sameTrim(left: CardTrim, right: CardTrim): boolean {
+export function sameTrim(left: CardTrim, right: CardTrim): boolean {
   return left.frontMarkerSec === right.frontMarkerSec && left.backMarkerSec === right.backMarkerSec;
 }
 

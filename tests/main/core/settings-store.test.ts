@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -216,6 +216,129 @@ describe("queue data store", () => {
     await store.save(value);
     const raw = JSON.parse(await readFile(queuePath(), "utf8"));
     expect(raw.cards[0].createdAtUtc).toBe("2026-04-22T00:00:00.000Z");
+  });
+
+  describe("a time the file holds unreadable", () => {
+    const UPDATED = Date.UTC(2026, 3, 23, 5, 0, 0);
+    const EFFECTIVE = Date.UTC(2026, 3, 22, 0, 45, 5);
+
+    async function loadRaw(raw: Record<string, unknown>): Promise<MumblerQueue> {
+      await writeFile(queuePath(), JSON.stringify({ schemaVersion: 2, pendingImports: [], cards: [], ...raw }), "utf8");
+      return (await createQueueStore(queuePath()).load()).value;
+    }
+
+    /** A card whose every time is missing or unreadable. */
+    function undatedCard(sourceFilePath: string): Record<string, unknown> {
+      const { createdAtUtc: _created, updatedAtUtc: _updated, ...rest } = card({ id: "u", sourceFilePath });
+      return {
+        ...rest,
+        timestamps: { ...rest.timestamps, confirmedUtc: "not a time", effectiveUtc: null },
+      };
+    }
+
+    it("takes it from the card's other recorded times, never from the moment of loading", async () => {
+      const [loaded] = (
+        await loadRaw({
+          cards: [
+            {
+              ...card({ id: "x", status: "Queued", queuedMode: "generate" }),
+              createdAtUtc: "garbled",
+              updatedAtUtc: new Date(UPDATED).toISOString(),
+              queuedAtUtc: "garbled",
+              timestamps: { ...card().timestamps, frontTrimOffsetSec: 65.5, confirmedUtc: null, effectiveUtc: EFFECTIVE },
+              trimDecision: { kind: "stream-copy", analyzedAtUtc: "garbled" },
+              ai: { transcription: { provider: "gemini", model: "m", generatedAtUtc: null }, structured: null, title: null, slug: null },
+              lastError: { message: "failed", occurredAtUtc: {}, failedStep: "transcription" },
+            },
+          ],
+        })
+      ).cards;
+
+      expect(loaded.createdAtUtc).toBe(UPDATED);
+      expect(loaded.updatedAtUtc).toBe(UPDATED);
+      expect(loaded.queuedAtUtc).toBe(UPDATED);
+      expect(loaded.trimDecision?.analyzedAtUtc).toBe(UPDATED);
+      expect(loaded.ai.transcription?.generatedAtUtc).toBe(UPDATED);
+      expect(loaded.lastError?.occurredAtUtc).toBe(UPDATED);
+      // The recording time comes back from its effective twin, less the whole
+      // seconds the front trim moved it.
+      expect(loaded.timestamps.confirmedUtc).toBe(EFFECTIVE - 65_000);
+      expect(loaded.timestamps.effectiveUtc).toBe(EFFECTIVE);
+    });
+
+    it("takes a missing updated time from the created time, and the effective time from the confirmed one", async () => {
+      const [loaded] = (
+        await loadRaw({
+          cards: [
+            {
+              ...card({ id: "x" }),
+              updatedAtUtc: null,
+              timestamps: { ...card().timestamps, frontTrimOffsetSec: 3, effectiveUtc: "garbled" },
+            },
+          ],
+        })
+      ).cards;
+
+      expect(loaded.updatedAtUtc).toBe(Date.UTC(2026, 3, 22, 0, 0, 0));
+      expect(loaded.timestamps.effectiveUtc).toBe(Date.UTC(2026, 3, 22, 0, 44, 3));
+    });
+
+    it("takes a pending import's missing time from its other one", async () => {
+      const item = {
+        id: "p",
+        originalFilename: "a.m4a",
+        importSource: "file-picker",
+        originalSourcePath: "/tmp/a.m4a",
+        workingFilePath: "/tmp/a.m4a",
+        fileSizeBytes: 1,
+        localTimestampText: "",
+        timezone: "Asia/Tokyo",
+        utcTimestampText: "",
+        parseStatus: "manual-required",
+        deleteOriginalOnConfirm: false,
+        copyToBackupOnConfirm: false,
+      };
+      const { pendingImports } = await loadRaw({
+        pendingImports: [
+          { ...item, id: "a", createdAtUtc: "garbled", updatedAtUtc: UPDATED },
+          { ...item, id: "b", createdAtUtc: UPDATED },
+        ],
+      });
+
+      expect(pendingImports.map((entry) => [entry.createdAtUtc, entry.updatedAtUtc])).toEqual([
+        [UPDATED, UPDATED],
+        [UPDATED, UPDATED],
+      ]);
+    });
+
+    it("dates a card that recorded no time by its audio file's modified time", async () => {
+      const audio = join(dir, "take.wav");
+      await writeFile(audio, "audio");
+      const modified = new Date(Date.UTC(2025, 0, 2, 3, 4, 5));
+      await utimes(audio, modified, modified);
+
+      const [loaded] = (await loadRaw({ cards: [undatedCard(audio)] })).cards;
+
+      expect(loaded.createdAtUtc).toBe(modified.getTime());
+      expect(loaded.updatedAtUtc).toBe(modified.getTime());
+      expect(loaded.timestamps.confirmedUtc).toBe(modified.getTime());
+      expect(loaded.timestamps.effectiveUtc).toBe(modified.getTime());
+    });
+
+    it("dates it by the queue file that recorded it when its audio file is gone too", async () => {
+      await writeFile(
+        queuePath(),
+        JSON.stringify({ schemaVersion: 2, pendingImports: [], cards: [undatedCard(join(dir, "gone.wav"))] }),
+        "utf8",
+      );
+      const modified = new Date(Date.UTC(2025, 5, 6, 7, 8, 9));
+      await utimes(queuePath(), modified, modified);
+
+      const [loaded] = (await createQueueStore(queuePath()).load()).value.cards;
+
+      expect(loaded.createdAtUtc).toBe(modified.getTime());
+      expect(loaded.timestamps.effectiveUtc).toBe(modified.getTime());
+    });
   });
 
   it("refuses (does not overwrite) a state file from a newer schema version", async () => {

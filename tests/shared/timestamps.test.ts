@@ -8,7 +8,7 @@ import {
   getUtcTimestampError,
   isValidTimezone,
   DEFAULT_TIMESTAMP_PATTERN,
-  normalizeUtcMs,
+  parseUtcMs,
   parseTimestampFromFilename,
   parseUtcFromDisplay,
   recomputeLocalFromUtc,
@@ -143,27 +143,27 @@ describe("formatUtcIsoCompact", () => {
   });
 });
 
-describe("normalizeUtcMs", () => {
+describe("parseUtcMs", () => {
   it("returns a finite number input unchanged", () => {
-    expect(normalizeUtcMs(1_700_000_000_000)).toBe(1_700_000_000_000);
+    expect(parseUtcMs(1_700_000_000_000)).toBe(1_700_000_000_000);
   });
 
   it("parses a display-format string", () => {
-    expect(normalizeUtcMs("2026-04-22 00:44:00")).toBe(parseUtcFromDisplay("2026-04-22 00:44:00"));
+    expect(parseUtcMs("2026-04-22 00:44:00")).toBe(parseUtcFromDisplay("2026-04-22 00:44:00"));
   });
 
   it("parses a -utc marker string", () => {
-    expect(normalizeUtcMs("20260422-004400-utc")).toBe(Date.UTC(2026, 3, 22, 0, 44, 0));
+    expect(parseUtcMs("20260422-004400-utc")).toBe(Date.UTC(2026, 3, 22, 0, 44, 0));
   });
 
   it("parses an ISO string via the Date fallback", () => {
-    expect(normalizeUtcMs("2026-04-22T00:44:00Z")).toBe(Date.UTC(2026, 3, 22, 0, 44, 0));
+    expect(parseUtcMs("2026-04-22T00:44:00Z")).toBe(Date.UTC(2026, 3, 22, 0, 44, 0));
   });
 
-  it("falls back when the value is unparseable", () => {
-    expect(normalizeUtcMs("nonsense", 999)).toBe(999);
-    expect(normalizeUtcMs(undefined, 999)).toBe(999);
-    expect(normalizeUtcMs(Number.NaN, 999)).toBe(999);
+  it("reads a missing or unparseable value as null, never as the current time", () => {
+    expect(parseUtcMs("nonsense")).toBeNull();
+    expect(parseUtcMs(undefined)).toBeNull();
+    expect(parseUtcMs(Number.NaN)).toBeNull();
   });
 });
 

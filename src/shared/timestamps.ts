@@ -212,7 +212,10 @@ export function formatUtcMarkerMs(date: Date): string {
   );
 }
 
-export function normalizeUtcMs(value: unknown, fallback: number = Date.now()): number {
+// Reads a stored UTC instant, or null when it is missing or unreadable. What
+// stands in for an unreadable time is the caller's to decide from the times its
+// item recorded (content-lifecycle-conventions, "A missing time is not made up").
+export function parseUtcMs(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
     const fromDisplay = parseUtcFromDisplay(value);
@@ -222,7 +225,7 @@ export function normalizeUtcMs(value: unknown, fallback: number = Date.now()): n
     const d = new Date(value);
     if (!Number.isNaN(d.getTime())) return d.getTime();
   }
-  return fallback;
+  return null;
 }
 
 function parseLocalTimestamp(value: string): TimestampParts | null {

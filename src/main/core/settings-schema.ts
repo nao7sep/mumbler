@@ -6,20 +6,21 @@ import type {
   SettingsDraft,
   SettingsSummary,
 } from "@shared/app-shell";
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import {
   DEFAULT_TIMESTAMP_PATTERN,
   SYSTEM_TIMEZONE,
   formatUtcIsoCompact,
   isValidTimezone,
-  normalizeUtcMs,
+  parseUtcMs,
   resolveTimezone,
 } from "@shared/timestamps";
 import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
 import { THEME_PREFERENCES } from "@shared/app-shell";
 import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
-import { JsonStore } from "./json-store";
+import { JsonStore, type LoadResult } from "./json-store";
 import { OperationError } from "./operation-error";
 import { resolvePathFromHome } from "./storage-root";
 import { multiline, singleLine } from "./text-cleanup";
@@ -217,32 +218,91 @@ function normalizeSettings(
   return settings;
 }
 
-function normalizePendingImportRecord(item: PendingImportReviewItem): PendingImportReviewItem {
-  const createdAtUtc = normalizeUtcMs(item.createdAtUtc);
+// A time the queue file holds unreadable is taken from another time the same
+// item recorded, and only an item that recorded none takes its audio file's
+// modified time, never the moment of loading (content-lifecycle-conventions,
+// "A missing time is not made up"). Each list is in the order a missing time is
+// taken from: the item's own change times first.
+function pendingImportRecordedTimes(item: PendingImportReviewItem): (number | null)[] {
+  return [item.updatedAtUtc, item.createdAtUtc].map(parseUtcMs);
+}
+
+function cardRecordedTimes(card: MumblerCard): (number | null)[] {
+  return [
+    card.updatedAtUtc,
+    card.createdAtUtc,
+    card.queuedAtUtc,
+    card.trimDecision?.analyzedAtUtc,
+    card.ai?.transcription?.generatedAtUtc,
+    card.ai?.structured?.generatedAtUtc,
+    card.ai?.title?.generatedAtUtc,
+    card.ai?.slug?.generatedAtUtc,
+    card.lastError?.occurredAtUtc,
+    card.timestamps.effectiveUtc,
+    card.timestamps.confirmedUtc,
+  ].map(parseUtcMs);
+}
+
+function firstRecorded(times: (number | null)[]): number | null {
+  return times.find((time) => time !== null) ?? null;
+}
+
+function rawPendingImports(raw: Record<string, unknown>): PendingImportReviewItem[] | null {
+  return Array.isArray(raw.pendingImports) ? (raw.pendingImports as PendingImportReviewItem[]) : null;
+}
+
+function rawCards(raw: Record<string, unknown>): MumblerCard[] | null {
+  return Array.isArray(raw.cards) ? (raw.cards as MumblerCard[]) : null;
+}
+
+// The audio files of the items that recorded no readable time at all.
+function undatedItemFiles(raw: Record<string, unknown>): string[] {
+  return [
+    ...(rawPendingImports(raw) ?? [])
+      .filter((item) => firstRecorded(pendingImportRecordedTimes(item)) === null)
+      .map((item) => item.workingFilePath),
+    ...(rawCards(raw) ?? [])
+      .filter((card) => firstRecorded(cardRecordedTimes(card)) === null)
+      .map((card) => card.sourceFilePath),
+  ];
+}
+
+/** The time the loader read for an undated item from its audio file, or failing that the queue file. */
+type UndatedItemTime = (audioFilePath: string) => number;
+
+function normalizePendingImportRecord(
+  item: PendingImportReviewItem,
+  undatedTime: UndatedItemTime,
+): PendingImportReviewItem {
+  const fallback = firstRecorded(pendingImportRecordedTimes(item)) ?? undatedTime(item.workingFilePath);
 
   return {
     ...item,
     originalSourcePath: typeof item.originalSourcePath === 'string' ? item.originalSourcePath : '',
     deleteOriginalOnConfirm: typeof item.deleteOriginalOnConfirm === 'boolean' ? item.deleteOriginalOnConfirm : false,
     copyToBackupOnConfirm: typeof item.copyToBackupOnConfirm === 'boolean' ? item.copyToBackupOnConfirm : false,
-    createdAtUtc,
-    updatedAtUtc: normalizeUtcMs(item.updatedAtUtc, createdAtUtc),
+    createdAtUtc: parseUtcMs(item.createdAtUtc) ?? fallback,
+    updatedAtUtc: parseUtcMs(item.updatedAtUtc) ?? fallback,
   };
 }
 
-function normalizeTrimDecisionRecord(cardTrimDecision: MumblerCard["trimDecision"]): MumblerCard["trimDecision"] {
+function normalizeTrimDecisionRecord(
+  cardTrimDecision: MumblerCard["trimDecision"],
+  fallback: number,
+): MumblerCard["trimDecision"] {
   if (cardTrimDecision === null) {
     return null;
   }
 
   return {
     ...cardTrimDecision,
-    analyzedAtUtc: normalizeUtcMs(cardTrimDecision.analyzedAtUtc),
+    analyzedAtUtc: parseUtcMs(cardTrimDecision.analyzedAtUtc) ?? fallback,
   };
 }
 
 function normalizeAiRunInfo(
   run: MumblerCard["ai"]["transcription"] | undefined,
+  fallback: number,
 ): MumblerCard["ai"]["transcription"] {
   if (run === null || run === undefined) {
     return null;
@@ -250,33 +310,41 @@ function normalizeAiRunInfo(
 
   return {
     ...run,
-    generatedAtUtc: normalizeUtcMs(run.generatedAtUtc),
+    generatedAtUtc: parseUtcMs(run.generatedAtUtc) ?? fallback,
   };
 }
 
-function normalizeCardError(error: MumblerCard["lastError"]): MumblerCard["lastError"] {
+function normalizeCardError(error: MumblerCard["lastError"], fallback: number): MumblerCard["lastError"] {
   if (error === null) {
     return null;
   }
 
   return {
     ...error,
-    occurredAtUtc: normalizeUtcMs(error.occurredAtUtc),
+    occurredAtUtc: parseUtcMs(error.occurredAtUtc) ?? fallback,
   };
 }
 
-function normalizeCardRecord(card: MumblerCard): MumblerCard {
-  const createdAtUtc = normalizeUtcMs(card.createdAtUtc);
-  const confirmedUtc = normalizeUtcMs(card.timestamps.confirmedUtc);
+function normalizeCardRecord(card: MumblerCard, undatedTime: UndatedItemTime): MumblerCard {
+  const fallback = firstRecorded(cardRecordedTimes(card)) ?? undatedTime(card.sourceFilePath);
+  // The confirmed and effective instants are one recording time apart by the
+  // front trim, which applyFrontTrimOffset applies in whole seconds, so either
+  // one restores the other before the card's other times are used.
+  const frontTrimOffsetSec = card.timestamps.frontTrimOffsetSec;
+  const frontTrimOffsetMs = Number.isFinite(frontTrimOffsetSec) ? Math.floor(frontTrimOffsetSec) * 1000 : 0;
+  const storedConfirmedUtc = parseUtcMs(card.timestamps.confirmedUtc);
+  const storedEffectiveUtc = parseUtcMs(card.timestamps.effectiveUtc);
+  const confirmedUtc =
+    storedConfirmedUtc ?? (storedEffectiveUtc !== null ? storedEffectiveUtc - frontTrimOffsetMs : fallback);
   const queuedMode = card.queuedMode === "generate" ? card.queuedMode : null;
   // queuedAtUtc is paired with queuedMode: when the card is queued, parse it
-  // through normalizeUtcMs (which accepts both a number and the canonical ISO
+  // through parseUtcMs (which accepts both a number and the canonical ISO
   // string the store now writes) — the same way every other instant field is
   // read. A `typeof number` guard here would drop the value to null after a
   // save/reload now that instants serialize as ISO, and selectNextQueuedCard
   // would then skip the card forever.
-  const queuedAtUtc = queuedMode !== null ? normalizeUtcMs(card.queuedAtUtc) : null;
-  const transcriptionRun = normalizeAiRunInfo(card.ai?.transcription);
+  const queuedAtUtc = queuedMode !== null ? (parseUtcMs(card.queuedAtUtc) ?? fallback) : null;
+  const transcriptionRun = normalizeAiRunInfo(card.ai?.transcription, fallback);
   // Before a trim kept results, every stored transcription matched the card's
   // current trim, so a record without transcribedTrim takes it from there. The
   // text itself lives in the card's transcript file, so the run info is what
@@ -292,9 +360,9 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
     timestamps: {
       ...card.timestamps,
       confirmedUtc,
-      effectiveUtc: normalizeUtcMs(card.timestamps.effectiveUtc, confirmedUtc),
+      effectiveUtc: storedEffectiveUtc ?? confirmedUtc + frontTrimOffsetMs,
     },
-    trimDecision: normalizeTrimDecisionRecord(card.trimDecision),
+    trimDecision: normalizeTrimDecisionRecord(card.trimDecision, fallback),
     metadata: {
       structured: card.metadata?.structured ?? null,
       title: card.metadata?.title ?? null,
@@ -302,27 +370,26 @@ function normalizeCardRecord(card: MumblerCard): MumblerCard {
     },
     ai: {
       transcription: transcriptionRun,
-      structured: normalizeAiRunInfo(card.ai?.structured),
-      title: normalizeAiRunInfo(card.ai?.title),
-      slug: normalizeAiRunInfo(card.ai?.slug),
+      structured: normalizeAiRunInfo(card.ai?.structured, fallback),
+      title: normalizeAiRunInfo(card.ai?.title, fallback),
+      slug: normalizeAiRunInfo(card.ai?.slug, fallback),
     },
     queuedMode,
     queuedAtUtc,
-    lastError: normalizeCardError(card.lastError),
-    createdAtUtc,
-    updatedAtUtc: normalizeUtcMs(card.updatedAtUtc, createdAtUtc),
+    lastError: normalizeCardError(card.lastError, fallback),
+    createdAtUtc: parseUtcMs(card.createdAtUtc) ?? fallback,
+    updatedAtUtc: parseUtcMs(card.updatedAtUtc) ?? fallback,
   };
 }
 
-function normalizeQueue(raw: Record<string, unknown>, defaults: MumblerQueue): MumblerQueue {
+function normalizeQueue(raw: Record<string, unknown>, undatedTime: UndatedItemTime): MumblerQueue {
+  const defaults = createEmptyQueue();
   return {
     schemaVersion: QUEUE_SCHEMA_VERSION,
-    pendingImports: Array.isArray(raw.pendingImports)
-      ? (raw.pendingImports as PendingImportReviewItem[]).map(normalizePendingImportRecord)
-      : defaults.pendingImports,
-    cards: Array.isArray(raw.cards)
-      ? (raw.cards as MumblerCard[]).map(normalizeCardRecord)
-      : defaults.cards,
+    pendingImports:
+      rawPendingImports(raw)?.map((item) => normalizePendingImportRecord(item, undatedTime)) ??
+      defaults.pendingImports,
+    cards: rawCards(raw)?.map((card) => normalizeCardRecord(card, undatedTime)) ?? defaults.cards,
   };
 }
 
@@ -330,7 +397,7 @@ function normalizeQueue(raw: Record<string, unknown>, defaults: MumblerQueue): M
 // epoch-ms number and named with the convention's `*Utc` suffix) becomes the
 // canonical ISO-8601 string, while everything else passes through unchanged.
 // The model keeps epoch-ms for arithmetic/sorting; this converts only at the
-// persistence edge. The read path (normalizeUtcMs) accepts both ISO and
+// persistence edge. The read path (parseUtcMs) accepts both ISO and
 // epoch-ms, so a legacy numeric queue.json keeps loading and is rewritten as ISO
 // on the next save — no migration step.
 function serializeUtcInstants(value: unknown): unknown {
@@ -353,14 +420,14 @@ function serializeUtcInstants(value: unknown): unknown {
 // The transcription and structured outline are written by TranscriptStore into
 // each card's own file, so queue.json stays small and its frequent saves record
 // small rows in the backup history.
-export function serializeQueue(state: MumblerQueue): unknown {
+export function serializeQueue(state: MumblerQueue): Record<string, unknown> {
   return serializeUtcInstants({
     ...state,
     cards: state.cards.map(({ transcription: _bodyInOwnFile, metadata, ...card }) => ({
       ...card,
       metadata: { title: metadata.title, slug: metadata.slug },
     })),
-  });
+  }) as Record<string, unknown>;
 }
 
 export function recoverInterruptedCards(
@@ -494,14 +561,44 @@ export function createSettingsStore(
   return new SettingsStore(path, homeDirectory, warn);
 }
 
-export function createQueueStore(path: string): JsonStore<MumblerQueue> {
-  return new JsonStore<MumblerQueue>({
-    path,
-    schemaVersion: QUEUE_SCHEMA_VERSION,
-    validate: (raw) => normalizeQueue(raw, createEmptyQueue()),
-    createDefault: () => createEmptyQueue(),
-    serialize: serializeQueue,
-  });
+// The durable card queue. The file is read raw so the modified time of an
+// undated item's audio file can be read before the pure normalization.
+export class QueueStore {
+  private readonly store: JsonStore<Record<string, unknown>>;
+
+  constructor(path: string) {
+    this.store = new JsonStore({
+      path,
+      schemaVersion: QUEUE_SCHEMA_VERSION,
+      validate: (raw) => raw,
+      createDefault: () => ({}),
+    });
+  }
+
+  get path(): string { return this.store.path; }
+
+  async load(): Promise<LoadResult<MumblerQueue>> {
+    const loaded = await this.store.load();
+    const modifiedTime = async (file: string) => Math.floor((await stat(file)).mtimeMs);
+    const fileTimes = new Map<string, number>();
+    for (const audioFilePath of undatedItemFiles(loaded.value)) {
+      // Failing the audio file too, the queue file that recorded the item.
+      fileTimes.set(audioFilePath, await modifiedTime(audioFilePath).catch(() => modifiedTime(this.path)));
+    }
+    // undatedItemFiles named every path normalizeQueue asks for.
+    return { ...loaded, value: normalizeQueue(loaded.value, (audioFilePath) => fileTimes.get(audioFilePath)!) };
+  }
+
+  save(queue: MumblerQueue): Promise<void> {
+    return this.store.save(serializeQueue(queue));
+  }
+
+  flush(): Promise<void> { return this.store.flush(); }
+  preserveExistingFiles(): Promise<string[]> { return this.store.preserveExistingFiles(); }
+}
+
+export function createQueueStore(path: string): QueueStore {
+  return new QueueStore(path);
 }
 
 export function createEmptyQueue(): MumblerQueue {

@@ -294,6 +294,23 @@ describe("confirming what was dropped in", () => {
     expect(snapshot.state?.pendingImports.map((item) => item.id)).toEqual([pending[1].id]);
   });
 
+  it("moves an import's updated time and rewrites the queue only when the review changes it", async () => {
+    const [pending] = await dropIn("take.wav");
+    const queueFile = join(home, "queue.json");
+    const stored = await readFile(queueFile, "utf8");
+
+    const unchanged = await runtime.updatePendingImportDrafts([{ ...pending }]);
+
+    expect(unchanged.state?.pendingImports[0].updatedAtUtc).toBe(pending.updatedAtUtc);
+    expect(await readFile(queueFile, "utf8"), "an unchanged draft writes nothing").toBe(stored);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const edited = await runtime.updatePendingImportDrafts([review(pending)]);
+
+    expect(edited.state?.pendingImports[0].updatedAtUtc).toBeGreaterThan(pending.updatedAtUtc);
+    expect(await readFile(queueFile, "utf8")).not.toBe(stored);
+  });
+
   it("keeps an import dropped in while the review is being confirmed", async () => {
     const [first] = await dropIn("first.wav");
     const laterPath = join(sourceDir, "later.wav");
@@ -469,6 +486,40 @@ describe("working with a card", () => {
     await runtime.shutdown();
     const persisted = await createQueueStore(join(home, "queue.json")).load();
     expect(persisted.value.cards[0].trim.frontMarkerSec).toBe(9);
+  });
+
+  it("leaves a card as it was when the trim it already holds is applied again", async () => {
+    const card = await confirmed();
+    const [trimmed] = cards(await runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: 200 }));
+    const queueFile = join(home, "queue.json");
+    const stored = await readFile(queueFile, "utf8");
+    const analyses = trimGate.entered;
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const [again] = cards(await runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: 200 }));
+
+    expect(trimGate.entered, "no second analysis").toBe(analyses);
+    expect(again.updatedAtUtc).toBe(trimmed.updatedAtUtc);
+    expect(again.trimDecision).toEqual(trimmed.trimDecision);
+    expect(await readFile(queueFile, "utf8"), "nothing is written").toBe(stored);
+  });
+
+  it("keeps the held trim when the user returns to it while another is analyzing", async () => {
+    const card = await confirmed();
+    let release!: () => void;
+    trimGate.held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const other = runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: null });
+    await vi.waitFor(() => expect(trimGate.entered).toBe(1));
+    await runtime.updateCardTrim(card.id, { frontMarkerSec: null, backMarkerSec: null });
+    release();
+    await other;
+
+    const [kept] = cards(runtime.getSnapshot());
+    expect(kept.trim).toEqual({ frontMarkerSec: null, backMarkerSec: null });
+    expect(kept.updatedAtUtc).toBe(card.updatedAtUtc);
   });
 
   it("cancels a save cut short by quitting and leaves the card ready to save", async () => {

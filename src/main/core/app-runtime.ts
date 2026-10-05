@@ -27,7 +27,7 @@ import {
   type TrimDecision,
 } from "@shared/app-shell";
 import { AUDIO_IMPORT_EXTENSIONS, isSupportedAudioImportName } from "@shared/audio-import";
-import { isCardBusy } from "@shared/card-status";
+import { isCardBusy, sameTrim } from "@shared/card-status";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
 import {
   analyzeTrimDecision,
@@ -63,7 +63,7 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
-import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type SettingsStore } from "./settings-schema";
+import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type QueueStore, type SettingsStore } from "./settings-schema";
 import {
   clampQueueWidth,
   clampRecordsListWidth,
@@ -137,7 +137,7 @@ interface AppRuntimeState {
   // leniently: a corrupt layout file self-heals rather than failing startup.
   layout: MumblerLayout | null;
   settingsStore: SettingsStore | null;
-  queueStore: JsonStore<MumblerQueue> | null;
+  queueStore: QueueStore | null;
   // Each card's transcription and structured outline, in its own file.
   transcriptStore: TranscriptStore | null;
   layoutStore: JsonStore<MumblerLayout> | null;
@@ -175,7 +175,10 @@ export class ApplicationRuntime {
   // request. A card listed here is busy for every other mutation (save,
   // generate, remove, duplicate), because the trim changes it after its await;
   // a newer trim of the same card supersedes an older one still analyzing.
+  // Request numbers never repeat, so an entry removed and taken again cannot
+  // hand a superseded analysis the number it started with.
   private readonly trimRequests = new Map<string, number>();
+  private lastTrimRequest = 0;
 
   private constructor(runtime: AppRuntimeState) {
     this.runtime = runtime;
@@ -780,11 +783,15 @@ export class ApplicationRuntime {
     }
 
     const draftsById = new Map(items.map((item) => [item.id, item]));
-    state.pendingImports = state.pendingImports.map((authoritative) => {
+    const current = state.pendingImports;
+    state.pendingImports = current.map((authoritative) => {
       const draft = draftsById.get(authoritative.id);
       return draft ? applyPendingImportDraft(authoritative, draft) : authoritative;
     });
-    await this.persistState();
+    // A draft that changes nothing leaves queue.json as it is.
+    if (state.pendingImports.some((item, index) => item !== current[index])) {
+      await this.persistState();
+    }
     return this.getSnapshot();
   }
 
@@ -1021,7 +1028,15 @@ export class ApplicationRuntime {
     }
     const normalizedTrim = normalizeTrim(trim, card.durationSec);
 
-    const request = (this.trimRequests.get(cardId) ?? 0) + 1;
+    // The trim the card already holds changes nothing: no analysis, no new
+    // updatedAtUtc, no write. Dropping the card's entry still supersedes a
+    // different trim that is analyzing, since this one is the user's latest.
+    if (sameTrim(normalizedTrim, card.trim)) {
+      this.trimRequests.delete(cardId);
+      return this.getSnapshot();
+    }
+
+    const request = ++this.lastTrimRequest;
     this.trimRequests.set(cardId, request);
     try {
       const trimDecision = await analyzeTrimDecision(
@@ -1998,19 +2013,25 @@ export function buildConfirmedTimestamps(
 // paths from the renderer would let a buggy (or hostile) renderer point the main
 // process's unlink / copy / ffprobe at an arbitrary path. So we keep the
 // authoritative item and overlay only the review-editable fields from the draft.
+//
+// updatedAtUtc moves only when one of those fields differs from the stored item
+// (content-lifecycle-conventions, "Modified"); a draft that matches it returns
+// the stored item itself.
 export function applyPendingImportDraft(
   authoritative: PendingImportReviewItem,
   draft: PendingImportReviewItem,
 ): PendingImportReviewItem {
-  return {
-    ...authoritative,
+  const edits = {
     localTimestampText: draft.localTimestampText,
     timezone: draft.timezone,
     utcTimestampText: draft.utcTimestampText,
     deleteOriginalOnConfirm: draft.deleteOriginalOnConfirm,
     copyToBackupOnConfirm: draft.copyToBackupOnConfirm,
-    updatedAtUtc: Date.now(),
   };
+  const changed = (Object.keys(edits) as (keyof typeof edits)[]).some(
+    (field) => edits[field] !== authoritative[field],
+  );
+  return changed ? { ...authoritative, ...edits, updatedAtUtc: Date.now() } : authoritative;
 }
 
 function createDuplicatedCard(source: MumblerCard, sourceFilePath: string): MumblerCard {

@@ -128,6 +128,26 @@ describe("applyPendingImportDraft", () => {
     expect(result.deleteOriginalOnConfirm).toBe(true);
     expect(result.copyToBackupOnConfirm).toBe(false);
   });
+
+  it("returns the stored item, its updated time kept, when the draft changes nothing", () => {
+    const authoritative = authoritativeItem();
+    // Only fields the review cannot edit differ, so nothing the user made changed.
+    const result = applyPendingImportDraft(authoritative, { ...authoritative, workingFilePath: "/elsewhere" });
+
+    expect(result).toBe(authoritative);
+    expect(result.updatedAtUtc).toBe(1_700_000_000_000);
+  });
+
+  it("moves the updated time when one review field changes", () => {
+    const authoritative = authoritativeItem();
+    const before = Date.now();
+
+    const result = applyPendingImportDraft(authoritative, { ...authoritative, copyToBackupOnConfirm: false });
+
+    expect(result.copyToBackupOnConfirm).toBe(false);
+    expect(result.updatedAtUtc).toBeGreaterThanOrEqual(before);
+    expect(result.createdAtUtc).toBe(1_700_000_000_000);
+  });
 });
 
 describe("buildConfirmedTimestamps", () => {
