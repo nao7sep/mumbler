@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const generateContent = vi.fn();
 vi.mock("@google/genai", async (importOriginal) => ({
-  ThinkingLevel: (await importOriginal<typeof import("@google/genai")>()).ThinkingLevel,
+  ...(await importOriginal<typeof import("@google/genai")>()),
   GoogleGenAI: class { models = { generateContent }; files = { upload: vi.fn(), get: vi.fn() }; },
   ApiError: class extends Error {},
 }));

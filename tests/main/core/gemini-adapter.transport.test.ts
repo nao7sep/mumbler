@@ -46,6 +46,15 @@ import { CancelledError } from "@main/core/cancellation";
 
 const SAFE = INLINE_AUDIO_LIMIT_BYTES;
 
+// The five current categories, each OFF; civic integrity is deprecated and never sent.
+const SAFETY_SETTINGS = [
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
+  { category: "HARM_CATEGORY_JAILBREAK", threshold: "OFF" },
+];
+
 function baseParams() {
   return {
     apiKey: "test-key",
@@ -64,8 +73,12 @@ beforeEach(() => {
 });
 
 // A supported model's branch reaches every generation call, and nothing else does.
-describe("the role's thinking is stated on every model call", () => {
-  const BRANCH_CONFIG = { abortSignal: expect.any(AbortSignal), thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } };
+describe("the role's thinking and the safety settings are stated on every model call", () => {
+  const BRANCH_CONFIG = {
+    abortSignal: expect.any(AbortSignal),
+    safetySettings: SAFETY_SETTINGS,
+    thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+  };
 
   it("states the role's thinking on the inline transcription call", async () => {
     stat.mockResolvedValue({ size: SAFE - 1 });
@@ -86,6 +99,7 @@ describe("the role's thinking is stated on every model call", () => {
     expect(generateContent.mock.calls[0]?.[0].config).toEqual(BRANCH_CONFIG);
     // The upload is a file transfer, not a generation — it must not carry one.
     expect(upload.mock.calls[0]?.[0].config).not.toHaveProperty("thinkingConfig");
+    expect(upload.mock.calls[0]?.[0].config).not.toHaveProperty("safetySettings");
   });
 
   it("states the role's thinking on the text-generation call", async () => {
@@ -104,10 +118,26 @@ describe("the role's thinking is stated on every model call", () => {
 });
 
 describe("the plain request and the inline audio limit", () => {
-  it("sends model and contents only for an id with no branch", async () => {
+  it("sends contents and the safety settings, and no thinking, for an id with no branch", async () => {
     generateContent.mockResolvedValue({ text: "result" });
     await generateTextWithGemini({ apiKey: "fixture", prompt: "title", model: "unknown", timeoutMs: 1000 });
-    expect(generateContent.mock.calls[0]![0].config).toEqual({ abortSignal: expect.any(AbortSignal) });
+    expect(generateContent.mock.calls[0]![0].config).toEqual({ abortSignal: expect.any(AbortSignal), safetySettings: SAFETY_SETTINGS });
+  });
+
+  it("sends each thinking value as chosen, the default included", async () => {
+    generateContent.mockResolvedValue({ text: "result" });
+    const cases = [
+      ["gemini-3.1-pro-preview", "medium", ThinkingLevel.MEDIUM],
+      ["gemini-3.8-flash", "medium", ThinkingLevel.MEDIUM],
+      ["gemini-3.8-flash", "low", ThinkingLevel.LOW],
+      ["gemini-3.5-flash-lite", "minimal", ThinkingLevel.MINIMAL],
+    ] as const;
+    for (const [model, thinking] of cases) {
+      await generateTextWithGemini({ apiKey: "k", prompt: "p", model, thinking, timeoutMs: 1000 });
+    }
+    expect(generateContent.mock.calls.map(([request]) => request.config.thinkingConfig)).toEqual(
+      cases.map(([, , thinkingLevel]) => ({ thinkingLevel })),
+    );
   });
 
   it("sends audio inline through 14,250,000 bytes and through the Files API one byte above", async () => {
@@ -330,7 +360,7 @@ describe("every provider call is recorded whole", () => {
     expect(request.contents[0].parts[1]).toEqual({
       inlineData: { mimeType: "audio/mp4", filePath: "/tmp/rec.m4a", byteSize: 1234 },
     });
-    expect(request.config).toEqual({ thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } });
+    expect(request.config).toEqual({ safetySettings: SAFETY_SETTINGS, thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } });
   });
 
   it("records the upload, the generation and the delete of a Files-API transcription", async () => {
@@ -359,9 +389,56 @@ describe("every provider call is recorded whole", () => {
     })).rejects.toBe(failure);
 
     expect(recordCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      request: { model: "unknown", contents: [{ role: "user", parts: [{ text: "title" }] }], config: undefined },
+      request: { model: "unknown", contents: [{ role: "user", parts: [{ text: "title" }] }], config: { safetySettings: SAFETY_SETTINGS } },
       response: null,
       error: failure,
     }));
+  });
+});
+
+describe("a structured answer is asked for with a strict schema and read from it", () => {
+  const params = { apiKey: "k", prompt: "p", model: "gemini-3.5-flash-lite", thinking: "minimal", timeoutMs: 1000 };
+
+  it("asks for the one field as a required string and returns its value", async () => {
+    generateContent.mockResolvedValue({ text: '{"title": "  A Short Title  "}' });
+
+    const result = await generateTextWithGemini({ ...params, field: "title" });
+
+    expect(result.text).toBe("A Short Title");
+    expect(generateContent.mock.calls[0]![0].config).toEqual({
+      abortSignal: expect.any(AbortSignal),
+      safetySettings: SAFETY_SETTINGS,
+      responseMimeType: "application/json",
+      responseSchema: { type: "OBJECT", properties: { title: { type: "STRING" } }, required: ["title"] },
+      thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+    });
+  });
+
+  it("sends the schema for an id with no branch too, since the feature reads it", async () => {
+    generateContent.mockResolvedValue({ text: '{"slug": "a-short-title"}' });
+
+    expect((await generateTextWithGemini({ ...params, model: "custom-model", thinking: undefined, field: "slug" })).text).toBe("a-short-title");
+    expect(generateContent.mock.calls[0]![0].config).toEqual({
+      abortSignal: expect.any(AbortSignal),
+      safetySettings: SAFETY_SETTINGS,
+      responseMimeType: "application/json",
+      responseSchema: { type: "OBJECT", properties: { slug: { type: "STRING" } }, required: ["slug"] },
+    });
+  });
+
+  it("keeps prose as plain text with no schema", async () => {
+    generateContent.mockResolvedValue({ text: '{"title": "not parsed"}' });
+
+    expect((await generateTextWithGemini(params)).text).toBe('{"title": "not parsed"}');
+    const { config } = generateContent.mock.calls[0]![0];
+    expect(config).not.toHaveProperty("responseMimeType");
+    expect(config).not.toHaveProperty("responseSchema");
+  });
+
+  it("fails an answer that is not the asked-for object or holds an empty value", async () => {
+    for (const text of ["A bare title", '{"slug": "wrong-field"}', '{"title": 7}', "null", '{"title": "  "}']) {
+      generateContent.mockResolvedValueOnce({ text });
+      await expect(generateTextWithGemini({ ...params, field: "title" }), text).rejects.toThrow(/title|empty/);
+    }
   });
 });

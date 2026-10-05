@@ -1,6 +1,15 @@
 import { readFile, stat } from "node:fs/promises";
 
-import { ApiError, GoogleGenAI, type GenerateContentResponse } from "@google/genai";
+import {
+  ApiError,
+  GoogleGenAI,
+  HarmBlockThreshold,
+  HarmCategory,
+  Type,
+  type GenerateContentConfig,
+  type GenerateContentResponse,
+  type SafetySetting,
+} from "@google/genai";
 
 import { supportedModelConfig } from "@shared/model-branches";
 
@@ -10,6 +19,32 @@ import { CancelledError } from "./cancellation";
 // Inline audio travels as base64 (4 bytes per 3) in a request of at most 20,000,000 bytes that also carries the prompt.
 export const INLINE_AUDIO_LIMIT_BYTES = ((20_000_000 - 1_000_000) * 3) / 4;
 const FILES_API_CLEANUP_TIMEOUT_MS = 30_000;
+
+// The most permissive safety values, sent on every generation and never exposed
+// (ai-model-lineup-20261004, Safety).
+const GEMINI_SAFETY_SETTINGS: readonly SafetySetting[] = [
+  HarmCategory.HARM_CATEGORY_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+  HarmCategory.HARM_CATEGORY_JAILBREAK,
+].map((category) => ({ category, threshold: HarmBlockThreshold.OFF }));
+
+// The plain request's config: what the feature asks for, the safety settings and,
+// for a structured answer, a strict one-field schema; then the model's own branch,
+// which adds only its thinking. An id with no branch gets this alone.
+function generationConfig(model: string, thinking: string | undefined, field?: string): GenerateContentConfig {
+  return {
+    safetySettings: [...GEMINI_SAFETY_SETTINGS],
+    ...(field === undefined
+      ? {}
+      : {
+          responseMimeType: "application/json",
+          responseSchema: { type: Type.OBJECT, properties: { [field]: { type: Type.STRING } }, required: [field] },
+        }),
+    ...supportedModelConfig(model, thinking),
+  };
+}
 
 // The SDK's own retries would resend a request that may already have been billed,
 // stacking on top of card-pipeline's retryPolicy. `attempts: 1` disables them so the
@@ -49,6 +84,9 @@ export interface GeminiTextGenerationParams {
   model: string;
   // The role's thinking value from thinkingFor; absent for a model with no row.
   thinking?: string;
+  // The one field of a structured answer, such as a title, asked for with a strict
+  // schema and returned alone; absent for prose, which comes back as plain text.
+  field?: string;
   timeoutMs: number;
   signal?: AbortSignal;
   recordCall?: RecordProviderCall;
@@ -108,7 +146,7 @@ export async function transcribeWithGemini(
     throwIfExternallyCancelled(params.signal);
     const fileStats = await stat(params.filePath);
     const prompt = buildTranscriptionPrompt();
-    const config = supportedModelConfig(params.model, params.thinking);
+    const config = generationConfig(params.model, params.thinking);
 
     let response: GenerateContentResponse;
     if (fileStats.size <= INLINE_AUDIO_LIMIT_BYTES) {
@@ -251,7 +289,7 @@ export async function generateTextWithGemini(
 
   try {
     throwIfExternallyCancelled(params.signal);
-    const config = supportedModelConfig(params.model, params.thinking);
+    const config = generationConfig(params.model, params.thinking, params.field);
     const request = {
       model: params.model,
       contents: [{ role: "user", parts: [{ text: params.prompt }] }],
@@ -261,8 +299,9 @@ export async function generateTextWithGemini(
       ai.models.generateContent({ ...request, config: { abortSignal: abortState.signal, ...config } }),
     );
 
+    const text = readResponseText(response);
     return {
-      text: readResponseText(response),
+      text: params.field === undefined ? text : readAnswerField(text, params.field),
       modelVersion: response.modelVersion ?? null,
       usageMetadata: response.usageMetadata ?? null,
     };
@@ -339,6 +378,21 @@ function readResponseText(response: GenerateContentResponse): string {
   }
 
   return normalizeResponseText(response.text);
+}
+
+// A structured answer is the JSON object its strict schema asked for; the field is
+// read from it and held to the same non-empty rule as plain text.
+function readAnswerField(text: string, field: string): string {
+  let value: unknown;
+  try {
+    value = (JSON.parse(text) as Record<string, unknown> | null)?.[field];
+  } catch {
+    value = undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Gemini's answer did not hold the requested ${field}.`);
+  }
+  return normalizeResponseText(value);
 }
 
 function normalizeResponseText(value: string | undefined): string {

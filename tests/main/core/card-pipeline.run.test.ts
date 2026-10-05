@@ -254,6 +254,14 @@ describe("executeCardPipeline", () => {
     expect(mockGenerateText.mock.calls.map(([params]) => params.thinking)).toEqual(["high", undefined, undefined]);
   });
 
+  it("asks for the title and the slug as structured answers and the outline as prose", async () => {
+    mockGenerateText.mockResolvedValue({ text: "result", modelVersion: null, usageMetadata: null });
+    const card = makeCard();
+    const ctx = makeContext(card, new AbortController().signal);
+    await executeCardPipeline(card.id, "structured", "generate", ctx);
+    expect(mockGenerateText.mock.calls.map(([params]) => params.field)).toEqual([undefined, "title", "slug"]);
+  });
+
   it("retries a retryable failure as many times as the retry setting allows", async () => {
     vi.useFakeTimers();
     try {
