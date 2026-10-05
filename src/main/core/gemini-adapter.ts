@@ -3,12 +3,9 @@ import { readFile, stat } from "node:fs/promises";
 import {
   ApiError,
   GoogleGenAI,
-  HarmBlockThreshold,
-  HarmCategory,
   Type,
   type GenerateContentConfig,
   type GenerateContentResponse,
-  type SafetySetting,
 } from "@google/genai";
 
 import { supportedModelConfig } from "@shared/model-branches";
@@ -20,22 +17,11 @@ import { CancelledError } from "./cancellation";
 export const INLINE_AUDIO_LIMIT_BYTES = ((20_000_000 - 1_000_000) * 3) / 4;
 const FILES_API_CLEANUP_TIMEOUT_MS = 30_000;
 
-// The most permissive safety values, sent on every generation and never exposed
-// (ai-model-lineup-20261004, Safety).
-const GEMINI_SAFETY_SETTINGS: readonly SafetySetting[] = [
-  HarmCategory.HARM_CATEGORY_HARASSMENT,
-  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-  HarmCategory.HARM_CATEGORY_JAILBREAK,
-].map((category) => ({ category, threshold: HarmBlockThreshold.OFF }));
-
-// The plain request's config: what the feature asks for, the safety settings and,
-// for a structured answer, a strict one-field schema; then the model's own branch,
-// which adds only its thinking. An id with no branch gets this alone.
+// The plain request's config: what the feature asks for, which for a structured
+// answer is a strict one-field schema; then the model's own branch, which adds its
+// safety settings and thinking. An id with no branch gets this alone.
 function generationConfig(model: string, thinking: string | undefined, field?: string): GenerateContentConfig {
   return {
-    safetySettings: [...GEMINI_SAFETY_SETTINGS],
     ...(field === undefined
       ? {}
       : {

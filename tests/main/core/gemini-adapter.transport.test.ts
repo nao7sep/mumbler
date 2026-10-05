@@ -73,7 +73,7 @@ beforeEach(() => {
 });
 
 // A supported model's branch reaches every generation call, and nothing else does.
-describe("the role's thinking and the safety settings are stated on every model call", () => {
+describe("a listed model's thinking and safety settings are stated on every model call", () => {
   const BRANCH_CONFIG = {
     abortSignal: expect.any(AbortSignal),
     safetySettings: SAFETY_SETTINGS,
@@ -118,10 +118,23 @@ describe("the role's thinking and the safety settings are stated on every model 
 });
 
 describe("the plain request and the inline audio limit", () => {
-  it("sends contents and the safety settings, and no thinking, for an id with no branch", async () => {
+  it("sends model and contents alone, with no thinking and no safety settings, for an id with no branch", async () => {
     generateContent.mockResolvedValue({ text: "result" });
     await generateTextWithGemini({ apiKey: "fixture", prompt: "title", model: "unknown", timeoutMs: 1000 });
-    expect(generateContent.mock.calls[0]![0].config).toEqual({ abortSignal: expect.any(AbortSignal), safetySettings: SAFETY_SETTINGS });
+    expect(generateContent.mock.calls[0]![0].config).toEqual({ abortSignal: expect.any(AbortSignal) });
+  });
+
+  it("sends no safety settings or thinking on either transcription transport for an id with no branch", async () => {
+    generateContent.mockResolvedValue({ text: "hi" });
+    stat.mockResolvedValueOnce({ size: SAFE - 1 });
+    await transcribeWithGemini({ ...baseParams(), model: "custom-model", thinking: undefined });
+    stat.mockResolvedValueOnce({ size: SAFE + 1 });
+    upload.mockResolvedValue({ name: "files/abc", uri: "gs://u", mimeType: "audio/mp4" });
+    await transcribeWithGemini({ ...baseParams(), model: "custom-model", thinking: undefined });
+    expect(generateContent.mock.calls.map(([request]) => request.config)).toEqual([
+      { abortSignal: expect.any(AbortSignal) },
+      { abortSignal: expect.any(AbortSignal) },
+    ]);
   });
 
   it("sends each thinking value as chosen, the default included", async () => {
@@ -389,7 +402,7 @@ describe("every provider call is recorded whole", () => {
     })).rejects.toBe(failure);
 
     expect(recordCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      request: { model: "unknown", contents: [{ role: "user", parts: [{ text: "title" }] }], config: { safetySettings: SAFETY_SETTINGS } },
+      request: { model: "unknown", contents: [{ role: "user", parts: [{ text: "title" }] }], config: {} },
       response: null,
       error: failure,
     }));
@@ -414,13 +427,12 @@ describe("a structured answer is asked for with a strict schema and read from it
     });
   });
 
-  it("sends the schema for an id with no branch too, since the feature reads it", async () => {
+  it("sends the schema alone for an id with no branch, since the feature reads it", async () => {
     generateContent.mockResolvedValue({ text: '{"slug": "a-short-title"}' });
 
     expect((await generateTextWithGemini({ ...params, model: "custom-model", thinking: undefined, field: "slug" })).text).toBe("a-short-title");
     expect(generateContent.mock.calls[0]![0].config).toEqual({
       abortSignal: expect.any(AbortSignal),
-      safetySettings: SAFETY_SETTINGS,
       responseMimeType: "application/json",
       responseSchema: { type: "OBJECT", properties: { slug: { type: "STRING" } }, required: ["slug"] },
     });

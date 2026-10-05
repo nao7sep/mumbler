@@ -30,9 +30,11 @@ describe("the model registry and committed lineup", () => {
     for (const row of SUPPORTED_MODELS) {
       expect(row.thinking.length, row.id).toBeGreaterThan(0);
       for (const value of row.thinking) {
-        const level = supportedModelConfig(row.id, value)?.thinkingConfig?.thinkingLevel;
+        const config = supportedModelConfig(row.id, value);
+        const level = config?.thinkingConfig?.thinkingLevel;
         expect(level, `${row.id} ${value}`).toBe(value.toUpperCase());
         expect(levels.has(level!), `${row.id} ${value}`).toBe(true);
+        expect(config?.safetySettings?.map((setting) => setting.threshold), row.id).toEqual(["OFF", "OFF", "OFF", "OFF", "OFF"]);
       }
     }
     expect(supportedModelConfig(" GEMINI-3.8-FLASH ", "high")).toEqual(supportedModelConfig("gemini-3.8-flash", "high"));
