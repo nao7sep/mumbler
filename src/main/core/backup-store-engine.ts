@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+
+import { FORMAT_VERSIONS } from "./format-versions.ts";
+import { openVersionedDatabase } from "./sqlite-store.ts";
 
 export type BackupEngineWarn = (message: string, details: Record<string, unknown>) => void;
 
@@ -84,12 +85,9 @@ export class BackupStoreEngine {
     if (this.initialized) return this.db;
     this.initialized = true;
     try {
-      mkdirSync(path.dirname(this.file), { recursive: true });
-      const opened = new DatabaseSync(this.file);
-      opened.exec("PRAGMA journal_mode = WAL");
-      opened.exec("PRAGMA busy_timeout = 5000");
-      opened.exec(SCHEMA);
-      this.db = opened;
+      // A history in a newer format is left untouched, like any other that
+      // cannot be opened: recording stays off for the session.
+      this.db = openVersionedDatabase(this.file, FORMAT_VERSIONS.backups, SCHEMA);
     } catch (error: unknown) {
       this.warnOnce("backup store: could not open; recording disabled for this session", {
         file: this.file,

@@ -24,6 +24,9 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
+    // The worker engines import their siblings with the extension Node's type
+    // stripping needs, as tsconfig.node.json allows.
+    "allowImportingTsExtensions": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node", "vite/client"]
   },

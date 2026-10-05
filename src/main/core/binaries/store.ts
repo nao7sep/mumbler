@@ -1,6 +1,7 @@
 import type { ToolName } from "@shared/app-shell";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 
+import { FORMAT_VERSIONS } from "../format-versions";
 import { JsonStore } from "../json-store";
 import { TOOL_NAMES } from "./registry";
 
@@ -29,12 +30,9 @@ export interface PersistedToolFacts {
 // automatic or manual, written immediately before the check starts
 // (managed-runtime-dependencies-conventions).
 export interface DependenciesValue {
-  schemaVersion: 1;
   tools: Record<ToolName, PersistedToolFacts>;
   lastCheckAttemptAtUtc: number | null;
 }
-
-const SCHEMA_VERSION = 1;
 
 function emptyFacts(): PersistedToolFacts {
   return {
@@ -45,7 +43,6 @@ function emptyFacts(): PersistedToolFacts {
 
 export function createDefaultDependencies(): DependenciesValue {
   return {
-    schemaVersion: SCHEMA_VERSION,
     tools: { ffmpeg: emptyFacts(), ffprobe: emptyFacts() },
     lastCheckAttemptAtUtc: null,
   };
@@ -100,7 +97,7 @@ function normalize(raw: Record<string, unknown>): DependenciesValue {
 
 // Render the in-memory value to its on-disk shape: epoch-ms instants become
 // canonical ISO-8601. The write-side mirror of normalize() above.
-function serializeDependencies(value: DependenciesValue): unknown {
+function serializeDependencies(value: DependenciesValue): object {
   const tools: Record<string, unknown> = {};
   for (const name of TOOL_NAMES) {
     const facts = value.tools[name];
@@ -111,7 +108,6 @@ function serializeDependencies(value: DependenciesValue): unknown {
     };
   }
   return {
-    schemaVersion: SCHEMA_VERSION,
     tools,
     lastCheckAttemptAtUtc:
       value.lastCheckAttemptAtUtc === null ? null : formatUtcIsoCompact(value.lastCheckAttemptAtUtc),
@@ -121,7 +117,7 @@ function serializeDependencies(value: DependenciesValue): unknown {
 export function createDependenciesStore(path: string): JsonStore<DependenciesValue> {
   return new JsonStore<DependenciesValue>({
     path,
-    schemaVersion: SCHEMA_VERSION,
+    formatVersion: FORMAT_VERSIONS.dependencies,
     validate: normalize,
     createDefault: createDefaultDependencies,
     serialize: serializeDependencies,

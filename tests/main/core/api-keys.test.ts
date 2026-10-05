@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { apiKeyEnvVar, clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "@main/core/api-keys";
 import { closeBackupStore } from "@main/core/backupStore";
+import { NewerFormatError } from "@main/core/format-versions";
 
 // The secrets store is isolated by pointing MUMBLER_DATA_DIR at a throwaway directory
 // (storage-path-conventions: tests relocate the root via the env override) and
@@ -105,6 +106,7 @@ describe("API key secrets store", () => {
     const stored = await readFile(apiKeysPath, "utf8");
     expect(stored).not.toContain("AIzaSecretKey123"); // obfuscated at rest
     expect(JSON.parse(stored)).toHaveProperty(["keys", "gemini"]);
+    expect(JSON.parse(stored).formatVersion).toBe(1);
 
     if (process.platform !== "win32") {
       const fileStat = await stat(apiKeysPath);
@@ -247,5 +249,24 @@ describe("API key secrets store", () => {
     const entries = await readdir(home);
     expect(entries.some((e) => /^api-keys-\d{8}-\d{6}-\d{3}-utc\.invalid$/.test(e))).toBe(true);
     expect(entries).not.toContain("api-keys.json");
+  });
+
+  it("reads a key file with no format version as version 1", async () => {
+    await writeFile(apiKeysPath, JSON.stringify({ keys: { gemini: "hand-pasted" } }), "utf8");
+    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("hand-pasted");
+  });
+
+  it("leaves a key file in a newer format in place, reads no key from it, and refuses to write over it", async () => {
+    const newer = JSON.stringify({ formatVersion: 2, keys: { gemini: "from-a-newer-build" } });
+    await writeFile(apiKeysPath, newer, "utf8");
+    const warn = vi.fn();
+
+    await expect(resolveApiKey(apiKeysPath, "gemini", warn)).resolves.toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("newer format"), expect.objectContaining({ path: apiKeysPath }));
+    await expect(writeApiKey(apiKeysPath, "gemini", "replacement-key", warn)).rejects.toBeInstanceOf(NewerFormatError);
+    await expect(clearApiKey(apiKeysPath, "gemini", warn)).rejects.toBeInstanceOf(NewerFormatError);
+
+    expect(await readFile(apiKeysPath, "utf8")).toBe(newer);
+    expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
 });

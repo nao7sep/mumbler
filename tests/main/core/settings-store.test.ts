@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { MumblerCard, MumblerQueue, MumblerSettings } from "@shared/app-shell";
-import { CorruptStateError } from "@main/core/json-store";
+import { NewerFormatError } from "@main/core/format-versions";
 import {
   buildSettingsDraft,
   createDefaultSettings,
@@ -72,7 +72,6 @@ function card(overrides: Partial<MumblerCard> = {}): MumblerCard {
 
 function stateWith(cards: MumblerCard[]): MumblerQueue {
   return {
-    schemaVersion: 2,
     pendingImports: [],
     cards,
   };
@@ -113,7 +112,7 @@ describe("queue data store", () => {
     );
 
     const raw = JSON.parse(await readFile(queuePath(), "utf8"));
-    expect(raw.schemaVersion).toBe(2);
+    expect(raw.formatVersion).toBe(1);
     expect(raw).not.toHaveProperty("updatedAtUtc");
     expect(raw.cards[0]).not.toHaveProperty("transcription");
     expect(raw.cards[0].metadata).toEqual({ title: "Title", slug: "title" });
@@ -122,19 +121,25 @@ describe("queue data store", () => {
     expect(value.cards[0].metadata.structured).toBeNull();
   });
 
-  it("still reads a version-1 file whose cards carry their text", async () => {
-    const legacy = {
-      schemaVersion: 1,
-      updatedAtUtc: "2026-04-22T00:00:00.000Z",
+  it("takes no card text from queue.json, which only the card's transcript file holds", async () => {
+    const withText = {
+      formatVersion: 1,
       pendingImports: [],
-      cards: [{ ...card({ id: "old" }), transcription: { text: "old words" }, metadata: { structured: "old outline", title: "T", slug: "t" } }],
+      cards: [{ ...card({ id: "x" }), transcription: { text: "words" }, metadata: { structured: "outline", title: "T", slug: "t" } }],
     };
-    await writeFile(queuePath(), JSON.stringify(legacy), "utf8");
+    await writeFile(queuePath(), JSON.stringify(withText), "utf8");
 
     const { value } = await createQueueStore(queuePath()).load();
 
-    expect(value.cards[0].transcription.text).toBe("old words");
-    expect(value.cards[0].metadata.structured).toBe("old outline");
+    expect(value.cards[0].transcription.text).toBeNull();
+    expect(value.cards[0].metadata).toEqual({ structured: null, title: "T", slug: "t" });
+  });
+
+  it("reads a queue.json with no format version as version 1", async () => {
+    await writeFile(queuePath(), JSON.stringify(stateWith([card({ id: "x" })])), "utf8");
+    const { value, origin } = await createQueueStore(queuePath()).load();
+    expect(origin).toBe("loaded");
+    expect(value.cards.map((c) => c.id)).toEqual(["x"]);
   });
 
   it("writes UTC instants as canonical ISO strings and reads epoch-ms back", async () => {
@@ -223,7 +228,7 @@ describe("queue data store", () => {
     const EFFECTIVE = Date.UTC(2026, 3, 22, 0, 45, 5);
 
     async function loadRaw(raw: Record<string, unknown>): Promise<MumblerQueue> {
-      await writeFile(queuePath(), JSON.stringify({ schemaVersion: 2, pendingImports: [], cards: [], ...raw }), "utf8");
+      await writeFile(queuePath(), JSON.stringify({ formatVersion: 1, pendingImports: [], cards: [], ...raw }), "utf8");
       return (await createQueueStore(queuePath()).load()).value;
     }
 
@@ -328,7 +333,7 @@ describe("queue data store", () => {
     it("dates it by the queue file that recorded it when its audio file is gone too", async () => {
       await writeFile(
         queuePath(),
-        JSON.stringify({ schemaVersion: 2, pendingImports: [], cards: [undatedCard(join(dir, "gone.wav"))] }),
+        JSON.stringify({ formatVersion: 1, pendingImports: [], cards: [undatedCard(join(dir, "gone.wav"))] }),
         "utf8",
       );
       const modified = new Date(Date.UTC(2025, 5, 6, 7, 8, 9));
@@ -341,10 +346,10 @@ describe("queue data store", () => {
     });
   });
 
-  it("refuses (does not overwrite) a state file from a newer schema version", async () => {
-    const newer = JSON.stringify({ ...stateWith([card()]), schemaVersion: 99 });
+  it("refuses (does not overwrite) a queue file in a newer format", async () => {
+    const newer = JSON.stringify({ formatVersion: 2, ...stateWith([card()]) });
     await writeFile(queuePath(), newer, "utf8");
-    await expect(createQueueStore(queuePath()).load()).rejects.toBeInstanceOf(CorruptStateError);
+    await expect(createQueueStore(queuePath()).load()).rejects.toBeInstanceOf(NewerFormatError);
     expect(await readFile(queuePath(), "utf8")).toBe(newer);
   });
 });
@@ -367,16 +372,15 @@ describe("settings store", () => {
     expect((await store.load()).value).toEqual(createDefaultSettings());
   });
 
-  it("keeps the file as {} when its final set is saved equal to its built-in, dropping unknown keys too", async () => {
+  it("keeps the file holding only its format version when its final set is saved equal to its built-in, dropping unknown keys too", async () => {
     await writeFile(settingsPath(), JSON.stringify({
       prompts: { structured: "custom", title: "custom", slug: "custom" },
-      schemaVersion: 1,
       retired: true,
     }));
     const store = createSettingsStore(settingsPath());
     await store.save(createDefaultSettings());
 
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({});
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1 });
     expect((await store.load()).value).toEqual(createDefaultSettings());
   });
 
@@ -384,31 +388,31 @@ describe("settings store", () => {
     const store = createSettingsStore(settingsPath());
     await store.save(settings({ concurrencyLimit: 5, theme: "dark" }));
     await store.save(settings({ theme: "dark" }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ theme: "dark" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, theme: "dark" });
   });
 
   it("compares a model id with its built-in trimmed and case-insensitively", async () => {
     const store = createSettingsStore(settingsPath());
     await store.save(settings({ "gemini.outline": "custom-model" }));
     await store.save(settings({ "gemini.outline": ` ${createDefaultSettings()["gemini.outline"].toUpperCase()} ` }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({});
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1 });
   });
 
   it("stores a role's thinking only while it differs from the default for the role's model", async () => {
     const store = createSettingsStore(settingsPath());
     const defaults = createDefaultSettings();
     await store.save({ ...defaults, "gemini.metadata": "gemini-3.8-flash", "gemini.thinking.metadata": "medium", "gemini.thinking.outline": "high" });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.metadata": "gemini-3.8-flash", "gemini.thinking.outline": "high" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.metadata": "gemini-3.8-flash", "gemini.thinking.outline": "high" });
 
     // The default follows the model's tier, not the role's: a fast model on the balanced role starts at minimal.
     await store.save({ ...defaults, "gemini.outline": "gemini-3.5-flash-lite", "gemini.thinking.outline": "minimal" });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "gemini-3.5-flash-lite" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.outline": "gemini-3.5-flash-lite" });
 
     // Under a model with no row the choice is kept, unsent, while it differs from the built-in.
     await store.save({ ...defaults, "gemini.outline": "custom-model", "gemini.thinking.outline": "high" });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "custom-model", "gemini.thinking.outline": "high" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.outline": "custom-model", "gemini.thinking.outline": "high" });
     await store.save({ ...defaults, "gemini.outline": "custom-model" });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "custom-model" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.outline": "custom-model" });
   });
 
   it("keeps a thinking saved under a model with no row through a relaunch, in the settings and the draft", async () => {
@@ -421,7 +425,7 @@ describe("settings store", () => {
   it("reads a thinking the file does not hold as the selected model's own default after a relaunch", async () => {
     // The outline's built-in model is Flash (medium); Flash Lite's own default is minimal, so it is not stored.
     await createSettingsStore(settingsPath()).save(settings({ "gemini.outline": "gemini-3.5-flash-lite", "gemini.thinking.outline": "minimal" }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "gemini-3.5-flash-lite" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.outline": "gemini-3.5-flash-lite" });
     const loaded = (await createSettingsStore(settingsPath()).load()).value;
     expect(loaded["gemini.thinking.outline"]).toBe("minimal");
     expect(buildSettingsDraft(loaded, "", "", false)).toMatchObject({ outlineModel: "gemini-3.5-flash-lite", outlineThinking: "minimal" });
@@ -439,17 +443,17 @@ describe("settings store", () => {
     expect((await store.load()).value).toEqual(createDefaultSettings());
     await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await store.save(settings({ concurrencyLimit: 5 }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
     expect((await store.load()).value).toEqual(settings({ concurrencyLimit: 5 }));
   });
 
-  it("accepts an old version key and drops it and other unknown keys at the next write", async () => {
+  it("drops a retired version key and other unknown keys at the next write", async () => {
     await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 99, version: 99, theme: "dark", retired: true }));
     const store = createSettingsStore(settingsPath());
     const loaded = (await store.load()).value;
     expect(loaded.theme).toBe("dark");
     await store.save({ ...loaded, concurrencyLimit: 5 });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ theme: "dark", concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, theme: "dark", concurrencyLimit: 5 });
   });
 
   it("builds the file from the settings it is given, not onto the stored bytes, one save after another", async () => {
@@ -457,7 +461,7 @@ describe("settings store", () => {
     await store.load();
     await writeFile(settingsPath(), JSON.stringify({ theme: "dark" }));
     await Promise.all([store.save(settings({ concurrencyLimit: 5 })), store.save(settings({ skipIntervalSec: 20 }))]);
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ skipIntervalSec: 20 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, skipIntervalSec: 20 });
   });
 
   it("ignores an old timestampPatterns list and drops it at the next write", async () => {
@@ -465,7 +469,7 @@ describe("settings store", () => {
     const store = createSettingsStore(settingsPath());
     expect((await store.load()).value).toEqual(createDefaultSettings());
     await store.save(settings({ concurrencyLimit: 5 }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
   });
 
   it("drops retired model-selection keys without migrating them into role sets", async () => {
@@ -473,14 +477,14 @@ describe("settings store", () => {
     const store = createSettingsStore(settingsPath());
     expect((await store.load()).value).toEqual(createDefaultSettings());
     await store.save(settings({ "gemini.outline": "unknown-model" }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ "gemini.outline": "unknown-model" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.outline": "unknown-model" });
   });
   it("ignores the retired provider and extra-model keys and drops them at the next write", async () => {
     await writeFile(settingsPath(), JSON.stringify({ provider: "gemini", extraModelIds: { gemini: ["custom"] } }));
     const store = createSettingsStore(settingsPath());
     expect((await store.load()).value).toEqual(createDefaultSettings());
     await store.save(settings({ concurrencyLimit: 5 }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
   });
 
   it("falls back for a malformed whole set, warns with its key, and heals at the next save", async () => {
@@ -496,7 +500,7 @@ describe("settings store", () => {
     expect(loaded).toEqual(createDefaultSettings());
     expect(warnings).toEqual(["theme", "prompts", "retryPolicy", "timeouts"]);
     await store.save({ ...loaded, concurrencyLimit: 5 });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
   });
 
   it.each([
@@ -522,10 +526,19 @@ describe("settings store", () => {
     expect((await createSettingsStore(settingsPath()).load()).value.prompts).toEqual(prompts);
   });
 
+  it("refuses a config.json in a newer format, on load and on save, and leaves it untouched", async () => {
+    const newer = JSON.stringify({ formatVersion: 2, theme: "dark" });
+    await writeFile(settingsPath(), newer, "utf8");
+    const store = createSettingsStore(settingsPath());
+    await expect(store.load()).rejects.toBeInstanceOf(NewerFormatError);
+    await expect(store.save(settings({ concurrencyLimit: 5 }))).rejects.toBeInstanceOf(NewerFormatError);
+    expect(await readFile(settingsPath(), "utf8")).toBe(newer);
+  });
+
   it("normalizes out-of-range settings values on load", async () => {
     await writeFile(
       settingsPath(),
-      JSON.stringify({ schemaVersion: 1, concurrencyLimit: -5, skipIntervalSec: "nope" }),
+      JSON.stringify({ formatVersion: 1, concurrencyLimit: -5, skipIntervalSec: "nope" }),
       "utf8",
     );
     const { value } = await createSettingsStore(settingsPath()).load();
@@ -534,23 +547,23 @@ describe("settings store", () => {
   });
 
   it("defaults the theme to System and keeps a saved Light or Dark", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 1 }), "utf8");
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1 }), "utf8");
     expect((await createSettingsStore(settingsPath()).load()).value.theme).toBe("system");
 
-    await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 1, theme: "dark" }), "utf8");
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, theme: "dark" }), "utf8");
     expect((await createSettingsStore(settingsPath()).load()).value.theme).toBe("dark");
 
-    await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 1, theme: "sepia" }), "utf8");
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, theme: "sepia" }), "utf8");
     expect((await createSettingsStore(settingsPath()).load()).value.theme).toBe("system");
   });
 
   it("defaults the launch update check on when absent, and preserves an explicit off", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ schemaVersion: 1 }), "utf8");
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1 }), "utf8");
     expect((await createSettingsStore(settingsPath()).load()).value.checkUpdatesAtLaunch).toBe(true);
 
     await writeFile(
       settingsPath(),
-      JSON.stringify({ schemaVersion: 1, checkUpdatesAtLaunch: false }),
+      JSON.stringify({ formatVersion: 1, checkUpdatesAtLaunch: false }),
       "utf8",
     );
     expect((await createSettingsStore(settingsPath()).load()).value.checkUpdatesAtLaunch).toBe(false);
@@ -561,7 +574,7 @@ describe("settings store", () => {
     await writeFile(
       settingsPath(),
       JSON.stringify({
-        schemaVersion: 1,
+        formatVersion: 1,
         outputDirectory: "~/output",
         backupDirectory: "relative/backups",
       }),

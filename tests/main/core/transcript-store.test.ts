@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { MumblerCard } from "@shared/app-shell";
+import { NewerFormatError } from "@main/core/format-versions";
 import { CorruptStateError } from "@main/core/json-store";
 import { TranscriptStore } from "@main/core/transcript-store";
 
@@ -42,7 +43,7 @@ describe("TranscriptStore", () => {
 
     const [name] = await files();
     expect(JSON.parse(await readFile(join(dir, name), "utf8"))).toEqual({
-      schemaVersion: 1,
+      formatVersion: 1,
       cardId: "take",
       transcription: "the words",
       structured: "## better outline",
@@ -103,6 +104,26 @@ describe("TranscriptStore", () => {
 
     await expect(new TranscriptStore(dir).open(["take"])).rejects.toBeInstanceOf(CorruptStateError);
     expect(await readFile(join(dir, name), "utf8")).toBe("{ not json");
+  });
+
+  it("refuses a file in a newer format as intact, not corrupt, and leaves it in place", async () => {
+    await mkdir(dir, { recursive: true });
+    const name = `${Buffer.from("take").toString("hex")}.json`;
+    const newer = JSON.stringify({ formatVersion: 2, cardId: "take", transcription: "words", structured: null });
+    await writeFile(join(dir, name), newer);
+
+    const error = await new TranscriptStore(dir).open(["take"]).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(NewerFormatError);
+    expect(error).toMatchObject({ filePath: join(dir, name) });
+    expect(await readFile(join(dir, name), "utf8")).toBe(newer);
+  });
+
+  it("reads a file with no format version as version 1", async () => {
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${Buffer.from("take").toString("hex")}.json`), JSON.stringify({ cardId: "take", transcription: "words", structured: null }));
+
+    expect((await new TranscriptStore(dir).open(["take"])).get("take")).toEqual({ transcription: "words", structured: null });
   });
 
   it("ignores files it did not name", async () => {

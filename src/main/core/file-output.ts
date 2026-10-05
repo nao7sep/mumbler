@@ -7,6 +7,7 @@ import type { MumblerCard } from "@shared/app-shell";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 import { CancelledError, isCancelledError } from "./cancellation";
 import { fileExists, formatError, syncDirectory, syncFile } from "./file-io";
+import { FORMAT_VERSIONS } from "./format-versions";
 
 // A save that must not overwrite found one of its targets already taken when
 // it came to publish: someone wrote that name after the conflict check.
@@ -240,7 +241,7 @@ export function buildOutputPayload(params: {
   finalizedAtUtc: number;
 }): Record<string, unknown> {
   return {
-    schemaVersion: 1,
+    formatVersion: FORMAT_VERSIONS.outputJson,
     appVersion: __APP_VERSION__,
     originalFilename: params.card.originalFilename,
     importSource: params.card.importSource,
@@ -316,7 +317,7 @@ export function buildMarkdownContent(params: {
 
   const lines: string[] = [
     "---",
-    `schema_version: 1`,
+    `format_version: ${FORMAT_VERSIONS.outputMarkdown}`,
     `date: ${yamlDoubleQuotedString(date)}`,
     `audio: ${yamlDoubleQuotedString(params.audioFilename)}`,
     `duration: ${duration === null ? "null" : duration}`,

@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import type {
   RecordDetail,
@@ -9,6 +9,9 @@ import type {
   RecordsQuery,
   RecordSummary,
 } from "@shared/records";
+
+import { FORMAT_VERSIONS } from "./format-versions.ts";
+import { openVersionedDatabase } from "./sqlite-store.ts";
 
 // The records database (data-lifecycle-conventions, Records): one row per log
 // line or provider call, each carrying its session, its time and the card it
@@ -192,18 +195,10 @@ export class RecordsEngine {
     if (this.db !== null) return this.db;
     if (this.opened) throw new Error(`records database is unavailable: ${this.target.databasePath}`);
     this.opened = true;
-    mkdirSync(path.dirname(this.target.databasePath), { recursive: true });
-    const db = new DatabaseSync(this.target.databasePath);
-    try {
-      db.exec("PRAGMA journal_mode = WAL");
-      db.exec("PRAGMA busy_timeout = 5000");
-      db.exec(SCHEMA);
-    } catch (error: unknown) {
-      db.close();
-      throw error;
-    }
-    this.db = db;
-    return db;
+    // A database in a newer format is left untouched: entries go to the
+    // fallback file and reads fail, as for any database that cannot be opened.
+    this.db = openVersionedDatabase(this.target.databasePath, FORMAT_VERSIONS.records, SCHEMA);
+    return this.db;
   }
 
   private insert(db: DatabaseSync, entry: RecordEntry): void {

@@ -82,6 +82,41 @@ describe("App startup snapshot gate", () => {
   });
 });
 
+describe("a startup diagnostic", () => {
+  it("names a store from a newer version and offers no reset", async () => {
+    getSnapshot.mockResolvedValue({
+      ...readySnapshot(),
+      startupDiagnostic: {
+        title: { key: "diagnostic.newerTitle" },
+        message: { key: "diagnostic.newerBody", values: { path: "/home/me/.mumbler/queue.json" } },
+        canReset: false,
+      },
+    });
+
+    await act(async () => root?.render(createElement(App)));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Saved Data Is From a Newer Version"));
+
+    expect(document.body.textContent).toContain("/home/me/.mumbler/queue.json was saved by a newer version of Mumbler");
+    expect(button("Reset State")).toBeUndefined();
+  });
+
+  it("offers a reset for data that could not be loaded", async () => {
+    getSnapshot.mockResolvedValue({
+      ...readySnapshot(),
+      startupDiagnostic: {
+        title: { key: "diagnostic.corruptTitle" },
+        message: { key: "diagnostic.corruptBody" },
+        canReset: true,
+      },
+    });
+
+    await act(async () => root?.render(createElement(App)));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Loaded"));
+
+    expect(button("Reset State")).toBeDefined();
+  });
+});
+
 function rendererApi(): MumblerShellApi {
   const unsubscribe = (): void => undefined;
   return new Proxy(

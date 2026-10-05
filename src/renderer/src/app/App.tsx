@@ -1161,16 +1161,18 @@ function LoadedShell({
             <section className="panel panel--nested queue-empty">
               <p className="empty-state__title">{i18n.text(snapshot.startupDiagnostic.title)}</p>
               <p className="empty-state__body">{i18n.text(snapshot.startupDiagnostic.message)}</p>
-              <div className="toolbar">
-                <button
-                  type="button"
-                  className="button button--danger"
-                  onClick={() => void handleResetState()}
-                  disabled={isResettingState}
-                >
-                  {isResettingState ? t("queue.resetting") : t("queue.resetState")}
-                </button>
-              </div>
+              {snapshot.startupDiagnostic.canReset ? (
+                <div className="toolbar">
+                  <button
+                    type="button"
+                    className="button button--danger"
+                    onClick={() => void handleResetState()}
+                    disabled={isResettingState}
+                  >
+                    {isResettingState ? t("queue.resetting") : t("queue.resetState")}
+                  </button>
+                </div>
+              ) : null}
             </section>
           ) : snapshot?.state?.cards.length ? (
             <QueueList

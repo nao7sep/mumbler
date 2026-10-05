@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createDependenciesStore, launchCheckDue } from "@main/core/binaries/store";
+import { NewerFormatError } from "@main/core/format-versions";
 import { closeBackupStore } from "@main/core/backupStore";
 
 let dir: string;
@@ -45,7 +46,7 @@ describe("dependencies store — timestamp persistence", () => {
     await writeFile(
       storePath(),
       JSON.stringify({
-        schemaVersion: 1,
+        formatVersion: 1,
         tools: {
           ffmpeg: { installedVersion: "8.1", desiredVersion: "8.1", lastCheckedAtUtc: null },
           ffprobe: {},
@@ -58,6 +59,17 @@ describe("dependencies store — timestamp persistence", () => {
     expect(value.tools.ffmpeg).not.toHaveProperty("installedVersion");
     await store.save(value);
     expect((await onDisk()).tools.ffmpeg).not.toHaveProperty("installedVersion");
+  });
+
+  it("writes its format version, and refuses a newer file without touching it", async () => {
+    const store = createDependenciesStore(storePath());
+    await store.save((await store.load()).value);
+    expect(JSON.parse(await readFile(storePath(), "utf8")).formatVersion).toBe(1);
+
+    const newer = JSON.stringify({ formatVersion: 2, tools: {} });
+    await writeFile(storePath(), newer);
+    await expect(createDependenciesStore(storePath()).load()).rejects.toBeInstanceOf(NewerFormatError);
+    expect(await readFile(storePath(), "utf8")).toBe(newer);
   });
 
   it("keeps a null check time null on disk and on reload", async () => {
@@ -78,7 +90,7 @@ describe("dependencies store — timestamp persistence", () => {
     await writeFile(
       storePath(),
       JSON.stringify({
-        schemaVersion: 1,
+        formatVersion: 1,
         tools: {
           ffmpeg: { installedVersion: "8.1", desiredVersion: "8.1", lastCheckedAtUtc: 1_699_000_000_000 },
           ffprobe: {},
@@ -111,7 +123,7 @@ describe("the launch check's last attempt", () => {
     expect(JSON.parse(await readFile(storePath(), "utf8")).lastCheckAttemptAtUtc).toBe("2023-11-14T22:13:20.000Z");
     expect((await createDependenciesStore(storePath()).load()).value.lastCheckAttemptAtUtc).toBe(NOW);
 
-    await writeFile(storePath(), JSON.stringify({ schemaVersion: 1, tools: {}, lastCheckAttemptAtUtc: "not a time" }));
+    await writeFile(storePath(), JSON.stringify({ formatVersion: 1, tools: {}, lastCheckAttemptAtUtc: "not a time" }));
     expect((await createDependenciesStore(storePath()).load()).value.lastCheckAttemptAtUtc).toBeNull();
   });
 });

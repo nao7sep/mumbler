@@ -9,6 +9,7 @@ import type { ToolName } from "@shared/app-shell";
 import { FFMPEG_BUILD_TAG } from "@shared/dependency-status";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 
+import { FORMAT_VERSIONS, recordedFormatVersion } from "../format-versions";
 import { normalizeToolVersion } from "./registry";
 
 const execFileAsync = promisify(execFile);
@@ -67,6 +68,7 @@ export function versionSidecarPath(binDir: string, name: ToolName): string {
 }
 
 interface VersionSidecar {
+  formatVersion: number;
   version: string;
   installedAt: string;
 }
@@ -82,7 +84,11 @@ export async function writeVersionSidecar(
   version: string,
   nowUtc: number,
 ): Promise<void> {
-  const payload: VersionSidecar = { version, installedAt: formatUtcIsoCompact(nowUtc) };
+  const payload: VersionSidecar = {
+    formatVersion: FORMAT_VERSIONS.toolVersion,
+    version,
+    installedAt: formatUtcIsoCompact(nowUtc),
+  };
   const target = versionSidecarPath(binDir, name);
   // Atomic replace through a same-directory temp, per the storage-path conventions.
   // not recorded: a sidecar colocated in the binary-bearing bin/ directory, describing
@@ -101,7 +107,8 @@ export async function writeVersionSidecar(
 }
 
 // The installed version of `name`, or null when it cannot be read — the binary will
-// not run, exits non-zero, prints something unrecognized, or its sidecar is missing.
+// not run, exits non-zero, prints something unrecognized, or its sidecar is missing
+// or in a format this build does not read (left as it is until the next install).
 // Null is NOT "absent" and never reads as up to date: there is nothing to compare,
 // so the derivation holds the tool at installed-unchecked. Callers check presence
 // first; an absent tool has no version to read.
@@ -125,7 +132,10 @@ export async function readInstalledVersion(
 async function readSidecar(binDir: string, name: ToolName): Promise<string | null> {
   try {
     const raw: unknown = JSON.parse(await readFile(versionSidecarPath(binDir, name), "utf8"));
-    const version = (raw as Partial<VersionSidecar> | null)?.version;
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const recorded = recordedFormatVersion(raw as Record<string, unknown>);
+    if (recorded === null || recorded > FORMAT_VERSIONS.toolVersion) return null;
+    const version = (raw as Partial<VersionSidecar>).version;
     return typeof version === "string" && FFMPEG_BUILD_TAG.test(version) ? version : null;
   } catch {
     return null;

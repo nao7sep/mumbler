@@ -105,7 +105,7 @@ describe("buildMarkdownContent", () => {
     expect(content).toBe(
       [
         "---",
-        "schema_version: 1",
+        "format_version: 1",
         'date: "2026-04-22T00:44:00.000Z"',
         'audio: "20260422-004400-my-slug.m4a"',
         "duration: 42",
@@ -155,7 +155,7 @@ describe("computeFinalDuration", () => {
 });
 
 describe("buildOutputPayload", () => {
-  it("emits a schema-versioned payload with formatted timestamps and transcription", () => {
+  it("emits a format-versioned payload with formatted timestamps and transcription", () => {
     const payload = buildOutputPayload({
       card: makeCard(),
       finalProfile: makeCard().audioProfile,
@@ -163,7 +163,8 @@ describe("buildOutputPayload", () => {
       finalizedAtUtc: Date.UTC(2026, 3, 22, 2, 0, 0),
     });
 
-    expect(payload.schemaVersion).toBe(1);
+    expect(payload.formatVersion).toBe(1);
+    expect(Object.keys(payload)[0]).toBe("formatVersion");
     expect(payload.appVersion).toBe(__APP_VERSION__);
     expect(payload.transcription).toEqual({
       raw: "raw text",

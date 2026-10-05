@@ -715,63 +715,120 @@ describe("working with a card", () => {
 });
 
 describe("each card's text in its own file", () => {
-  it("moves the text a version-1 queue.json carries into per-card files on first launch", async () => {
+  /** Gives the confirmed card text in its own file, the way a finished run leaves it. */
+  async function withTextOnDisk(card: MumblerCard): Promise<void> {
+    await runtime.shutdown();
+    await new TranscriptStore(join(home, "transcripts")).writeChanged([
+      { ...card, transcription: { text: "every word that was said" }, metadata: { ...card.metadata, structured: "## what it was about" } },
+    ]);
+    runtime = await ApplicationRuntime.initialize();
+  }
+
+  it("reads a card's text from its own file, never from queue.json", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
-    await runtime.shutdown();
-    // A version-1 queue record carries text inside each card.
-    const current = JSON.parse(await readFile(join(home, "queue.json"), "utf8"));
-    const legacy = {
-      ...current,
-      schemaVersion: 1,
-      updatedAtUtc: current.cards[0].createdAtUtc,
-      cards: current.cards.map((entry: Record<string, unknown>) => ({
-        ...entry,
-        status: "Ready to Save",
-        transcription: { text: "every word that was said" },
-        metadata: { structured: "## what it was about", title: "A title", slug: "a-title" },
-      })),
-    };
-    await writeFile(join(home, "queue.json"), JSON.stringify(legacy), "utf8");
-
-    runtime = await ApplicationRuntime.initialize();
+    await withTextOnDisk(card);
 
     const [loaded] = cards(runtime.getSnapshot());
     expect(loaded).toMatchObject({
       id: card.id,
       transcription: { text: "every word that was said" },
-      metadata: { structured: "## what it was about", title: "A title", slug: "a-title" },
+      metadata: { structured: "## what it was about" },
     });
-    const onDisk = await readFile(join(home, "queue.json"), "utf8");
-    expect(JSON.parse(onDisk).schemaVersion).toBe(2);
-    expect(onDisk, "queue.json no longer carries the text").not.toContain("every word that was said");
+    expect(await readFile(join(home, "queue.json"), "utf8")).not.toContain("every word that was said");
     const [file] = await readdir(join(home, "transcripts"));
     expect(JSON.parse(await readFile(join(home, "transcripts", file), "utf8"))).toMatchObject({
+      formatVersion: 1,
       cardId: card.id,
       transcription: "every word that was said",
-      structured: "## what it was about",
     });
-
-    // And the text survives the next launch from its own file alone.
-    await runtime.shutdown();
-    runtime = await ApplicationRuntime.initialize();
-    expect(cards(runtime.getSnapshot())[0].transcription.text).toBe("every word that was said");
   });
 
   it("drops a card's text file when the card is removed", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
-    await runtime.shutdown();
-    const current = JSON.parse(await readFile(join(home, "queue.json"), "utf8"));
-    current.schemaVersion = 1;
-    current.cards[0].transcription = { text: "words" };
-    await writeFile(join(home, "queue.json"), JSON.stringify(current), "utf8");
-    runtime = await ApplicationRuntime.initialize();
+    await withTextOnDisk(card);
     expect(await readdir(join(home, "transcripts"))).toHaveLength(1);
 
     await runtime.removeCard(card.id);
 
     expect(await readdir(join(home, "transcripts"))).toEqual([]);
+  });
+});
+
+describe("a store in a newer format", () => {
+  /** Rewrites a JSON store as a newer build would have left it, returning its bytes. */
+  async function makeNewer(path: string): Promise<string> {
+    const current = (await exists(path)) ? JSON.parse(await readFile(path, "utf8")) : {};
+    const newer = JSON.stringify({ ...current, formatVersion: 2 });
+    await writeFile(path, newer, "utf8");
+    return newer;
+  }
+
+  async function confirmedCard(): Promise<MumblerCard> {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
+    return card;
+  }
+
+  it.each(["queue.json", "config.json", "dependencies.json"])(
+    "halts launch naming %s, leaves it untouched and offers no reset",
+    async (name) => {
+      await confirmedCard();
+      await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), concurrencyLimit: 5 });
+      await runtime.shutdown();
+      const path = join(home, name);
+      const newer = await makeNewer(path);
+
+      runtime = await ApplicationRuntime.initialize();
+
+      expect(runtime.getSnapshot().startupDiagnostic).toEqual({
+        title: { key: "diagnostic.newerTitle" },
+        message: { key: "diagnostic.newerBody", values: { path } },
+        canReset: false,
+      });
+      expect(runtime.getSnapshot().state).toBeNull();
+      await runtime.shutdown();
+      expect(await readFile(path, "utf8")).toBe(newer);
+      expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
+    },
+  );
+
+  it("halts launch naming a card's transcript file and leaves it untouched", async () => {
+    const card = await confirmedCard();
+    await runtime.shutdown();
+    await new TranscriptStore(join(home, "transcripts")).writeChanged([
+      { ...card, transcription: { text: "words" } },
+    ]);
+    const [file] = await readdir(join(home, "transcripts"));
+    const path = join(home, "transcripts", file);
+    const newer = await makeNewer(path);
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({
+      message: { key: "diagnostic.newerBody", values: { path } },
+      canReset: false,
+    });
+    expect(await readFile(path, "utf8")).toBe(newer);
+  });
+
+  it("opens on a default layout and never writes a layout.json from a newer build", async () => {
+    const card = await confirmedCard();
+    await runtime.saveLayout(420);
+    await runtime.shutdown();
+    const path = join(home, "layout.json");
+    const newer = await makeNewer(path);
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+    expect(runtime.getSnapshot().layout?.queueWidth).not.toBe(420);
+    await runtime.saveLayout(430);
+    await runtime.saveRecordsListWidth(500);
+    await runtime.selectCard(card.id);
+    await runtime.shutdown();
+    expect(await readFile(path, "utf8")).toBe(newer);
   });
 });
 
@@ -784,15 +841,15 @@ describe("settings, secrets and the window's own state", () => {
   it("launches without a config file and writes only the edited set", async () => {
     expect(await exists(join(home, "config.json"))).toBe(false);
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), concurrencyLimit: 5 });
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
   });
 
   it("writes the Audio Tools update toggle with the other sets the app holds", async () => {
     await runtime.saveToolSettings(false);
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ checkUpdatesAtLaunch: false });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ formatVersion: 1, checkUpdatesAtLaunch: false });
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), concurrencyLimit: 5 });
     await runtime.saveToolSettings(true);
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
   });
 
   it("removes model and prompt copies when Save holds their built-ins, as after a reset", async () => {
@@ -807,7 +864,7 @@ describe("settings, secrets and the window's own state", () => {
       transcriptionModel: defaults.transcriptionModel, metadataModel: defaults.metadataModel,
       structuredPrompt: prompts.structured, titlePrompt: prompts.title, slugPrompt: prompts.slug,
     });
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
   });
 
   it("does not store a prompt that differs from its built-in only by line endings and trailing spaces", async () => {

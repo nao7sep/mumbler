@@ -281,7 +281,6 @@ export interface MumblerCard {
 
 /** The user's durable card queue and pending imports; presentation is in MumblerLayout. */
 export interface MumblerQueue {
-  schemaVersion: 2;
   pendingImports: PendingImportReviewItem[];
   cards: MumblerCard[];
 }
@@ -395,6 +394,12 @@ export interface StartupDiagnostic {
   message: Message;
 }
 
+// Why the stores did not load. Reset sets them aside and starts empty, so it is
+// offered only where nothing must stay exactly in place.
+export interface StartupFailure extends StartupDiagnostic {
+  canReset: boolean;
+}
+
 export interface RendererErrorReport {
   message: string;
   source: string;
@@ -499,7 +504,6 @@ export interface DependencyStatus {
 // dragged intents in CSS pixels, for the main window's queue pane and the records
 // window's list pane; selectedCardId remembers where the user left the queue view.
 export interface MumblerLayout {
-  schemaVersion: number;
   queueWidth: number;
   recordsListWidth: number;
   selectedCardId: string | null;
@@ -518,7 +522,7 @@ export interface AppSnapshot {
   settingsSummary: SettingsSummary | null;
   queueSummary: QueueSummary | null;
   commands: CommandDefinition[];
-  startupDiagnostic: StartupDiagnostic | null;
+  startupDiagnostic: StartupFailure | null;
   appWideError: StartupDiagnostic | null;
   state: MumblerQueue | null;
   // Disposable presentation state. Null until the runtime is ready, like the

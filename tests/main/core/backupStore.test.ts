@@ -7,7 +7,7 @@
  * can read the resulting `backups.sqlite3` back directly.
  */
 import { createHash } from "node:crypto";
-import { readdirSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -216,6 +216,40 @@ describe("record — best-effort: a store failure never throws, logs one warn, s
     record(join(root, "config.json"), Buffer.from("ok", "utf8"));
     await closeBackupStore();
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("record — format version", () => {
+  it("records the history's format version in user_version", async () => {
+    record(join(root, "config.json"), Buffer.from("x", "utf8"));
+    await closeBackupStore();
+    const db = new DatabaseSync(storeFilePath);
+    try {
+      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("leaves a history in a newer format untouched, warning once and recording nothing", async () => {
+    const newer = new DatabaseSync(storeFilePath);
+    newer.exec("CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 2;");
+    newer.close();
+    const before = createHash("sha256").update(readFileSync(storeFilePath)).digest("hex");
+    const warn = vi.fn<BackupWarn>();
+    setBackupStoreWarn(warn);
+
+    record(join(root, "config.json"), Buffer.from("x", "utf8"));
+    record(join(root, "queue.json"), Buffer.from("y", "utf8"));
+    await closeBackupStore();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("could not open"),
+      expect.objectContaining({ error: expect.stringContaining("newer than this build reads") }),
+    );
+    expect(createHash("sha256").update(readFileSync(storeFilePath)).digest("hex")).toBe(before);
+    expect(readdirSync(root)).not.toContain("backups.sqlite3-wal");
   });
 });
 

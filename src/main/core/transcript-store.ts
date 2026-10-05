@@ -4,9 +4,8 @@ import { basename, extname, join } from "node:path";
 import type { MumblerCard } from "@shared/app-shell";
 
 import { formatError, isMissingFileError, readJsonFile, writeJsonFile } from "./file-io";
-import { CorruptStateError } from "./json-store";
-
-const TRANSCRIPT_SCHEMA_VERSION = 1;
+import { FORMAT_VERSIONS } from "./format-versions";
+import { assertReadableFormat, CorruptStateError } from "./json-store";
 
 /** A card's two long text bodies, kept in the card's own file rather than in queue.json. */
 export interface CardTranscript {
@@ -36,7 +35,7 @@ function cardIdFrom(fileName: string): string | null {
 }
 
 function serialize(cardId: string, transcript: CardTranscript): Record<string, unknown> {
-  return { schemaVersion: TRANSCRIPT_SCHEMA_VERSION, cardId, ...transcript };
+  return { formatVersion: FORMAT_VERSIONS.transcript, cardId, ...transcript };
 }
 
 function parse(path: string, raw: unknown): CardTranscript {
@@ -44,13 +43,7 @@ function parse(path: string, raw: unknown): CardTranscript {
     throw new CorruptStateError(path, "file does not contain a JSON object");
   }
   const record = raw as Record<string, unknown>;
-  if (typeof record.schemaVersion === "number" && record.schemaVersion > TRANSCRIPT_SCHEMA_VERSION) {
-    throw new CorruptStateError(
-      path,
-      `on-disk schema version ${record.schemaVersion} is newer than this build supports (${TRANSCRIPT_SCHEMA_VERSION})`,
-      "future-version",
-    );
-  }
+  assertReadableFormat(path, record, FORMAT_VERSIONS.transcript);
   const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
   return { transcription: text(record.transcription), structured: text(record.structured) };
 }
@@ -73,8 +66,8 @@ export class TranscriptStore {
   /**
    * Reads the transcript of every card in `cardIds`, and deletes files that no
    * card refers to any more (the card was removed or saved before its file could
-   * be). A file that cannot be read halts like a corrupt queue.json: it is left
-   * in place for the user.
+   * be). A file that cannot be read halts like a corrupt queue.json, and one in
+   * a newer format halts like a newer queue.json: either is left in place.
    */
   async open(cardIds: readonly string[]): Promise<Map<string, CardTranscript>> {
     const wanted = new Set(cardIds);

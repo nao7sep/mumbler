@@ -108,7 +108,7 @@ describe("writeJsonFile — data-backup record hook", () => {
   it("records by default (no options) — a managed text write is captured", async () => {
     const target = join(dir, "state.json");
 
-    await writeJsonFile(target, { schemaVersion: 1 });
+    await writeJsonFile(target, { formatVersion: 1 });
 
     expect(backupRecord).toHaveBeenCalledOnce();
     expect(backupRecord).toHaveBeenCalledWith(target, await readFile(target));

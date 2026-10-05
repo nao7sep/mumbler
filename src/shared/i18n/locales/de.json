@@ -53,6 +53,8 @@
   "diagnostic.storageBody": "Mumbler konnte den eingestellten Speicherordner nicht verwenden. Stellen Sie den Zugriff auf diesen Ordner wieder her oder entfernen Sie die Einstellung MUMBLER_DATA_DIR und öffnen Sie die App dann erneut.",
   "diagnostic.corruptTitle": "Gespeicherte Daten konnten nicht geladen werden",
   "diagnostic.corruptBody": "Mumbler konnte seine gespeicherten Daten nicht sicher laden. Die Dateien wurden nicht verändert; sehen Sie im Menü unter „Protokoll“ nach, was schiefgelaufen ist, bevor Sie die App erneut öffnen.",
+  "diagnostic.newerTitle": "Gespeicherte Daten stammen aus einer neueren Version",
+  "diagnostic.newerBody": "Die Datei {path} wurde von einer neueren Version von Mumbler gespeichert und kann mit dieser Version nicht gelesen werden. Die Datei wurde nicht verändert; aktualisieren Sie Mumbler, um sie weiter zu verwenden.",
   "diagnostic.startupTitle": "Start fehlgeschlagen",
   "diagnostic.startupBody": "Mumbler konnte seinen Speicher nicht vollständig vorbereiten. Öffnen Sie die App erneut, um es noch einmal zu versuchen; gespeicherte Dateien wurden nicht verändert.",
   "diagnostic.resetTitle": "Zurücksetzen fehlgeschlagen",

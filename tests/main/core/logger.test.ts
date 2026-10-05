@@ -156,6 +156,38 @@ describe("createLogger", () => {
     }
   });
 
+  it("records the database's format version in user_version", async () => {
+    const logger = open();
+    await logger.info("startup", "first line");
+    await logger.close();
+    const db = new DatabaseSync(recordsPath);
+    try {
+      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("leaves a database in a newer format untouched, and keeps its lines in the fallback file", async () => {
+    const newer = new DatabaseSync(recordsPath);
+    newer.exec("CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 2;");
+    newer.close();
+    const before = await readFile(recordsPath);
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      const logger = open();
+      await logger.info("startup", "kept anyway");
+      await logger.close();
+
+      expect((await fallbackLines())[0]).toMatchObject({ kind: "log", message: "kept anyway" });
+      expect(stderr.mock.calls.some(([text]) => String(text).includes("newer than this build reads"))).toBe(true);
+      expect(await readFile(recordsPath)).toEqual(before);
+      expect(await readdir(dir)).not.toContain("records.sqlite3-wal");
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   it("never throws when neither the database nor the fallback file can be written", async () => {
     const blocker = join(dir, "blocker");
     await writeFile(blocker, "x", "utf8");

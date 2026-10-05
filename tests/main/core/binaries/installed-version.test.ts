@@ -83,7 +83,7 @@ describe("the sidecar", () => {
   it("records when it was installed, in canonical UTC", async () => {
     await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000);
     const raw: unknown = JSON.parse(await readFile(versionSidecarPath(binDir, "ffmpeg"), "utf8"));
-    expect(raw).toEqual({ version: "8.2", installedAt: "2023-11-14T22:13:20.000Z" });
+    expect(raw).toEqual({ formatVersion: 1, version: "8.2", installedAt: "2023-11-14T22:13:20.000Z" });
   });
 
   it("leaves no staging file behind", async () => {
@@ -95,6 +95,18 @@ describe("the sidecar", () => {
     expect(
       await readInstalledVersion("ffmpeg", join(binDir, "ffmpeg.exe"), binDir, { kind: "sidecar" }),
     ).toBeNull();
+  });
+
+  it("reads a sidecar with no format version as version 1, and one in a newer format as unreadable, untouched", async () => {
+    const tag = "autobuild-2026-08-19-19-21";
+    const read = () => readInstalledVersion("ffmpeg", join(binDir, "ffmpeg.exe"), binDir, { kind: "sidecar" });
+    await writeFile(versionSidecarPath(binDir, "ffmpeg"), JSON.stringify({ version: tag }), "utf8");
+    expect(await read()).toBe(tag);
+
+    const newer = JSON.stringify({ formatVersion: 2, version: tag });
+    await writeFile(versionSidecarPath(binDir, "ffmpeg"), newer, "utf8");
+    expect(await read()).toBeNull();
+    expect(await readFile(versionSidecarPath(binDir, "ffmpeg"), "utf8")).toBe(newer);
   });
 
   it("is null when unreadable or empty, rather than a blank version", async () => {

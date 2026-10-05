@@ -20,15 +20,11 @@ import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages"
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
 import { THEME_PREFERENCES } from "@shared/app-shell";
 import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
+import { FORMAT_VERSIONS } from "./format-versions";
 import { JsonStore, type LoadResult } from "./json-store";
 import { OperationError } from "./operation-error";
 import { resolvePathFromHome } from "./storage-root";
 import { multiline, singleLine } from "./text-cleanup";
-
-// Version 2 keeps each card's transcription and structured outline in the card's
-// own file under transcripts/ (TranscriptStore), not in queue.json. Version 1
-// files still load: their bodies are read here and moved out on first launch.
-const QUEUE_SCHEMA_VERSION = 2;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -347,15 +343,16 @@ function normalizeCardRecord(card: MumblerCard, undatedTime: UndatedItemTime): M
   const transcriptionRun = normalizeAiRunInfo(card.ai?.transcription, fallback);
   // Before a trim kept results, every stored transcription matched the card's
   // current trim, so a record without transcribedTrim takes it from there. The
-  // text itself lives in the card's transcript file, so the run info is what
-  // says a transcription exists.
+  // text itself lives in the card's transcript file (TranscriptStore), so the run
+  // info is what says a transcription exists.
   const transcribedTrim =
     transcriptionRun === null ? null : (card.transcribedTrim ?? { ...card.trim });
 
   return {
     ...card,
     audioProfile: card.audioProfile ?? null,
-    transcription: { text: card.transcription?.text ?? null },
+    // Filled from the card's transcript file once it is read.
+    transcription: { text: null },
     transcribedTrim,
     timestamps: {
       ...card.timestamps,
@@ -364,7 +361,7 @@ function normalizeCardRecord(card: MumblerCard, undatedTime: UndatedItemTime): M
     },
     trimDecision: normalizeTrimDecisionRecord(card.trimDecision, fallback),
     metadata: {
-      structured: card.metadata?.structured ?? null,
+      structured: null,
       title: card.metadata?.title ?? null,
       slug: card.metadata?.slug ?? null,
     },
@@ -385,7 +382,6 @@ function normalizeCardRecord(card: MumblerCard, undatedTime: UndatedItemTime): M
 function normalizeQueue(raw: Record<string, unknown>, undatedTime: UndatedItemTime): MumblerQueue {
   const defaults = createEmptyQueue();
   return {
-    schemaVersion: QUEUE_SCHEMA_VERSION,
     pendingImports:
       rawPendingImports(raw)?.map((item) => normalizePendingImportRecord(item, undatedTime)) ??
       defaults.pendingImports,
@@ -531,7 +527,12 @@ export class SettingsStore {
     private readonly homeDirectory: string,
     private readonly warn: (key: keyof MumblerSettings) => void,
   ) {
-    this.store = new JsonStore({ path, validate: knownSettings, createDefault: () => ({}) });
+    this.store = new JsonStore({
+      path,
+      formatVersion: FORMAT_VERSIONS.config,
+      validate: knownSettings,
+      createDefault: () => ({}),
+    });
   }
 
   get path(): string { return this.store.path; }
@@ -543,7 +544,8 @@ export class SettingsStore {
 
   // The one owner of what a save stores: the file is built from the full settings
   // the app holds, every set that differs from its built-in written whole. A save
-  // that changes nothing on disk writes nothing, and one that leaves no set writes `{}`.
+  // that changes nothing on disk writes nothing, and one that leaves no set writes
+  // only the format version.
   async save(settings: MumblerSettings): Promise<void> {
     const next = storedSets(settings);
     await this.store.update((current) => (sameSets(current, next) ? undefined : next));
@@ -569,7 +571,7 @@ export class QueueStore {
   constructor(path: string) {
     this.store = new JsonStore({
       path,
-      schemaVersion: QUEUE_SCHEMA_VERSION,
+      formatVersion: FORMAT_VERSIONS.queue,
       validate: (raw) => raw,
       createDefault: () => ({}),
     });
@@ -603,7 +605,6 @@ export function createQueueStore(path: string): QueueStore {
 
 export function createEmptyQueue(): MumblerQueue {
   return {
-    schemaVersion: QUEUE_SCHEMA_VERSION,
     pendingImports: [],
     cards: [],
   };

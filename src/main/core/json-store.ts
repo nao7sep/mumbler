@@ -1,27 +1,37 @@
-
 import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
+import { NewerFormatError, recordedFormatVersion } from "./format-versions";
 
-// Thrown when a persisted file exists but cannot be safely loaded — malformed
-// JSON, or an on-disk schema version newer than this build understands. The
-// store never overwrites or deletes the offending file in this case; the caller
-// is expected to halt and surface the path so the user can repair or restore it.
+// Thrown when a persisted file exists but cannot be safely loaded: malformed
+// JSON, or a document that does not fit its shape. The store never overwrites or
+// deletes the offending file in this case; the caller decides the recovery.
 export class CorruptStateError extends Error {
   constructor(
     readonly filePath: string,
     readonly reason: string,
-    /** Only genuine corruption may be set aside; future-version data stays intact. */
-    readonly kind: "corrupt" | "future-version" = "corrupt",
   ) {
     super(`Could not load ${filePath}: ${reason}.`);
     this.name = "CorruptStateError";
   }
 }
 
+// Checks the format version a JSON document records against the one this build
+// reads: an unusable marker is corruption, and a newer one is intact data this
+// build leaves alone (store-recovery-conventions).
+export function assertReadableFormat(filePath: string, document: Record<string, unknown>, supported: number): void {
+  const recorded = recordedFormatVersion(document);
+  if (recorded === null) {
+    throw new CorruptStateError(filePath, "formatVersion is not a positive integer");
+  }
+  if (recorded > supported) {
+    throw new NewerFormatError(filePath, recorded, supported);
+  }
+}
+
 export interface JsonStoreOptions<T> {
   /** Absolute path to the canonical file (e.g. ~/.mumbler/queue.json). */
   path: string;
-  /** When declared, newer schema versions are refused; settings maps omit it. */
-  schemaVersion?: number;
+  /** The format version this build reads and writes, recorded as `formatVersion`. */
+  formatVersion: number;
   /** Normalize/validate raw parsed JSON into the typed value. Pure, no I/O. */
   validate: (raw: Record<string, unknown>) => T;
   /** Build the in-memory default when no file exists yet. Pure, no I/O. */
@@ -32,9 +42,10 @@ export interface JsonStoreOptions<T> {
    * serialize() renders T back to the canonical on-disk form. Defaults to
    * identity, so stores whose in-memory shape is already the on-disk shape omit
    * it. Used to convert in-memory epoch-ms instants to canonical ISO at the
-   * persistence edge while keeping the core in epoch-ms.
+   * persistence edge while keeping the core in epoch-ms. The store adds
+   * `formatVersion` itself.
    */
-  serialize?: (value: T) => unknown;
+  serialize?: (value: T) => object;
   /** Whether writes enter backups.sqlite3. Defaults to true for managed text. */
   record?: boolean;
 }
@@ -46,18 +57,19 @@ export interface LoadResult<T> {
 }
 
 // Owns the full safe lifecycle of ONE canonical JSON file:
-//   - load(): never destructive — missing → defaults, corrupt → throws (file
-//     left untouched), valid → returns.
+//   - load(): never destructive — missing → defaults, corrupt → throws
+//     CorruptStateError, newer format → throws NewerFormatError (the file is
+//     left untouched either way), valid → returns.
 //   - save(): serialized (no overlapping writes) + atomic (temp + fsync +
 //     rename + dir fsync, via writeJsonFile).
 //   - flush(): await all queued writes — used by graceful shutdown.
 //
 // There is no `.bak` last-good copy: save() is atomic (temp + rename), so a write
 // can never tear the canonical file into a state that would need one. A logically
-// bad file (hand-edited, or newer schema) is left untouched for the user to repair
+// bad file (hand-edited, or a newer format) is left untouched for the user to repair
 // or delete, and Reset (preserveExistingFiles) sets it aside before writing
 // defaults so the original is always recoverable.
-export class JsonStore<T> {
+export class JsonStore<T extends object> {
   private queue: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: JsonStoreOptions<T>) {}
@@ -87,24 +99,13 @@ export class JsonStore<T> {
     }
 
     const record = raw as Record<string, unknown>;
-    const onDiskVersion =
-      typeof record.schemaVersion === "number" ? record.schemaVersion : null;
-    if (this.options.schemaVersion !== undefined && onDiskVersion !== null && onDiskVersion > this.options.schemaVersion) {
-      throw new CorruptStateError(
-        this.options.path,
-        `on-disk schema version ${onDiskVersion} is newer than this build supports (${this.options.schemaVersion})`,
-        "future-version",
-      );
-    }
+    assertReadableFormat(this.options.path, record, this.options.formatVersion);
 
     return { value: this.options.validate(record), origin: "loaded" };
   }
 
   async save(value: T): Promise<void> {
-    const work = async (): Promise<void> => {
-      const wire = this.options.serialize ? this.options.serialize(value) : value;
-      await writeJsonFile(this.options.path, wire, { record: this.options.record });
-    };
+    const work = (): Promise<void> => this.write(value);
     // Chain on the tail so writes never overlap, and a failed write doesn't
     // wedge the queue (errors propagate to that caller but the chain continues).
     this.queue = this.queue.then(work, work);
@@ -117,11 +118,19 @@ export class JsonStore<T> {
       const { value } = await this.load();
       const next = change(value);
       if (next === undefined) return;
-      const wire = this.options.serialize ? this.options.serialize(next) : next;
-      await writeJsonFile(this.options.path, wire, { record: this.options.record });
+      await this.write(next);
     };
     this.queue = this.queue.then(work, work);
     return this.queue;
+  }
+
+  private async write(value: T): Promise<void> {
+    const wire = this.options.serialize ? this.options.serialize(value) : value;
+    await writeJsonFile(
+      this.options.path,
+      { formatVersion: this.options.formatVersion, ...wire },
+      { record: this.options.record },
+    );
   }
 
   // Awaits all queued writes — used by graceful shutdown. A failed save() rejects

@@ -5,7 +5,6 @@ import {
   clampQueueWidth,
   clampRecordsListWidth,
   createDefaultLayout,
-  LAYOUT_SCHEMA_VERSION,
   normalizeLayout,
   selectExistingCardId,
 } from "@main/core/layout-store";
@@ -42,9 +41,8 @@ describe("clampRecordsListWidth", () => {
 });
 
 describe("createDefaultLayout", () => {
-  it("is the default pane widths at the current schema version", () => {
+  it("is the default pane widths with no card selected", () => {
     expect(createDefaultLayout()).toEqual({
-      schemaVersion: LAYOUT_SCHEMA_VERSION,
       queueWidth: QUEUE_WIDTH.default,
       recordsListWidth: RECORDS_LIST_WIDTH.default,
       selectedCardId: null,
@@ -53,9 +51,8 @@ describe("createDefaultLayout", () => {
 });
 
 describe("normalizeLayout", () => {
-  it("clamps a persisted width and stamps the current schema version", () => {
-    expect(normalizeLayout({ schemaVersion: 1, queueWidth: 640, recordsListWidth: 9999 })).toEqual({
-      schemaVersion: LAYOUT_SCHEMA_VERSION,
+  it("clamps a persisted width and keeps the format version out of the layout", () => {
+    expect(normalizeLayout({ formatVersion: 1, queueWidth: 640, recordsListWidth: 9999 })).toEqual({
       queueWidth: 640,
       recordsListWidth: RECORDS_LIST_WIDTH.max,
       selectedCardId: null,

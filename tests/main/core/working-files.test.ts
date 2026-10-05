@@ -107,7 +107,7 @@ function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
 }
 
 function makeState(overrides: Partial<MumblerQueue> = {}): MumblerQueue {
-  return { schemaVersion: 2, pendingImports: [], cards: [], ...overrides };
+  return { pendingImports: [], cards: [], ...overrides };
 }
 
 beforeEach(async () => {

@@ -53,6 +53,8 @@
   "diagnostic.storageBody": "Mumbler non ha potuto usare la cartella di archiviazione configurata. Ripristina l’accesso a quella cartella o rimuovi la variabile MUMBLER_DATA_DIR, poi riapri l’app.",
   "diagnostic.corruptTitle": "Impossibile caricare i dati salvati",
   "diagnostic.corruptBody": "Mumbler non è riuscito a caricare in sicurezza i dati salvati. I file non sono stati modificati; apri il Log dal menu per vedere cosa è andato storto prima di riaprire l’app.",
+  "diagnostic.newerTitle": "I dati salvati provengono da una versione più recente",
+  "diagnostic.newerBody": "Il file {path} è stato salvato da una versione più recente di Mumbler, quindi questa versione non può leggerlo. Il file non è stato modificato; aggiorna Mumbler per continuare a usarlo.",
   "diagnostic.startupTitle": "Avvio non riuscito",
   "diagnostic.startupBody": "Mumbler non è riuscito a completare la preparazione dell’archiviazione. Riapri l’app per riprovare; i file salvati non sono stati modificati.",
   "diagnostic.resetTitle": "Ripristino non riuscito",

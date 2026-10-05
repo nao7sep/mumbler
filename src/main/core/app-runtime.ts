@@ -22,6 +22,7 @@ import {
   type SaveCardResult,
   type SaveConflictResolution,
   type SettingsDraft,
+  type StartupFailure,
   type ThemePreference,
   type ToolName,
   type TrimDecision,
@@ -47,6 +48,7 @@ import {
   resolveTimezone,
 } from "@shared/timestamps";
 import { closeBackupStore, setBackupStoreWarn } from "./backupStore";
+import { NewerFormatError } from "./format-versions";
 import { CorruptStateError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
@@ -107,11 +109,27 @@ function rendererReportError(report: RendererErrorReport): Error {
 
 /** Stable presentation for a failed user-commanded reset; the thrown value is
  * retained by the IPC/logger boundary and must never become later snapshot UI. */
-export function resetFailureDiagnostic(_error: unknown): NonNullable<AppSnapshot["startupDiagnostic"]> {
+export function resetFailureDiagnostic(_error: unknown): StartupFailure {
   return {
     title: message("diagnostic.resetTitle"),
     message: message("diagnostic.resetBody"),
+    canReset: true,
   };
+}
+
+// A store in a newer format is named and left exactly in place, so Reset, which
+// would set it aside, is not offered (store-recovery-conventions).
+export function startupFailureDiagnostic(error: unknown): StartupFailure {
+  if (error instanceof NewerFormatError) {
+    return {
+      title: message("diagnostic.newerTitle"),
+      message: message("diagnostic.newerBody", { path: error.filePath }),
+      canReset: false,
+    };
+  }
+  return error instanceof CorruptStateError
+    ? { title: message("diagnostic.corruptTitle"), message: message("diagnostic.corruptBody"), canReset: true }
+    : { title: message("diagnostic.startupTitle"), message: message("diagnostic.startupBody"), canReset: true };
 }
 
 // A source that is not importable, with the reason the interface shows (in the
@@ -225,6 +243,7 @@ export class ApplicationRuntime {
         startupDiagnostic: {
           title: message("diagnostic.storageTitle"),
           message: message("diagnostic.storageBody"),
+          canReset: true,
         },
         appWideError: null,
         recoveredInterruptedCards: 0,
@@ -276,9 +295,7 @@ export class ApplicationRuntime {
       const recovered = recoverInterruptedCards(stateLoad.value);
       const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
 
-      // Each card's text lives in its own file. Bodies a version-1 queue.json
-      // still carries are written out to those files first, so the rewrite of
-      // queue.json below never drops text that is not yet safe elsewhere.
+      // Each card's text lives in its own file.
       const transcriptStore = new TranscriptStore(paths.transcriptsDir);
       const transcripts = await transcriptStore.open(reconciliation.state.cards.map((card) => card.id));
       for (const card of reconciliation.state.cards) {
@@ -288,16 +305,14 @@ export class ApplicationRuntime {
           card.metadata = { ...card.metadata, structured: transcript.structured };
         }
       }
-      const movedTranscripts = await transcriptStore.writeChanged(reconciliation.state.cards);
 
-      // Persist startup fix-ups (interrupted-card recovery, text moved out of a
-      // version-1 queue.json, and working-file reconciliation) only. queue.json holds precious queue/work data, so a
+      // Persist startup fix-ups (interrupted-card recovery and working-file
+      // reconciliation) only. queue.json holds precious queue/work data, so a
       // fresh empty queue has nothing to materialize and an unchanged existing
       // store is never rewritten.
       const stateChanged =
         recovered.recoveredInterruptedCards > 0 ||
         recovered.restoredSavingCards > 0 ||
-        movedTranscripts > 0 ||
         reconciliation.droppedPendingImports > 0 ||
         reconciliation.missingWorkingCards > 0;
       if (stateChanged) {
@@ -306,19 +321,28 @@ export class ApplicationRuntime {
 
       // Presentation state (disposable, volatile). A missing layout loads defaults
       // in memory and is written only once the user changes the pane width or card
-      // selection. A corrupt or too-new layout.json must not halt launch, so it
-      // self-heals to defaults and overwrites the bad file.
-      const layoutStore = createLayoutStore(paths.layoutPath);
+      // selection. A layout.json in a newer format is left as it is: the session
+      // runs on defaults and never writes it. A corrupt one must not halt launch
+      // either, so it self-heals to defaults and overwrites the bad file.
+      let layoutStore: JsonStore<MumblerLayout> | null = createLayoutStore(paths.layoutPath);
       let layout: MumblerLayout;
       try {
         layout = (await layoutStore.load()).value;
       } catch (error: unknown) {
         layout = createDefaultLayout();
-        await layoutStore.save(layout);
-        await logger.warn("app.layout-recovered", "Layout file was unreadable; reset to defaults.", {
-          layoutPath: paths.layoutPath,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        if (error instanceof NewerFormatError) {
+          layoutStore = null;
+          await logger.warn("app.layout-newer", "Layout file is in a newer format; left unchanged and not saved this session.", {
+            layoutPath: paths.layoutPath,
+            error: error.message,
+          });
+        } else {
+          await layoutStore.save(layout);
+          await logger.warn("app.layout-recovered", "Layout file was unreadable; reset to defaults.", {
+            layoutPath: paths.layoutPath,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
       layout = {
         ...layout,
@@ -382,8 +406,8 @@ export class ApplicationRuntime {
       try {
         dependenciesLoad = await dependenciesStore.load();
       } catch (error) {
-        // A future-version file stays in place for the build that wrote it.
-        if (!(error instanceof CorruptStateError) || error.kind === "future-version") throw error;
+        // A newer format halts launch below, leaving the file for the build that wrote it.
+        if (!(error instanceof CorruptStateError)) throw error;
         const quarantinedTo = await dependenciesStore.preserveExistingFiles();
         await logger.warn(
           "dependencies.corrupt-quarantined",
@@ -432,9 +456,7 @@ export class ApplicationRuntime {
         transcriptStore: null,
         layoutStore: null,
         logger,
-        startupDiagnostic: error instanceof CorruptStateError
-          ? { title: message("diagnostic.corruptTitle"), message: message("diagnostic.corruptBody") }
-          : { title: message("diagnostic.startupTitle"), message: message("diagnostic.startupBody") },
+        startupDiagnostic: startupFailureDiagnostic(error),
         appWideError: null,
         recoveredInterruptedCards: 0,
         shellReadyAtUtc,
@@ -1817,7 +1839,7 @@ export class ApplicationRuntime {
       selectedCardId,
     };
     this.runtime.layout = layout;
-    await this.runtime.layoutStore!.save(layout);
+    await this.runtime.layoutStore?.save(layout);
   }
 
   private async setAppWideError(
