@@ -48,7 +48,24 @@ const audioGate = vi.hoisted(() => ({
 }));
 // Confirming a review probes each recording; holding the probe keeps a confirm
 // in flight while something else reaches the import boundary.
-const probeGate = vi.hoisted(() => ({ held: null as Promise<void> | null, entered: 0 }));
+const probeGate = vi.hoisted(() => ({
+  held: null as Promise<void> | null,
+  entered: 0,
+  onEnter: null as (() => void) | null,
+}));
+// Each source an import starts on, recorded the moment the import reaches it, so
+// a test can tell whether an import has begun without waiting for one to finish.
+const importStarts = vi.hoisted(() => [] as string[]);
+vi.mock("@shared/audio-import", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@shared/audio-import")>();
+  return {
+    ...actual,
+    isSupportedAudioImportName: (pathOrName: string) => {
+      importStarts.push(pathOrName);
+      return actual.isSupportedAudioImportName(pathOrName);
+    },
+  };
+});
 // Holding the silence analysis keeps a trim in flight, the way ffmpeg does on a
 // long recording, while the user presses the next shortcut.
 const trimGate = vi.hoisted(() => ({ held: null as Promise<void> | null, entered: 0 }));
@@ -68,6 +85,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
     },
     probeAudioProfile: async () => {
       probeGate.entered += 1;
+      probeGate.onEnter?.();
       if (probeGate.held !== null) await probeGate.held;
       return probed.profile;
     },
@@ -149,6 +167,8 @@ beforeEach(async () => {
   audioGate.entered = 0;
   probeGate.held = null;
   probeGate.entered = 0;
+  probeGate.onEnter = null;
+  importStarts.length = 0;
   trimGate.held = null;
   trimGate.entered = 0;
   runtime = await ApplicationRuntime.initialize();
@@ -323,16 +343,21 @@ describe("confirming what was dropped in", () => {
     const queueFile = join(home, "queue.json");
     const stored = await readFile(queueFile, "utf8");
 
-    const unchanged = await runtime.updatePendingImportDrafts([{ ...pending }]);
+    const editedAt = pending.updatedAtUtc + 60_000;
+    const now = vi.spyOn(Date, "now").mockReturnValue(editedAt);
+    try {
+      const unchanged = await runtime.updatePendingImportDrafts([{ ...pending }]);
 
-    expect(unchanged.state?.pendingImports[0].updatedAtUtc).toBe(pending.updatedAtUtc);
-    expect(await readFile(queueFile, "utf8"), "an unchanged draft writes nothing").toBe(stored);
+      expect(unchanged.state?.pendingImports[0].updatedAtUtc).toBe(pending.updatedAtUtc);
+      expect(await readFile(queueFile, "utf8"), "an unchanged draft writes nothing").toBe(stored);
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    const edited = await runtime.updatePendingImportDrafts([review(pending)]);
+      const edited = await runtime.updatePendingImportDrafts([review(pending)]);
 
-    expect(edited.state?.pendingImports[0].updatedAtUtc).toBeGreaterThan(pending.updatedAtUtc);
-    expect(await readFile(queueFile, "utf8")).not.toBe(stored);
+      expect(edited.state?.pendingImports[0].updatedAtUtc).toBe(editedAt);
+      expect(await readFile(queueFile, "utf8")).not.toBe(stored);
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("keeps an import dropped in while the review is being confirmed", async () => {
@@ -345,12 +370,20 @@ describe("confirming what was dropped in", () => {
       release = resolve;
     });
 
+    const probing = new Promise<void>((resolve) => {
+      probeGate.onEnter = resolve;
+    });
+
     const confirming = runtime.confirmPendingImports([review(first)]);
+    await probing;
     const importing = runtime.importDroppedPaths([laterPath]);
-    // Long enough for an unordered import to copy its file and land.
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // An import not ordered behind the confirm would have reached its source by
+    // the time the pending callbacks have run; this one waits for the confirm.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(importStarts, "the import waits for the confirm to end").not.toContain(laterPath);
     release();
     await Promise.all([confirming, importing]);
+    expect(importStarts).toContain(laterPath);
 
     const snapshot = runtime.getSnapshot();
     expect(cards(snapshot).map((card) => card.originalFilename)).toEqual(["first.wav"]);
@@ -520,8 +553,11 @@ describe("working with a card", () => {
     const stored = await readFile(queueFile, "utf8");
     const analyses = trimGate.entered;
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    const [again] = cards(await runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: 200 }));
+    // A later clock, so a trim that stamped the card would show it.
+    const now = vi.spyOn(Date, "now").mockReturnValue(trimmed.updatedAtUtc + 60_000);
+    const [again] = cards(
+      await runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: 200 }).finally(() => now.mockRestore()),
+    );
 
     expect(trimGate.entered, "no second analysis").toBe(analyses);
     expect(again.updatedAtUtc).toBe(trimmed.updatedAtUtc);
