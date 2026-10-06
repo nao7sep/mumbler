@@ -318,9 +318,7 @@ export class ApplicationRuntime {
 
       const stateLoad = await queueStore.load();
       const recovered = recoverInterruptedCards(stateLoad.value);
-      // A fresh queue refers to no recording, so the working files are swept
-      // only against a queue.json that was read.
-      const reconciliation = await reconcileWorkingState(paths, recovered.state, logger, stateLoad.origin === "loaded");
+      const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
 
       // Each card's text lives in its own file.
       const transcriptStore = new TranscriptStore(paths.transcriptsDir);
@@ -391,8 +389,8 @@ export class ApplicationRuntime {
         recoveredInterruptedCards: recovered.recoveredInterruptedCards,
         droppedPendingImports: reconciliation.droppedPendingImports,
         missingWorkingCards: reconciliation.missingWorkingCards,
-        deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
-        retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
+        deletedDerivedFiles: reconciliation.deletedDerivedFiles,
+        retainedDerivedFiles: reconciliation.retainedDerivedFiles,
       });
 
       if (recovered.recoveredInterruptedCards > 0) {
@@ -739,15 +737,15 @@ export class ApplicationRuntime {
       // Reuse the per-launch session logger rather than building a new one, so a
       // reset keeps writing to the same file as the rest of the launch.
       const logger = this.runtime.logger;
-      const reconciliation = await reconcileWorkingState(paths, state, logger, true);
+      const reconciliation = await reconcileWorkingState(paths, state, logger);
       await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
         workingDir: paths.workingDir,
         preservedSettingsFiles,
         preservedStateFiles,
         preservedTranscripts,
         preservedLayoutFiles,
-        deletedOrphanedFiles: reconciliation.deletedOrphanedFiles,
-        retainedOrphanedFiles: reconciliation.retainedOrphanedFiles,
+        deletedDerivedFiles: reconciliation.deletedDerivedFiles,
+        retainedDerivedFiles: reconciliation.retainedDerivedFiles,
       });
 
       this.runtime.paths = paths;

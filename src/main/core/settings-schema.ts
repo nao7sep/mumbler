@@ -244,8 +244,8 @@ function firstRecorded(times: (number | null)[]): number | null {
 }
 
 // The queue fields the app reads or acts on, checked before anything is
-// normalized: a wrong shape coerced to an empty list would let startup sweep the
-// working recordings and transcripts as unreferenced (store-recovery-conventions).
+// normalized: a wrong shape coerced to an empty list would let startup delete the
+// transcripts as unreferenced (store-recovery-conventions).
 // An absent list is empty; an absent time is taken from the item's other times.
 function textIssue(owner: string, record: Record<string, unknown>, keys: readonly string[]): string | null {
   const key = keys.find((name) => typeof record[name] !== "string");

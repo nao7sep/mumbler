@@ -27,11 +27,11 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const {
-  cleanupOrphanedWorkingFiles,
+  cleanupDerivedFiles,
   copyIntoWorking,
   copyOriginalToBackup,
   deleteImportedSource,
-  listWorkingFiles,
+  listDerivedFiles,
   reconcileWorkingState,
 } = await import("@main/core/working-files");
 
@@ -45,6 +45,10 @@ function makeLogger(): AppLogger {
     error: vi.fn().mockResolvedValue(undefined),
     providerCall: vi.fn().mockResolvedValue(undefined),
   };
+}
+
+async function exists(path: string): Promise<boolean> {
+  return stat(path).then(() => true, () => false);
 }
 
 /** Only workingDir matters here; the rest of the paths are never read. */
@@ -215,8 +219,8 @@ describe("working audio copies", () => {
   });
 });
 
-describe("the working directory listing", () => {
-  it("lists working files and derived output, and ignores other directories", async () => {
+describe("the derived audio listing", () => {
+  it("lists only the files directly in derived/, never a recording in working/ itself", async () => {
     const working = join(dir, "working");
     await mkdir(join(working, "derived", "nested"), { recursive: true });
     await mkdir(join(working, "scratch"), { recursive: true });
@@ -225,44 +229,48 @@ describe("the working directory listing", () => {
     await writeFile(join(working, "scratch", "ignored.tmp"), "junk", "utf8");
     await writeFile(join(working, "derived", "nested", "ignored.wav"), "audio", "utf8");
 
-    expect((await listWorkingFiles(working)).sort()).toEqual(
-      [join(working, "rec.m4a"), join(working, "derived", "rec.wav")].sort(),
-    );
+    expect(await listDerivedFiles(working)).toEqual([join(working, "derived", "rec.wav")]);
+  });
+
+  it("lists nothing when no pipeline has made derived/ yet", async () => {
+    const working = join(dir, "working");
+    await mkdir(working, { recursive: true });
+
+    expect(await listDerivedFiles(working)).toEqual([]);
   });
 });
 
-describe("orphaned working files", () => {
-  it("deletes what nothing references, keeps what is referenced, and traces each deletion", async () => {
+describe("leftover derived audio", () => {
+  it("deletes every derived file, keeps every recording, and traces each deletion", async () => {
     const working = join(dir, "working");
     await mkdir(join(working, "derived"), { recursive: true });
-    const referenced = join(working, "kept.m4a");
-    const orphan = join(working, "orphan.m4a");
-    const derivedOrphan = join(working, "derived", "orphan.wav");
-    for (const file of [referenced, orphan, derivedOrphan]) await writeFile(file, "audio", "utf8");
+    const recording = join(working, "unreferenced.m4a");
+    const derived = join(working, "derived", "leftover.wav");
+    for (const file of [recording, derived]) await writeFile(file, "audio", "utf8");
     const logger = makeLogger();
 
-    const result = await cleanupOrphanedWorkingFiles(makePaths(working), new Set([referenced]), logger);
+    const result = await cleanupDerivedFiles(makePaths(working), logger);
 
-    expect(result).toEqual({ deletedOrphanedFiles: 2, retainedOrphanedFiles: 0 });
-    expect((await listWorkingFiles(working))).toEqual([referenced]);
-    expect(logger.debug).toHaveBeenCalledTimes(2);
-    expect(logger.debug).toHaveBeenCalledWith("working.cleanup", expect.any(String), { filePath: orphan });
+    expect(result).toEqual({ deletedDerivedFiles: 1, retainedDerivedFiles: 0 });
+    expect(await exists(recording), "a recording no queue refers to is still the user's audio").toBe(true);
+    expect(await exists(derived)).toBe(false);
+    expect(logger.debug).toHaveBeenCalledExactlyOnceWith("working.cleanup", expect.any(String), { filePath: derived });
   });
 
-  it("counts and warns about an orphan the filesystem refuses to delete, and keeps going", async () => {
+  it("counts and warns about a derived file the filesystem refuses to delete, and keeps going", async () => {
     const working = join(dir, "working");
-    await mkdir(working, { recursive: true });
-    const stuck = join(working, "stuck.m4a");
-    const orphan = join(working, "orphan.m4a");
+    await mkdir(join(working, "derived"), { recursive: true });
+    const stuck = join(working, "derived", "stuck.wav");
+    const leftover = join(working, "derived", "leftover.wav");
     await writeFile(stuck, "audio", "utf8");
-    await writeFile(orphan, "audio", "utf8");
+    await writeFile(leftover, "audio", "utf8");
     undeletable.add(stuck);
     const logger = makeLogger();
 
-    const result = await cleanupOrphanedWorkingFiles(makePaths(working), new Set(), logger);
+    const result = await cleanupDerivedFiles(makePaths(working), logger);
 
-    expect(result).toEqual({ deletedOrphanedFiles: 1, retainedOrphanedFiles: 1 });
-    expect(await listWorkingFiles(working), "the file it could not delete is still there").toEqual([stuck]);
+    expect(result).toEqual({ deletedDerivedFiles: 1, retainedDerivedFiles: 1 });
+    expect(await listDerivedFiles(working), "the file it could not delete is still there").toEqual([stuck]);
     expect(logger.warn).toHaveBeenCalledExactlyOnceWith("working.cleanup-failed", expect.any(String), {
       filePath: stuck,
       error: expect.stringContaining("EACCES"),
@@ -284,20 +292,20 @@ describe("reconciling saved state with the working directory", () => {
     });
     const logger = makeLogger();
 
-    const result = await reconcileWorkingState(makePaths(working), state, logger, true);
+    const result = await reconcileWorkingState(makePaths(working), state, logger);
 
     expect(result).toEqual({
       state,
       droppedPendingImports: 0,
       missingWorkingCards: 0,
-      deletedOrphanedFiles: 0,
-      retainedOrphanedFiles: 0,
+      deletedDerivedFiles: 0,
+      retainedDerivedFiles: 0,
     });
     expect(result.state, "the same state is handed back, not a rewritten copy").toBe(state);
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
-  it("drops a pending import whose audio is gone, errors a card whose audio is gone, and clears the leftovers", async () => {
+  it("drops a pending import whose audio is gone, errors a card whose audio is gone, and keeps every recording", async () => {
     const working = join(dir, "working");
     await mkdir(working, { recursive: true });
     const survivingCardFile = join(working, "card.m4a");
@@ -311,13 +319,13 @@ describe("reconciling saved state with the working directory", () => {
     });
     const logger = makeLogger();
 
-    const result = await reconcileWorkingState(makePaths(working), state, logger, true);
+    const result = await reconcileWorkingState(makePaths(working), state, logger);
 
     expect(result).toMatchObject({
       droppedPendingImports: 1,
       missingWorkingCards: 1,
-      deletedOrphanedFiles: 1,
-      retainedOrphanedFiles: 0,
+      deletedDerivedFiles: 0,
+      retainedDerivedFiles: 0,
     });
     expect(result.state.pendingImports).toEqual([]);
     expect(result.state.cards[0], "the card whose audio is still there is untouched").toBe(survivor);
@@ -330,7 +338,7 @@ describe("reconciling saved state with the working directory", () => {
       lastError: { failedStep: "startup-recovery", message: expect.stringContaining("missing") },
       updatedAtUtc: 1,
     });
-    expect(await listWorkingFiles(working), "the unreferenced file is swept").toEqual([survivingCardFile]);
+    expect(await exists(orphan), "a recording the queue does not refer to is kept").toBe(true);
     expect(logger.warn).toHaveBeenCalledWith("startup.pending-missing", expect.any(String), expect.objectContaining({ pendingImportId: "pending-gone" }));
     expect(logger.warn).toHaveBeenCalledWith("startup.card-missing", expect.any(String), expect.objectContaining({ cardId: "card-gone" }));
   });

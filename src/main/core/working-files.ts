@@ -3,7 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { basename, join } from "node:path";
 
 import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
-import { fileExists, formatError, keepSourceTimesAndMode, uniquePathInDirectory } from "./file-io";
+import { fileExists, formatError, isMissingFileError, keepSourceTimesAndMode, uniquePathInDirectory } from "./file-io";
 
 import { type AppLogger } from "./logger";
 
@@ -11,8 +11,8 @@ export interface WorkingReconciliationResult {
   state: MumblerQueue;
   droppedPendingImports: number;
   missingWorkingCards: number;
-  deletedOrphanedFiles: number;
-  retainedOrphanedFiles: number;
+  deletedDerivedFiles: number;
+  retainedDerivedFiles: number;
 }
 
 export async function deleteImportedSource(sourcePath: string): Promise<void> {
@@ -66,29 +66,28 @@ export async function copyOriginalToBackup(
   return targetPath;
 }
 
-export async function cleanupOrphanedWorkingFiles(
+// Startup cleanup deletes only what is temporary by location: derived/ holds
+// the trimmed audio a pipeline or save prepares and removes when it ends, so a
+// file left there was cut short by a crash. A recording in working/ itself is
+// never swept, whatever the queue says: a lost or reset queue is no reason to
+// delete user audio, and a card's own audio is deleted when the card is.
+export async function cleanupDerivedFiles(
   paths: AppPaths,
-  referencedPaths: Set<string>,
   logger: AppLogger,
-): Promise<{ deletedOrphanedFiles: number; retainedOrphanedFiles: number }> {
-  let deletedOrphanedFiles = 0;
-  let retainedOrphanedFiles = 0;
-  const candidates = await listWorkingFiles(paths.workingDir);
+): Promise<{ deletedDerivedFiles: number; retainedDerivedFiles: number }> {
+  let deletedDerivedFiles = 0;
+  let retainedDerivedFiles = 0;
 
-  for (const candidate of candidates) {
-    if (referencedPaths.has(candidate)) {
-      continue;
-    }
-
+  for (const candidate of await listDerivedFiles(paths.workingDir)) {
     try {
       await rm(candidate, { force: true });
-      deletedOrphanedFiles += 1;
-      await logger.debug("working.cleanup", "Deleted orphaned working file.", {
+      deletedDerivedFiles += 1;
+      await logger.debug("working.cleanup", "Deleted leftover derived audio.", {
         filePath: candidate,
       });
     } catch (error: unknown) {
-      retainedOrphanedFiles += 1;
-      await logger.warn("working.cleanup-failed", "Failed to delete orphaned working file.", {
+      retainedDerivedFiles += 1;
+      await logger.warn("working.cleanup-failed", "Failed to delete leftover derived audio.", {
         filePath: candidate,
         error: formatError(error),
       });
@@ -96,49 +95,34 @@ export async function cleanupOrphanedWorkingFiles(
   }
 
   return {
-    deletedOrphanedFiles,
-    retainedOrphanedFiles,
+    deletedDerivedFiles,
+    retainedDerivedFiles,
   };
 }
 
-export async function listWorkingFiles(workingDir: string): Promise<string[]> {
-  const entries = await readdir(workingDir, { withFileTypes: true });
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const entryPath = join(workingDir, entry.name);
-    if (entry.isFile()) {
-      files.push(entryPath);
-      continue;
-    }
-
-    if (entry.isDirectory() && entry.name === "derived") {
-      const subEntries = await readdir(entryPath, { withFileTypes: true });
-      for (const subEntry of subEntries) {
-        if (subEntry.isFile()) {
-          files.push(join(entryPath, subEntry.name));
-        }
-      }
-    }
+export async function listDerivedFiles(workingDir: string): Promise<string[]> {
+  const derivedDir = join(workingDir, "derived");
+  let entries;
+  try {
+    entries = await readdir(derivedDir, { withFileTypes: true });
+  } catch (error: unknown) {
+    if (isMissingFileError(error)) return [];
+    throw error;
   }
-
-  return files;
+  return entries.filter((entry) => entry.isFile()).map((entry) => join(derivedDir, entry.name));
 }
 
 export async function reconcileWorkingState(
   paths: AppPaths,
   state: MumblerQueue,
   logger: AppLogger,
-  sweepUnreferencedFiles: boolean,
 ): Promise<WorkingReconciliationResult> {
-  const referencedPaths = new Set<string>();
   const nextPendingImports: PendingImportReviewItem[] = [];
   let droppedPendingImports = 0;
 
   for (const pendingImport of state.pendingImports) {
     if (await fileExists(pendingImport.workingFilePath)) {
       nextPendingImports.push(pendingImport);
-      referencedPaths.add(pendingImport.workingFilePath);
       continue;
     }
 
@@ -159,7 +143,6 @@ export async function reconcileWorkingState(
 
   for (const card of state.cards) {
     if (await fileExists(card.sourceFilePath)) {
-      referencedPaths.add(card.sourceFilePath);
       nextCards.push(card);
       continue;
     }
@@ -177,14 +160,8 @@ export async function reconcileWorkingState(
     );
   }
 
-  const cleanupResult = sweepUnreferencedFiles
-    ? await cleanupOrphanedWorkingFiles(paths, referencedPaths, logger)
-    : { deletedOrphanedFiles: 0, retainedOrphanedFiles: 0 };
-  const changed =
-    droppedPendingImports > 0 ||
-    missingWorkingCards > 0 ||
-    cleanupResult.deletedOrphanedFiles > 0 ||
-    cleanupResult.retainedOrphanedFiles > 0;
+  const cleanupResult = await cleanupDerivedFiles(paths, logger);
+  const changed = droppedPendingImports > 0 || missingWorkingCards > 0;
 
   const nextState =
     !changed
@@ -199,8 +176,8 @@ export async function reconcileWorkingState(
     state: nextState,
     droppedPendingImports,
     missingWorkingCards,
-    deletedOrphanedFiles: cleanupResult.deletedOrphanedFiles,
-    retainedOrphanedFiles: cleanupResult.retainedOrphanedFiles,
+    deletedDerivedFiles: cleanupResult.deletedDerivedFiles,
+    retainedDerivedFiles: cleanupResult.retainedDerivedFiles,
   };
 }
 

@@ -222,7 +222,7 @@ describe("the durable queue store", () => {
     expect(await exists(card.sourceFilePath), "a fresh queue deletes no recording").toBe(true);
   });
 
-  it("sweeps a working recording that the queue.json it read does not refer to", async () => {
+  it("keeps a working recording that the queue.json it read does not refer to", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
@@ -231,7 +231,33 @@ describe("the durable queue store", () => {
 
     runtime = await ApplicationRuntime.initialize();
 
-    expect(await exists(card.sourceFilePath)).toBe(false);
+    expect(await exists(card.sourceFilePath), "a queue that lost the card deletes no recording").toBe(true);
+  });
+
+  it("keeps the working recordings at a launch after a new queue was saved over a lost one", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+    await runtime.shutdown();
+    await rm(join(home, "queue.json"));
+    runtime = await ApplicationRuntime.initialize();
+    const [next] = await dropIn("next.wav");
+    await runtime.confirmPendingImports([review(next)]);
+    await runtime.shutdown();
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(await exists(card.sourceFilePath), "the next launch still deletes no recording").toBe(true);
+  });
+
+  it("deletes audio a crash left in derived/ at launch", async () => {
+    await runtime.shutdown();
+    const leftover = join(home, "working", "derived", "cut-short.wav");
+    await mkdir(join(home, "working", "derived"), { recursive: true });
+    await writeFile(leftover, "trimmed audio");
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(await exists(leftover)).toBe(false);
   });
 });
 
@@ -1100,7 +1126,7 @@ describe("settings, secrets and the window's own state", () => {
     expect(await exists(join(home, "config.json"))).toBe(false);
     expect(await exists(join(home, "layout.json"))).toBe(false);
     expect(await exists(join(home, "queue.json"))).toBe(false);
-    expect(await exists(pending.workingFilePath), "the orphaned working copy is swept").toBe(false);
+    expect(await exists(pending.workingFilePath), "the working recording is not deleted").toBe(true);
     expect(await exists(pending.originalSourcePath), "the user's own file is untouched").toBe(true);
   });
 });
