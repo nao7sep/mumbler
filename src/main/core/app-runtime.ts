@@ -127,8 +127,13 @@ export function startupFailureDiagnostic(error: unknown): StartupFailure {
       canReset: false,
     };
   }
+  // A halted work store is named, and left in place (store-recovery-conventions).
   return error instanceof CorruptStateError
-    ? { title: message("diagnostic.corruptTitle"), message: message("diagnostic.corruptBody"), canReset: true }
+    ? {
+        title: message("diagnostic.corruptTitle"),
+        message: message("diagnostic.corruptBody", { path: error.filePath }),
+        canReset: true,
+      }
     : { title: message("diagnostic.startupTitle"), message: message("diagnostic.startupBody"), canReset: true };
 }
 

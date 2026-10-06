@@ -105,7 +105,7 @@ describe("a startup diagnostic", () => {
       ...readySnapshot(),
       startupDiagnostic: {
         title: { key: "diagnostic.corruptTitle" },
-        message: { key: "diagnostic.corruptBody" },
+        message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/queue.json" } },
         canReset: true,
       },
     });
@@ -113,6 +113,7 @@ describe("a startup diagnostic", () => {
     await act(async () => root?.render(createElement(App)));
     await vi.waitFor(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Loaded"));
 
+    expect(document.body.textContent).toContain("Mumbler could not safely load /home/me/.mumbler/queue.json.");
     expect(button("Reset State")).toBeDefined();
   });
 });

@@ -182,7 +182,11 @@ describe("the durable queue store", () => {
     await runtime.shutdown();
     await writeFile(join(home, "queue.json"), bytes);
     runtime = await ApplicationRuntime.initialize();
-    expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({ title: { key: "diagnostic.corruptTitle" }, canReset: true });
+    expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({
+      title: { key: "diagnostic.corruptTitle" },
+      message: { key: "diagnostic.corruptBody", values: { path: join(home, "queue.json") } },
+      canReset: true,
+    });
     expect(await readFile(join(home, "queue.json"), "utf8")).toBe(bytes);
   });
 });

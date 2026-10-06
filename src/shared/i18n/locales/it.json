@@ -52,7 +52,7 @@
   "diagnostic.storageTitle": "Impossibile determinare la posizione di archiviazione",
   "diagnostic.storageBody": "Mumbler non ha potuto usare la cartella di archiviazione configurata. Ripristina l’accesso a quella cartella o rimuovi la variabile MUMBLER_DATA_DIR, poi riapri l’app.",
   "diagnostic.corruptTitle": "Impossibile caricare i dati salvati",
-  "diagnostic.corruptBody": "Mumbler non è riuscito a caricare in sicurezza i dati salvati. I file non sono stati modificati; apri il Log dal menu per vedere cosa è andato storto prima di riaprire l’app.",
+  "diagnostic.corruptBody": "Mumbler non è riuscito a caricare in sicurezza il file {path}. Il file non è stato modificato; apri il Log dal menu per vedere cosa è andato storto prima di riaprire l’app.",
   "diagnostic.newerTitle": "I dati salvati provengono da una versione più recente",
   "diagnostic.newerBody": "Il file {path} è stato salvato da una versione più recente di Mumbler, quindi questa versione non può leggerlo. Il file non è stato modificato; aggiorna Mumbler per continuare a usarlo.",
   "diagnostic.settingsResetTitle": "Impossibile leggere le impostazioni",
