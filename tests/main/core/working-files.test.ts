@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -163,6 +163,34 @@ describe("working audio copies", () => {
 
     expect(copied).toBe(join(backup, "source.m4a"));
     expect(await readFile(copied, "utf8")).toBe("audio");
+  });
+
+  // A fixed time well in the past, so a copy that took the moment of copying fails.
+  const RECORDED = new Date(Date.UTC(2024, 4, 6, 7, 8, 9, 500));
+
+  it.each([
+    ["a working copy", (source: string) => copyIntoWorking(source, join(dir, "working"), "clip.wav")],
+    ["a backup of the original", (source: string) => copyOriginalToBackup(source, join(dir, "backup"))],
+  ])("keeps the recording's modified time on %s", async (_name, copy) => {
+    const source = join(dir, "clip.wav");
+    await writeFile(source, "audio", "utf8");
+    await utimes(source, RECORDED, RECORDED);
+
+    const copied = await copy(source);
+
+    expect((await stat(copied)).mtime.getTime()).toBe(RECORDED.getTime());
+  });
+
+  it.skipIf(process.platform === "win32")("keeps the recording's permission mode on its copies", async () => {
+    const source = join(dir, "clip.wav");
+    await writeFile(source, "audio", "utf8");
+    await chmod(source, 0o640);
+
+    const working = await copyIntoWorking(source, join(dir, "working"), "clip.wav");
+    const backup = await copyOriginalToBackup(source, join(dir, "backup"));
+
+    expect((await stat(working)).mode & 0o777).toBe(0o640);
+    expect((await stat(backup)).mode & 0o777).toBe(0o640);
   });
 
   it("names the original that could not be backed up", async () => {

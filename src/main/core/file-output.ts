@@ -6,7 +6,7 @@ import { nanoid } from "nanoid";
 import type { MumblerCard } from "@shared/app-shell";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 import { CancelledError, isCancelledError } from "./cancellation";
-import { fileExists, formatError, syncDirectory, syncFile } from "./file-io";
+import { fileExists, formatError, keepSourceTimesAndMode, syncDirectory, syncFile } from "./file-io";
 import { FORMAT_VERSIONS } from "./format-versions";
 
 // A save that must not overwrite found one of its targets already taken when
@@ -144,8 +144,8 @@ export async function finalizeOutputsAtomically(params: {
   try {
     await copyFile(params.sourceAudioPath, audioTempPath);
     // A copied recording can inherit a read-only mode from removable media or the
-    // source file. The staged output is user-owned and must be writable both for
-    // the durability sync below and after it is published.
+    // source file, so the staged copy is made writable for the durability syncs;
+    // the recording's own mode and modified time are put back once it is published.
     await chmod(audioTempPath, 0o600);
     await syncFile(audioTempPath);
     await writeFile(jsonTempPath, params.jsonContent, "utf8");
@@ -176,6 +176,7 @@ export async function finalizeOutputsAtomically(params: {
     const publish = params.overwrite ? rename : publishExclusive;
     await publish(audioTempPath, params.targets.audioPath);
     audioFinalized = true;
+    await keepSourceTimesAndMode(params.sourceAudioPath, params.targets.audioPath);
     await publish(jsonTempPath, params.targets.jsonPath);
     jsonFinalized = true;
     await publish(markdownTempPath, params.targets.markdownPath);

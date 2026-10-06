@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, open, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { nanoid } from "nanoid";
@@ -96,6 +96,16 @@ export async function syncDirectory(directoryPath: string): Promise<void> {
   } catch {
     // ignore
   }
+}
+
+// A byte copy of the user's audio keeps the source's modified time and mode
+// (content-lifecycle-conventions, "A copy keeps the source's metadata"). Node has
+// no call that copies birth time, extended attributes or Finder tags, so a copy
+// carries only these two.
+export async function keepSourceTimesAndMode(sourcePath: string, copyPath: string): Promise<void> {
+  const source = await stat(sourcePath);
+  await utimes(copyPath, source.atime, source.mtime);
+  await chmod(copyPath, source.mode);
 }
 
 export async function fileExists(filePath: string): Promise<boolean> {

@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -233,7 +233,27 @@ describe("finalizeOutputsAtomically", () => {
     expect(syncedDirectories).toEqual([dir, dir]);
   });
 
-  it("publishes a writable output when the source recording is read-only", async () => {
+  // A fixed time well in the past, so a copy that took the moment of copying fails.
+  const RECORDED = new Date(Date.UTC(2024, 4, 6, 7, 8, 9, 500));
+
+  it.each([false, true])("publishes the audio with the recording's own modified time (overwrite: %s)", async (overwrite) => {
+    const t = targets("timed");
+    await writeFile(t.audioPath, "OLD-AUDIO");
+    await utimes(sourceAudio, RECORDED, RECORDED);
+
+    await finalizeOutputsAtomically({
+      sourceAudioPath: sourceAudio,
+      targets: overwrite ? t : targets("fresh"),
+      overwrite,
+      jsonContent: "{}",
+      markdownContent: "# md",
+    });
+
+    const published = overwrite ? t.audioPath : targets("fresh").audioPath;
+    expect((await stat(published)).mtime.getTime()).toBe(RECORDED.getTime());
+  });
+
+  it.skipIf(process.platform === "win32")("publishes the audio with the recording's own mode, even a read-only one", async () => {
     const t = targets("readonly-source");
     await chmod(sourceAudio, 0o400);
 
@@ -245,8 +265,8 @@ describe("finalizeOutputsAtomically", () => {
       markdownContent: "# md",
     });
 
-    await expect(writeFile(t.audioPath, "REPLACED")).resolves.toBeUndefined();
-    expect(await readFile(t.audioPath, "utf8")).toBe("REPLACED");
+    expect((await stat(t.audioPath)).mode & 0o777).toBe(0o400);
+    expect(await readFile(t.audioPath, "utf8")).toBe("AUDIO-BYTES");
     expect(await leftoverTempsAndBackups()).toEqual([]);
   });
 

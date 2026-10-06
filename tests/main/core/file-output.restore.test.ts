@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -124,9 +124,11 @@ describe("finalizeOutputsAtomically — a filesystem without hard links", () => 
     };
   }
 
-  it("still publishes a new save, by exclusive copy", async () => {
+  it("still publishes a new save, by exclusive copy that keeps the recording's modified time", async () => {
     linkRefusal.code = "ENOTSUP";
     const t = targets();
+    const recorded = new Date(Date.UTC(2024, 4, 6, 7, 8, 9, 500));
+    await utimes(sourceAudio, recorded, recorded);
 
     await finalizeOutputsAtomically({
       sourceAudioPath: sourceAudio,
@@ -139,6 +141,7 @@ describe("finalizeOutputsAtomically — a filesystem without hard links", () => 
     expect(await readFile(t.audioPath, "utf8")).toBe("AUDIO-BYTES");
     expect(await readFile(t.jsonPath, "utf8")).toBe("J");
     expect(await readFile(t.markdownPath, "utf8")).toBe("M");
+    expect((await stat(t.audioPath)).mtime.getTime()).toBe(recorded.getTime());
     expect((await readdir(dir)).filter((name) => name.includes(".tmp"))).toEqual([]);
   });
 

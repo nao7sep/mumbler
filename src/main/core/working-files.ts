@@ -3,7 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { basename, join } from "node:path";
 
 import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
-import { fileExists, formatError, uniquePathInDirectory } from "./file-io";
+import { fileExists, formatError, keepSourceTimesAndMode, uniquePathInDirectory } from "./file-io";
 
 import { type AppLogger } from "./logger";
 
@@ -31,6 +31,7 @@ export async function copyIntoWorking(
     // not recorded: working/ contains managed audio binaries; queue.json records
     // the durable queue/work metadata that gives those copies meaning.
     await copyFile(sourcePath, workingFilePath);
+    await keepSourceTimesAndMode(sourcePath, workingFilePath);
     await access(workingFilePath, fsConstants.R_OK);
   } catch (error: unknown) {
     // Best-effort removal of the partial copy; the wrapped error below is the
@@ -56,6 +57,7 @@ export async function copyOriginalToBackup(
     // not recorded: this is a user-requested copy of the original audio binary,
     // written as output and never reopened as Mumbler-managed state.
     await copyFile(sourcePath, targetPath);
+    await keepSourceTimesAndMode(sourcePath, targetPath);
   } catch (error: unknown) {
     throw new Error(`Failed to copy ${sourcePath} to backup directory: ${formatError(error)}`);
   }
