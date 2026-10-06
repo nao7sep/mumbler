@@ -204,7 +204,7 @@
   "error.copy.title": "Não foi possível copiar o título. Selecione o texto e copie manualmente.",
   "error.copy.slug": "Não foi possível copiar o slug. Selecione o texto e copie manualmente.",
   "error.dismissMessage": "Não foi possível fechar a mensagem. Reinicie o Mumbler para removê-la.",
-  "notice.reset": "Padrões restaurados.",
+  "notice.reset": "Padrões restaurados. A fila anterior e as gravações dela foram guardadas à parte em {folder}, com nomes que incluem o horário da redefinição.",
   "error.resetState": "O Mumbler não conseguiu redefinir seu estado. Os arquivos existentes não foram alterados; tente novamente.",
   "tools.installFailed": "Não foi possível instalar a ferramenta de áudio.",
   "tools.cancelInstallFailed": "Não foi possível cancelar a instalação da ferramenta de áudio.",

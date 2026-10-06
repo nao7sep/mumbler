@@ -203,7 +203,7 @@
   "error.copy.title": "Der Titel konnte nicht kopiert werden. Markieren Sie den Text und kopieren Sie ihn manuell.",
   "error.copy.slug": "Der Slug konnte nicht kopiert werden. Markieren Sie den Text und kopieren Sie ihn manuell.",
   "error.dismissMessage": "Die Meldung konnte nicht geschlossen werden. Starten Sie Mumbler neu, um sie zu entfernen.",
-  "notice.reset": "Auf Standardwerte zurückgesetzt.",
+  "notice.reset": "Auf Standardwerte zurückgesetzt. Die bisherige Warteschlange und ihre Aufnahmen wurden in {folder} beiseitegelegt, unter Namen, die den Zeitpunkt des Zurücksetzens enthalten.",
   "error.resetState": "Mumbler konnte seinen Zustand nicht zurücksetzen. Vorhandene Dateien sind unverändert; versuchen Sie es erneut.",
   "tools.installFailed": "Das Audiowerkzeug konnte nicht installiert werden.",
   "tools.cancelInstallFailed": "Die Installation des Audiowerkzeugs konnte nicht abgebrochen werden.",

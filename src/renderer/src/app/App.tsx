@@ -798,7 +798,8 @@ function LoadedShell({
     try {
       const nextSnapshot = await window.mumbler.resetState();
       setSnapshot(nextSnapshot);
-      addToast(message("notice.reset"));
+      // Says where the previous queue and recordings went, so it stays until dismissed.
+      addPersistent("state-reset", message("notice.reset", { folder: nextSnapshot.paths!.homeDir }));
     } catch (error: unknown) {
       addPersistent(
         "state-reset",

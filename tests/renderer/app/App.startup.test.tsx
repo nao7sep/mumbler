@@ -5,7 +5,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AppSnapshot, MumblerShellApi } from "@shared/app-shell";
+import type { AppPaths, AppSnapshot, MumblerShellApi } from "@shared/app-shell";
 import { App } from "@renderer/app/App";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -131,6 +131,31 @@ describe("a startup diagnostic", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("Startup Failed"));
 
     expect(button("Reset State")).toBeDefined();
+  });
+
+  it("says where a reset set the previous queue and recordings aside, and keeps saying it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      getSnapshot.mockResolvedValue({
+        ...readySnapshot(),
+        startupDiagnostic: { title: { key: "diagnostic.startupTitle" }, message: { key: "diagnostic.startupBody" }, canReset: true },
+      });
+      window.mumbler.resetState = vi.fn(async () => ({
+        ...readySnapshot(),
+        paths: { homeDir: "/home/me/.mumbler" } as AppPaths,
+      }));
+
+      await act(async () => root?.render(createElement(App)));
+      await vi.waitFor(() => expect(button("Reset State")).toBeDefined());
+      await act(async () => button("Reset State")!.click());
+      await act(async () => vi.advanceTimersByTime(10_000));
+
+      expect(document.body.textContent).toContain(
+        "The previous queue and its recordings were set aside in /home/me/.mumbler,",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

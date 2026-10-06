@@ -204,7 +204,7 @@
   "error.copy.title": "No se pudo copiar el título. Selecciona el texto y cópialo manualmente.",
   "error.copy.slug": "No se pudo copiar el slug. Selecciona el texto y cópialo manualmente.",
   "error.dismissMessage": "No se pudo cerrar el mensaje. Reinicia Mumbler para quitarlo.",
-  "notice.reset": "Se restableció la configuración predeterminada.",
+  "notice.reset": "Se restableció la configuración predeterminada. La cola anterior y sus grabaciones se guardaron aparte en {folder}, con nombres que incluyen la hora del restablecimiento.",
   "error.resetState": "Mumbler no pudo restablecer su estado. Los archivos existentes no cambiaron; inténtalo de nuevo.",
   "tools.installFailed": "No se pudo instalar la herramienta de audio.",
   "tools.cancelInstallFailed": "No se pudo cancelar la instalación de la herramienta de audio.",

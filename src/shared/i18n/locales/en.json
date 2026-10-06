@@ -203,7 +203,7 @@
   "error.copy.title": "The title could not be copied. Select the text and copy it manually.",
   "error.copy.slug": "The slug could not be copied. Select the text and copy it manually.",
   "error.dismissMessage": "The message could not be closed. Restart Mumbler to clear it.",
-  "notice.reset": "Reset to defaults.",
+  "notice.reset": "Reset to defaults. The previous queue and its recordings were set aside in {folder}, under names that include the time of the reset.",
   "error.resetState": "Mumbler could not reset its state. Existing files are unchanged; try again.",
   "tools.installFailed": "Failed to install audio tool.",
   "tools.cancelInstallFailed": "Failed to cancel audio tool installation.",

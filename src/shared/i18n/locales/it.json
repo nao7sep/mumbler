@@ -204,7 +204,7 @@
   "error.copy.title": "Impossibile copiare il titolo. Seleziona il testo e copialo manualmente.",
   "error.copy.slug": "Impossibile copiare lo slug. Seleziona il testo e copialo manualmente.",
   "error.dismissMessage": "Impossibile chiudere il messaggio. Riavvia Mumbler per rimuoverlo.",
-  "notice.reset": "Ripristinati i valori predefiniti.",
+  "notice.reset": "Ripristinati i valori predefiniti. La coda precedente e le sue registrazioni sono state messe da parte in {folder}, con nomi che includono l’ora del ripristino.",
   "error.resetState": "Mumbler non è riuscito a ripristinare il proprio stato. I file esistenti non sono cambiati; riprova.",
   "tools.installFailed": "Impossibile installare lo strumento audio.",
   "tools.cancelInstallFailed": "Impossibile annullare l’installazione dello strumento audio.",

@@ -727,30 +727,30 @@ export class ApplicationRuntime {
 
     try {
       await loadInterfaceCatalogue(settings.language);
-      await ensureDirectories(paths, this.runtime.logger);
       // Preserve each store before the user-commanded reset returns to built-ins.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
       const preservedStateFiles = await queueStore.preserveExistingFiles();
-      // The preserved queue.json keeps its cards' text beside it.
+      // The preserved queue.json keeps its cards' text and recordings beside it;
+      // a reset deletes no user audio.
       const preservedTranscripts = await preserveAside(paths.transcriptsDir);
+      const preservedRecordings = await preserveAside(paths.workingDir);
       const preservedLayoutFiles = await layoutStore.preserveExistingFiles();
+      // Recreates the working folder the recordings were moved out of.
+      await ensureDirectories(paths, this.runtime.logger);
       // Reuse the per-launch session logger rather than building a new one, so a
       // reset keeps writing to the same file as the rest of the launch.
       const logger = this.runtime.logger;
-      const reconciliation = await reconcileWorkingState(paths, state, logger);
       await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
-        workingDir: paths.workingDir,
         preservedSettingsFiles,
         preservedStateFiles,
         preservedTranscripts,
+        preservedRecordings,
         preservedLayoutFiles,
-        deletedDerivedFiles: reconciliation.deletedDerivedFiles,
-        retainedDerivedFiles: reconciliation.retainedDerivedFiles,
       });
 
       this.runtime.paths = paths;
       this.runtime.settings = settings;
-      this.runtime.state = reconciliation.state;
+      this.runtime.state = state;
       this.runtime.layout = layout;
       this.runtime.settingsStore = settingsStore;
       this.runtime.queueStore = queueStore;

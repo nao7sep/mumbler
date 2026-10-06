@@ -204,7 +204,7 @@
   "error.copy.title": "Le titre n’a pas pu être copié. Sélectionnez le texte et copiez-le manuellement.",
   "error.copy.slug": "Le slug n’a pas pu être copié. Sélectionnez le texte et copiez-le manuellement.",
   "error.dismissMessage": "Le message n’a pas pu être fermé. Redémarrez Mumbler pour le faire disparaître.",
-  "notice.reset": "Valeurs par défaut rétablies.",
+  "notice.reset": "Valeurs par défaut rétablies. L’ancienne file d’attente et ses enregistrements ont été mis de côté dans {folder}, sous des noms qui comportent l’heure de la réinitialisation.",
   "error.resetState": "Mumbler n’a pas pu réinitialiser son état. Les fichiers existants sont inchangés\u00a0; réessayez.",
   "tools.installFailed": "L’outil audio n’a pas pu être installé.",
   "tools.cancelInstallFailed": "L’installation de l’outil audio n’a pas pu être annulée.",

@@ -1164,8 +1164,25 @@ describe("settings, secrets and the window's own state", () => {
     expect(await exists(join(home, "config.json"))).toBe(false);
     expect(await exists(join(home, "layout.json"))).toBe(false);
     expect(await exists(join(home, "queue.json"))).toBe(false);
-    expect(await exists(pending.workingFilePath), "the working recording is not deleted").toBe(true);
+    expect(await exists(pending.workingFilePath), "the recording left the working folder").toBe(false);
     expect(await exists(pending.originalSourcePath), "the user's own file is untouched").toBe(true);
+  });
+
+  it("moves every working recording aside beside the set-aside queue, and deletes none", async () => {
+    const [kept, waiting] = await dropIn("take.wav", "waiting.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(kept)])).snapshot);
+    await mkdir(join(home, "working", "derived"), { recursive: true });
+    await writeFile(join(home, "working", "derived", "cut-short.wav"), "trimmed audio");
+
+    await runtime.resetState();
+
+    const names = await readdir(home);
+    expect(names.find((name) => /^queue-.*\.invalid$/.test(name)), "the queue is set aside").toBeDefined();
+    const setAside = names.find((name) => /^working-.*\.invalid$/.test(name));
+    expect(setAside, "the recordings are set aside in the same folder as the queue").toBeDefined();
+    expect(await readFile(join(home, setAside!, basename(card.sourceFilePath)), "utf8")).toBe("audio for take.wav");
+    expect(await readFile(join(home, setAside!, basename(waiting.workingFilePath)), "utf8")).toBe("audio for waiting.wav");
+    expect(await readdir(join(home, "working")), "the new queue starts with an empty working folder").toEqual([]);
   });
 });
 

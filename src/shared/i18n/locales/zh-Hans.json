@@ -202,7 +202,7 @@
   "error.copy.title": "无法拷贝标题。请选中文本并手动拷贝。",
   "error.copy.slug": "无法拷贝别名。请选中文本并手动拷贝。",
   "error.dismissMessage": "无法关闭该消息。请重新启动 Mumbler 以清除它。",
-  "notice.reset": "已恢复为默认状态。",
+  "notice.reset": "已恢复为默认状态。之前的队列及其录音已另存到 {folder}，名称中包含重置的时间。",
   "error.resetState": "Mumbler 无法重置其状态。现有文件未被更改；请重试。",
   "tools.installFailed": "无法安装音频工具。",
   "tools.cancelInstallFailed": "无法取消音频工具的安装。",
