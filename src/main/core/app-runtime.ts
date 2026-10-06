@@ -2161,10 +2161,11 @@ export function applyFrontTrimOffset(
   timestamps: MumblerCard["timestamps"],
   frontTrimOffsetSec: number,
 ): MumblerCard["timestamps"] {
-  // The trim's whole seconds move the recorded instant, and the local time is
-  // read from that instant in the card's zone, so a daylight-saving change in
-  // between is counted. The tenths stay a suffix of the local time only.
-  const effectiveUtc = timestamps.confirmedUtc + Math.floor(frontTrimOffsetSec) * 1000;
+  // The trim moves the recorded instant exactly, and the local time is read from
+  // that instant in the card's zone, so a daylight-saving change in between is
+  // counted. The local time shows the trim's tenths as a suffix; file names keep
+  // whole seconds.
+  const effectiveUtc = timestamps.confirmedUtc + Math.round(frontTrimOffsetSec * 1000);
   const effective = recomputeLocalFromUtc(effectiveUtc, timestamps.timezone);
   if (effective.error !== null) {
     return timestamps;

@@ -740,9 +740,11 @@ describe("working with a card", () => {
     expect(updated.trim).toEqual({ frontMarkerSec: 65.5, backMarkerSec: 200 });
     expect(updated.trimDecision).toMatchObject({ kind: "stream-copy", chosenStartBoundarySec: 65.5 });
     expect(updated.timestamps.frontTrimOffsetSec).toBe(65.5);
-    // The instant moves by whole seconds; the tenths stay visible in the text.
-    expect(updated.timestamps.effectiveUtc - updated.timestamps.confirmedUtc).toBe(65_000);
+    // The instant moves by the exact trim; the local time shows its tenths and
+    // the file name keeps whole seconds.
+    expect(updated.timestamps.effectiveUtc - updated.timestamps.confirmedUtc).toBe(65_500);
     expect(updated.timestamps.effectiveLocal).toBe("2026-03-01 07:31:05.5");
+    expect(formatUtcMarker(new Date(updated.timestamps.effectiveUtc))).toBe("20260228-223105-utc");
     expect(updated, "the paid results survive the trim").toMatchObject({
       transcription: { text: "the words from the old span" },
       metadata: { structured: "notes", title: "Old title", slug: "old-title" },

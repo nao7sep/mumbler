@@ -212,8 +212,9 @@ describe("applyFrontTrimOffset", () => {
     expect(result.effectiveLocal).toBe("2026-04-22 09:44:05");
   });
 
-  it("appends a tenths suffix for a fractional offset", () => {
+  it("moves the instant by a fractional offset exactly and appends its tenths to the local time", () => {
     const result = applyFrontTrimOffset(base, 0.5);
+    expect(result.effectiveUtc).toBe(base.confirmedUtc + 500);
     expect(result.effectiveLocal).toBe("2026-04-22 09:44:00.5");
   });
 

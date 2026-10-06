@@ -379,10 +379,10 @@ function normalizeCardError(error: MumblerCard["lastError"], fallback: number): 
 function normalizeCardRecord(card: MumblerCard, undatedTime: UndatedItemTime): MumblerCard {
   const fallback = firstRecorded(cardRecordedTimes(card)) ?? undatedTime(card.sourceFilePath);
   // The confirmed and effective instants are one recording time apart by the
-  // front trim, which applyFrontTrimOffset applies in whole seconds, so either
-  // one restores the other before the card's other times are used.
+  // front trim, which applyFrontTrimOffset applies exactly, so either one
+  // restores the other before the card's other times are used.
   const frontTrimOffsetSec = card.timestamps.frontTrimOffsetSec;
-  const frontTrimOffsetMs = Number.isFinite(frontTrimOffsetSec) ? Math.floor(frontTrimOffsetSec) * 1000 : 0;
+  const frontTrimOffsetMs = Number.isFinite(frontTrimOffsetSec) ? Math.round(frontTrimOffsetSec * 1000) : 0;
   const storedConfirmedUtc = parseUtcMs(card.timestamps.confirmedUtc);
   const storedEffectiveUtc = parseUtcMs(card.timestamps.effectiveUtc);
   const confirmedUtc =

@@ -285,9 +285,9 @@ describe("queue data store", () => {
       expect(loaded.trimDecision?.analyzedAtUtc).toBe(UPDATED);
       expect(loaded.ai.transcription?.generatedAtUtc).toBe(UPDATED);
       expect(loaded.lastError?.occurredAtUtc).toBe(UPDATED);
-      // The recording time comes back from its effective twin, less the whole
-      // seconds the front trim moved it.
-      expect(loaded.timestamps.confirmedUtc).toBe(EFFECTIVE - 65_000);
+      // The recording time comes back from its effective twin, less the front
+      // trim that moved it.
+      expect(loaded.timestamps.confirmedUtc).toBe(EFFECTIVE - 65_500);
       expect(loaded.timestamps.effectiveUtc).toBe(EFFECTIVE);
     });
 
