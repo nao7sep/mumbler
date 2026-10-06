@@ -5,6 +5,7 @@ import {
   APP_SHELL_EVENTS,
   type AppSnapshot,
   type CardTrim,
+  type ConfirmImportsResult,
   type GenerateTarget,
   type ImportOperationResult,
   type MumblerShellApi,
@@ -43,7 +44,7 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(
       APP_SHELL_CHANNELS.confirmPendingImports,
       items,
-    ) as Promise<AppSnapshot>,
+    ) as Promise<ConfirmImportsResult>,
   selectCard: (cardId: string | null) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.selectCard, cardId) as Promise<AppSnapshot>,
   duplicateCard: (cardId: string) =>

@@ -9,9 +9,11 @@ import {
   type CardTrim,
   type AppPaths,
   type AppSnapshot,
+  type ConfirmImportsResult,
   type FailedImport,
   type GenerateTarget,
   type ImportOperationResult,
+  type ImportOriginalWarning,
   type ImportSource,
   type MumblerCard,
   type MumblerLayout,
@@ -840,11 +842,11 @@ export class ApplicationRuntime {
   // Confirm and cancel run on the same serialized import boundary as the copies
   // that create pending imports, and each settles only the imports the review
   // showed: an import that arrives meanwhile stays pending for its own review.
-  async confirmPendingImports(items: PendingImportReviewItem[]): Promise<AppSnapshot> {
+  async confirmPendingImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult> {
     return this.runImportExclusive(() => this.confirmReviewedImports(items));
   }
 
-  private async confirmReviewedImports(items: PendingImportReviewItem[]): Promise<AppSnapshot> {
+  private async confirmReviewedImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult> {
     this.ensureReady();
     const state = this.runtime.state!;
     const paths = this.runtime.paths!;
@@ -867,6 +869,9 @@ export class ApplicationRuntime {
         return { pendingImport, merged, timestamps };
       });
     const cardsToAdd: MumblerCard[] = [];
+    // A backup or deletion of the original that did not happen is a warning on
+    // the confirmed import, never its failure (error-handling-conventions).
+    const originalWarnings: ImportOriginalWarning[] = [];
 
     for (const { pendingImport, merged, timestamps } of reviewed) {
       let probed: Awaited<ReturnType<typeof probeAudioProfile>>;
@@ -928,8 +933,9 @@ export class ApplicationRuntime {
       });
 
       let backupSucceeded = true;
+      const backupDir = this.runtime.settings!.backupDirectory ?? paths.originalsDir;
+      const file = pendingImport.originalSourcePath;
       if (merged.copyToBackupOnConfirm) {
-        const backupDir = this.runtime.settings!.backupDirectory ?? paths.originalsDir;
         try {
           const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir);
           await this.runtime.logger.info("import.backup-original", "Copied original to backup directory.", {
@@ -943,11 +949,21 @@ export class ApplicationRuntime {
             backupDir,
             error: error instanceof Error ? error.message : String(error),
           });
+          if (!merged.deleteOriginalOnConfirm) {
+            originalWarnings.push({
+              sourcePath: file,
+              message: message("import.backupFailed", { file, folder: backupDir }),
+            });
+          }
         }
       }
 
       if (merged.deleteOriginalOnConfirm) {
         if (merged.copyToBackupOnConfirm && !backupSucceeded) {
+          originalWarnings.push({
+            sourcePath: file,
+            message: message("import.backupFailedNotDeleted", { file, folder: backupDir }),
+          });
           await this.runtime.logger.warn(
             "import.delete-original",
             "Skipped deleting original because backup copy failed.",
@@ -957,6 +973,7 @@ export class ApplicationRuntime {
           try {
             await deleteImportedSource(pendingImport.originalSourcePath);
           } catch (error: unknown) {
+            originalWarnings.push({ sourcePath: file, message: message("import.deleteFailed", { file }) });
             await this.runtime.logger.warn("import.delete-original", "Failed to delete original after confirm.", {
               originalSourcePath: pendingImport.originalSourcePath,
               error: error instanceof Error ? error.message : String(error),
@@ -982,7 +999,7 @@ export class ApplicationRuntime {
       { addedCards: cardsToAdd.length, stillPending: state.pendingImports.length },
     );
 
-    return this.getSnapshot();
+    return { snapshot: this.getSnapshot(), originalWarnings };
   }
 
   async cancelPendingImports(ids: string[]): Promise<AppSnapshot> {

@@ -189,8 +189,17 @@ export function useImportFlow({
   async function handleConfirmPendingImports(): Promise<void> {
     setIsConfirmingReview(true);
     try {
-      const nextSnapshot = await window.mumbler.confirmPendingImports(pendingReviewDrafts);
-      onSnapshotUpdate(nextSnapshot);
+      const result = await window.mumbler.confirmPendingImports(pendingReviewDrafts);
+      onSnapshotUpdate(result.snapshot);
+      // The recordings are in the queue; an original that was not backed up or
+      // deleted as asked is a warning on that success, kept until dismissed.
+      if (result.originalWarnings.length > 0) {
+        setImportResult({
+          severity: "warning",
+          message: joinSentences(result.originalWarnings.map((warning) => warning.message)),
+          issueKeys: result.originalWarnings.map((warning) => resultKey(warning.sourcePath)),
+        });
+      }
     } catch (error: unknown) {
       onError(
         "import-review-confirm",

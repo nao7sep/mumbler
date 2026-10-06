@@ -195,7 +195,7 @@ describe("confirming what was dropped in", () => {
   it("turns each pending import into a card with the reviewed time, and selects the first", async () => {
     const [pending] = await dropIn("take.wav");
 
-    const snapshot = await runtime.confirmPendingImports([
+    const { snapshot } = await runtime.confirmPendingImports([
       review(pending, { localTimestampText: "2026-03-01 07:30:00", timezone: "Asia/Tokyo" }),
     ]);
 
@@ -224,7 +224,7 @@ describe("confirming what was dropped in", () => {
   it("orders the cards by when they were recorded, not by when they were dropped in", async () => {
     const pending = await dropIn("later.wav", "earlier.wav");
 
-    const snapshot = await runtime.confirmPendingImports([
+    const { snapshot } = await runtime.confirmPendingImports([
       review(pending[0], { localTimestampText: "2026-03-02 10:00:00" }),
       review(pending[1], { localTimestampText: "2026-03-01 10:00:00" }),
     ]);
@@ -256,18 +256,63 @@ describe("confirming what was dropped in", () => {
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(root, "blocked") });
     await writeFile(join(root, "blocked"), "not a directory");
 
-    await runtime.confirmPendingImports([
+    const { originalWarnings } = await runtime.confirmPendingImports([
       review(pending, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true }),
     ]);
 
     expect(await exists(pending.originalSourcePath), "nothing is thrown away unbacked").toBe(true);
     expect(cards(runtime.getSnapshot()), "the card is still made").toHaveLength(1);
+    expect(originalWarnings).toEqual([{
+      sourcePath: pending.originalSourcePath,
+      message: {
+        key: "import.backupFailedNotDeleted",
+        values: { file: pending.originalSourcePath, folder: join(root, "blocked") },
+      },
+    }]);
+  });
+
+  it("warns, naming both paths, when only the backup it was told to make could not be written", async () => {
+    const [pending] = await dropIn("take.wav");
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(root, "blocked") });
+    await writeFile(join(root, "blocked"), "not a directory");
+
+    const { originalWarnings } = await runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true })]);
+
+    expect(originalWarnings).toEqual([{
+      sourcePath: pending.originalSourcePath,
+      message: { key: "import.backupFailed", values: { file: pending.originalSourcePath, folder: join(root, "blocked") } },
+    }]);
+  });
+
+  it("warns when the original it was told to delete could not be deleted, and still makes the card", async () => {
+    const [pending] = await dropIn("take.wav");
+    await rm(pending.originalSourcePath);
+
+    const { snapshot, originalWarnings } = await runtime.confirmPendingImports([
+      review(pending, { deleteOriginalOnConfirm: true, copyToBackupOnConfirm: false }),
+    ]);
+
+    expect(cards(snapshot)).toHaveLength(1);
+    expect(originalWarnings).toEqual([{
+      sourcePath: pending.originalSourcePath,
+      message: { key: "import.deleteFailed", values: { file: pending.originalSourcePath } },
+    }]);
+  });
+
+  it("returns no warning when the original was backed up and deleted as asked", async () => {
+    const [pending] = await dropIn("take.wav");
+
+    const { originalWarnings } = await runtime.confirmPendingImports([
+      review(pending, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true }),
+    ]);
+
+    expect(originalWarnings).toEqual([]);
   });
 
   it("confirms what was reviewed and leaves an import the review did not show pending", async () => {
     const pending = await dropIn("first.wav", "second.wav");
 
-    const snapshot = await runtime.confirmPendingImports([review(pending[0])]);
+    const { snapshot } = await runtime.confirmPendingImports([review(pending[0])]);
 
     expect(cards(snapshot).map((card) => card.originalFilename)).toEqual(["first.wav"]);
     expect(snapshot.state?.pendingImports.map((item) => item.id)).toEqual([pending[1].id]);
@@ -379,7 +424,7 @@ describe("working with a card", () => {
 
   async function confirmed(): Promise<MumblerCard> {
     const [pending] = await dropIn("take.wav");
-    const snapshot = await runtime.confirmPendingImports([review(pending)]);
+    const { snapshot } = await runtime.confirmPendingImports([review(pending)]);
     return cards(snapshot)[0];
   }
 
@@ -606,7 +651,7 @@ describe("working with a card", () => {
   it("keeps a duplicate made while another card's change is saved", async () => {
     const pending = await dropIn("first.wav", "second.wav");
     const [first, second] = cards(
-      await runtime.confirmPendingImports(pending.map((item) => review(item))),
+      (await runtime.confirmPendingImports(pending.map((item) => review(item)))).snapshot,
     );
 
     // The duplicate waits on a file copy; the trim on the other card saves the
@@ -706,7 +751,7 @@ describe("each card's text in its own file", () => {
 
   it("reads a card's text from its own file, never from queue.json", async () => {
     const [pending] = await dropIn("take.wav");
-    const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await withTextOnDisk(card);
 
     const [loaded] = cards(runtime.getSnapshot());
@@ -726,7 +771,7 @@ describe("each card's text in its own file", () => {
 
   it("drops a card's text file when the card is removed", async () => {
     const [pending] = await dropIn("take.wav");
-    const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await withTextOnDisk(card);
     expect(await readdir(join(home, "transcripts"))).toHaveLength(1);
 
@@ -747,7 +792,7 @@ describe("a store in a newer format", () => {
 
   async function confirmedCard(): Promise<MumblerCard> {
     const [pending] = await dropIn("take.wav");
-    const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     return card;
   }
 
@@ -818,7 +863,7 @@ describe("settings, secrets and the window's own state", () => {
     ["without its format version", JSON.stringify({ concurrencyLimit: 5 })],
   ])("sets aside a config.json that is %s, starts on the built-ins and keeps the queue", async (_kind, bytes) => {
     const [pending] = await dropIn("take.wav");
-    const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
     await writeFile(join(home, "config.json"), bytes);
 
@@ -1001,7 +1046,7 @@ describe("settings, secrets and the window's own state", () => {
 describe("an unreadable work store", () => {
   it("halts launch on a queue.json holding the JSON literal null and keeps the working recordings", async () => {
     const [pending] = await dropIn("take.wav");
-    const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
     await writeFile(join(home, "queue.json"), "null", "utf8");
 

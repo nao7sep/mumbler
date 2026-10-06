@@ -15,12 +15,13 @@ const english = createTranslator("en");
 let root: Root | null = null;
 const importDroppedPaths = vi.fn();
 const openImportDialog = vi.fn();
+const confirmPendingImports = vi.fn();
 const getPathForFile = vi.fn((file: File) => `/fixtures/${file.name}`);
 
 beforeEach(() => {
   Object.defineProperty(window, "mumbler", {
     configurable: true,
-    value: { importDroppedPaths, openImportDialog, getPathForFile },
+    value: { importDroppedPaths, openImportDialog, confirmPendingImports, getPathForFile },
   });
 });
 
@@ -43,6 +44,11 @@ function Harness({ onError }: { onError: (owner: string, message: Message) => vo
       type: "button",
       onClick: () => void flow.handleImportClick(),
       children: "Import",
+    }),
+    React.createElement("button", {
+      type: "button",
+      onClick: () => void flow.handleConfirmPendingImports(),
+      children: "Confirm",
     }),
     flow.importResult
       ? React.createElement("p", {
@@ -75,6 +81,7 @@ afterEach(async () => {
   document.body.innerHTML = "";
   importDroppedPaths.mockReset();
   openImportDialog.mockReset();
+  confirmPendingImports.mockReset();
   getPathForFile.mockClear();
   delete (window as unknown as { mumbler?: unknown }).mumbler;
 });
@@ -444,5 +451,40 @@ describe("useImportFlow review cancel", () => {
     expect(onError).toHaveBeenCalledWith("import-review-cancel", message("error.reviewCancel"));
     expect(english.text(message("error.reviewCancel"))).toContain("The review remains open");
     expect(button?.dataset.drafts, "the review is still shown").toBe("1");
+  });
+});
+
+describe("useImportFlow confirming a review", () => {
+  async function confirmWith(originalWarnings: unknown[]): Promise<HTMLElement> {
+    confirmPendingImports.mockResolvedValue({ snapshot: {}, originalWarnings });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(React.createElement(Harness, { onError: vi.fn() })));
+    const confirm = [...container.querySelectorAll("button")].find((button) => button.textContent === "Confirm");
+    await act(async () => confirm?.click());
+    return container;
+  }
+
+  it("keeps a warning for each original that was not backed up or deleted as asked", async () => {
+    const container = await confirmWith([
+      {
+        sourcePath: "/rec/a.wav",
+        message: message("import.backupFailedNotDeleted", { file: "/rec/a.wav", folder: "/backups" }),
+      },
+      { sourcePath: "/rec/b.wav", message: message("import.deleteFailed", { file: "/rec/b.wav" }) },
+    ]);
+
+    const result = container.querySelector("[data-result]");
+    expect(result?.getAttribute("data-result")).toBe("warning");
+    expect(result?.textContent).toContain(
+      "/rec/a.wav was added to the queue, but it could not be copied to the backup folder /backups, so it was not deleted.",
+    );
+    expect(result?.textContent).toContain("/rec/b.wav was added to the queue, but it could not be deleted.");
+  });
+
+  it("shows nothing when every original was handled as asked", async () => {
+    const container = await confirmWith([]);
+    expect(container.querySelector("[data-result]")).toBeNull();
   });
 });

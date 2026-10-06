@@ -547,6 +547,18 @@ export interface ImportOperationResult {
   duplicateImports: string[];
 }
 
+// A confirmed import whose requested backup or deletion of the original did not
+// happen. The import itself reached the queue; this is a warning on that success.
+export interface ImportOriginalWarning {
+  sourcePath: string;
+  message: Message;
+}
+
+export interface ConfirmImportsResult {
+  snapshot: AppSnapshot;
+  originalWarnings: ImportOriginalWarning[];
+}
+
 export type SaveConflictResolution = "overwrite" | "suffix" | "cancel";
 
 export type SaveCardResult =
@@ -577,7 +589,7 @@ export interface MumblerShellApi {
   openImportDialog(): Promise<ImportOperationResult>;
   importDroppedPaths(paths: string[]): Promise<ImportOperationResult>;
   updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot>;
-  confirmPendingImports(items: PendingImportReviewItem[]): Promise<AppSnapshot>;
+  confirmPendingImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult>;
   selectCard(cardId: string | null): Promise<AppSnapshot>;
   duplicateCard(cardId: string): Promise<AppSnapshot>;
   updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot>;
