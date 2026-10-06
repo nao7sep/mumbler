@@ -144,6 +144,38 @@ describe("queue data store", () => {
     expect(await readFile(queuePath(), "utf8")).toBe(unmarked);
   });
 
+  it.each([
+    ["cards that are not a list", { cards: { x: 1 } }],
+    ["pending imports that are not a list", { pendingImports: "none" }],
+    ["a card that is not an object", { cards: [7] }],
+    ["a card without a working recording path", { cards: [{ ...card(), sourceFilePath: 3 }] }],
+    ["a card whose AI result is not an object", { cards: [{ ...card(), ai: { ...card().ai, title: "words" } }] }],
+    ["a card whose title is not text", { cards: [{ ...card(), metadata: { title: 4, slug: null } }] }],
+    ["a pending import whose delete choice is not true or false", {
+      pendingImports: [{
+        id: "p",
+        originalFilename: "a.m4a",
+        originalSourcePath: "/tmp/a.m4a",
+        workingFilePath: "/tmp/w.m4a",
+        localTimestampText: "",
+        timezone: "Asia/Tokyo",
+        utcTimestampText: "",
+        deleteOriginalOnConfirm: "false",
+        copyToBackupOnConfirm: true,
+      }],
+    }],
+  ])("refuses %s as unreadable, and leaves the file untouched", async (_name, shape) => {
+    const text = JSON.stringify({ formatVersion: 1, ...shape });
+    await writeFile(queuePath(), text, "utf8");
+    await expect(createQueueStore(queuePath()).load()).rejects.toBeInstanceOf(CorruptStateError);
+    expect(await readFile(queuePath(), "utf8")).toBe(text);
+  });
+
+  it("reads absent lists as empty", async () => {
+    await writeFile(queuePath(), JSON.stringify({ formatVersion: 1 }), "utf8");
+    expect((await createQueueStore(queuePath()).load()).value).toEqual({ pendingImports: [], cards: [] });
+  });
+
   it("writes UTC instants as canonical ISO strings and reads epoch-ms back", async () => {
     const store = createQueueStore(queuePath());
     await store.save(

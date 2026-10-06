@@ -44,8 +44,14 @@ function parse(path: string, raw: unknown): CardTranscript {
   }
   const record = raw as Record<string, unknown>;
   assertReadableFormat(path, record, FORMAT_VERSIONS.transcript);
-  const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
-  return { transcription: text(record.transcription), structured: text(record.structured) };
+  // A wrong type is unreadable: read as no text, a later save or cleanup would
+  // overwrite or delete it (store-recovery-conventions). An absent field is no text.
+  const text = (key: keyof CardTranscript): string | null => {
+    const value = record[key];
+    if (value === undefined || value === null || typeof value === "string") return value ?? null;
+    throw new CorruptStateError(path, `${key} is not text`);
+  };
+  return { transcription: text("transcription"), structured: text("structured") };
 }
 
 // Owns the per-card transcript files under transcripts/. Each file holds one

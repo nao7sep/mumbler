@@ -138,6 +138,16 @@ describe("TranscriptStore", () => {
     expect(await readFile(path, "utf8")).toBe("null");
   });
 
+  it("refuses a file whose text is not text as unreadable and leaves it in place", async () => {
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, `${Buffer.from("take").toString("hex")}.json`);
+    const wrong = JSON.stringify({ formatVersion: 1, cardId: "take", transcription: ["words"], structured: null });
+    await writeFile(path, wrong);
+
+    await expect(new TranscriptStore(dir).open(["take"])).rejects.toBeInstanceOf(CorruptStateError);
+    expect(await readFile(path, "utf8")).toBe(wrong);
+  });
+
   it("ignores files it did not name", async () => {
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, "notes.txt"), "mine");

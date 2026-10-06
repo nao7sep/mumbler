@@ -21,7 +21,7 @@ import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-valid
 import { THEME_PREFERENCES } from "@shared/app-shell";
 import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
 import { FORMAT_VERSIONS } from "./format-versions";
-import { JsonStore, type LoadResult } from "./json-store";
+import { CorruptStateError, JsonStore, type LoadResult } from "./json-store";
 import { OperationError } from "./operation-error";
 import { resolvePathFromHome } from "./storage-root";
 import { multiline, singleLine } from "./text-cleanup";
@@ -241,6 +241,64 @@ function cardRecordedTimes(card: MumblerCard): (number | null)[] {
 
 function firstRecorded(times: (number | null)[]): number | null {
   return times.find((time) => time !== null) ?? null;
+}
+
+// The queue fields the app reads or acts on, checked before anything is
+// normalized: a wrong shape coerced to an empty list would let startup sweep the
+// working recordings and transcripts as unreferenced (store-recovery-conventions).
+// An absent list is empty; an absent time is taken from the item's other times.
+function textIssue(owner: string, record: Record<string, unknown>, keys: readonly string[]): string | null {
+  const key = keys.find((name) => typeof record[name] !== "string");
+  return key === undefined ? null : `${owner} ${key} is not text`;
+}
+
+function objectOrNullIssue(owner: string, record: Record<string, unknown>, keys: readonly string[]): string | null {
+  const key = keys.find((name) => record[name] !== null && asRecord(record[name]) === null);
+  return key === undefined ? null : `${owner} ${key} is not an object or null`;
+}
+
+function pendingImportIssue(item: unknown): string | null {
+  const record = asRecord(item);
+  if (record === null) return "a pending import is not an object";
+  const flag = ["deleteOriginalOnConfirm", "copyToBackupOnConfirm"].find((key) => typeof record[key] !== "boolean");
+  return textIssue("a pending import's", record, [
+    "id",
+    "originalFilename",
+    "originalSourcePath",
+    "workingFilePath",
+    "localTimestampText",
+    "timezone",
+    "utcTimestampText",
+  ]) ?? (flag === undefined ? null : `a pending import's ${flag} is not true or false`);
+}
+
+function cardIssue(item: unknown): string | null {
+  const card = asRecord(item);
+  if (card === null) return "a card is not an object";
+  const issue = textIssue("a card's", card, ["id", "originalFilename", "sourceFilePath", "status"]) ??
+    objectOrNullIssue("a card's", card, ["trimDecision", "transcribedTrim", "lastError"]);
+  if (issue !== null) return issue;
+  const part = ["timestamps", "trim", "metadata", "ai"].find((key) => asRecord(card[key]) === null);
+  if (part !== undefined) return `a card's ${part} is not an object`;
+  const metadata = card.metadata as Record<string, unknown>;
+  const label = ["title", "slug"].find((key) => metadata[key] !== null && typeof metadata[key] !== "string");
+  return textIssue("a card's timestamps", card.timestamps as Record<string, unknown>, ["confirmedLocal", "effectiveLocal", "timezone"]) ??
+    objectOrNullIssue("a card's ai", card.ai as Record<string, unknown>, ["transcription", "structured", "title", "slug"]) ??
+    (label === undefined ? null : `a card's metadata ${label} is not text or null`);
+}
+
+function queueShapeIssue(raw: Record<string, unknown>): string | null {
+  const lists = [["pendingImports", pendingImportIssue], ["cards", cardIssue]] as const;
+  for (const [key, itemIssue] of lists) {
+    if (!Object.hasOwn(raw, key)) continue;
+    const list = raw[key];
+    if (!Array.isArray(list)) return `${key} is not a list`;
+    for (const item of list) {
+      const issue = itemIssue(item);
+      if (issue !== null) return issue;
+    }
+  }
+  return null;
 }
 
 function rawPendingImports(raw: Record<string, unknown>): PendingImportReviewItem[] | null {
@@ -550,7 +608,11 @@ export class QueueStore {
     this.store = new JsonStore({
       path,
       formatVersion: FORMAT_VERSIONS.queue,
-      validate: (raw) => raw,
+      validate: (raw) => {
+        const issue = queueShapeIssue(raw);
+        if (issue !== null) throw new CorruptStateError(path, issue);
+        return raw;
+      },
       createDefault: () => ({}),
     });
   }
