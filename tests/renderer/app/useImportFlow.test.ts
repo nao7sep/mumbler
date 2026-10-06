@@ -21,7 +21,7 @@ const getPathForFile = vi.fn((file: File) => `/fixtures/${file.name}`);
 beforeEach(() => {
   Object.defineProperty(window, "mumbler", {
     configurable: true,
-    value: { importDroppedPaths, openImportDialog, confirmPendingImports, getPathForFile },
+    value: { importDroppedPaths, openImportDialog, confirmPendingImports, getPathForFile, onFlushPendingEdits: () => () => undefined },
   });
 });
 
@@ -432,6 +432,7 @@ describe("useImportFlow review cancel", () => {
         cancelPendingImports,
         updatePendingImportDrafts: vi.fn().mockResolvedValue({}),
         reportRendererDiagnostic: vi.fn().mockResolvedValue(undefined),
+        onFlushPendingEdits: () => () => undefined,
       },
     });
     const onError = vi.fn();
@@ -451,6 +452,76 @@ describe("useImportFlow review cancel", () => {
     expect(onError).toHaveBeenCalledWith("import-review-cancel", message("error.reviewCancel"));
     expect(english.text(message("error.reviewCancel"))).toContain("The review remains open");
     expect(button?.dataset.drafts, "the review is still shown").toBe("1");
+  });
+});
+
+describe("useImportFlow at quit", () => {
+  const pendingImport = {
+    id: "pending-1",
+    originalFilename: "take.wav",
+    localTimestampText: "2026-03-01 07:30:00",
+    timezone: "Asia/Tokyo",
+  };
+  const snapshot = { state: { pendingImports: [pendingImport] } } as unknown as Parameters<
+    typeof useImportFlow
+  >[0]["snapshot"];
+
+  function EditHarness(): ReactElement {
+    const flow = useImportFlow({ snapshot, onSnapshotUpdate: vi.fn(), onError: vi.fn() });
+    return React.createElement("button", {
+      type: "button",
+      onClick: () => flow.setPendingReviewDrafts((drafts) => drafts.map((draft) => ({ ...draft, timezone: "Europe/Berlin" }))),
+    }, "Edit");
+  }
+
+  async function mount(): Promise<{ edit: () => Promise<void>; flush: () => Promise<void>; sent: ReturnType<typeof vi.fn> }> {
+    const sent = vi.fn().mockResolvedValue({});
+    let flush: (() => Promise<void>) | null = null;
+    Object.defineProperty(window, "mumbler", {
+      configurable: true,
+      value: {
+        updatePendingImportDrafts: sent,
+        onFlushPendingEdits: (registered: () => Promise<void>) => {
+          flush = registered;
+          return () => { flush = null; };
+        },
+      },
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(React.createElement(EditHarness)));
+    await act(async () => vi.advanceTimersByTime(250));
+    sent.mockClear();
+    return {
+      edit: () => act(async () => container.querySelector("button")?.click()),
+      flush: () => act(async () => flush!()),
+      sent,
+    };
+  }
+
+  it("sends a review edit still in its debounce at once, and only once", async () => {
+    vi.useFakeTimers();
+    const { edit, flush, sent } = await mount();
+
+    await edit();
+    await act(async () => vi.advanceTimersByTime(100));
+    expect(sent).not.toHaveBeenCalled();
+    await flush();
+
+    expect(sent).toHaveBeenCalledOnce();
+    expect(sent.mock.calls[0]![0]).toEqual([expect.objectContaining({ id: "pending-1", timezone: "Europe/Berlin" })]);
+    await act(async () => vi.advanceTimersByTime(1_000));
+    expect(sent, "the debounce no longer sends it again").toHaveBeenCalledOnce();
+  });
+
+  it("sends nothing when no edit is waiting", async () => {
+    vi.useFakeTimers();
+    const { flush, sent } = await mount();
+
+    await flush();
+
+    expect(sent).not.toHaveBeenCalled();
   });
 });
 

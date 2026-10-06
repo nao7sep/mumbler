@@ -52,6 +52,10 @@ export const APP_SHELL_EVENTS = {
   dependenciesUpdated: "app-shell:event-dependencies-updated",
   interfaceLanguageChanged: "app-shell:event-interface-language-changed",
   recordsChanged: "app-shell:event-records-changed",
+  // A quit asks the main window to send the edits it has not sent yet; the
+  // window replies on pendingEditsFlushed once they are sent.
+  flushPendingEdits: "app-shell:event-flush-pending-edits",
+  pendingEditsFlushed: "app-shell:event-pending-edits-flushed",
 } as const;
 
 export type CardStatus =
@@ -642,4 +646,6 @@ export interface MumblerShellApi {
   onInterfaceLanguageChanged(listener: () => void): () => void;
   // A record was stored in the records database.
   onRecordsChanged(listener: () => void): () => void;
+  /** Registers what sends the window's unsent edits when a quit asks for them. */
+  onFlushPendingEdits(flush: () => Promise<void>): () => void;
 }

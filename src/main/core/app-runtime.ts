@@ -150,6 +150,9 @@ class ImportAdmissionError extends Error {
   }
 }
 
+/** The user's own work a quit could not save. */
+export type QuitSaveFailure = "queue" | "transcripts" | "settings";
+
 // What a save produced, before the snapshot that reports it is taken: the
 // snapshot is built only after the card's status has settled.
 type SaveOutcome =
@@ -188,7 +191,17 @@ export class ApplicationRuntime {
   // queued-card drain) lives in the coordinator; the runtime keeps owning the
   // app state those pipelines mutate and the single persist path they call.
   private readonly pipeline: PipelineCoordinator;
-  private shutdownPromise: Promise<void> | null = null;
+  // Set while a quit saves and closes; a cancelled quit clears it again.
+  private closing = false;
+  private quitSave: Promise<QuitSaveFailure[]> | null = null;
+  // The settings write that had failed before this quit began, if any: that
+  // failure was reported where the change was made, so only a later one is the
+  // quit's to retry. Undefined while no quit is under way.
+  private settingsFailureBeforeQuit: object | null | undefined = undefined;
+  private closePromise: Promise<void> | null = null;
+  // Whether queue.json may be behind the queue the app holds: set when a
+  // persist fails, cleared when one lands.
+  private queueBehind = false;
   private onPipelineProgressCallback: (() => void) | null = null;
   private onLanguageChangedCallback: (() => void) | null = null;
   private onDependenciesChangedCallback: (() => void) | null = null;
@@ -765,6 +778,7 @@ export class ApplicationRuntime {
       this.runtime.settingsStore = settingsStore;
       this.runtime.queueStore = queueStore;
       this.runtime.transcriptStore = new TranscriptStore(paths.transcriptsDir);
+      this.queueBehind = false;
       this.runtime.layoutStore = layoutStore;
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
@@ -1433,36 +1447,98 @@ export class ApplicationRuntime {
     await this.pipeline.drainQueued();
   }
 
-  // Idempotent graceful shutdown, called from the app's before-quit handler.
-  // Stops new pipelines and saves, aborts in-flight ones and lets them unwind (a
-  // cancelled save rolls back and leaves its card Ready to Save), then drains
-  // the store write-queues so the canonical files are current before the process
-  // exits. Cards aborted mid-step are left for startup recovery to mark as
-  // resumable Errors, so no work is silently lost or half-written.
-  async shutdown(): Promise<void> {
-    if (this.shutdownPromise !== null) {
-      return this.shutdownPromise;
+  // The quit's save (unsaved-edits conventions, Quitting). Stops new pipelines
+  // and saves, aborts in-flight ones and lets them unwind (a cancelled save
+  // rolls back and leaves its card Ready to Save; a cancelled run leaves its
+  // card Cancelled), drains the store write-queues, then writes the user's own
+  // work that is not on disk: the queue and the transcripts from what the app
+  // holds, and a settings write that failed during the quit. Returns what could
+  // not be saved; a call while one runs shares it.
+  saveForQuit(): Promise<QuitSaveFailure[]> {
+    this.quitSave ??= this.runQuitSave().finally(() => {
+      this.quitSave = null;
+    });
+    return this.quitSave;
+  }
+
+  private async runQuitSave(): Promise<QuitSaveFailure[]> {
+    const { queueStore, transcriptStore, settingsStore, logger } = this.runtime;
+    if (this.settingsFailureBeforeQuit === undefined) {
+      this.settingsFailureBeforeQuit = settingsStore?.failedWrite ?? null;
     }
-    this.shutdownPromise = (async () => {
-      for (const controller of this.activeSaves.keys()) {
-        controller.abort();
+    this.closing = true;
+    for (const controller of this.activeSaves.keys()) {
+      controller.abort();
+    }
+    await Promise.all([
+      Promise.allSettled([...this.activeSaves.values()]),
+      this.pipeline.shutdown(),
+    ]);
+    await queueStore?.flush();
+    await transcriptStore?.flush();
+    await settingsStore?.flush();
+    await this.runtime.layoutStore?.flush();
+
+    const failures: QuitSaveFailure[] = [];
+    const attempt = async (store: QuitSaveFailure, write: () => Promise<unknown>): Promise<void> => {
+      try {
+        await write();
+      } catch (error: unknown) {
+        failures.push(store);
+        await logger.error("quit.save-failed", "Could not save before quitting.", error, { store });
       }
-      await Promise.all([
-        Promise.allSettled([...this.activeSaves.values()]),
-        this.pipeline.shutdown(),
-      ]);
-      await this.runtime.queueStore?.flush();
-      await this.runtime.transcriptStore?.flush();
-      await this.runtime.settingsStore?.flush();
-      await this.runtime.layoutStore?.flush();
+    };
+    const state = this.runtime.state;
+    if (state !== null && queueStore !== null && transcriptStore !== null) {
+      // Writes only the text that differs from its file.
+      await attempt("transcripts", () => transcriptStore.writeChanged(state.cards));
+      if (this.queueBehind) {
+        await attempt("queue", () => queueStore.save(state));
+      }
+      if (failures.length === 0) {
+        this.queueBehind = false;
+        // Cleanup of removed cards' files, not the user's work: logged only.
+        await transcriptStore.removeAbsent(state.cards).catch((error: unknown) =>
+          logger.warn("quit.transcript-cleanup-failed", "Could not delete a removed card's text file.", {
+            error: serializeError(error),
+          }));
+      }
+    }
+    const settingsFailure = settingsStore?.failedWrite ?? null;
+    if (settingsStore && settingsFailure !== null && settingsFailure !== this.settingsFailureBeforeQuit) {
+      await attempt("settings", () => settingsStore.retryFailedWrite());
+    }
+    return failures;
+  }
+
+  // The user cancelled the quit: the app takes work again. Runs a quit stopped
+  // stay Cancelled, for the user to start again.
+  async resumeAfterCancelledQuit(): Promise<void> {
+    this.closing = false;
+    this.settingsFailureBeforeQuit = undefined;
+    await this.runtime.logger.info("quit.cancelled", "Quit cancelled; Mumbler keeps running.");
+    await this.pipeline.resume();
+  }
+
+  // The quit's last step, after its save: closes the backup history and the
+  // records, which log their own failures. Called once; later calls share it.
+  closeForQuit(details: Record<string, unknown> = {}): Promise<void> {
+    this.closePromise ??= (async () => {
       await closeBackupStore();
-      await this.runtime.logger.info("app.shutdown", "Graceful shutdown complete.", {
-        reason: "before-quit",
+      await this.runtime.logger.info("app.shutdown", "Shutdown complete.", {
+        ...details,
         cardCount: this.runtime.state?.cards.length ?? 0,
       });
       await this.runtime.logger.close();
     })();
-    return this.shutdownPromise;
+    return this.closePromise;
+  }
+
+  // Saves, logging what could not be saved, and closes; for a caller that
+  // cannot ask the user, such as tests.
+  async shutdown(): Promise<void> {
+    const unsaved = await this.saveForQuit();
+    await this.closeForQuit({ unsaved });
   }
 
   async chooseOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
@@ -1491,7 +1567,7 @@ export class ApplicationRuntime {
     if (card.status !== "Ready to Save") {
       throw new OperationError("Only cards in Ready to Save state can be finalized.");
     }
-    if (this.shutdownPromise !== null) {
+    if (this.closing) {
       throw new OperationError("Mumbler is closing; the recording was not saved.");
     }
     if (this.trimRequests.has(cardId)) {
@@ -1866,8 +1942,14 @@ export class ApplicationRuntime {
     // is deleted only after queue.json no longer refers to it. Each store
     // serializes its writes, so overlapping persistState calls never interleave
     // on disk, and unchanged text is not written again.
-    await this.runtime.transcriptStore!.writeChanged(cards);
-    await this.runtime.queueStore!.save(state);
+    try {
+      await this.runtime.transcriptStore!.writeChanged(cards);
+      await this.runtime.queueStore!.save(state);
+    } catch (error: unknown) {
+      this.queueBehind = true;
+      throw error;
+    }
+    this.queueBehind = false;
     await this.runtime.transcriptStore!.removeAbsent(cards);
     const selectedCardId = selectExistingCardId(
       state.cards.map((card) => card.id),

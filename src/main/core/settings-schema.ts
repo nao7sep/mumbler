@@ -586,6 +586,8 @@ export class SettingsStore {
     await this.store.update((current) => (sameSets(current, next) ? undefined : next));
   }
 
+  get failedWrite(): object | null { return this.store.failedWrite; }
+  retryFailedWrite(): Promise<void> { return this.store.retryFailedWrite(); }
   flush(): Promise<void> { return this.store.flush(); }
   preserveExistingFiles(): Promise<string[]> { return this.store.preserveExistingFiles(); }
 }

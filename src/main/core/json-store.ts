@@ -73,6 +73,9 @@ export interface LoadResult<T> {
 // defaults so the original is always recoverable.
 export class JsonStore<T extends object> {
   private queue: Promise<void> = Promise.resolve();
+  // The latest write, when it failed: the value it could not write. A write
+  // that lands clears it.
+  private failure: { readonly value: T } | null = null;
 
   constructor(private readonly options: JsonStoreOptions<T>) {}
 
@@ -128,11 +131,32 @@ export class JsonStore<T extends object> {
 
   private async write(value: T): Promise<void> {
     const wire = this.options.serialize ? this.options.serialize(value) : value;
-    await writeJsonFile(
-      this.options.path,
-      { formatVersion: this.options.formatVersion, ...wire },
-      { record: this.options.record },
-    );
+    try {
+      await writeJsonFile(
+        this.options.path,
+        { formatVersion: this.options.formatVersion, ...wire },
+        { record: this.options.record },
+      );
+    } catch (error: unknown) {
+      this.failure = { value };
+      throw error;
+    }
+    this.failure = null;
+  }
+
+  /** The latest write when it failed, holding the value it could not write;
+   * null once a write lands. Each failure is a new object. */
+  get failedWrite(): { readonly value: T } | null {
+    return this.failure;
+  }
+
+  /** Writes again the value the latest write failed to write; nothing when it landed. */
+  retryFailedWrite(): Promise<void> {
+    const work = async (): Promise<void> => {
+      if (this.failure !== null) await this.write(this.failure.value);
+    };
+    this.queue = this.queue.then(work, work);
+    return this.queue;
   }
 
   // Awaits all queued writes — used by graceful shutdown. A failed save() rejects

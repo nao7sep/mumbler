@@ -264,13 +264,19 @@ export class PipelineCoordinator {
   }
 
   // Stop admitting queued cards, abort every in-flight pipeline, and wait for
-  // them to unwind. The runtime's shutdown wraps this (once) and then flushes
-  // the stores, so the canonical files are current before the process exits.
+  // them to unwind. The runtime's quit save runs this and then saves the
+  // stores, so the canonical files are current before the process exits.
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
     for (const run of this.activeRuns.values()) {
       run.controller.abort();
     }
     await Promise.allSettled([...this.activePipelines]);
+  }
+
+  // A quit the user cancelled: admit queued cards again.
+  async resume(): Promise<void> {
+    this.shuttingDown = false;
+    await this.drainQueued();
   }
 }

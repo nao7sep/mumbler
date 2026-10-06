@@ -25,6 +25,13 @@ vi.mock("electron", () => ({
 const undeletable = vi.hoisted(() => new Set<string>());
 // Paths a rename refuses to move, the way a folder held open by another program can.
 const unmovable = vi.hoisted(() => new Set<string>());
+// Files a write cannot replace, the way a full disk refuses them: an atomic
+// write's final rename onto the file fails. A held write waits at that rename
+// until released, so a test can act while it is in flight.
+const unwritable = vi.hoisted(() => ({
+  refuses: (_path: string): boolean => false,
+  held: null as { path: string; release: Promise<void>; entered: number } | null,
+}));
 // Runs while a refused removal is in flight, the way another card's save can.
 const duringRefusedRm = vi.hoisted(() => ({ run: null as (() => Promise<unknown>) | null }));
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -40,6 +47,12 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     },
     rename: async (from: Parameters<typeof actual.rename>[0], to: Parameters<typeof actual.rename>[1]) => {
       if (unmovable.has(String(from))) throw new Error("EBUSY: resource busy or locked");
+      const held = unwritable.held;
+      if (held !== null && held.path === String(to)) {
+        held.entered += 1;
+        await held.release;
+      }
+      if (unwritable.refuses(String(to))) throw new Error("ENOSPC: no space left on device");
       return actual.rename(from, to);
     },
   };
@@ -190,6 +203,8 @@ beforeEach(async () => {
   delete process.env.GEMINI_API_KEY;
   undeletable.clear();
   unmovable.clear();
+  unwritable.refuses = () => false;
+  unwritable.held = null;
   duringRefusedRm.run = null;
   audioGate.held = null;
   audioGate.entered = 0;
@@ -1277,5 +1292,95 @@ describe("an unreadable work store", () => {
     expect(runtime.getSnapshot().state).toBeNull();
     expect(await readFile(join(home, "queue.json"), "utf8")).toBe("null");
     expect(await exists(card.sourceFilePath), "the working recording is kept").toBe(true);
+  });
+});
+
+describe("the save a quit makes", () => {
+  type Internals = { runtime: { state: { cards: MumblerCard[] } } };
+
+  it("writes the queue its last save could not write, and reports it while it still cannot", async () => {
+    const [pending] = await dropIn("take.wav");
+    unwritable.refuses = (path) => path === join(home, "queue.json");
+    await expect(runtime.confirmPendingImports([review(pending)])).rejects.toThrow();
+
+    expect(await runtime.saveForQuit()).toEqual(["queue"]);
+
+    unwritable.refuses = () => false;
+    expect(await runtime.saveForQuit(), "Retry").toEqual([]);
+    const saved = await createQueueStore(join(home, "queue.json")).load();
+    expect(saved.value.cards.map((card) => card.originalFilename)).toEqual(["take.wav"]);
+  });
+
+  it("writes a card's text that is not in its file yet", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+    (runtime as unknown as Internals).runtime.state.cards[0]!.transcription = { text: "words not on disk yet" };
+    unwritable.refuses = (path) => path.startsWith(join(home, "transcripts"));
+
+    expect(await runtime.saveForQuit()).toEqual(["transcripts"]);
+
+    unwritable.refuses = () => false;
+    expect(await runtime.saveForQuit()).toEqual([]);
+    const [file] = await readdir(join(home, "transcripts"));
+    expect(JSON.parse(await readFile(join(home, "transcripts", file!), "utf8"))).toMatchObject({
+      cardId: card.id,
+      transcription: "words not on disk yet",
+    });
+  });
+
+  it("writes nothing when everything is already on disk", async () => {
+    const [pending] = await dropIn("take.wav");
+    await runtime.confirmPendingImports([review(pending)]);
+    const before = await stat(join(home, "queue.json"));
+
+    expect(await runtime.saveForQuit()).toEqual([]);
+
+    expect((await stat(join(home, "queue.json"))).mtimeMs).toBe(before.mtimeMs);
+  });
+
+  it("retries a settings change that fails while the quit runs, with the value the user saved", async () => {
+    const configPath = join(home, "config.json");
+    let release!: () => void;
+    unwritable.held = { path: configPath, release: new Promise((resolve) => { release = resolve; }), entered: 0 };
+    unwritable.refuses = (path) => path === configPath;
+    const saving = runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" })
+      .then(() => "saved", () => "failed");
+    await vi.waitFor(() => expect(unwritable.held?.entered).toBe(1));
+
+    const quit = runtime.saveForQuit();
+    release();
+
+    expect(await quit).toEqual(["settings"]);
+    expect(await saving).toBe("failed");
+    unwritable.held = null;
+    unwritable.refuses = () => false;
+    expect(await runtime.saveForQuit(), "Retry").toEqual([]);
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({ defaultTimezone: "Europe/Berlin" });
+  });
+
+  it("leaves a settings change that failed before the quit to where it was reported", async () => {
+    const configPath = join(home, "config.json");
+    unwritable.refuses = (path) => path === configPath;
+    await expect(runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" })).rejects.toThrow();
+    unwritable.refuses = () => false;
+
+    expect(await runtime.saveForQuit()).toEqual([]);
+
+    expect(await exists(configPath)).toBe(false);
+  });
+
+  it("takes work again after a cancelled quit", async () => {
+    const [pending] = await dropIn("take.wav");
+    unwritable.refuses = (path) => path === join(home, "queue.json");
+    await expect(runtime.confirmPendingImports([review(pending)])).rejects.toThrow();
+    expect(await runtime.saveForQuit()).toEqual(["queue"]);
+
+    unwritable.refuses = () => false;
+    await runtime.resumeAfterCancelledQuit();
+    const [next] = await dropIn("next.wav");
+    await runtime.confirmPendingImports([review(next)]);
+
+    const saved = await createQueueStore(join(home, "queue.json")).load();
+    expect(saved.value.cards.map((card) => card.originalFilename).sort()).toEqual(["next.wav", "take.wav"]);
   });
 });

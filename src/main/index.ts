@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol } from "electron";
+import { app, BrowserWindow, ipcMain, powerMonitor, protocol, type IpcMainEvent } from "electron";
 import { extname } from "node:path";
 
 import { APP_SHELL_EVENTS } from "@shared/app-shell";
@@ -11,6 +11,8 @@ import { showStartupFailureDialog } from "./startup-failure-dialog";
 import { loadInterfaceCatalogue, mainTranslator } from "./i18n";
 import { installApplicationMenu } from "./app-menu";
 import { notifyRecordsChanged, openRecordsWindow } from "./records-window";
+import { createQuitController, QUIT_BUDGETS, quitFailureDialog, within, type QuitController } from "./quit";
+import { showPlainDialog, type OpenPlainDialog } from "./plain-dialog";
 
 app.setName("Mumbler");
 
@@ -32,27 +34,106 @@ const AUDIO_MIME_TYPES: Record<string, string> = {
   ".opus": "audio/ogg",
 };
 
-const QUIT_TIMEOUT_MS = 15_000;
-
-// Set once bootstrap finishes so the before-quit handler can reach the runtime.
+// Set once bootstrap finishes so the quit paths can reach the runtime.
 let runtimeForShutdown: ApplicationRuntime | null = null;
+// Every quit path goes through it once the runtime exists.
+let quitController: QuitController | null = null;
+// macOS posts a logout, restart or shutdown before it sends the quit, so the
+// quit that follows is a session end, which never asks the user.
+let sessionEnding = false;
 // The main window, apart from the records window beside it: closing it quits
 // on Windows and Linux, and on macOS the Dock reopens it.
 let mainWindow: BrowserWindow | null = null;
 
+// Asks the window to send the edits it has not sent yet, and resolves when it
+// replies; the quit bounds the wait.
+function flushWindowEdits(window: BrowserWindow | null): Promise<void> {
+  if (window === null || window.isDestroyed()) return Promise.resolve();
+  const contents = window.webContents;
+  return new Promise<void>((resolve) => {
+    const replied = (event: IpcMainEvent): void => {
+      if (event.sender !== contents) return;
+      ipcMain.removeListener(APP_SHELL_EVENTS.pendingEditsFlushed, replied);
+      resolve();
+    };
+    ipcMain.on(APP_SHELL_EVENTS.pendingEditsFlushed, replied);
+    contents.send(APP_SHELL_EVENTS.flushPendingEdits);
+  });
+}
+
+function createQuit(runtime: ApplicationRuntime): QuitController {
+  let question: OpenPlainDialog<"retry" | "quit-anyway" | "cancel"> | null = null;
+  return createQuitController({
+    flushEdits: () => flushWindowEdits(mainWindow),
+    save: () => runtime.saveForQuit(),
+    resume: () => runtime.resumeAfterCancelledQuit(),
+    close: (details) => runtime.closeForQuit(details),
+    ask: async (failure) => {
+      question = showPlainDialog(quitFailureDialog(runtime.translator(), failure));
+      try {
+        return await question.choice;
+      } finally {
+        question = null;
+      }
+    },
+    dismissQuestion: () => question?.close(),
+    warn: (event, message, details) => {
+      console.error(`[mumbler] ${message}`, details);
+      void runtime.currentLogger().warn(event, message, details);
+    },
+    exit: () => app.exit(0),
+  });
+}
+
 async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
   const window = await createMainWindow(runtime);
   mainWindow = window;
+  let editsSentForClose = false;
+  window.on("close", (event) => {
+    // Closing the main window quits on Windows and Linux, through the same
+    // save as every other quit, which a failed save can cancel.
+    if (process.platform !== "darwin") {
+      if (quitController === null) return;
+      event.preventDefault();
+      quitController.request("user");
+      return;
+    }
+    // On macOS it only closes the window, after it sends its unsent edits.
+    if (editsSentForClose) return;
+    event.preventDefault();
+    void within(flushWindowEdits(window), QUIT_BUDGETS.user.flush).then(() => {
+      editsSentForClose = true;
+      if (!window.isDestroyed()) window.close();
+    });
+  });
+  // Windows asks before a logout, restart or shutdown and never sends
+  // before-quit. Holding the answer gives the save its bounded time; the
+  // process then exits and Windows goes on (Electron's documented use).
+  window.on("query-session-end", (event) => {
+    event.preventDefault();
+    quitController?.request("session-end");
+  });
+  // A session end Windows did not ask about first (a forced or critical one)
+  // ends the process soon after this returns; the same save starts, as far as
+  // it gets.
+  window.on("session-end", () => {
+    quitController?.request("session-end");
+  });
   window.once("closed", () => {
     if (mainWindow === window) mainWindow = null;
     if (process.platform !== "darwin") app.quit();
   });
 }
-let shuttingDown = false;
 
 async function bootstrap(): Promise<void> {
   const runtime = await ApplicationRuntime.initialize();
   runtimeForShutdown = runtime;
+  quitController = createQuit(runtime);
+  // A logout, restart or shutdown on macOS (and Linux); the OS then sends the
+  // quit, which before-quit takes as a session end.
+  powerMonitor.on("shutdown", () => {
+    sessionEnding = true;
+  });
 
   protocol.handle("mumbler-asset", async (request) => {
     const url = new URL(request.url);
@@ -215,35 +296,16 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  // Graceful shutdown: hold every quit, flush pending state + abort in-flight
-  // pipelines via the runtime once, then exit with app.exit(0) once it finishes or
-  // QUIT_TIMEOUT_MS passes (PLAYBOOK, Own the work in flight). A quit arriving
-  // while that runs, such as window-all-closed after the main window's own quit,
-  // is held too, so only that app.exit(0) ends the process.
+  // The menu's Quit, Cmd+Q, the Dock's Quit and, on macOS, a logout, restart
+  // or shutdown all arrive here. Every quit is held and goes through the quit
+  // controller, whose app.exit(0) alone ends the process; one arriving while a
+  // quit runs is held too (PLAYBOOK, Own the work in flight).
   app.on("before-quit", (event) => {
     event.preventDefault();
-    if (shuttingDown) {
-      return;
-    }
-    shuttingDown = true;
-    const runtime = runtimeForShutdown;
-    if (runtime === null) {
+    if (quitController === null) {
       app.exit(0);
       return;
     }
-    let timer: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        console.error(`[mumbler] Shutdown did not finish within ${QUIT_TIMEOUT_MS} ms; exiting.`);
-        resolve();
-      }, QUIT_TIMEOUT_MS);
-    });
-    const finished = runtime.shutdown().catch((error: unknown) => {
-      console.error("[mumbler] Shutdown error:", error instanceof Error ? error.stack : String(error));
-    });
-    void Promise.race([finished, timedOut]).finally(() => {
-      clearTimeout(timer);
-      app.exit(0);
-    });
+    quitController.request(sessionEnding ? "session-end" : "user");
   });
 }

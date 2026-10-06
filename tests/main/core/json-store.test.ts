@@ -219,3 +219,44 @@ describe("JsonStore.preserveExistingFiles", () => {
     );
   });
 });
+
+describe("JsonStore failed writes", () => {
+  function storeIn(folder: string): JsonStore<Doc> {
+    return new JsonStore<Doc>({
+      path: join(folder, "doc.json"),
+      formatVersion: 1,
+      validate: (raw) => ({ value: String(raw.value) }),
+      createDefault: () => ({ value: "default" }),
+      record: false,
+    });
+  }
+
+  it("keeps the value a failed write could not write, retries it, and forgets it once a write lands", async () => {
+    // A file where the store's folder should be, so no write can land.
+    const folder = join(dir, "blocked");
+    await writeFile(folder, "not a folder");
+    const store = storeIn(folder);
+
+    await expect(store.save({ value: "kept" })).rejects.toThrow();
+    const failure = store.failedWrite;
+    expect(failure?.value).toEqual({ value: "kept" });
+
+    await expect(store.retryFailedWrite()).rejects.toThrow();
+    expect(store.failedWrite, "each failure is a new one").not.toBe(failure);
+
+    await rm(folder);
+    await store.retryFailedWrite();
+    expect(store.failedWrite).toBeNull();
+    expect(await read(join(folder, "doc.json"))).toEqual({ formatVersion: 1, value: "kept" });
+  });
+
+  it("retries nothing when the latest write landed", async () => {
+    const store = makeStore();
+    await store.save({ value: "landed" });
+    await writeFile(join(dir, "doc.json"), "changed by hand");
+
+    await store.retryFailedWrite();
+
+    expect(await readFile(join(dir, "doc.json"), "utf8")).toBe("changed by hand");
+  });
+});

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   initializeFailure: null as Error | null,
@@ -9,9 +9,35 @@ const state = vi.hoisted(() => ({
   exits: [] as number[],
   relaunches: 0,
   loggerErrors: [] as unknown[][],
-  shutdown: () => Promise.resolve() as Promise<void>,
+  saveForQuit: () => Promise.resolve([]) as Promise<string[]>,
+  quitChoice: "cancel" as "retry" | "quit-anyway" | "cancel",
+  questions: [] as unknown[],
   dependenciesWatched: false,
+  ipcListeners: new Map<string, (event: { sender: unknown }) => void>(),
+  powerListeners: new Map<string, () => void>(),
 }));
+
+// The main window as main sees it: its handlers by event, and the edits request
+// it answers the way the preload does.
+const mainWindow = vi.hoisted(() => {
+  const handlers = new Map<string, (event: { preventDefault: () => void }) => void>();
+  const window = {
+    handlers,
+    flushRequests: 0,
+    closes: 0,
+    on: (event: string, handler: (event: { preventDefault: () => void }) => void) => { handlers.set(event, handler); return window; },
+    once: () => window,
+    isDestroyed: () => false,
+    close: () => { window.closes += 1; },
+    webContents: {
+      send: (channel: string) => {
+        window.flushRequests += 1;
+        queueMicrotask(() => state.ipcListeners.get(`${channel}:reply`)?.({ sender: window.webContents }));
+      },
+    },
+  };
+  return window;
+});
 
 vi.mock("electron", () => ({
   app: {
@@ -26,11 +52,20 @@ vi.mock("electron", () => ({
   },
   BrowserWindow: { getAllWindows: () => [] },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
+  // The window's reply arrives on the reply channel; the test keys it by the
+  // request it answers.
+  ipcMain: {
+    on: (channel: string, listener: (event: { sender: unknown }) => void) => {
+      state.ipcListeners.set(`${channel.replace("pending-edits-flushed", "flush-pending-edits")}:reply`, listener);
+    },
+    removeListener: vi.fn(),
+  },
+  powerMonitor: { on: (event: string, listener: () => void) => { state.powerListeners.set(event, listener); } },
 }));
 
 
 const runtime = vi.hoisted(() => ({
-  currentLogger: () => ({ error: (...args: unknown[]) => { state.loggerErrors.push(args); } }),
+  currentLogger: () => ({ error: (...args: unknown[]) => { state.loggerErrors.push(args); }, warn: async () => undefined }),
   themePreference: () => "system",
   translator: () => ({ t: (key: string) => key, language: "en" }),
   onLanguageChanged: vi.fn(),
@@ -38,7 +73,9 @@ const runtime = vi.hoisted(() => ({
   onPipelineProgress: vi.fn(),
   onDependenciesChanged: () => { state.dependenciesWatched = true; },
   onRecordsChanged: vi.fn(),
-  shutdown: () => state.shutdown(),
+  saveForQuit: vi.fn(() => state.saveForQuit()),
+  resumeAfterCancelledQuit: vi.fn(async () => undefined),
+  closeForQuit: vi.fn(async () => undefined),
 }));
 
 vi.mock("@main/core/app-runtime", () => ({
@@ -52,7 +89,13 @@ const recordsWindow = vi.hoisted(() => ({ openRecordsWindow: vi.fn(), notifyReco
 vi.mock("@main/records-window", () => recordsWindow);
 vi.mock("@main/core/theme", () => ({ applyThemePreference: vi.fn(), followOsThemeChanges: vi.fn() }));
 vi.mock("@main/window", () => ({
-  createMainWindow: () => state.windowLoadFailure ? Promise.reject(state.windowLoadFailure) : Promise.resolve({ once: vi.fn() }),
+  createMainWindow: () => state.windowLoadFailure ? Promise.reject(state.windowLoadFailure) : Promise.resolve(mainWindow),
+}));
+vi.mock("@main/plain-dialog", () => ({
+  showPlainDialog: (dialog: unknown) => {
+    state.questions.push(dialog);
+    return { choice: Promise.resolve(state.quitChoice), close: vi.fn() };
+  },
 }));
 vi.mock("@main/startup-failure-dialog", () => ({
   showStartupFailureDialog: async () => {
@@ -72,8 +115,18 @@ beforeEach(() => {
   state.exits.length = 0;
   state.relaunches = 0;
   state.loggerErrors.length = 0;
-  state.shutdown = () => Promise.resolve();
+  state.saveForQuit = () => Promise.resolve([]);
+  state.quitChoice = "cancel";
+  state.questions.length = 0;
   state.dependenciesWatched = false;
+  state.ipcListeners.clear();
+  state.powerListeners.clear();
+  mainWindow.handlers.clear();
+  mainWindow.flushRequests = 0;
+  mainWindow.closes = 0;
+  runtime.saveForQuit.mockClear();
+  runtime.resumeAfterCancelledQuit.mockClear();
+  runtime.closeForQuit.mockClear();
 });
 
 describe("main startup recovery", () => {
@@ -106,62 +159,130 @@ describe("main startup recovery", () => {
 });
 
 describe("quit", () => {
-  it("exits once the shutdown bound passes even when shutdown never finishes", async () => {
+  type Handler = (event: { preventDefault: () => void }) => void;
+
+  /** Boots main and returns its before-quit handler. */
+  async function boot(): Promise<Handler> {
     vi.spyOn(process, "on").mockImplementation(() => process);
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    state.shutdown = () => new Promise<void>(() => undefined);
     await import("@main/index");
     await vi.waitFor(() => expect(state.dependenciesWatched).toBe(true));
     const { app } = await import("electron");
-    const calls = vi.mocked(app.on).mock.calls as unknown as [string, (event: { preventDefault: () => void }) => void][];
-    const beforeQuit = calls.filter(([event]) => event === "before-quit").at(-1)?.[1];
+    const calls = vi.mocked(app.on).mock.calls as unknown as [string, Handler][];
+    return calls.filter(([event]) => event === "before-quit").at(-1)![1];
+  }
 
-    vi.useFakeTimers();
-    try {
-      beforeQuit!({ preventDefault: vi.fn() });
-      await vi.advanceTimersByTimeAsync(14_999);
-      expect(state.exits).toEqual([]);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(state.exits).toEqual([0]);
-    } finally {
-      vi.useRealTimers();
-      vi.restoreAllMocks();
-    }
+  function onPlatform(platform: NodeJS.Platform): void {
+    vi.spyOn(process, "platform", "get").mockReturnValue(platform);
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it("holds a second quit during shutdown and exits once, after shutdown finishes", async () => {
-    vi.spyOn(process, "on").mockImplementation(() => process);
-    let finishShutdown!: () => void;
-    let shutdownCalls = 0;
-    state.shutdown = () => {
-      shutdownCalls += 1;
-      return new Promise<void>((resolve) => { finishShutdown = resolve; });
-    };
-    try {
-      await import("@main/index");
-      await vi.waitFor(() => expect(state.dependenciesWatched).toBe(true));
-      const { app } = await import("electron");
-      const calls = vi.mocked(app.on).mock.calls as unknown as [string, (event: { preventDefault: () => void }) => void][];
-      const beforeQuit = calls.filter(([event]) => event === "before-quit").at(-1)?.[1];
+  it("sends the window's edits, saves, closes and exits on the menu's or the Dock's Quit", async () => {
+    const beforeQuit = await boot();
+    const event = { preventDefault: vi.fn() };
 
-      const first = { preventDefault: vi.fn() };
-      beforeQuit!(first);
-      const second = { preventDefault: vi.fn() };
-      beforeQuit!(second);
-      await Promise.resolve();
+    beforeQuit(event);
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
 
-      expect(first.preventDefault).toHaveBeenCalledOnce();
-      expect(second.preventDefault).toHaveBeenCalledOnce();
-      expect(shutdownCalls).toBe(1);
-      expect(state.exits).toEqual([]);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(mainWindow.flushRequests).toBe(1);
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+    expect(runtime.closeForQuit).toHaveBeenCalledOnce();
+    expect(state.questions).toEqual([]);
+  });
 
-      finishShutdown();
-      await vi.waitFor(() => expect(state.exits).toEqual([0]));
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(state.exits).toEqual([0]);
-    } finally {
-      vi.restoreAllMocks();
-    }
+  it("holds a second quit during the save and exits once, after it finishes", async () => {
+    let finishSave!: (failures: string[]) => void;
+    state.saveForQuit = () => new Promise((resolve) => { finishSave = resolve; });
+    const beforeQuit = await boot();
+
+    const first = { preventDefault: vi.fn() };
+    beforeQuit(first);
+    const second = { preventDefault: vi.fn() };
+    beforeQuit(second);
+    await vi.waitFor(() => expect(runtime.saveForQuit).toHaveBeenCalledOnce());
+
+    expect(second.preventDefault).toHaveBeenCalledOnce();
+    expect(state.exits).toEqual([]);
+    finishSave([]);
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(state.exits).toEqual([0]);
+  });
+
+  it("asks when the save fails, and keeps running on Cancel", async () => {
+    state.saveForQuit = () => Promise.resolve(["queue"]);
+    const beforeQuit = await boot();
+
+    beforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(runtime.resumeAfterCancelledQuit).toHaveBeenCalledOnce());
+
+    expect(state.questions).toHaveLength(1);
+    expect(state.exits).toEqual([]);
+  });
+
+  it("takes a macOS logout as a session end: saves, never asks, and exits", async () => {
+    state.saveForQuit = () => Promise.resolve(["queue"]);
+    const beforeQuit = await boot();
+
+    state.powerListeners.get("shutdown")!();
+    beforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+    expect(state.questions).toEqual([]);
+  });
+
+  it("holds a Windows logout, which never reaches before-quit, saves without asking, and exits", async () => {
+    state.saveForQuit = () => Promise.resolve(["settings"]);
+    await boot();
+    const query = { preventDefault: vi.fn() };
+
+    mainWindow.handlers.get("query-session-end")!(query);
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+
+    expect(query.preventDefault, "Windows waits for the save").toHaveBeenCalledOnce();
+    expect(mainWindow.flushRequests).toBe(1);
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+    expect(state.questions).toEqual([]);
+  });
+
+  it("starts the same save when Windows ends the session without asking first", async () => {
+    await boot();
+
+    mainWindow.handlers.get("session-end")!({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+  });
+
+  it("quits through the save when the main window is closed on Windows", async () => {
+    onPlatform("win32");
+    await boot();
+    const close = { preventDefault: vi.fn() };
+
+    mainWindow.handlers.get("close")!(close);
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+
+    expect(close.preventDefault).toHaveBeenCalledOnce();
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+  });
+
+  it("only closes the main window on macOS, after it sends its unsent edits", async () => {
+    onPlatform("darwin");
+    await boot();
+    const close = { preventDefault: vi.fn() };
+
+    mainWindow.handlers.get("close")!(close);
+    await vi.waitFor(() => expect(mainWindow.closes).toBe(1));
+    mainWindow.handlers.get("close")!({ preventDefault: close.preventDefault });
+
+    expect(mainWindow.flushRequests).toBe(1);
+    expect(close.preventDefault, "the second close goes through").toHaveBeenCalledOnce();
+    expect(runtime.saveForQuit).not.toHaveBeenCalled();
+    expect(state.exits).toEqual([]);
   });
 });
 

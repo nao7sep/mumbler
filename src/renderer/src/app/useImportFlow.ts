@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -64,6 +65,8 @@ export function useImportFlow({
   const [pendingReviewDrafts, setPendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const [importResult, setImportResult] = useState<ImportResultNotice | null>(null);
+  // The review edits still waiting out the debounce, and what sends them.
+  const unsentDrafts = useRef<{ timer: number; send: () => Promise<void> } | null>(null);
 
   function resetDragState(): void {
     setIsDragActive(false);
@@ -89,21 +92,35 @@ export function useImportFlow({
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      void window.mumbler
-        .updatePendingImportDrafts(pendingReviewDrafts)
-        .catch((error: unknown) => {
-          onError(
-            "import-review-save",
-            presentFailure(error, message("error.reviewSave"), "pending import review save failed"),
-          );
-        });
+    const send = (): Promise<void> => window.mumbler
+      .updatePendingImportDrafts(pendingReviewDrafts)
+      .then(() => undefined, (error: unknown) => {
+        onError(
+          "import-review-save",
+          presentFailure(error, message("error.reviewSave"), "pending import review save failed"),
+        );
+      });
+    const timer = window.setTimeout(() => {
+      unsentDrafts.current = null;
+      void send();
     }, 250);
+    unsentDrafts.current = { timer, send };
 
     return () => {
-      window.clearTimeout(timeoutId);
+      window.clearTimeout(timer);
+      if (unsentDrafts.current?.timer === timer) unsentDrafts.current = null;
     };
   }, [pendingReviewDrafts]);
+
+  // A quit sends the edits the debounce still holds, instead of dropping them
+  // (unsaved-edits conventions, Quitting).
+  useEffect(() => window.mumbler.onFlushPendingEdits(async () => {
+    const unsent = unsentDrafts.current;
+    if (unsent === null) return;
+    unsentDrafts.current = null;
+    window.clearTimeout(unsent.timer);
+    await unsent.send();
+  }), []);
 
   function resultKey(sourcePath: string): string {
     return `source:${sourcePath}`;
