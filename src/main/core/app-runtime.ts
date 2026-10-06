@@ -727,6 +727,7 @@ export class ApplicationRuntime {
 
     try {
       await loadInterfaceCatalogue(settings.language);
+      await ensureDirectories(paths, this.runtime.logger);
       // Preserve each store before the user-commanded reset returns to built-ins.
       const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
       const preservedStateFiles = await queueStore.preserveExistingFiles();
@@ -734,9 +735,8 @@ export class ApplicationRuntime {
       // a reset deletes no user audio.
       const preservedTranscripts = await preserveAside(paths.transcriptsDir);
       const preservedRecordings = await preserveAside(paths.workingDir);
+      await mkdir(paths.workingDir, { recursive: true });
       const preservedLayoutFiles = await layoutStore.preserveExistingFiles();
-      // Recreates the working folder the recordings were moved out of.
-      await ensureDirectories(paths, this.runtime.logger);
       // Reuse the per-launch session logger rather than building a new one, so a
       // reset keeps writing to the same file as the rest of the launch.
       const logger = this.runtime.logger;
@@ -1664,6 +1664,8 @@ export class ApplicationRuntime {
       state.cards = [...state.cards, card].sort((left, right) =>
         left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
       );
+      // A save made while the deletion ran left the card out of queue.json.
+      await this.persistState();
       throw new Error(`Failed to delete the working audio of card ${cardId}: ${formatError(error)}`, { cause: error });
     }
     await this.runtime.logger.info("card.remove", "Deleted card working audio and removed card.", {

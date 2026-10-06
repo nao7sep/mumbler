@@ -23,12 +23,17 @@ vi.mock("electron", () => ({
 // The filesystem is real; only a removal the OS refuses is simulated, for paths
 // registered in `undeletable`, so the case runs the same on every platform.
 const undeletable = vi.hoisted(() => new Set<string>());
+// Runs while a refused removal is in flight, the way another card's save can.
+const duringRefusedRm = vi.hoisted(() => ({ run: null as (() => Promise<unknown>) | null }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
     rm: async (path: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
-      if (undeletable.has(String(path))) throw new Error("EACCES: permission denied");
+      if (undeletable.has(String(path))) {
+        await duringRefusedRm.run?.();
+        throw new Error("EACCES: permission denied");
+      }
       return actual.rm(path, options);
     },
   };
@@ -178,6 +183,7 @@ beforeEach(async () => {
   previousGeminiKey = process.env.GEMINI_API_KEY;
   delete process.env.GEMINI_API_KEY;
   undeletable.clear();
+  duringRefusedRm.run = null;
   audioGate.held = null;
   audioGate.entered = 0;
   probeGate.held = null;
@@ -843,6 +849,22 @@ describe("working with a card", () => {
     undeletable.clear();
     expect(cards(await runtime.removeCard(card.id)), "removing it again deletes it").toEqual([]);
     expect(await exists(card.sourceFilePath)).toBe(false);
+  });
+
+  it("keeps the refused card in queue.json even when another save ran during the deletion", async () => {
+    const card = await confirmed();
+    const [otherPending] = await dropIn("other.wav");
+    const [other] = cards((await runtime.confirmPendingImports([review(otherPending)])).snapshot).filter(
+      (entry) => entry.id !== card.id,
+    );
+    undeletable.add(card.sourceFilePath);
+    duringRefusedRm.run = () => runtime.duplicateCard(other.id);
+
+    await expect(runtime.removeCard(card.id)).rejects.toThrow(/working audio/);
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(cards(runtime.getSnapshot()).map((entry) => entry.id)).toContain(card.id);
   });
 
   it("deletes only the removed card's own audio, leaving its duplicate's", async () => {
