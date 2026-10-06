@@ -82,15 +82,27 @@ describe("TranscriptStore", () => {
     expect(reopened.get("abc")?.transcription).toBe("lower");
   });
 
-  it("reads what it wrote, and sweeps files no card refers to", async () => {
-    await new TranscriptStore(dir).writeChanged([card("live", "live words", "live outline"), card("orphan", "stale")]);
+  it("reads what it wrote, and keeps files no card refers to", async () => {
+    await new TranscriptStore(dir).writeChanged([card("live", "live words", "live outline"), card("lost", "kept words")]);
+    const before = await files();
 
     const store = new TranscriptStore(dir);
     const transcripts = await store.open(["live"]);
 
     expect(transcripts.get("live")).toEqual({ transcription: "live words", structured: "live outline" });
-    expect(await files()).toHaveLength(1);
+    expect([...transcripts.keys()]).toEqual(["live"]);
     expect(await store.writeChanged([card("live", "live words", "live outline")]), "what it read counts as written").toBe(0);
+    await store.removeAbsent([card("live", "live words", "live outline")]);
+    expect(await files(), "a file it did not open is not its to delete").toEqual(before);
+  });
+
+  it("does not halt on an unreadable file no card refers to", async () => {
+    await mkdir(dir, { recursive: true });
+    const name = `${Buffer.from("lost").toString("hex")}.json`;
+    await writeFile(join(dir, name), "{ not json");
+
+    expect((await new TranscriptStore(dir).open([])).size).toBe(0);
+    expect(await readFile(join(dir, name), "utf8")).toBe("{ not json");
   });
 
   it("opens an empty store when the folder does not exist yet", async () => {

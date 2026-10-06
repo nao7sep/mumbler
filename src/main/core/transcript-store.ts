@@ -70,10 +70,11 @@ export class TranscriptStore {
   constructor(private readonly directory: string) {}
 
   /**
-   * Reads the transcript of every card in `cardIds`, and deletes files that no
-   * card refers to any more (the card was removed or saved before its file could
-   * be). A file that cannot be read halts like a corrupt queue.json, and one in
-   * a newer format halts like a newer queue.json: either is left in place.
+   * Reads the transcript of every card in `cardIds`. A file no card refers to is
+   * left in place: it may hold the text of a queue that was lost, which is never
+   * deleted for that (a removed card's file is deleted when it is removed). A
+   * file that cannot be read halts like a corrupt queue.json, and one in a newer
+   * format halts like a newer queue.json: either is left in place.
    */
   async open(cardIds: readonly string[]): Promise<Map<string, CardTranscript>> {
     const wanted = new Set(cardIds);
@@ -88,12 +89,8 @@ export class TranscriptStore {
 
     for (const name of names) {
       const cardId = cardIdFrom(name);
-      if (cardId === null) continue;
+      if (cardId === null || !wanted.has(cardId)) continue;
       const path = join(this.directory, name);
-      if (!wanted.has(cardId)) {
-        await rm(path, { force: true });
-        continue;
-      }
       let raw: unknown;
       try {
         raw = await readJsonFile<unknown>(path);

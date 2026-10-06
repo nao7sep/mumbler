@@ -927,6 +927,25 @@ describe("each card's text in its own file", () => {
 
     expect(await readdir(join(home, "transcripts"))).toEqual([]);
   });
+
+  it("keeps a lost queue's text files, at the launch that finds no queue and at every launch after it", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+    await withTextOnDisk(card);
+    const files = await readdir(join(home, "transcripts"));
+    await runtime.shutdown();
+    await rm(join(home, "queue.json"));
+
+    runtime = await ApplicationRuntime.initialize();
+    expect(cards(runtime.getSnapshot())).toEqual([]);
+    expect(await readdir(join(home, "transcripts")), "no queue was read").toEqual(files);
+
+    const [next] = await dropIn("next.wav");
+    await runtime.confirmPendingImports([review(next)]);
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+    expect(await readdir(join(home, "transcripts")), "the new queue never referred to them").toEqual(files);
+  });
 });
 
 describe("a store in a newer format", () => {
