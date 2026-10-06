@@ -212,6 +212,5 @@ function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
       occurredAtUtc: Date.now(),
       failedStep: "startup-recovery",
     },
-    updatedAtUtc: Date.now(),
   };
 }

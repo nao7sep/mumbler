@@ -1175,13 +1175,14 @@ export class ApplicationRuntime {
     this.pipeline.assertCardCanStart(card);
 
     const startStep = resolveGenerateStartStep(card, target);
-    clearCardResultsFromStep(card, startStep);
+    if (clearCardResultsFromStep(card, startStep)) {
+      card.updatedAtUtc = Date.now();
+    }
     card.status = "Imported";
     card.activeStep = null;
     card.queuedMode = null;
     card.queuedAtUtc = null;
     card.lastError = null;
-    card.updatedAtUtc = Date.now();
     await this.pipeline.startOrEnqueue(cardId, "generate", startStep);
     await this.runtime.logger.info("pipeline.generate", "Started dependency-aware generation.", {
       cardId,
@@ -1224,7 +1225,6 @@ export class ApplicationRuntime {
         occurredAtUtc: Date.now(),
         failedStep,
       },
-      updatedAtUtc: Date.now(),
     };
 
     // Detach the run so its later unwind can't touch a replacement's bookkeeping,
@@ -2037,24 +2037,29 @@ export function buildConfirmedTimestamps(
 // process's unlink / copy / ffprobe at an arbitrary path. So we keep the
 // authoritative item and overlay only the review-editable fields from the draft.
 //
-// updatedAtUtc moves only when one of those fields differs from the stored item
-// (content-lifecycle-conventions, "Modified"); a draft that matches it returns
-// the stored item itself.
+// updatedAtUtc moves only when the recording's time differs from the stored item
+// (content-lifecycle-conventions, "Modified"); the backup and delete choices are
+// flags, not content, and leave it. A draft that matches the stored item returns
+// the item itself.
 export function applyPendingImportDraft(
   authoritative: PendingImportReviewItem,
   draft: PendingImportReviewItem,
 ): PendingImportReviewItem {
-  const edits = {
+  const content = {
     localTimestampText: draft.localTimestampText,
     timezone: draft.timezone,
     utcTimestampText: draft.utcTimestampText,
+  };
+  const flags = {
     deleteOriginalOnConfirm: draft.deleteOriginalOnConfirm,
     copyToBackupOnConfirm: draft.copyToBackupOnConfirm,
   };
-  const changed = (Object.keys(edits) as (keyof typeof edits)[]).some(
-    (field) => edits[field] !== authoritative[field],
-  );
-  return changed ? { ...authoritative, ...edits, updatedAtUtc: Date.now() } : authoritative;
+  const differs = (fields: Partial<PendingImportReviewItem>): boolean =>
+    (Object.keys(fields) as (keyof PendingImportReviewItem)[]).some((field) => fields[field] !== authoritative[field]);
+  if (differs(content)) {
+    return { ...authoritative, ...content, ...flags, updatedAtUtc: Date.now() };
+  }
+  return differs(flags) ? { ...authoritative, ...flags } : authoritative;
 }
 
 function createDuplicatedCard(source: MumblerCard, sourceFilePath: string): MumblerCard {

@@ -490,7 +490,6 @@ export function recoverInterruptedCards(
         occurredAtUtc: Date.now(),
         failedStep: "startup-recovery" as const,
       },
-      updatedAtUtc: Date.now(),
     };
   });
 

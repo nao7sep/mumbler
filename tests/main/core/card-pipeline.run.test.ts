@@ -319,6 +319,7 @@ describe("executeCardPipeline", () => {
 
     expect(mockGenerateText).not.toHaveBeenCalled();
     expect(card.status).toBe("Cancelled");
+    expect(card.updatedAtUtc, "a status change is not a content edit").toBe(1);
     expect(ctx.releaseTranscriptionSlot).toHaveBeenCalledTimes(1);
   });
 

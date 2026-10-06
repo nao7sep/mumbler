@@ -138,15 +138,33 @@ describe("applyPendingImportDraft", () => {
     expect(result.updatedAtUtc).toBe(1_700_000_000_000);
   });
 
-  it("moves the updated time when one review field changes", () => {
+  it("moves the updated time to the moment of the edit when the recording's time changes", () => {
     const authoritative = authoritativeItem();
-    const before = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    try {
+      const result = applyPendingImportDraft(authoritative, { ...authoritative, timezone: "Europe/Berlin" });
 
-    const result = applyPendingImportDraft(authoritative, { ...authoritative, copyToBackupOnConfirm: false });
+      expect(result.timezone).toBe("Europe/Berlin");
+      expect(result.updatedAtUtc).toBe(1_800_000_000_000);
+      expect(result.createdAtUtc).toBe(1_700_000_000_000);
+    } finally {
+      now.mockRestore();
+    }
+  });
 
-    expect(result.copyToBackupOnConfirm).toBe(false);
-    expect(result.updatedAtUtc).toBeGreaterThanOrEqual(before);
-    expect(result.createdAtUtc).toBe(1_700_000_000_000);
+  it("keeps the updated time when only the backup or delete choice changes, which are not content", () => {
+    const authoritative = authoritativeItem();
+
+    const result = applyPendingImportDraft(authoritative, {
+      ...authoritative,
+      copyToBackupOnConfirm: !authoritative.copyToBackupOnConfirm,
+      deleteOriginalOnConfirm: !authoritative.deleteOriginalOnConfirm,
+    });
+
+    expect(result).not.toBe(authoritative);
+    expect(result.copyToBackupOnConfirm).toBe(!authoritative.copyToBackupOnConfirm);
+    expect(result.deleteOriginalOnConfirm).toBe(!authoritative.deleteOriginalOnConfirm);
+    expect(result.updatedAtUtc).toBe(1_700_000_000_000);
   });
 });
 

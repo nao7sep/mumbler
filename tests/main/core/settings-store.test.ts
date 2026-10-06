@@ -631,6 +631,7 @@ describe("recoverInterruptedCards", () => {
     expect(busy.activeStep).toBeNull();
     expect(busy.lastError?.failedStep).toBe("startup-recovery");
     expect(busy.lastError?.message).toMatch(/interrupted/i);
+    expect(busy.updatedAtUtc, "recovery is not a content edit").toBe(card().updatedAtUtc);
     expect(state.cards.find((c) => c.id === "meta")!.status).toBe("Error");
     expect(state.cards.find((c) => c.id === "done")!.status).toBe("Ready to Save");
   });

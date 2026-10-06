@@ -324,6 +324,7 @@ describe("reconciling saved state with the working directory", () => {
       queuedMode: null,
       queuedAtUtc: null,
       lastError: { failedStep: "startup-recovery", message: expect.stringContaining("missing") },
+      updatedAtUtc: 1,
     });
     expect(await listWorkingFiles(working), "the unreferenced file is swept").toEqual([survivingCardFile]);
     expect(logger.warn).toHaveBeenCalledWith("startup.pending-missing", expect.any(String), expect.objectContaining({ pendingImportId: "pending-gone" }));

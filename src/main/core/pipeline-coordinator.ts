@@ -130,7 +130,6 @@ export class PipelineCoordinator {
       card.activeStep = startStep;
       card.queuedMode = null;
       card.queuedAtUtc = null;
-      card.updatedAtUtc = Date.now();
       await this.hooks.persistState();
       this.spawnCardPipeline(cardId, startStep, mode, slot);
       return;
@@ -140,7 +139,6 @@ export class PipelineCoordinator {
     card.queuedMode = mode;
     card.queuedAtUtc = Date.now();
     card.activeStep = null;
-    card.updatedAtUtc = Date.now();
     await this.hooks.persistState();
     await this.runtime.logger.info(
       "pipeline.queued",

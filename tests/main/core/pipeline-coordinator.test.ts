@@ -116,6 +116,7 @@ describe("PipelineCoordinator.startOrEnqueue", () => {
 
     expect(second.status).toBe("Queued");
     expect(second.queuedMode).toBe("generate");
+    expect(second.updatedAtUtc, "queueing is not a content edit").toBe(1);
     expect(coordinator.hasRun("b")).toBe(false);
   });
 

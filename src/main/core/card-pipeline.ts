@@ -81,7 +81,9 @@ export async function executeCardPipeline(
     }
 
     if (startStep === "transcription") {
-      clearCardResultsFromStep(card, "transcription");
+      if (clearCardResultsFromStep(card, "transcription")) {
+        card.updatedAtUtc = Date.now();
+      }
       await setCardStepState(card, "Transcribing", "transcription", ctx);
 
       let trimDecision = card.trimDecision;
@@ -89,7 +91,6 @@ export async function executeCardPipeline(
         trimDecision = await analyzeTrimDecision(card.sourceFilePath, card.trim, card.durationSec, ctx.signal);
         throwIfCancelled(ctx.signal);
         card.trimDecision = trimDecision;
-        card.updatedAtUtc = Date.now();
         await ctx.persistState();
       }
 
@@ -175,7 +176,9 @@ export async function executeCardPipeline(
     }
 
     if (activeStep === "structured") {
-      clearCardResultsFromStep(card, "structured");
+      if (clearCardResultsFromStep(card, "structured")) {
+        card.updatedAtUtc = Date.now();
+      }
       await setCardStepState(card, "Generating Metadata", "structured", ctx);
       const structuredPrompt = renderPromptTemplate(settings.prompts.structured, {
         transcript: card.transcription.text ?? "",
@@ -224,7 +227,9 @@ export async function executeCardPipeline(
     }
 
     if (activeStep === "title") {
-      clearCardResultsFromStep(card, "title");
+      if (clearCardResultsFromStep(card, "title")) {
+        card.updatedAtUtc = Date.now();
+      }
       await setCardStepState(card, "Generating Metadata", "title", ctx);
       const titlePrompt = renderPromptTemplate(settings.prompts.title, {
         transcript: card.transcription.text ?? "",
@@ -267,7 +272,9 @@ export async function executeCardPipeline(
     }
 
     if (activeStep === "slug") {
-      clearCardResultsFromStep(card, "slug");
+      if (clearCardResultsFromStep(card, "slug")) {
+        card.updatedAtUtc = Date.now();
+      }
       await setCardStepState(card, "Generating Metadata", "slug", ctx);
       const slugPrompt = renderPromptTemplate(settings.prompts.slug, {
         transcript: card.transcription.text ?? "",
@@ -327,7 +334,6 @@ export async function executeCardPipeline(
       occurredAtUtc: Date.now(),
       failedStep: activeStep,
     };
-    card.updatedAtUtc = Date.now();
 
     await ctx.persistState();
     await logPipelineFailure(logger, error, cardId, activeStep, card.status);
@@ -379,7 +385,6 @@ async function setCardStepState(
   card.status = status;
   card.activeStep = step;
   card.lastError = null;
-  card.updatedAtUtc = Date.now();
   await ctx.persistState();
 }
 
@@ -430,19 +435,23 @@ async function executeWithRetry<T>(params: {
 }
 
 export function clearCardResults(card: MumblerCard): void {
-  clearCardResultsFromStep(card, "transcription");
+  if (clearCardResultsFromStep(card, "transcription")) {
+    card.updatedAtUtc = Date.now();
+  }
   card.status = "Imported";
   card.activeStep = null;
   card.queuedMode = null;
   card.queuedAtUtc = null;
   card.lastError = null;
-  card.updatedAtUtc = Date.now();
 }
 
+// Returns whether it cleared any content, which moves the card's modified time
+// (content-lifecycle-conventions, "Modified").
 export function clearCardResultsFromStep(
   card: MumblerCard,
   step: PipelineStartStep,
-): void {
+): boolean {
+  const before = JSON.stringify([card.transcription, card.metadata]);
   if (step === "transcription") {
     card.transcription = { text: null };
     card.ai.transcription = null;
@@ -461,6 +470,7 @@ export function clearCardResultsFromStep(
 
   card.metadata.slug = null;
   card.ai.slug = null;
+  return JSON.stringify([card.transcription, card.metadata]) !== before;
 }
 
 export function resolveGenerateStartStep(

@@ -113,6 +113,14 @@ describe("clearCardResultsFromStep", () => {
   });
 });
 
+describe("clearCardResultsFromStep — whether content changed", () => {
+  it("reports clearing content, and not clearing what was already empty", () => {
+    const card = makeCard();
+    expect(clearCardResultsFromStep(card, "title")).toBe(true);
+    expect(clearCardResultsFromStep(card, "title")).toBe(false);
+  });
+});
+
 describe("clearCardResults", () => {
   it("resets a finished card back to Imported with cleared outputs", () => {
     const card = makeCard({ queuedMode: "generate", queuedAtUtc: 5, lastError: null });
