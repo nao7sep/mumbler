@@ -54,7 +54,7 @@ import { NewerFormatError } from "./format-versions";
 import { CorruptStateError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
-import { preserveAside } from "./file-io";
+import { formatError, preserveAside } from "./file-io";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState } from "./working-files";
 import {
   buildMarkdownContent,
@@ -1656,24 +1656,22 @@ export class ApplicationRuntime {
     // card while its audio is being deleted.
     state.cards = state.cards.filter((entry) => entry.id !== cardId);
 
+    // The card's audio is deleted here and nowhere later: startup never sweeps
+    // a recording, so audio that cannot be deleted keeps its card in the queue.
     try {
       await rm(card.sourceFilePath, { force: true });
-      await this.runtime.logger.info("card.remove", "Deleted card working audio and removed card.", {
-        cardId,
-        sourceFilePath: card.sourceFilePath,
-      });
     } catch (error: unknown) {
-      await this.runtime.logger.warn(
-        "card.remove",
-        "Working audio could not be deleted; removing card anyway.",
-        {
-          cardId,
-          sourceFilePath: card.sourceFilePath,
-          error: error instanceof Error ? error.message : String(error),
-        },
+      state.cards = [...state.cards, card].sort((left, right) =>
+        left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
       );
+      throw new Error(`Failed to delete the working audio of card ${cardId}: ${formatError(error)}`, { cause: error });
     }
+    await this.runtime.logger.info("card.remove", "Deleted card working audio and removed card.", {
+      cardId,
+      sourceFilePath: card.sourceFilePath,
+    });
 
+    // The card's text file goes with it, once queue.json no longer refers to it.
     await this.persistState();
     return this.getSnapshot();
   }

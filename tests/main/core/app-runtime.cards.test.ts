@@ -20,6 +20,20 @@ vi.mock("electron", () => ({
   nativeTheme: { themeSource: "system" },
 }));
 
+// The filesystem is real; only a removal the OS refuses is simulated, for paths
+// registered in `undeletable`, so the case runs the same on every platform.
+const undeletable = vi.hoisted(() => new Set<string>());
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rm: async (path: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
+      if (undeletable.has(String(path))) throw new Error("EACCES: permission denied");
+      return actual.rm(path, options);
+    },
+  };
+});
+
 // Managed ffmpeg/ffprobe are a separate boundary with their own tests; keeping
 // them inert makes this a local, deterministic test of the card rules.
 vi.mock("@main/core/binaries/manager", () => ({
@@ -163,6 +177,7 @@ beforeEach(async () => {
   // so these cases start from none; the rule itself is asserted below.
   previousGeminiKey = process.env.GEMINI_API_KEY;
   delete process.env.GEMINI_API_KEY;
+  undeletable.clear();
   audioGate.held = null;
   audioGate.entered = 0;
   probeGate.held = null;
@@ -810,11 +825,34 @@ describe("working with a card", () => {
     await expect(runtime.removeCard(card.id)).rejects.toThrow(/does not exist/);
   });
 
-  it("removes the card even when its audio could not be deleted", async () => {
+  it("removes the card when its audio is already gone", async () => {
     const card = await confirmed();
     await rm(card.sourceFilePath, { force: true });
 
     expect(cards(await runtime.removeCard(card.id))).toEqual([]);
+  });
+
+  it("keeps the card in the queue when its audio cannot be deleted, so no recording is left behind", async () => {
+    const card = await confirmed();
+    undeletable.add(card.sourceFilePath);
+
+    await expect(runtime.removeCard(card.id)).rejects.toThrow(/working audio/);
+
+    expect(cards(runtime.getSnapshot()).map((entry) => entry.id)).toEqual([card.id]);
+    expect(await exists(card.sourceFilePath)).toBe(true);
+    undeletable.clear();
+    expect(cards(await runtime.removeCard(card.id)), "removing it again deletes it").toEqual([]);
+    expect(await exists(card.sourceFilePath)).toBe(false);
+  });
+
+  it("deletes only the removed card's own audio, leaving its duplicate's", async () => {
+    const card = await confirmed();
+    const duplicate = cards(await runtime.duplicateCard(card.id)).find((entry) => entry.id !== card.id)!;
+
+    await runtime.removeCard(duplicate.id);
+
+    expect(await exists(duplicate.sourceFilePath)).toBe(false);
+    expect(await exists(card.sourceFilePath), "the card it was duplicated from keeps its audio").toBe(true);
   });
 
   it("names the file the window should play", async () => {
