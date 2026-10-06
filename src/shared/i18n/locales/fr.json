@@ -52,7 +52,7 @@
   "diagnostic.storageTitle": "Impossible de déterminer l’emplacement de stockage",
   "diagnostic.storageBody": "Mumbler n’a pas pu utiliser le dossier de stockage configuré. Rétablissez l’accès à ce dossier ou supprimez la variable MUMBLER_DATA_DIR, puis rouvrez l’app.",
   "diagnostic.corruptTitle": "Impossible de charger les données enregistrées",
-  "diagnostic.corruptBody": "Mumbler n’a pas pu charger le fichier {path} en toute sécurité. Le fichier n’a pas été modifié\u00a0; ouvrez le Journal depuis le menu pour voir ce qui s’est passé avant de rouvrir l’app.",
+  "diagnostic.corruptBody": "Mumbler n’a pas pu charger le fichier {path} en toute sécurité. Le fichier n’a pas été modifié\u00a0; réparez-le ou restaurez-le à partir d’une sauvegarde, puis rouvrez l’app.",
   "diagnostic.newerTitle": "Les données enregistrées proviennent d’une version plus récente",
   "diagnostic.newerBody": "Le fichier {path} a été enregistré par une version plus récente de Mumbler\u00a0; cette version ne peut pas le lire. Le fichier n’a pas été modifié\u00a0; mettez à jour Mumbler pour continuer à l’utiliser.",
   "diagnostic.settingsResetTitle": "Impossible de lire les réglages",

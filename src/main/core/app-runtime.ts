@@ -129,12 +129,13 @@ export function startupFailureDiagnostic(error: unknown): StartupFailure {
       canReset: false,
     };
   }
-  // A halted work store is named, and left in place (store-recovery-conventions).
+  // A halted work store is named and left in place, with no Reset, which would
+  // set it aside for a fresh queue (store-recovery-conventions).
   return error instanceof CorruptStateError
     ? {
         title: message("diagnostic.corruptTitle"),
         message: message("diagnostic.corruptBody", { path: error.filePath }),
-        canReset: true,
+        canReset: false,
       }
     : { title: message("diagnostic.startupTitle"), message: message("diagnostic.startupBody"), canReset: true };
 }
@@ -317,7 +318,9 @@ export class ApplicationRuntime {
 
       const stateLoad = await queueStore.load();
       const recovered = recoverInterruptedCards(stateLoad.value);
-      const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
+      // A fresh queue refers to no recording, so the working files are swept
+      // only against a queue.json that was read.
+      const reconciliation = await reconcileWorkingState(paths, recovered.state, logger, stateLoad.origin === "loaded");
 
       // Each card's text lives in its own file.
       const transcriptStore = new TranscriptStore(paths.transcriptsDir);
@@ -736,7 +739,7 @@ export class ApplicationRuntime {
       // Reuse the per-launch session logger rather than building a new one, so a
       // reset keeps writing to the same file as the rest of the launch.
       const logger = this.runtime.logger;
-      const reconciliation = await reconcileWorkingState(paths, state, logger);
+      const reconciliation = await reconcileWorkingState(paths, state, logger, true);
       await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
         workingDir: paths.workingDir,
         preservedSettingsFiles,

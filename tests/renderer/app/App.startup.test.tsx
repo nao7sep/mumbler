@@ -100,13 +100,13 @@ describe("a startup diagnostic", () => {
     expect(button("Reset State")).toBeUndefined();
   });
 
-  it("offers a reset for data that could not be loaded", async () => {
+  it("names an unreadable work file and offers no reset", async () => {
     getSnapshot.mockResolvedValue({
       ...readySnapshot(),
       startupDiagnostic: {
         title: { key: "diagnostic.corruptTitle" },
         message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/queue.json" } },
-        canReset: true,
+        canReset: false,
       },
     });
 
@@ -114,6 +114,22 @@ describe("a startup diagnostic", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Loaded"));
 
     expect(document.body.textContent).toContain("Mumbler could not safely load /home/me/.mumbler/queue.json.");
+    expect(button("Reset State")).toBeUndefined();
+  });
+
+  it("offers a reset when startup could not finish", async () => {
+    getSnapshot.mockResolvedValue({
+      ...readySnapshot(),
+      startupDiagnostic: {
+        title: { key: "diagnostic.startupTitle" },
+        message: { key: "diagnostic.startupBody" },
+        canReset: true,
+      },
+    });
+
+    await act(async () => root?.render(createElement(App)));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Startup Failed"));
+
     expect(button("Reset State")).toBeDefined();
   });
 });

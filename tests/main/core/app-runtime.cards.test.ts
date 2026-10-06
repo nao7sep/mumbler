@@ -205,9 +205,33 @@ describe("the durable queue store", () => {
     expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({
       title: { key: "diagnostic.corruptTitle" },
       message: { key: "diagnostic.corruptBody", values: { path: join(home, "queue.json") } },
-      canReset: true,
+      canReset: false,
     });
     expect(await readFile(join(home, "queue.json"), "utf8")).toBe(bytes);
+  });
+
+  it("keeps the working recordings at a launch that finds no queue.json", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+    await runtime.shutdown();
+    await rm(join(home, "queue.json"));
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(cards(runtime.getSnapshot())).toEqual([]);
+    expect(await exists(card.sourceFilePath), "a fresh queue deletes no recording").toBe(true);
+  });
+
+  it("sweeps a working recording that the queue.json it read does not refer to", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+    await runtime.shutdown();
+    const store = createQueueStore(join(home, "queue.json"));
+    await store.save({ ...(await store.load()).value, cards: [] });
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(await exists(card.sourceFilePath)).toBe(false);
   });
 });
 

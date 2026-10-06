@@ -52,7 +52,7 @@
   "diagnostic.storageTitle": "保存場所を特定できませんでした",
   "diagnostic.storageBody": "Mumblerは設定された保存フォルダを使用できませんでした。そのフォルダへのアクセスを回復するか、MUMBLER_DATA_DIRの指定を削除してから、アプリを開き直してください。",
   "diagnostic.corruptTitle": "保存されたデータを読み込めませんでした",
-  "diagnostic.corruptBody": "Mumblerは{path}を安全に読み込めませんでした。ファイルは変更されていません。アプリを開き直す前に、メニューの「ログ」で原因を確認してください。",
+  "diagnostic.corruptBody": "Mumblerは{path}を安全に読み込めませんでした。ファイルは変更されていません。ファイルを修復するかバックアップから復元してから、アプリを開き直してください。",
   "diagnostic.newerTitle": "保存されたデータは新しいバージョンのものです",
   "diagnostic.newerBody": "{path}は新しいバージョンのMumblerで保存されたため、このバージョンでは読み込めません。ファイルは変更されていません。引き続き使うには、Mumblerを更新してください。",
   "diagnostic.settingsResetTitle": "設定を読み込めませんでした",

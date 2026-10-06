@@ -52,7 +52,7 @@
   "diagnostic.storageTitle": "Storage Location Could Not Be Resolved",
   "diagnostic.storageBody": "Mumbler could not use its configured storage folder. Restore access to that folder or remove the MUMBLER_DATA_DIR override, then reopen the app.",
   "diagnostic.corruptTitle": "Saved Data Could Not Be Loaded",
-  "diagnostic.corruptBody": "Mumbler could not safely load {path}. The file was left unchanged; open Records from the menu to see what went wrong before reopening the app.",
+  "diagnostic.corruptBody": "Mumbler could not safely load {path}. The file was left unchanged; repair it or restore it from a backup, then reopen the app.",
   "diagnostic.newerTitle": "Saved Data Is From a Newer Version",
   "diagnostic.newerBody": "{path} was saved by a newer version of Mumbler, so this version cannot read it. The file was left unchanged; update Mumbler to keep using it.",
   "diagnostic.settingsResetTitle": "Settings Could Not Be Read",

@@ -284,7 +284,7 @@ describe("reconciling saved state with the working directory", () => {
     });
     const logger = makeLogger();
 
-    const result = await reconcileWorkingState(makePaths(working), state, logger);
+    const result = await reconcileWorkingState(makePaths(working), state, logger, true);
 
     expect(result).toEqual({
       state,
@@ -311,7 +311,7 @@ describe("reconciling saved state with the working directory", () => {
     });
     const logger = makeLogger();
 
-    const result = await reconcileWorkingState(makePaths(working), state, logger);
+    const result = await reconcileWorkingState(makePaths(working), state, logger, true);
 
     expect(result).toMatchObject({
       droppedPendingImports: 1,

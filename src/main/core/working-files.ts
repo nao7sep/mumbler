@@ -129,6 +129,7 @@ export async function reconcileWorkingState(
   paths: AppPaths,
   state: MumblerQueue,
   logger: AppLogger,
+  sweepUnreferencedFiles: boolean,
 ): Promise<WorkingReconciliationResult> {
   const referencedPaths = new Set<string>();
   const nextPendingImports: PendingImportReviewItem[] = [];
@@ -176,7 +177,9 @@ export async function reconcileWorkingState(
     );
   }
 
-  const cleanupResult = await cleanupOrphanedWorkingFiles(paths, referencedPaths, logger);
+  const cleanupResult = sweepUnreferencedFiles
+    ? await cleanupOrphanedWorkingFiles(paths, referencedPaths, logger)
+    : { deletedOrphanedFiles: 0, retainedOrphanedFiles: 0 };
   const changed =
     droppedPendingImports > 0 ||
     missingWorkingCards > 0 ||
