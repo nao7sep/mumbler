@@ -55,6 +55,8 @@
   "diagnostic.corruptBody": "Mumbler non è riuscito a caricare in sicurezza i dati salvati. I file non sono stati modificati; apri il Log dal menu per vedere cosa è andato storto prima di riaprire l’app.",
   "diagnostic.newerTitle": "I dati salvati provengono da una versione più recente",
   "diagnostic.newerBody": "Il file {path} è stato salvato da una versione più recente di Mumbler, quindi questa versione non può leggerlo. Il file non è stato modificato; aggiorna Mumbler per continuare a usarlo.",
+  "diagnostic.settingsResetTitle": "Impossibile leggere le impostazioni",
+  "diagnostic.settingsResetBody": "Mumbler non è riuscito a leggere il file delle impostazioni e lo ha spostato in {path}. L’app è stata avviata con le impostazioni predefinite; la coda e le registrazioni non sono state modificate.",
   "diagnostic.startupTitle": "Avvio non riuscito",
   "diagnostic.startupBody": "Mumbler non è riuscito a completare la preparazione dell’archiviazione. Riapri l’app per riprovare; i file salvati non sono stati modificati.",
   "diagnostic.resetTitle": "Ripristino non riuscito",

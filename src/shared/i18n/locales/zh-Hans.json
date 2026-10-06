@@ -55,6 +55,8 @@
   "diagnostic.corruptBody": "Mumbler 无法安全地加载其保存的数据。文件未被更改；请在重新打开应用前，从菜单打开“日志”查看原因。",
   "diagnostic.newerTitle": "已保存的数据来自更新的版本",
   "diagnostic.newerBody": "{path} 由更新版本的 Mumbler 保存，此版本无法读取。文件未被更改；请更新 Mumbler 以继续使用。",
+  "diagnostic.settingsResetTitle": "无法读取设置",
+  "diagnostic.settingsResetBody": "Mumbler 无法读取其设置文件，已将其移至 {path}。应用已使用内置设置启动；你的队列和录音未被更改。",
   "diagnostic.startupTitle": "启动失败",
   "diagnostic.startupBody": "Mumbler 未能完成存储准备。请重新打开应用以重试；已保存的文件未被更改。",
   "diagnostic.resetTitle": "重置失败",

@@ -275,7 +275,29 @@ export class ApplicationRuntime {
     try {
       await ensureDirectories(paths, logger);
 
-      const settingsLoad = await settingsStore.load();
+      // Authored settings that cannot be read are set aside and the app starts on
+      // the built-ins, leaving the work stores alone (store-recovery-conventions).
+      // A newer-format file halts launch below; a failed set-aside propagates.
+      let settingsLoad;
+      let settingsNotice: AppSnapshot["appWideError"] = null;
+      try {
+        settingsLoad = await settingsStore.load();
+      } catch (error: unknown) {
+        if (!(error instanceof CorruptStateError)) throw error;
+        const [quarantinedTo] = await settingsStore.preserveExistingFiles();
+        await logger.warn(
+          "settings.corrupt-quarantined",
+          "config.json was unreadable; quarantined aside and started with the built-in settings.",
+          { path: paths.settingsPath, quarantinedTo, reason: error.message },
+        );
+        if (quarantinedTo !== undefined) {
+          settingsNotice = {
+            title: message("diagnostic.settingsResetTitle"),
+            message: message("diagnostic.settingsResetBody", { path: quarantinedTo }),
+          };
+        }
+        settingsLoad = await settingsStore.load();
+      }
       const settings = settingsLoad.value;
       await loadInterfaceCatalogue(settings.language);
       // Resolve whether a Gemini key is available (env-first, then the dedicated
@@ -382,7 +404,7 @@ export class ApplicationRuntime {
         layoutStore,
         logger,
         startupDiagnostic: null,
-        appWideError: null,
+        appWideError: settingsNotice,
         recoveredInterruptedCards: recovered.recoveredInterruptedCards,
         shellReadyAtUtc,
         toolManager: null,

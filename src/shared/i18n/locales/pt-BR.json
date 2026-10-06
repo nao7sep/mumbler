@@ -55,6 +55,8 @@
   "diagnostic.corruptBody": "O Mumbler não conseguiu carregar os dados salvos com segurança. Os arquivos não foram alterados; abra Registros no menu para ver o que deu errado antes de abrir o app novamente.",
   "diagnostic.newerTitle": "Os dados salvos são de uma versão mais recente",
   "diagnostic.newerBody": "O arquivo {path} foi salvo por uma versão mais recente do Mumbler, por isso esta versão não consegue lê-lo. O arquivo não foi alterado; atualize o Mumbler para continuar usando seus dados.",
+  "diagnostic.settingsResetTitle": "Não foi possível ler as configurações",
+  "diagnostic.settingsResetBody": "O Mumbler não conseguiu ler o arquivo de configurações e o moveu para {path}. O app foi iniciado com as configurações padrão; sua fila e suas gravações não foram alteradas.",
   "diagnostic.startupTitle": "Falha ao iniciar",
   "diagnostic.startupBody": "O Mumbler não conseguiu terminar de preparar o armazenamento. Abra o app novamente para tentar outra vez; os arquivos salvos não foram alterados.",
   "diagnostic.resetTitle": "Falha ao redefinir",

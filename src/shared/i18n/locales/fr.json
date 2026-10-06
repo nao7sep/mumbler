@@ -55,6 +55,8 @@
   "diagnostic.corruptBody": "Mumbler n’a pas pu charger ses données enregistrées en toute sécurité. Les fichiers n’ont pas été modifiés\u00a0; ouvrez le Journal depuis le menu pour voir ce qui s’est passé avant de rouvrir l’app.",
   "diagnostic.newerTitle": "Les données enregistrées proviennent d’une version plus récente",
   "diagnostic.newerBody": "Le fichier {path} a été enregistré par une version plus récente de Mumbler\u00a0; cette version ne peut pas le lire. Le fichier n’a pas été modifié\u00a0; mettez à jour Mumbler pour continuer à l’utiliser.",
+  "diagnostic.settingsResetTitle": "Impossible de lire les réglages",
+  "diagnostic.settingsResetBody": "Mumbler n’a pas pu lire son fichier de réglages et l’a déplacé vers {path}. L’app a démarré avec les réglages par défaut\u00a0; votre file d’attente et vos enregistrements n’ont pas été modifiés.",
   "diagnostic.startupTitle": "Échec du démarrage",
   "diagnostic.startupBody": "Mumbler n’a pas pu terminer la préparation de son stockage. Rouvrez l’app pour réessayer\u00a0; les fichiers enregistrés n’ont pas été modifiés.",
   "diagnostic.resetTitle": "Échec de la réinitialisation",

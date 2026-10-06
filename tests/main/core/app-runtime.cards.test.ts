@@ -809,6 +809,31 @@ describe("a store in a newer format", () => {
 });
 
 describe("settings, secrets and the window's own state", () => {
+  it.each([
+    ["unparseable", "broken settings"],
+    ["without its format version", JSON.stringify({ concurrencyLimit: 5 })],
+  ])("sets aside a config.json that is %s, starts on the built-ins and keeps the queue", async (_kind, bytes) => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
+    await runtime.shutdown();
+    await writeFile(join(home, "config.json"), bytes);
+
+    runtime = await ApplicationRuntime.initialize();
+
+    const snapshot = runtime.getSnapshot();
+    const quarantined = (await readdir(home)).find((name) => /^config-.*\.invalid$/.test(name));
+    expect(quarantined).toBeDefined();
+    expect(await readFile(join(home, quarantined!), "utf8")).toBe(bytes);
+    expect(await exists(join(home, "config.json")), "nothing is written until the user changes a setting").toBe(false);
+    expect(snapshot.startupDiagnostic).toBeNull();
+    expect(snapshot.appWideError).toEqual({
+      title: { key: "diagnostic.settingsResetTitle" },
+      message: { key: "diagnostic.settingsResetBody", values: { path: join(home, quarantined!) } },
+    });
+    expect(cards(snapshot).map((entry) => entry.id)).toEqual([card.id]);
+    expect(await exists(card.sourceFilePath)).toBe(true);
+  });
+
   it("does not materialize sets when an unchanged draft is saved", async () => {
     await runtime.saveSettingsDraft(runtime.getSettingsDraft());
     expect(await exists(join(home, "config.json"))).toBe(false);
