@@ -33,7 +33,7 @@ export async function readJsonFile<T>(filePath: string): Promise<T | undefined> 
     if (isMissingFileError(error)) {
       return undefined;
     }
-    throw new Error(`Failed to read JSON file at ${filePath}: ${formatError(error)}`);
+    throw new Error(`Failed to read JSON file at ${filePath}: ${formatError(error)}`, { cause: error });
   }
 }
 

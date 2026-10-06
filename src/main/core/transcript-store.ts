@@ -98,7 +98,7 @@ export class TranscriptStore {
       try {
         raw = await readJsonFile<unknown>(path);
       } catch (error: unknown) {
-        throw new CorruptStateError(path, formatError(error));
+        throw new CorruptStateError(path, formatError(error), { cause: error });
       }
       if (raw === undefined) continue;
       const transcript = parse(path, raw);

@@ -3,13 +3,15 @@ import { NewerFormatError, recordedFormatVersion } from "./format-versions";
 
 // Thrown when a persisted file exists but cannot be safely loaded: malformed
 // JSON, or a document that does not fit its shape. The store never overwrites or
-// deletes the offending file in this case; the caller decides the recovery.
+// deletes the offending file in this case; the caller decides the recovery. A
+// read that failed keeps its error as the cause.
 export class CorruptStateError extends Error {
   constructor(
     readonly filePath: string,
     readonly reason: string,
+    options?: { cause?: unknown },
   ) {
-    super(`Could not load ${filePath}: ${reason}.`);
+    super(`Could not load ${filePath}: ${reason}.`, options);
     this.name = "CorruptStateError";
   }
 }
@@ -84,7 +86,7 @@ export class JsonStore<T extends object> {
       raw = await readJsonFile<unknown>(this.options.path);
     } catch (error) {
       // Present but unreadable/unparseable. Leave it in place; the caller halts.
-      throw new CorruptStateError(this.options.path, formatError(error));
+      throw new CorruptStateError(this.options.path, formatError(error), { cause: error });
     }
 
     if (raw === undefined) {

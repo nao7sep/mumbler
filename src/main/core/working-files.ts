@@ -40,6 +40,7 @@ export async function copyIntoWorking(
     await rm(workingFilePath, { force: true }).catch(() => undefined);
     throw new Error(
       `Failed to create a readable working copy for ${preferredName}: ${formatError(error)}`,
+      { cause: error },
     );
   }
 
@@ -59,7 +60,7 @@ export async function copyOriginalToBackup(
     await copyFile(sourcePath, targetPath);
     await keepSourceTimesAndMode(sourcePath, targetPath);
   } catch (error: unknown) {
-    throw new Error(`Failed to copy ${sourcePath} to backup directory: ${formatError(error)}`);
+    throw new Error(`Failed to copy ${sourcePath} to backup directory: ${formatError(error)}`, { cause: error });
   }
 
   return targetPath;

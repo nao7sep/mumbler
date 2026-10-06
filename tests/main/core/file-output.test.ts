@@ -369,7 +369,10 @@ describe("finalizeOutputsAtomically", () => {
         jsonContent: "J",
         markdownContent: "M",
       }),
-    ).rejects.toThrow(/finalize/i);
+    ).rejects.toThrow(expect.objectContaining({
+      message: expect.stringMatching(/finalize/i),
+      cause: expect.objectContaining({ code: "ENOENT" }),
+    }));
 
     expect(await readdir(dir)).toEqual(["source.m4a"]);
   });

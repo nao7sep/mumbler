@@ -137,9 +137,10 @@ describe("working audio copies", () => {
   it("names the import that could not be copied, and leaves no partial copy behind", async () => {
     const working = join(dir, "working");
 
-    await expect(copyIntoWorking(join(dir, "gone.wav"), working, "clip.wav")).rejects.toThrow(
-      /Failed to create a readable working copy for clip\.wav/,
-    );
+    await expect(copyIntoWorking(join(dir, "gone.wav"), working, "clip.wav")).rejects.toMatchObject({
+      message: expect.stringMatching(/Failed to create a readable working copy for clip\.wav/),
+      cause: { code: "ENOENT" },
+    });
 
     expect(await readdir(working), "the partial copy is cleaned up").toEqual([]);
   });
@@ -193,12 +194,15 @@ describe("working audio copies", () => {
     expect((await stat(backup)).mode & 0o777).toBe(0o640);
   });
 
-  it("names the original that could not be backed up", async () => {
+  it("names the original that could not be backed up, keeping the filesystem's error as the cause", async () => {
     const source = join(dir, "gone.m4a");
 
     await expect(copyOriginalToBackup(source, join(dir, "backup"))).rejects.toThrow(
       new RegExp(`Failed to copy ${source} to backup directory`),
     );
+    await expect(copyOriginalToBackup(source, join(dir, "backup"))).rejects.toMatchObject({
+      cause: { code: "ENOENT" },
+    });
   });
 
   it("deletes the imported source the user asked to remove", async () => {

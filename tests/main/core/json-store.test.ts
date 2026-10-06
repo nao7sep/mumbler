@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -66,6 +66,14 @@ describe("JsonStore.load", () => {
     await writeFile(store.path, "null", "utf8");
     await expect(store.load()).rejects.toBeInstanceOf(CorruptStateError);
     expect(await readFile(store.path, "utf8")).toBe("null");
+  });
+
+  it("keeps the read's own error as the cause of an unreadable file", async () => {
+    const store = makeStore();
+    await mkdir(store.path);
+    const error = await store.load().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(CorruptStateError);
+    expect(error).toMatchObject({ filePath: store.path, cause: { cause: { code: "EISDIR" } } });
   });
 
   it("refuses a format version newer than this build as intact, not corrupt, and leaves the file untouched", async () => {

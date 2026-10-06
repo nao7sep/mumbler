@@ -251,7 +251,7 @@ export async function finalizeOutputsAtomically(params: {
     if (isCancelledError(error) || error instanceof OutputConflictError) {
       throw error;
     }
-    throw new Error(`Failed to finalize output files: ${formatError(error)}`);
+    throw new Error(`Failed to finalize output files: ${formatError(error)}`, { cause: error });
   }
 
   // Backup cleanup is best-effort: failure here cannot undo the already-committed
