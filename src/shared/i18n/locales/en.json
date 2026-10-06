@@ -61,6 +61,7 @@
   "diagnostic.startupBody": "Mumbler could not finish preparing its storage. Reopen the app to try again; saved files were left unchanged.",
   "diagnostic.resetTitle": "Reset Failed",
   "diagnostic.resetBody": "Mumbler could not reset its saved state. Existing files were left unchanged; open Records from the menu to see what went wrong, then try again.",
+  "diagnostic.resetMovedBody": "Mumbler could not finish resetting its saved state. Before it stopped, it set these aside in {folder}, under names that include the time of the reset: {items}. Nothing was deleted. Open Records from the menu to see what went wrong, then try again.",
   "diagnostic.unexpectedTitle": "Mumbler could not continue",
   "diagnostic.windowBody": "The window encountered an unexpected problem. Restart Mumbler to continue; your saved files are unchanged.",
   "diagnostic.mainBody": "Mumbler encountered an unexpected problem. Restart the app to continue; your saved files are unchanged.",

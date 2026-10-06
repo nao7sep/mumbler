@@ -61,6 +61,7 @@
   "diagnostic.startupBody": "Mumblerは保存領域の準備を完了できませんでした。アプリを開き直してもう一度お試しください。保存済みのファイルは変更されていません。",
   "diagnostic.resetTitle": "リセットに失敗しました",
   "diagnostic.resetBody": "Mumblerは保存された状態をリセットできませんでした。既存のファイルは変更されていません。メニューの「ログ」で原因を確認してから、もう一度お試しください。",
+  "diagnostic.resetMovedBody": "Mumblerは保存された状態のリセットを完了できませんでした。中断する前に、リセットした時刻を含む名前で次のものを{folder}に退避しました：{items}。削除されたものはありません。メニューの「ログ」で原因を確認してから、もう一度お試しください。",
   "diagnostic.unexpectedTitle": "Mumblerを続行できませんでした",
   "diagnostic.windowBody": "ウインドウで予期しない問題が発生しました。続行するにはMumblerを再起動してください。保存済みのファイルは変更されていません。",
   "diagnostic.mainBody": "Mumblerで予期しない問題が発生しました。続行するにはアプリを再起動してください。保存済みのファイルは変更されていません。",

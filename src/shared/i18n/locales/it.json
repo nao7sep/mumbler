@@ -61,6 +61,7 @@
   "diagnostic.startupBody": "Mumbler non è riuscito a completare la preparazione dell’archiviazione. Riapri l’app per riprovare; i file salvati non sono stati modificati.",
   "diagnostic.resetTitle": "Ripristino non riuscito",
   "diagnostic.resetBody": "Mumbler non è riuscito a ripristinare lo stato salvato. I file esistenti non sono stati modificati; apri il Log dal menu per vedere cosa è andato storto, poi riprova.",
+  "diagnostic.resetMovedBody": "Mumbler non è riuscito a completare il ripristino dello stato salvato. Prima di fermarsi ha messo da parte i seguenti elementi in {folder}, con nomi che includono l’ora del ripristino: {items}. Non è stato eliminato nulla. Apri il Log dal menu per vedere cosa è andato storto, poi riprova.",
   "diagnostic.unexpectedTitle": "Mumbler non può continuare",
   "diagnostic.windowBody": "La finestra ha riscontrato un problema imprevisto. Riavvia Mumbler per continuare; i file salvati non sono stati modificati.",
   "diagnostic.mainBody": "Mumbler ha riscontrato un problema imprevisto. Riavvia l’app per continuare; i file salvati non sono stati modificati.",

@@ -61,6 +61,7 @@
   "diagnostic.startupBody": "Mumbler 未能完成存储准备。请重新打开应用以重试；已保存的文件未被更改。",
   "diagnostic.resetTitle": "重置失败",
   "diagnostic.resetBody": "Mumbler 无法重置其保存的状态。现有文件未被更改；请从菜单打开“日志”查看原因后重试。",
+  "diagnostic.resetMovedBody": "Mumbler 未能完成重置其保存的状态。在中止之前，已将以下内容另存到 {folder}，名称中包含重置的时间：{items}。没有删除任何内容。请从菜单打开“日志”查看原因后重试。",
   "diagnostic.unexpectedTitle": "Mumbler 无法继续",
   "diagnostic.windowBody": "窗口遇到意外问题。请重新启动 Mumbler 以继续；你保存的文件未被更改。",
   "diagnostic.mainBody": "Mumbler 遇到意外问题。请重新启动应用以继续；你保存的文件未被更改。",

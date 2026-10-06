@@ -61,6 +61,7 @@
   "diagnostic.startupBody": "Mumbler no pudo terminar de preparar su almacenamiento. Vuelve a abrir la app para intentarlo de nuevo; los archivos guardados no se modificaron.",
   "diagnostic.resetTitle": "Error al restablecer",
   "diagnostic.resetBody": "Mumbler no pudo restablecer su estado guardado. Los archivos existentes no se modificaron; abre Registros desde el menú para ver qué falló e inténtalo de nuevo.",
+  "diagnostic.resetMovedBody": "Mumbler no pudo terminar de restablecer su estado guardado. Antes de detenerse, guardó aparte lo siguiente en {folder}, con nombres que incluyen la hora del restablecimiento: {items}. No se eliminó nada. Abre Registros desde el menú para ver qué falló e inténtalo de nuevo.",
   "diagnostic.unexpectedTitle": "Mumbler no pudo continuar",
   "diagnostic.windowBody": "La ventana tuvo un problema inesperado. Reinicia Mumbler para continuar; tus archivos guardados no se modificaron.",
   "diagnostic.mainBody": "Mumbler tuvo un problema inesperado. Reinicia la app para continuar; tus archivos guardados no se modificaron.",

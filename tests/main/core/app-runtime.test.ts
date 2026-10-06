@@ -54,17 +54,21 @@ const {
 const { createQueueStore } = await import("@main/core/settings-schema");
 
 describe("reset failure presentation", () => {
-  it("keeps exception, IPC, and internal path diagnostics out of the retained snapshot message", () => {
-    const hostile = new Error(
-      "Error invoking remote method 'resetState': EACCES /private/tmp/MUMBLER_RESET_SENTINEL",
-    );
-
-    const presentation = resetFailureDiagnostic(hostile);
+  it("says existing files were left unchanged when the reset moved nothing", () => {
+    const presentation = resetFailureDiagnostic([], "/home/me/.mumbler");
 
     const english = createTranslator("en");
     expect(english.text(presentation.title)).toBe("Reset Failed");
     expect(english.text(presentation.message)).toContain("Existing files were left unchanged");
-    expect(JSON.stringify(presentation)).not.toMatch(/EACCES|private\/tmp|SENTINEL|invoking remote method/i);
+  });
+
+  it("names what a reset set aside before it failed, instead of claiming nothing changed", () => {
+    const presentation = resetFailureDiagnostic(["config.json", "queue.json", "transcripts"], "/home/me/.mumbler");
+
+    const text = createTranslator("en").text(presentation.message);
+    expect(text).toContain("it set these aside in /home/me/.mumbler");
+    expect(text).toContain("config.json, queue.json, transcripts.");
+    expect(text).not.toContain("unchanged");
   });
 });
 

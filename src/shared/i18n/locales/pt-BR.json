@@ -61,6 +61,7 @@
   "diagnostic.startupBody": "O Mumbler não conseguiu terminar de preparar o armazenamento. Abra o app novamente para tentar outra vez; os arquivos salvos não foram alterados.",
   "diagnostic.resetTitle": "Falha ao redefinir",
   "diagnostic.resetBody": "O Mumbler não conseguiu redefinir o estado salvo. Os arquivos existentes não foram alterados; abra Registros no menu para ver o que deu errado e tente novamente.",
+  "diagnostic.resetMovedBody": "O Mumbler não conseguiu concluir a redefinição do estado salvo. Antes de parar, guardou à parte os itens a seguir em {folder}, com nomes que incluem o horário da redefinição: {items}. Nada foi excluído. Abra Registros no menu para ver o que deu errado e tente novamente.",
   "diagnostic.unexpectedTitle": "O Mumbler não pôde continuar",
   "diagnostic.windowBody": "A janela encontrou um problema inesperado. Reinicie o Mumbler para continuar; seus arquivos salvos não foram alterados.",
   "diagnostic.mainBody": "O Mumbler encontrou um problema inesperado. Reinicie o app para continuar; seus arquivos salvos não foram alterados.",

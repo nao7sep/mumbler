@@ -61,6 +61,7 @@
   "diagnostic.startupBody": "Mumbler konnte seinen Speicher nicht vollständig vorbereiten. Öffnen Sie die App erneut, um es noch einmal zu versuchen; gespeicherte Dateien wurden nicht verändert.",
   "diagnostic.resetTitle": "Zurücksetzen fehlgeschlagen",
   "diagnostic.resetBody": "Mumbler konnte seinen gespeicherten Zustand nicht zurücksetzen. Vorhandene Dateien wurden nicht verändert; sehen Sie im Menü unter „Protokoll“ nach, was schiefgelaufen ist, und versuchen Sie es erneut.",
+  "diagnostic.resetMovedBody": "Mumbler konnte das Zurücksetzen seines gespeicherten Zustands nicht abschließen. Zuvor hat es Folgendes in {folder} beiseitegelegt, unter Namen, die den Zeitpunkt des Zurücksetzens enthalten: {items}. Gelöscht wurde nichts. Sehen Sie im Menü unter „Protokoll“ nach, was schiefgelaufen ist, und versuchen Sie es erneut.",
   "diagnostic.unexpectedTitle": "Mumbler konnte nicht fortfahren",
   "diagnostic.windowBody": "Im Fenster ist ein unerwartetes Problem aufgetreten. Starten Sie Mumbler neu, um fortzufahren; Ihre gespeicherten Dateien sind unverändert.",
   "diagnostic.mainBody": "In Mumbler ist ein unerwartetes Problem aufgetreten. Starten Sie die App neu, um fortzufahren; Ihre gespeicherten Dateien sind unverändert.",

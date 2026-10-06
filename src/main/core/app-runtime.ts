@@ -109,12 +109,14 @@ function rendererReportError(report: RendererErrorReport): Error {
   return build(report, 0);
 }
 
-/** Stable presentation for a failed user-commanded reset; the thrown value is
- * retained by the IPC/logger boundary and must never become later snapshot UI. */
-export function resetFailureDiagnostic(_error: unknown): StartupFailure {
+/** Stable presentation for a failed user-commanded reset, naming what it had
+ * already set aside in `folder`; the error itself is only logged. */
+export function resetFailureDiagnostic(movedAside: readonly string[], folder: string): StartupFailure {
   return {
     title: message("diagnostic.resetTitle"),
-    message: message("diagnostic.resetBody"),
+    message: movedAside.length === 0
+      ? message("diagnostic.resetBody")
+      : message("diagnostic.resetMovedBody", { items: [...movedAside], folder }),
     canReset: true,
   };
 }
@@ -714,6 +716,8 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
+  // A reset that fails part-way is reported in the snapshot it returns, naming
+  // what it had already set aside, rather than thrown.
   async resetState(): Promise<AppSnapshot> {
     const previousPreference = this.languagePreference();
     const previousLanguage = this.interfaceLanguage().language;
@@ -725,18 +729,24 @@ export class ApplicationRuntime {
     const state = createEmptyQueue();
     const layout = createDefaultLayout();
 
+    // The names of what has been set aside so far.
+    const movedAside: string[] = [];
+    const moved = <T extends string[] | string | null>(path: string, result: T): T => {
+      if (result !== null && result.length > 0) movedAside.push(basename(path));
+      return result;
+    };
     try {
       await loadInterfaceCatalogue(settings.language);
       await ensureDirectories(paths, this.runtime.logger);
       // Preserve each store before the user-commanded reset returns to built-ins.
-      const preservedSettingsFiles = await settingsStore.preserveExistingFiles();
-      const preservedStateFiles = await queueStore.preserveExistingFiles();
+      const preservedSettingsFiles = moved(paths.settingsPath, await settingsStore.preserveExistingFiles());
+      const preservedStateFiles = moved(paths.queuePath, await queueStore.preserveExistingFiles());
       // The preserved queue.json keeps its cards' text and recordings beside it;
       // a reset deletes no user audio.
-      const preservedTranscripts = await preserveAside(paths.transcriptsDir);
-      const preservedRecordings = await preserveAside(paths.workingDir);
+      const preservedTranscripts = moved(paths.transcriptsDir, await preserveAside(paths.transcriptsDir));
+      const preservedRecordings = moved(paths.workingDir, await preserveAside(paths.workingDir));
       await mkdir(paths.workingDir, { recursive: true });
-      const preservedLayoutFiles = await layoutStore.preserveExistingFiles();
+      const preservedLayoutFiles = moved(paths.layoutPath, await layoutStore.preserveExistingFiles());
       // Reuse the per-launch session logger rather than building a new one, so a
       // reset keeps writing to the same file as the rest of the launch.
       const logger = this.runtime.logger;
@@ -764,8 +774,9 @@ export class ApplicationRuntime {
 
       return this.getSnapshot();
     } catch (error: unknown) {
-      this.runtime.startupDiagnostic = resetFailureDiagnostic(error);
-      throw error;
+      await this.runtime.logger.error("app.reset-failed", "Reset of settings and state failed.", error, { movedAside });
+      this.runtime.startupDiagnostic = resetFailureDiagnostic(movedAside, paths.homeDir);
+      return this.getSnapshot();
     }
   }
 

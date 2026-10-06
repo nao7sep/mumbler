@@ -798,9 +798,14 @@ function LoadedShell({
     try {
       const nextSnapshot = await window.mumbler.resetState();
       setSnapshot(nextSnapshot);
-      // Says where the previous queue and recordings went, so it stays until dismissed.
-      addPersistent("state-reset", message("notice.reset", { folder: nextSnapshot.paths!.homeDir }));
+      // A reset that failed part-way says so, and what it moved, where the Reset
+      // button is. A finished one says where the previous queue and recordings
+      // went, so it stays until dismissed.
+      if (nextSnapshot.startupDiagnostic === null) {
+        addPersistent("state-reset", message("notice.reset", { folder: nextSnapshot.paths!.homeDir }));
+      }
     } catch (error: unknown) {
+      // The call itself failed, before the reset could move anything.
       addPersistent(
         "state-reset",
         presentFailure(error, message("error.resetState"), "state reset failed"),

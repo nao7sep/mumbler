@@ -157,6 +157,33 @@ describe("a startup diagnostic", () => {
       vi.useRealTimers();
     }
   });
+
+  it("shows a reset that failed part-way where the Reset button is, naming what it moved, and no success notice", async () => {
+    getSnapshot.mockResolvedValue({
+      ...readySnapshot(),
+      startupDiagnostic: { title: { key: "diagnostic.startupTitle" }, message: { key: "diagnostic.startupBody" }, canReset: true },
+    });
+    window.mumbler.resetState = vi.fn(async (): Promise<AppSnapshot> => ({
+      ...readySnapshot(),
+      paths: { homeDir: "/home/me/.mumbler" } as AppPaths,
+      startupDiagnostic: {
+        title: { key: "diagnostic.resetTitle" },
+        message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json", "queue.json"], folder: "/home/me/.mumbler" } },
+        canReset: true,
+      },
+    }));
+
+    await act(async () => root?.render(createElement(App)));
+    await vi.waitFor(() => expect(button("Reset State")).toBeDefined());
+    await act(async () => button("Reset State")!.click());
+
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("Reset Failed");
+    expect(text).toContain("it set these aside in /home/me/.mumbler, under names that include the time of the reset: config.json, queue.json.");
+    expect(text).not.toContain("Reset to defaults.");
+    expect(text).not.toContain("unchanged");
+    expect(button("Reset State"), "the reset can be tried again").toBeDefined();
+  });
 });
 
 function rendererApi(): MumblerShellApi {

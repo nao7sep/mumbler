@@ -61,6 +61,7 @@
   "diagnostic.startupBody": "Mumbler n’a pas pu terminer la préparation de son stockage. Rouvrez l’app pour réessayer\u00a0; les fichiers enregistrés n’ont pas été modifiés.",
   "diagnostic.resetTitle": "Échec de la réinitialisation",
   "diagnostic.resetBody": "Mumbler n’a pas pu réinitialiser son état enregistré. Les fichiers existants n’ont pas été modifiés\u00a0; ouvrez le Journal depuis le menu pour voir ce qui s’est passé, puis réessayez.",
+  "diagnostic.resetMovedBody": "Mumbler n’a pas pu terminer la réinitialisation de son état enregistré. Avant de s’arrêter, il a mis de côté les éléments suivants dans {folder}, sous des noms qui comportent l’heure de la réinitialisation\u00a0: {items}. Rien n’a été supprimé. Ouvrez le Journal depuis le menu pour voir ce qui s’est passé, puis réessayez.",
   "diagnostic.unexpectedTitle": "Mumbler n’a pas pu continuer",
   "diagnostic.windowBody": "La fenêtre a rencontré un problème inattendu. Redémarrez Mumbler pour continuer\u00a0; vos fichiers enregistrés n’ont pas été modifiés.",
   "diagnostic.mainBody": "Mumbler a rencontré un problème inattendu. Redémarrez l’app pour continuer\u00a0; vos fichiers enregistrés n’ont pas été modifiés.",

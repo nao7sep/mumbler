@@ -23,6 +23,8 @@ vi.mock("electron", () => ({
 // The filesystem is real; only a removal the OS refuses is simulated, for paths
 // registered in `undeletable`, so the case runs the same on every platform.
 const undeletable = vi.hoisted(() => new Set<string>());
+// Paths a rename refuses to move, the way a folder held open by another program can.
+const unmovable = vi.hoisted(() => new Set<string>());
 // Runs while a refused removal is in flight, the way another card's save can.
 const duringRefusedRm = vi.hoisted(() => ({ run: null as (() => Promise<unknown>) | null }));
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -35,6 +37,10 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         throw new Error("EACCES: permission denied");
       }
       return actual.rm(path, options);
+    },
+    rename: async (from: Parameters<typeof actual.rename>[0], to: Parameters<typeof actual.rename>[1]) => {
+      if (unmovable.has(String(from))) throw new Error("EBUSY: resource busy or locked");
+      return actual.rename(from, to);
     },
   };
 });
@@ -183,6 +189,7 @@ beforeEach(async () => {
   previousGeminiKey = process.env.GEMINI_API_KEY;
   delete process.env.GEMINI_API_KEY;
   undeletable.clear();
+  unmovable.clear();
   duringRefusedRm.run = null;
   audioGate.held = null;
   audioGate.entered = 0;
@@ -1224,6 +1231,36 @@ describe("settings, secrets and the window's own state", () => {
     expect(await readFile(join(home, setAside!, basename(card.sourceFilePath)), "utf8")).toBe("audio for take.wav");
     expect(await readFile(join(home, setAside!, basename(waiting.workingFilePath)), "utf8")).toBe("audio for waiting.wav");
     expect(await readdir(join(home, "working")), "the new queue starts with an empty working folder").toEqual([]);
+  });
+
+  it("says what a reset that failed part-way had already set aside, and keeps the old queue", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
+    unmovable.add(join(home, "working"));
+
+    const snapshot = await runtime.resetState();
+
+    expect(snapshot.startupDiagnostic).toEqual({
+      title: { key: "diagnostic.resetTitle" },
+      message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json", "queue.json"], folder: home } },
+      canReset: true,
+    });
+    const names = await readdir(home);
+    expect(names.filter((name) => name.endsWith(".invalid")).map((name) => name.replace(/-\d.*$/, "")).sort())
+      .toEqual(["config", "queue"]);
+    expect(await exists(card.sourceFilePath), "the recording stays where it was").toBe(true);
+    expect(cards(snapshot), "the session keeps the queue it had").toHaveLength(1);
+  });
+
+  it("says nothing was changed when a reset failed before moving anything", async () => {
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
+    unmovable.add(join(home, "config.json"));
+
+    const snapshot = await runtime.resetState();
+
+    expect(snapshot.startupDiagnostic?.message).toEqual({ key: "diagnostic.resetBody" });
+    expect((await readdir(home)).filter((name) => name.endsWith(".invalid"))).toEqual([]);
   });
 });
 
