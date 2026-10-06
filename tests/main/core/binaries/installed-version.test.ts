@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -84,6 +84,15 @@ describe("the sidecar", () => {
     await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000);
     const raw: unknown = JSON.parse(await readFile(versionSidecarPath(binDir, "ffmpeg"), "utf8"));
     expect(raw).toEqual({ formatVersion: 1, version: "8.2", installedAt: "2023-11-14T22:13:20.000Z" });
+  });
+
+  it.skipIf(process.platform === "win32")("keeps the mode of the sidecar it replaces", async () => {
+    await writeVersionSidecar(binDir, "ffmpeg", "8.1", 1_700_000_000_000);
+    await chmod(versionSidecarPath(binDir, "ffmpeg"), 0o640);
+
+    await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000);
+
+    expect((await stat(versionSidecarPath(binDir, "ffmpeg"))).mode & 0o777).toBe(0o640);
   });
 
   it("leaves no staging file behind", async () => {

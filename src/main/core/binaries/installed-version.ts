@@ -9,6 +9,7 @@ import type { ToolName } from "@shared/app-shell";
 import { FFMPEG_BUILD_TAG } from "@shared/dependency-status";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 
+import { keepReplacedMode } from "../file-io";
 import { FORMAT_VERSIONS, recordedFormatVersion } from "../format-versions";
 import { normalizeToolVersion } from "./registry";
 
@@ -98,6 +99,7 @@ export async function writeVersionSidecar(
   const staged = join(binDir, `${name}-${nanoid()}.tmp`);
   try {
     await writeFile(staged, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    await keepReplacedMode(target, staged);
     await rename(staged, target);
   } catch (error) {
     // A stranded temp is tolerated for a crash, not for an ordinary failure path.

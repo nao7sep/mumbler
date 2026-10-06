@@ -290,6 +290,26 @@ describe("finalizeOutputsAtomically", () => {
     expect(await leftoverTempsAndBackups()).toEqual([]);
   });
 
+  it.skipIf(process.platform === "win32")("keeps the mode of the JSON and Markdown an overwrite replaces", async () => {
+    const t = targets("out");
+    await writeFile(t.audioPath, "OLD-AUDIO");
+    await writeFile(t.jsonPath, "OLD-JSON");
+    await writeFile(t.markdownPath, "OLD-MD");
+    await chmod(t.jsonPath, 0o640);
+    await chmod(t.markdownPath, 0o604);
+
+    await finalizeOutputsAtomically({
+      sourceAudioPath: sourceAudio,
+      targets: t,
+      overwrite: true,
+      jsonContent: "NEW-JSON",
+      markdownContent: "NEW-MD",
+    });
+
+    expect((await stat(t.jsonPath)).mode & 0o777).toBe(0o640);
+    expect((await stat(t.markdownPath)).mode & 0o777).toBe(0o604);
+  });
+
   it("publishes nothing and keeps the existing outputs when the save is cancelled", async () => {
     const t = targets("out");
     await writeFile(t.audioPath, "OLD-AUDIO");

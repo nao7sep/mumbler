@@ -64,6 +64,9 @@ export async function writeJsonFile(
       await chmod(tempPath, options.mode);
     }
     await syncFile(tempPath);
+    if (options.mode === undefined) {
+      await keepReplacedMode(filePath, tempPath);
+    }
     await rename(tempPath, filePath);
     await syncDirectory(dirname(filePath));
   } catch (error) {
@@ -96,6 +99,21 @@ export async function syncDirectory(directoryPath: string): Promise<void> {
   } catch {
     // ignore
   }
+}
+
+// A replace keeps the replaced file's permission mode (content-lifecycle-conventions,
+// "A replace keeps what it can"), set on the replacement before it is renamed into
+// place. Node has no call that carries extended attributes or Finder tags, and a
+// replacement takes no times from the file it replaces.
+export async function keepReplacedMode(targetPath: string, replacementPath: string): Promise<void> {
+  let mode: number;
+  try {
+    mode = (await stat(targetPath)).mode;
+  } catch (error: unknown) {
+    if (isMissingFileError(error)) return;
+    throw error;
+  }
+  await chmod(replacementPath, mode);
 }
 
 // A byte copy of the user's audio keeps the source's modified time and mode

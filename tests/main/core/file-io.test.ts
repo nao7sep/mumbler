@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -78,6 +78,29 @@ describe("writeJsonFile", () => {
     expect(tempRenames).toHaveLength(1);
     expect(dirname(tempRenames[0]!.source)).toBe(dir);
     expect(basename(tempRenames[0]!.source)).toMatch(/^config-[\w-]{8}\.tmp$/);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("writeJsonFile — the replaced file's mode", () => {
+  it("keeps the mode of the file it replaces", async () => {
+    const target = join(dir, "config.json");
+    await writeJsonFile(target, { version: 1 });
+    await chmod(target, 0o640);
+
+    await writeJsonFile(target, { version: 2 });
+
+    expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ version: 2 });
+    expect((await stat(target)).mode & 0o777).toBe(0o640);
+  });
+
+  it("applies an explicit mode instead, as the secrets file does", async () => {
+    const target = join(dir, "api-keys.json");
+    await writeJsonFile(target, { version: 1 });
+    await chmod(target, 0o644);
+
+    await writeJsonFile(target, { version: 2 }, { mode: 0o600, record: false });
+
+    expect((await stat(target)).mode & 0o777).toBe(0o600);
   });
 });
 

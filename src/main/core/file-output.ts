@@ -6,7 +6,7 @@ import { nanoid } from "nanoid";
 import type { MumblerCard } from "@shared/app-shell";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 import { CancelledError, isCancelledError } from "./cancellation";
-import { fileExists, formatError, keepSourceTimesAndMode, syncDirectory, syncFile } from "./file-io";
+import { fileExists, formatError, keepReplacedMode, keepSourceTimesAndMode, syncDirectory, syncFile } from "./file-io";
 import { FORMAT_VERSIONS } from "./format-versions";
 
 // A save that must not overwrite found one of its targets already taken when
@@ -155,6 +155,13 @@ export async function finalizeOutputsAtomically(params: {
 
     if (params.signal?.aborted) {
       throw new CancelledError("Save cancelled.");
+    }
+
+    // The JSON and Markdown an overwrite replaces keep their mode; the audio is a
+    // copy of the recording and takes the recording's own once published.
+    if (params.overwrite) {
+      await keepReplacedMode(params.targets.jsonPath, jsonTempPath);
+      await keepReplacedMode(params.targets.markdownPath, markdownTempPath);
     }
 
     audioHadExisting = params.overwrite && (await fileExists(params.targets.audioPath));
