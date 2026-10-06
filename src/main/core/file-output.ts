@@ -6,7 +6,15 @@ import { nanoid } from "nanoid";
 import type { MumblerCard } from "@shared/app-shell";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 import { CancelledError, isCancelledError } from "./cancellation";
-import { fileExists, formatError, keepReplacedMode, keepSourceTimesAndMode, syncDirectory, syncFile } from "./file-io";
+import {
+  fileExists,
+  formatError,
+  keepReplacedMode,
+  keepSourceTimesAndMode,
+  sameFileBytes,
+  syncDirectory,
+  syncFile,
+} from "./file-io";
 import { FORMAT_VERSIONS } from "./format-versions";
 
 // A save that must not overwrite found one of its targets already taken when
@@ -164,9 +172,18 @@ export async function finalizeOutputsAtomically(params: {
       await keepReplacedMode(params.targets.markdownPath, markdownTempPath);
     }
 
-    audioHadExisting = params.overwrite && (await fileExists(params.targets.audioPath));
-    jsonHadExisting = params.overwrite && (await fileExists(params.targets.jsonPath));
-    markdownHadExisting = params.overwrite && (await fileExists(params.targets.markdownPath));
+    // An overwrite leaves an output that already holds the same bytes as it is
+    // (content-lifecycle-conventions, "A write that changes nothing is skipped").
+    const unchanged = async (tempPath: string, targetPath: string): Promise<boolean> =>
+      params.overwrite && (await fileExists(targetPath)) && (await sameFileBytes(tempPath, targetPath));
+    const audioUnchanged = await unchanged(audioTempPath, params.targets.audioPath);
+    const jsonUnchanged = await unchanged(jsonTempPath, params.targets.jsonPath);
+    const markdownUnchanged = await unchanged(markdownTempPath, params.targets.markdownPath);
+
+    audioHadExisting = params.overwrite && !audioUnchanged && (await fileExists(params.targets.audioPath));
+    jsonHadExisting = params.overwrite && !jsonUnchanged && (await fileExists(params.targets.jsonPath));
+    markdownHadExisting =
+      params.overwrite && !markdownUnchanged && (await fileExists(params.targets.markdownPath));
 
     if (audioHadExisting) {
       await rename(params.targets.audioPath, audioBackupPath);
@@ -181,13 +198,25 @@ export async function finalizeOutputsAtomically(params: {
     // An overwrite replaces what it moved aside above; any other save claims each
     // name exclusively, so a target written after the conflict check is kept.
     const publish = params.overwrite ? rename : publishExclusive;
-    await publish(audioTempPath, params.targets.audioPath);
-    audioFinalized = true;
-    await keepSourceTimesAndMode(params.sourceAudioPath, params.targets.audioPath);
-    await publish(jsonTempPath, params.targets.jsonPath);
-    jsonFinalized = true;
-    await publish(markdownTempPath, params.targets.markdownPath);
-    markdownFinalized = true;
+    if (audioUnchanged) {
+      await rm(audioTempPath, { force: true });
+    } else {
+      await publish(audioTempPath, params.targets.audioPath);
+      audioFinalized = true;
+      await keepSourceTimesAndMode(params.sourceAudioPath, params.targets.audioPath);
+    }
+    if (jsonUnchanged) {
+      await rm(jsonTempPath, { force: true });
+    } else {
+      await publish(jsonTempPath, params.targets.jsonPath);
+      jsonFinalized = true;
+    }
+    if (markdownUnchanged) {
+      await rm(markdownTempPath, { force: true });
+    } else {
+      await publish(markdownTempPath, params.targets.markdownPath);
+      markdownFinalized = true;
+    }
 
     // The files were synced before publication; now make their directory entries
     // durable before the caller is allowed to delete the only working recording.

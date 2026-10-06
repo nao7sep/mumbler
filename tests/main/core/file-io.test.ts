@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -32,7 +32,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-const { preserveAside, uniquePathInDirectory, writeJsonFile } = await import("@main/core/file-io");
+const { preserveAside, sameFileBytes, uniquePathInDirectory, writeJsonFile } = await import("@main/core/file-io");
 
 let dir: string;
 
@@ -101,6 +101,46 @@ describe.skipIf(process.platform === "win32")("writeJsonFile — the replaced fi
     await writeJsonFile(target, { version: 2 }, { mode: 0o600, record: false });
 
     expect((await stat(target)).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("writeJsonFile — a write that changes nothing", () => {
+  it("leaves a file that already holds the same bytes untouched", async () => {
+    const target = join(dir, "queue.json");
+    await writeJsonFile(target, { formatVersion: 1, cards: [] });
+    const earlier = new Date(Date.UTC(2024, 4, 6, 7, 8, 9));
+    await utimes(target, earlier, earlier);
+    capturedRenames.length = 0;
+    backupRecord.mockClear();
+
+    await writeJsonFile(target, { formatVersion: 1, cards: [] });
+
+    expect((await stat(target)).mtime.getTime()).toBe(earlier.getTime());
+    expect(capturedRenames).toEqual([]);
+    expect(backupRecord).not.toHaveBeenCalled();
+  });
+
+  it("still writes a change", async () => {
+    const target = join(dir, "queue.json");
+    await writeJsonFile(target, { formatVersion: 1, cards: [] });
+
+    await writeJsonFile(target, { formatVersion: 1, cards: ["x"] });
+
+    expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ formatVersion: 1, cards: ["x"] });
+  });
+});
+
+describe("sameFileBytes", () => {
+  it("tells identical files from ones that differ in a byte or in length", async () => {
+    const [a, b, c, d] = ["a", "b", "c", "d"].map((name) => join(dir, name));
+    await writeFile(a, "same bytes");
+    await writeFile(b, "same bytes");
+    await writeFile(c, "same bytez");
+    await writeFile(d, "same bytes and more");
+
+    expect(await sameFileBytes(a, b)).toBe(true);
+    expect(await sameFileBytes(a, c)).toBe(false);
+    expect(await sameFileBytes(a, d)).toBe(false);
   });
 });
 

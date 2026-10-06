@@ -58,6 +58,11 @@ export async function writeJsonFile(
   const stem = basename(filePath, extname(filePath));
   const tempPath = join(dirname(filePath), `${stem}-${nanoid(8)}.tmp`);
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+  // A write that changes nothing is skipped (content-lifecycle-conventions), so
+  // the file's modified time, its backups and sync see only real changes.
+  if (await holdsBytes(filePath, bytes)) {
+    return;
+  }
   try {
     await writeFile(tempPath, bytes);
     if (options.mode !== undefined) {
@@ -81,6 +86,42 @@ export async function writeJsonFile(
   // that already succeeded above. Excluded when record === false (the secrets file).
   if (options.record !== false) {
     record(filePath, bytes);
+  }
+}
+
+async function holdsBytes(filePath: string, bytes: Buffer): Promise<boolean> {
+  try {
+    return (await readFile(filePath)).equals(bytes);
+  } catch (error: unknown) {
+    if (isMissingFileError(error)) return false;
+    throw error;
+  }
+}
+
+// Whether two files hold the same bytes, compared a chunk at a time so a long
+// recording is never read into memory whole.
+export async function sameFileBytes(leftPath: string, rightPath: string): Promise<boolean> {
+  const left = await open(leftPath, "r");
+  try {
+    const right = await open(rightPath, "r");
+    try {
+      if ((await left.stat()).size !== (await right.stat()).size) return false;
+      const leftChunk = Buffer.alloc(1 << 20);
+      const rightChunk = Buffer.alloc(1 << 20);
+      for (let position = 0; ; ) {
+        const { bytesRead } = await left.read(leftChunk, 0, leftChunk.length, position);
+        const { bytesRead: rightRead } = await right.read(rightChunk, 0, rightChunk.length, position);
+        if (bytesRead !== rightRead || !leftChunk.subarray(0, bytesRead).equals(rightChunk.subarray(0, rightRead))) {
+          return false;
+        }
+        if (bytesRead === 0) return true;
+        position += bytesRead;
+      }
+    } finally {
+      await right.close();
+    }
+  } finally {
+    await left.close();
   }
 }
 

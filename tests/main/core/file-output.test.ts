@@ -310,6 +310,29 @@ describe("finalizeOutputsAtomically", () => {
     expect((await stat(t.markdownPath)).mode & 0o777).toBe(0o604);
   });
 
+  it("leaves the outputs an overwrite would not change as they are", async () => {
+    const t = targets("out");
+    await writeFile(t.audioPath, "AUDIO-BYTES");
+    await writeFile(t.jsonPath, "OLD-JSON");
+    await writeFile(t.markdownPath, "# md");
+    const earlier = new Date(Date.UTC(2024, 4, 6, 7, 8, 9));
+    for (const path of [t.audioPath, t.jsonPath, t.markdownPath]) await utimes(path, earlier, earlier);
+
+    await finalizeOutputsAtomically({
+      sourceAudioPath: sourceAudio,
+      targets: t,
+      overwrite: true,
+      jsonContent: "NEW-JSON",
+      markdownContent: "# md",
+    });
+
+    expect((await stat(t.audioPath)).mtime.getTime()).toBe(earlier.getTime());
+    expect((await stat(t.markdownPath)).mtime.getTime()).toBe(earlier.getTime());
+    expect(await readFile(t.jsonPath, "utf8")).toBe("NEW-JSON");
+    expect((await stat(t.jsonPath)).mtime.getTime()).not.toBe(earlier.getTime());
+    expect(await leftoverTempsAndBackups()).toEqual([]);
+  });
+
   it("publishes nothing and keeps the existing outputs when the save is cancelled", async () => {
     const t = targets("out");
     await writeFile(t.audioPath, "OLD-AUDIO");
