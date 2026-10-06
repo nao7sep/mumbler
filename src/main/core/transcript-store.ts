@@ -94,7 +94,7 @@ export class TranscriptStore {
       } catch (error: unknown) {
         throw new CorruptStateError(path, formatError(error));
       }
-      if (raw === null) continue;
+      if (raw === undefined) continue;
       const transcript = parse(path, raw);
       transcripts.set(cardId, transcript);
       this.onDisk.set(cardId, JSON.stringify(serialize(cardId, transcript)));

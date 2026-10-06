@@ -968,3 +968,19 @@ describe("settings, secrets and the window's own state", () => {
     expect(await exists(pending.originalSourcePath), "the user's own file is untouched").toBe(true);
   });
 });
+
+describe("an unreadable work store", () => {
+  it("halts launch on a queue.json holding the JSON literal null and keeps the working recordings", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards(await runtime.confirmPendingImports([review(pending)]));
+    await runtime.shutdown();
+    await writeFile(join(home, "queue.json"), "null", "utf8");
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(runtime.getSnapshot().startupDiagnostic?.title).toEqual({ key: "diagnostic.corruptTitle" });
+    expect(runtime.getSnapshot().state).toBeNull();
+    expect(await readFile(join(home, "queue.json"), "utf8")).toBe("null");
+    expect(await exists(card.sourceFilePath), "the working recording is kept").toBe(true);
+  });
+});

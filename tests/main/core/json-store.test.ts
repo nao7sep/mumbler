@@ -61,6 +61,13 @@ describe("JsonStore.load", () => {
     expect(await readFile(store.path, "utf8")).toBe("{ not valid json");
   });
 
+  it("treats a file holding the JSON literal null as corruption, not as a missing file, untouched", async () => {
+    const store = makeStore();
+    await writeFile(store.path, "null", "utf8");
+    await expect(store.load()).rejects.toBeInstanceOf(CorruptStateError);
+    expect(await readFile(store.path, "utf8")).toBe("null");
+  });
+
   it("refuses a format version newer than this build as intact, not corrupt, and leaves the file untouched", async () => {
     const store = makeStore();
     const newer = JSON.stringify({ formatVersion: 2, value: "future" });

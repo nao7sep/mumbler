@@ -87,14 +87,14 @@ export class JsonStore<T extends object> {
       throw new CorruptStateError(this.options.path, formatError(error));
     }
 
-    if (raw === null) {
+    if (raw === undefined) {
       return { value: this.options.createDefault(), origin: "created" };
     }
 
-    // Valid JSON, but not a document object (e.g. an array or a bare number).
+    // Valid JSON, but not a document object (e.g. null, an array or a bare number).
     // Treat it as corruption rather than silently resetting to defaults, so the
     // user is alerted instead of losing whatever the file was meant to hold.
-    if (typeof raw !== "object" || Array.isArray(raw)) {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
       throw new CorruptStateError(this.options.path, "file does not contain a JSON object");
     }
 

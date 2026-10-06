@@ -23,13 +23,15 @@ export interface WriteJsonOptions {
   record?: boolean;
 }
 
-export async function readJsonFile<T>(filePath: string): Promise<T | null> {
+// undefined means no file: JSON has no undefined, so a file holding the literal
+// null is told apart from a missing one and is read like any other wrong shape.
+export async function readJsonFile<T>(filePath: string): Promise<T | undefined> {
   try {
     const content = await readFile(filePath, "utf8");
     return JSON.parse(content) as T;
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
-      return null;
+      return undefined;
     }
     throw new Error(`Failed to read JSON file at ${filePath}: ${formatError(error)}`);
   }

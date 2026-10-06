@@ -1,6 +1,6 @@
 import { chmod, stat } from "node:fs/promises";
 
-import { fileExists, formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
+import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 import { FORMAT_VERSIONS, NewerFormatError, recordedFormatVersion } from "./format-versions";
 
 /**
@@ -151,10 +151,7 @@ async function readAll(filePath: string, warn: WarnFn): Promise<ApiKeysFile | Ne
     });
     return { keys: {} };
   }
-  // readJsonFile uses null for both a missing file and a file containing the
-  // valid JSON literal null. Only the former is an empty store; preserve the
-  // latter just like every other wrong root shape.
-  if (raw === null && !(await fileExists(filePath))) return { keys: {} };
+  if (raw === undefined) return { keys: {} };
   const recorded = raw !== null && typeof raw === "object" && !Array.isArray(raw)
     ? recordedFormatVersion(raw as Record<string, unknown>)
     : null;
