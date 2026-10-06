@@ -2141,49 +2141,22 @@ export function applyFrontTrimOffset(
   timestamps: MumblerCard["timestamps"],
   frontTrimOffsetSec: number,
 ): MumblerCard["timestamps"] {
-  const confirmedDate = parseConfirmedLocalTimestamp(timestamps.confirmedLocal);
-  if (confirmedDate === null) {
+  // The trim's whole seconds move the recorded instant, and the local time is
+  // read from that instant in the card's zone, so a daylight-saving change in
+  // between is counted. The tenths stay a suffix of the local time only.
+  const effectiveUtc = timestamps.confirmedUtc + Math.floor(frontTrimOffsetSec) * 1000;
+  const effective = recomputeLocalFromUtc(effectiveUtc, timestamps.timezone);
+  if (effective.error !== null) {
     return timestamps;
   }
-
-  const effectiveDate = new Date(confirmedDate.getTime() + frontTrimOffsetSec * 1000);
-  const effectiveBaseText = formatLocalDateTime(effectiveDate);
-  const effectiveUtcResult = recomputeUtcFromLocal(effectiveBaseText, timestamps.timezone);
 
   return {
     ...timestamps,
     frontTrimOffsetSec,
     effectiveLocal:
       frontTrimOffsetSec % 1 === 0
-        ? effectiveBaseText
-        : `${effectiveBaseText}.${Math.round((frontTrimOffsetSec % 1) * 10)}`,
-    effectiveUtc:
-      effectiveUtcResult.utcMs ?? timestamps.confirmedUtc,
+        ? effective.localTimestampText
+        : `${effective.localTimestampText}.${Math.round((frontTrimOffsetSec % 1) * 10)}`,
+    effectiveUtc,
   };
-}
-
-function parseConfirmedLocalTimestamp(value: string): Date | null {
-  const match =
-    /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2}) (?<hour>\d{2}):(?<minute>\d{2}):(?<second>\d{2})$/.exec(
-      value,
-    );
-
-  if (!match?.groups) {
-    return null;
-  }
-
-  return new Date(
-    Date.UTC(
-      Number(match.groups.year),
-      Number(match.groups.month) - 1,
-      Number(match.groups.day),
-      Number(match.groups.hour),
-      Number(match.groups.minute),
-      Number(match.groups.second),
-    ),
-  );
-}
-
-function formatLocalDateTime(value: Date): string {
-  return `${value.getUTCFullYear().toString().padStart(4, "0")}-${`${value.getUTCMonth() + 1}`.padStart(2, "0")}-${`${value.getUTCDate()}`.padStart(2, "0")} ${`${value.getUTCHours()}`.padStart(2, "0")}:${`${value.getUTCMinutes()}`.padStart(2, "0")}:${`${value.getUTCSeconds()}`.padStart(2, "0")}`;
 }

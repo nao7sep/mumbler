@@ -217,8 +217,17 @@ describe("applyFrontTrimOffset", () => {
     expect(result.effectiveLocal).toBe("2026-04-22 09:44:00.5");
   });
 
-  it("returns the timestamps unchanged when the confirmed local time is unparseable", () => {
-    const broken = { ...base, confirmedLocal: "not a timestamp" };
+  it("moves the recorded instant by the trim across a daylight-saving change", () => {
+    const beforeChange = buildConfirmedTimestamps("2026-03-08 01:59:50", "America/New_York", "");
+
+    const result = applyFrontTrimOffset(beforeChange, 3620);
+
+    expect(result.effectiveUtc).toBe(Date.UTC(2026, 2, 8, 8, 0, 10));
+    expect(result.effectiveLocal).toBe("2026-03-08 04:00:10");
+  });
+
+  it("returns the timestamps unchanged when the card's zone is not one", () => {
+    const broken = { ...base, timezone: "Not/AZone" };
     expect(applyFrontTrimOffset(broken, 5)).toBe(broken);
   });
 });
