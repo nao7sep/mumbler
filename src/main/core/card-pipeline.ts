@@ -539,9 +539,9 @@ function cardFailureMessage(step: CardProcessingStep): string {
     case "structured":
     case "title":
     case "slug":
-      return "AI metadata could not be generated. Existing transcript and metadata are unchanged; check the Gemini settings and try again.";
+      return "AI metadata could not be generated. Your recording is kept. Earlier generated results may have been cleared. Check the Gemini settings and try again.";
     case null:
-      return "The recording could not be processed. Existing files are unchanged; try again.";
+      return "The recording could not be processed. Your recording is kept; try again.";
   }
 }
 
