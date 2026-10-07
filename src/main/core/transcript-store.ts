@@ -3,9 +3,9 @@ import { basename, extname, join } from "node:path";
 
 import type { MumblerCard } from "@shared/app-shell";
 
-import { formatError, isMissingFileError, readJsonFile, writeJsonFile } from "./file-io";
+import { formatError, isMissingFileError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 import { FORMAT_VERSIONS } from "./format-versions";
-import { assertReadableFormat, CorruptStateError } from "./json-store";
+import { assertReadableFormat, assertResettableJson, CorruptStateError } from "./json-store";
 
 /** A card's two long text bodies, kept in the card's own file rather than in queue.json. */
 export interface CardTranscript {
@@ -69,6 +69,22 @@ export class TranscriptStore {
   private queue: Promise<void> = Promise.resolve();
 
   constructor(private readonly directory: string) {}
+
+  /** A directory reset includes text no current queue refers to. Admit all named files. */
+  async admitReset(): Promise<void> {
+    const names = await readdir(this.directory).catch((error: unknown) => {
+      if (isMissingFileError(error)) return [];
+      throw error;
+    });
+    for (const name of names) {
+      if (cardIdFrom(name) !== null) await assertResettableJson(join(this.directory, name), FORMAT_VERSIONS.transcript);
+    }
+  }
+
+  async preserveExistingFiles(): Promise<string | null> {
+    await this.admitReset();
+    return preserveAside(this.directory);
+  }
 
   /**
    * Reads the transcript of every card in `cardIds`. A file no card refers to is

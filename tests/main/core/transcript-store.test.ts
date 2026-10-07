@@ -32,6 +32,26 @@ async function files(): Promise<string[]> {
 }
 
 describe("TranscriptStore", () => {
+  it("refuses a directory reset containing unreferenced newer text", async () => {
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, `${Buffer.from("lost").toString("hex")}.json`);
+    const text = JSON.stringify({ formatVersion: 2, cardId: "lost", transcription: "future words" });
+    await writeFile(path, text);
+    const store = new TranscriptStore(dir);
+    await store.open([]);
+    await expect(store.preserveExistingFiles()).rejects.toBeInstanceOf(NewerFormatError);
+    expect(await readFile(path, "utf8")).toBe(text);
+  });
+
+  it("sets malformed transcript bytes aside on explicit reset without deleting them", async () => {
+    await mkdir(dir, { recursive: true });
+    const name = `${Buffer.from("lost").toString("hex")}.json`;
+    await writeFile(join(dir, name), "{ malformed");
+    const preserved = await new TranscriptStore(dir).preserveExistingFiles();
+    expect(preserved).not.toBeNull();
+    expect(await readFile(join(preserved!, name), "utf8")).toBe("{ malformed");
+  });
+
   it("writes a card's text once, and again only when it changes", async () => {
     const store = new TranscriptStore(dir);
     const take = card("take", "the words", "## outline");

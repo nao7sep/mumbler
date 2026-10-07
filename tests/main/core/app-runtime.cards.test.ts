@@ -1,6 +1,6 @@
 import { link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,6 +29,7 @@ const outputFaults = vi.hoisted(() => ({
 const undeletable = vi.hoisted(() => new Set<string>());
 // Paths a rename refuses to move, the way a folder held open by another program can.
 const unmovable = vi.hoisted(() => new Set<string>());
+const afterResetMove = vi.hoisted(() => ({ run: null as (() => Promise<void>) | null }));
 // Files a write cannot replace, the way a full disk refuses them: an atomic
 // write's final rename onto the file fails. A held write waits at that rename
 // until released, so a test can act while it is in flight.
@@ -59,7 +60,13 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         await held.release;
       }
       if (unwritable.refuses(String(to))) throw new Error("ENOSPC: no space left on device");
-      return actual.rename(from, to);
+      const result = await actual.rename(from, to);
+      if (basename(String(from)) === "config.json") {
+        const run = afterResetMove.run;
+        afterResetMove.run = null;
+        await run?.();
+      }
+      return result;
     },
   };
 });
@@ -245,6 +252,51 @@ afterEach(async () => {
 });
 
 describe("the durable queue store", () => {
+  it("reports completed reset moves when a later store becomes newer before its move", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
+    const path = join(home, "queue.json");
+    const newer = JSON.stringify({ formatVersion: 2, cards: [] });
+    afterResetMove.run = () => writeFile(path, newer);
+    try {
+      const snapshot = await runtime.resetState();
+      expect(snapshot.startupDiagnostic).toEqual({
+        title: { key: "diagnostic.resetTitle" },
+        message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json"], folder: home } },
+        canReset: false,
+      });
+      expect(await readFile(path, "utf8")).toBe(newer);
+      expect((await readdir(home)).filter((name) => name.endsWith(".invalid")).map((name) => name.replace(/-\d.*$/, ""))).toEqual(["config"]);
+      expect(await exists(card.sourceFilePath)).toBe(true);
+    } finally { afterResetMove.run = null; }
+  });
+
+  it.each(["config.json", "queue.json", "layout.json", "transcripts/6c6f7374.json"])(
+    "refuses reset before moving any sibling when %s is newer", async (name) => {
+      const [pending] = await dropIn("take.wav");
+      const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+      await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
+      const newerPath = join(home, name);
+      await mkdir(dirname(newerPath), { recursive: true });
+      const text = JSON.stringify({ formatVersion: 2, cardId: "lost", transcription: "future words" });
+      await writeFile(newerPath, text);
+      const storePaths = ["config.json", "queue.json", "layout.json"].map((file) => join(home, file));
+      const before = await Promise.all(storePaths.map((path) => readFile(path, "utf8").catch(() => null)));
+      const snapshot = await runtime.resetState();
+      expect(snapshot.startupDiagnostic).toEqual({
+        title: { key: "diagnostic.newerTitle" },
+        message: { key: "diagnostic.newerBody", values: { path: newerPath } },
+        canReset: false,
+      });
+      expect(await Promise.all(storePaths.map((path) => readFile(path, "utf8").catch(() => null)))).toEqual(before);
+      expect(await readFile(newerPath, "utf8")).toBe(text);
+      expect((await readdir(home)).filter((file) => file.endsWith(".invalid"))).toEqual([]);
+      expect(await exists(card.sourceFilePath)).toBe(true);
+      expect(cards(snapshot)).toHaveLength(1);
+    },
+  );
+
   it("sets queue.json aside on reset", async () => {
     const [pending] = await dropIn("take.wav");
     await runtime.confirmPendingImports([review(pending)]);

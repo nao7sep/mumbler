@@ -180,6 +180,16 @@ describe("JsonStore.load — structural edge cases", () => {
 });
 
 describe("JsonStore.preserveExistingFiles", () => {
+  it("refuses to move a newer store aside even after it was loaded", async () => {
+    const store = makeStore();
+    await store.save({ value: "old" });
+    await store.load();
+    const text = JSON.stringify({ formatVersion: 2, value: "future" });
+    await writeFile(store.path, text);
+    await expect(store.preserveExistingFiles()).rejects.toBeInstanceOf(NewerFormatError);
+    expect(await readFile(store.path, "utf8")).toBe(text);
+  });
+
   it("returns no paths and throws nothing when the file does not exist", async () => {
     const store = makeStore();
     await expect(store.preserveExistingFiles()).resolves.toEqual([]);

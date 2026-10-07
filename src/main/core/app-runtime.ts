@@ -748,6 +748,7 @@ export class ApplicationRuntime {
     const settingsStore = createLoggedSettingsStore(paths.settingsPath, this.runtime.logger);
     const queueStore = createQueueStore(paths.queuePath);
     const layoutStore = createLayoutStore(paths.layoutPath);
+    const transcriptStore = new TranscriptStore(paths.transcriptsDir);
     const settings = createDefaultSettings();
     const state = createEmptyQueue();
     const layout = createDefaultLayout();
@@ -759,6 +760,11 @@ export class ApplicationRuntime {
       return result;
     };
     try {
+      // Admit every reset-owned store before moving any sibling aside.
+      await settingsStore.admitReset();
+      await queueStore.admitReset();
+      await layoutStore.admitReset();
+      await transcriptStore.admitReset();
       await loadInterfaceCatalogue(settings.language);
       await ensureDirectories(paths, this.runtime.logger);
       // Preserve each store before the user-commanded reset returns to built-ins.
@@ -766,7 +772,7 @@ export class ApplicationRuntime {
       const preservedStateFiles = moved(paths.queuePath, await queueStore.preserveExistingFiles());
       // The preserved queue.json keeps its cards' text and recordings beside it;
       // a reset deletes no user audio.
-      const preservedTranscripts = moved(paths.transcriptsDir, await preserveAside(paths.transcriptsDir));
+      const preservedTranscripts = moved(paths.transcriptsDir, await transcriptStore.preserveExistingFiles());
       const preservedRecordings = moved(paths.workingDir, await preserveAside(paths.workingDir));
       await mkdir(paths.workingDir, { recursive: true });
       const preservedLayoutFiles = moved(paths.layoutPath, await layoutStore.preserveExistingFiles());
@@ -799,7 +805,11 @@ export class ApplicationRuntime {
       return this.getSnapshot();
     } catch (error: unknown) {
       await this.runtime.logger.error("app.reset-failed", "Reset of settings and state failed.", error, { movedAside });
-      this.runtime.startupDiagnostic = resetFailureDiagnostic(movedAside, paths.homeDir);
+      this.runtime.startupDiagnostic = error instanceof NewerFormatError
+        ? movedAside.length === 0
+          ? startupFailureDiagnostic(error)
+          : { ...resetFailureDiagnostic(movedAside, paths.homeDir), canReset: false }
+        : resetFailureDiagnostic(movedAside, paths.homeDir);
       return this.getSnapshot();
     }
   }

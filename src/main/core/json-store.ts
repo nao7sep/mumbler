@@ -29,6 +29,20 @@ export function assertReadableFormat(filePath: string, document: Record<string, 
   }
 }
 
+/** Explicit reset may set corrupt bytes aside, but never a readable newer store. */
+export async function assertResettableJson(filePath: string, supported: number): Promise<void> {
+  let document: unknown;
+  try {
+    document = await readJsonFile<unknown>(filePath);
+  } catch (error: unknown) {
+    if (error instanceof Error && error.cause instanceof SyntaxError) return;
+    throw error;
+  }
+  if (document === null || typeof document !== "object" || Array.isArray(document)) return;
+  const recorded = recordedFormatVersion(document as Record<string, unknown>);
+  if (recorded !== null && recorded > supported) throw new NewerFormatError(filePath, recorded, supported);
+}
+
 export interface JsonStoreOptions<T> {
   /** Absolute path to the canonical file (e.g. ~/.mumbler/queue.json). */
   path: string;
@@ -179,7 +193,12 @@ export class JsonStore<T extends object> {
   //
   // Call before save(): it does not go through the write queue, and is meant to
   // run on a fresh store with no writes in flight (as Reset does).
+  async admitReset(): Promise<void> {
+    await assertResettableJson(this.options.path, this.options.formatVersion);
+  }
+
   async preserveExistingFiles(): Promise<string[]> {
+    await this.admitReset();
     const movedTo = await preserveAside(this.options.path);
     return movedTo !== null ? [movedTo] : [];
   }

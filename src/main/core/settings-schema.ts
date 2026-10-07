@@ -603,6 +603,7 @@ export class SettingsStore {
   get failedWrite(): object | null { return this.store.failedWrite; }
   retryFailedWrite(): Promise<void> { return this.store.retryFailedWrite(); }
   flush(): Promise<void> { return this.store.flush(); }
+  admitReset(): Promise<void> { return this.store.admitReset(); }
   preserveExistingFiles(): Promise<string[]> { return this.store.preserveExistingFiles(); }
 }
 
@@ -651,6 +652,7 @@ export class QueueStore {
   }
 
   flush(): Promise<void> { return this.store.flush(); }
+  admitReset(): Promise<void> { return this.store.admitReset(); }
   preserveExistingFiles(): Promise<string[]> { return this.store.preserveExistingFiles(); }
 }
 
