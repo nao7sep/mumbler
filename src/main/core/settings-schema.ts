@@ -483,8 +483,8 @@ export function recoverInterruptedCards(
   let restoredSavingCards = 0;
 
   const cards = state.cards.map((card) => {
-    // A save that did not finish published nothing it kept (its output is staged
-    // and rolled back), so the card is simply ready to save again.
+    // An interrupted save may have published some outputs. Retain the card as
+    // ready so the user can inspect those files and retry.
     if (card.status === "Saving") {
       restoredSavingCards += 1;
       return { ...card, status: "Ready to Save" as const };

@@ -808,6 +808,42 @@ describe("working with a card", () => {
     expect(await exists(card.sourceFilePath), "the working audio is gone").toBe(false);
   });
 
+  it("preserves the primary save rejection when persisting its ready state also fails", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    const store = (runtime as unknown as { runtime: { queueStore: { save(value: unknown): Promise<void> } } }).runtime.queueStore;
+    const primary = new Error("saving claim refused");
+    vi.spyOn(store, "save").mockRejectedValueOnce(primary).mockRejectedValueOnce(new Error("ready settlement refused"));
+    await expect(runtime.saveCard(card.id)).rejects.toBe(primary);
+    expect(cards(runtime.getSnapshot())[0].status).toBe("Ready to Save");
+    expect(await exists(card.sourceFilePath)).toBe(true);
+    await runtime.shutdown();
+    expect((await createQueueStore(join(home, "queue.json")).load()).value.cards[0].status).toBe("Ready to Save");
+  });
+
+  it("returns the partial publication result when persisting its ready state also fails", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    const store = (runtime as unknown as { runtime: { queueStore: { save(value: unknown): Promise<void> } } }).runtime.queueStore;
+    const save = store.save.bind(store);
+    let calls = 0;
+    vi.spyOn(store, "save").mockImplementation((value) => ++calls === 2
+      ? Promise.reject(new Error("ready settlement refused")) : save(value));
+    const ready = cards(runtime.getSnapshot())[0];
+    const stem = `${formatUtcMarker(new Date(ready.timestamps.effectiveUtc))}-old-title`;
+    outputFaults.failTarget = join(home, "output", `${stem}.md`);
+    const result = await runtime.saveCard(card.id, "overwrite");
+    expect(result.kind).toBe("failed");
+    if (result.kind === "failed") {
+      expect(result.message.key).toBe("error.saveIncomplete");
+      expect(result.files?.map((file) => file.status)).toEqual(["saved", "saved", "failed"]);
+    }
+    expect(cards(result.snapshot)[0]).toMatchObject({ status: "Ready to Save", metadata: { title: "Old title" } });
+    expect(await exists(card.sourceFilePath)).toBe(true);
+    await runtime.shutdown();
+    expect((await createQueueStore(join(home, "queue.json")).load()).value.cards[0].status).toBe("Ready to Save");
+  });
+
   it("keeps a file that took the save's name after its conflict check", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);

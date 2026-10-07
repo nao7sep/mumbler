@@ -219,8 +219,8 @@ export class ApplicationRuntime {
   // Card producers must be reached before quit snapshots the store tails: a
   // copy, deletion, trim analysis or key lookup can create its first write after an await.
   private readonly activeCardChanges = new Set<Promise<unknown>>();
-  // In-flight saves, so shutdown can cancel each one and wait for it to roll
-  // back (or finish publishing) before the stores are flushed.
+  // In-flight saves, so shutdown can cancel each one and await its completed
+  // publication attempt before the stores are flushed.
   private readonly activeSaves = new Map<AbortController, Promise<unknown>>();
   // Cards whose trim markers are being analyzed, with the number of the latest
   // request. A card listed here is busy for every other mutation (save,
@@ -1673,7 +1673,10 @@ export class ApplicationRuntime {
     } finally {
       if (outcome?.kind !== "saved") {
         card.status = "Ready to Save";
-        await this.persistState();
+        await this.persistState().catch((error: unknown) =>
+          this.runtime.logger.error("card.save-settlement-failed", "Could not persist the recording's ready state after saving stopped.", error, {
+            cardId: card.id,
+          }).catch(() => undefined));
       }
     }
     // Publication is the commit point: once the files are out, the save has
