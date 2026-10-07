@@ -39,9 +39,9 @@ export interface PipelineHooks {
 }
 
 // A run removed from the coordinator's bookkeeping by cancel. The caller aborts
-// and frees it *after* persisting the cancelled card, mirroring the detach →
-// persist → abort order that keeps an orphaned pipeline from ever touching a
-// replacement's slot.
+// and frees it after attempting to persist the cancelled card. Detaching first
+// keeps an orphaned pipeline from touching a replacement's slot, even when that
+// persistence attempt fails.
 export interface DetachedRun {
   abortAndRelease(): Promise<void>;
 }
@@ -65,7 +65,9 @@ export class PipelineCoordinator {
   private readonly activeRuns = new Map<string, ActivePipelineRun>();
   // In-flight pipeline promises, so shutdown can await them after aborting.
   private readonly activePipelines = new Set<Promise<void>>();
+  private readonly pendingStarts = new Set<Promise<void>>();
   private shuttingDown = false;
+  private shutdownRequest = 0;
 
   constructor(
     private readonly runtime: PipelineRuntimeView,
@@ -102,11 +104,27 @@ export class PipelineCoordinator {
     };
   }
 
-  async startOrEnqueue(
+  startOrEnqueue(
     cardId: string,
     mode: PipelineMode,
     requestedStartStep?: PipelineStartStep,
   ): Promise<void> {
+    if (this.shuttingDown) return Promise.reject(new OperationError("Mumbler is closing; new processing cannot start."));
+    const start = this.claimAndStart(cardId, mode, requestedStartStep);
+    this.pendingStarts.add(start);
+    void start.then(
+      () => this.pendingStarts.delete(start),
+      () => this.pendingStarts.delete(start),
+    );
+    return start;
+  }
+
+  private async claimAndStart(
+    cardId: string,
+    mode: PipelineMode,
+    requestedStartStep?: PipelineStartStep,
+  ): Promise<void> {
+    const shutdownRequest = this.shutdownRequest;
     const state = this.runtime.state!;
     const settings = this.runtime.settings!;
     const card = state.cards.find((entry) => entry.id === cardId);
@@ -125,12 +143,58 @@ export class PipelineCoordinator {
     const slotAvailable = this.transcriptionSlots.inUse < settings.concurrencyLimit;
 
     if (!needsTranscriptionSlot || slotAvailable) {
+      const previous = {
+        status: card.status,
+        activeStep: card.activeStep,
+        queuedMode: card.queuedMode,
+        queuedAtUtc: card.queuedAtUtc,
+      };
       const slot = needsTranscriptionSlot ? this.transcriptionSlots.acquire() : null;
       card.status = startStep === "transcription" ? "Transcribing" : "Generating Metadata";
       card.activeStep = startStep;
       card.queuedMode = null;
       card.queuedAtUtc = null;
-      await this.hooks.persistState();
+      const ownsClaim = (): boolean => state.cards.includes(card)
+        && card.status === (startStep === "transcription" ? "Transcribing" : "Generating Metadata")
+        && card.activeStep === startStep
+        && card.queuedMode === null
+        && card.queuedAtUtc === null;
+      try {
+        await this.hooks.persistState();
+      } catch (error: unknown) {
+        let restored = false;
+        if (ownsClaim()) {
+          Object.assign(card, previous);
+          restored = true;
+        }
+        await this.releaseSlotAndDrain(slot);
+        if (restored) {
+          try {
+            await this.hooks.persistState();
+          } catch (recoveryError: unknown) {
+            await this.runtime.logger.error(
+              "pipeline.prestart-recovery-failed",
+              "Failed to save the settled card after prestart failed.",
+              recoveryError,
+              { cardId, startStep },
+            );
+          }
+        }
+        throw error;
+      }
+      if (this.shuttingDown || shutdownRequest !== this.shutdownRequest || !ownsClaim()) {
+        try {
+          if (ownsClaim()) {
+            card.status = "Cancelled";
+            card.activeStep = null;
+            card.lastError = null;
+            await this.hooks.persistState();
+          }
+        } finally {
+          await this.releaseSlotAndDrain(slot);
+        }
+        return;
+      }
       this.spawnCardPipeline(cardId, startStep, mode, slot);
       return;
     }
@@ -168,6 +232,20 @@ export class PipelineCoordinator {
     // string is passed when nothing resolves; the pipeline's own guard rejects it.
     const pipeline = (async () => {
       const apiKey = (await this.hooks.resolveApiKey()) ?? "";
+      if (controller.signal.aborted) {
+        // Cancellation during the key lookup precedes the pipeline's own
+        // cancellation handler. Only this still-current run may settle its card.
+        const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
+        if (this.activeRuns.get(cardId) === run && card !== undefined) {
+          card.status = "Cancelled";
+          card.activeStep = null;
+          card.queuedMode = null;
+          card.queuedAtUtc = null;
+          card.lastError = null;
+          await this.hooks.persistState();
+        }
+        return;
+      }
       const ctx: CardPipelineContext = {
         state: this.runtime.state!,
         settings: this.runtime.settings!,
@@ -188,9 +266,7 @@ export class PipelineCoordinator {
           { cardId, mode, startStep },
         );
       })
-      .finally(() => {
-        void this.finalizeCardPipeline(cardId, run);
-      });
+      .finally(() => this.finalizeCardPipeline(cardId, run));
 
     // Track the chain so shutdown() can await it after aborting.
     this.activePipelines.add(pipeline);
@@ -268,10 +344,11 @@ export class PipelineCoordinator {
   // stores, so the canonical files are current before the process exits.
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    this.shutdownRequest += 1;
     for (const run of this.activeRuns.values()) {
       run.controller.abort();
     }
-    await Promise.allSettled([...this.activePipelines]);
+    await Promise.allSettled([...this.pendingStarts, ...this.activePipelines]);
   }
 
   // A quit the user cancelled: admit queued cards again.

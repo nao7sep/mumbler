@@ -194,6 +194,7 @@ export class ApplicationRuntime {
   // Set while a quit saves and closes; a cancelled quit clears it again.
   private closing = false;
   private quitSave: Promise<QuitSaveFailure[]> | null = null;
+  private quitAttempt = 0;
   // The settings write that had failed before this quit began, if any: that
   // failure was reported where the change was made, so only a later one is the
   // quit's to retry. Undefined while no quit is under way.
@@ -202,6 +203,8 @@ export class ApplicationRuntime {
   // Whether queue.json may be behind the queue the app holds: set when a
   // persist fails, cleared when one lands.
   private queueBehind = false;
+  private persistenceRequest = 0;
+  private persistenceTail: Promise<void> = Promise.resolve();
   private onPipelineProgressCallback: (() => void) | null = null;
   private onLanguageChangedCallback: (() => void) | null = null;
   private onDependenciesChangedCallback: (() => void) | null = null;
@@ -209,6 +212,9 @@ export class ApplicationRuntime {
   // imports. Keep copy -> pending state -> persistence, and settling a review,
   // ordered here; renderer disabling is presentation and cannot own data safety.
   private importTail: Promise<void> = Promise.resolve();
+  // Card producers must be reached before quit snapshots the store tails: a
+  // copy, deletion, trim analysis or key lookup can create its first write after an await.
+  private readonly activeCardChanges = new Set<Promise<unknown>>();
   // In-flight saves, so shutdown can cancel each one and wait for it to roll
   // back (or finish publishing) before the stores are flushed.
   private readonly activeSaves = new Map<AbortController, Promise<unknown>>();
@@ -898,6 +904,7 @@ export class ApplicationRuntime {
     // A backup or deletion of the original that did not happen is a warning on
     // the confirmed import, never its failure (error-handling-conventions).
     const originalWarnings: ImportOriginalWarning[] = [];
+    const originalsToDelete: string[] = [];
 
     for (const { pendingImport, merged, timestamps } of reviewed) {
       let probed: Awaited<ReturnType<typeof probeAudioProfile>>;
@@ -996,15 +1003,7 @@ export class ApplicationRuntime {
             { originalSourcePath: pendingImport.originalSourcePath },
           );
         } else {
-          try {
-            await deleteImportedSource(pendingImport.originalSourcePath);
-          } catch (error: unknown) {
-            originalWarnings.push({ sourcePath: file, message: message("import.deleteFailed", { file }) });
-            await this.runtime.logger.warn("import.delete-original", "Failed to delete original after confirm.", {
-              originalSourcePath: pendingImport.originalSourcePath,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
+          originalsToDelete.push(pendingImport.originalSourcePath);
         }
       }
     }
@@ -1016,8 +1015,25 @@ export class ApplicationRuntime {
     );
 
     await this.persistState();
+    for (const file of originalsToDelete) {
+      try {
+        await deleteImportedSource(file);
+      } catch (error: unknown) {
+        originalWarnings.push({ sourcePath: file, message: message("import.deleteFailed", { file }) });
+        await this.runtime.logger.warn("import.delete-original", "Failed to delete original after confirm.", {
+          originalSourcePath: file,
+          error: serializeError(error),
+        });
+      }
+    }
     if (cardsToAdd.length > 0) {
-      await this.persistSelectedCard(cardsToAdd[0].id);
+      try {
+        await this.persistSelectedCard(cardsToAdd[0].id);
+      } catch (error: unknown) {
+        await this.runtime.logger.warn("import.select-card", "Import committed, but selection was not saved.", {
+          error: serializeError(error),
+        });
+      }
     }
     await this.runtime.logger.info(
       "import.confirm-review",
@@ -1073,7 +1089,11 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  async duplicateCard(cardId: string): Promise<AppSnapshot> {
+  duplicateCard(cardId: string): Promise<AppSnapshot> {
+    return this.runCardChange(() => this.duplicateCardFromWorking(cardId));
+  }
+
+  private async duplicateCardFromWorking(cardId: string): Promise<AppSnapshot> {
     this.ensureReady();
     const state = this.runtime.state!;
     const paths = this.runtime.paths!;
@@ -1103,7 +1123,11 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  async updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot> {
+  updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot> {
+    return this.runCardChange(() => this.analyzeAndApplyCardTrim(cardId, trim));
+  }
+
+  private async analyzeAndApplyCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot> {
     this.ensureReady();
     const card = this.requireCard(cardId, "Card to update does not exist.");
     // Not requireIdleCard: a trim still analyzing is superseded by this one
@@ -1201,7 +1225,12 @@ export class ApplicationRuntime {
     return card?.sourceFilePath ?? null;
   }
 
-  async generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
+  generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
+    return this.runCardChange(() => this.generateCardFromStep(cardId, target));
+  }
+
+  private async generateCardFromStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
+    const quitAttempt = this.quitAttempt;
     this.ensureReady();
     this.requireCard(cardId, "Card to generate does not exist.");
 
@@ -1211,6 +1240,10 @@ export class ApplicationRuntime {
       throw new OperationError("Gemini API key is not configured.");
     }
 
+    this.ensureAcceptingWork();
+    if (quitAttempt !== this.quitAttempt) {
+      throw new OperationError("Processing was stopped while Mumbler was closing.");
+    }
     const card = this.requireIdleCard(cardId, {
       missing: "Card to generate does not exist.",
       busy: "This card is already being processed.",
@@ -1271,14 +1304,14 @@ export class ApplicationRuntime {
     };
 
     // Detach the run so its later unwind can't touch a replacement's bookkeeping,
-    // then (after persisting the cancelled card) abort it and free its slot
-    // immediately so the user can generate again at once.
+    // then abort it and free its slot even when saving the cancelled card fails,
+    // so the user can generate again at once.
     const detached = this.pipeline.detachRun(cardId);
 
-    await this.persistState();
-
-    if (detached !== null) {
-      await detached.abortAndRelease();
+    try {
+      await this.persistState();
+    } finally {
+      await detached?.abortAndRelease();
     }
 
     await this.runtime.logger.info("pipeline.cancel-immediate", "Immediately detached and cancelled card pipeline.", {
@@ -1455,13 +1488,16 @@ export class ApplicationRuntime {
   // holds, and a settings write that failed during the quit. Returns what could
   // not be saved; a call while one runs shares it.
   saveForQuit(): Promise<QuitSaveFailure[]> {
-    this.quitSave ??= this.runQuitSave().finally(() => {
-      this.quitSave = null;
+    if (this.quitSave !== null) return this.quitSave;
+    const attempt = ++this.quitAttempt;
+    const save = this.runQuitSave(attempt).finally(() => {
+      if (this.quitSave === save) this.quitSave = null;
     });
-    return this.quitSave;
+    this.quitSave = save;
+    return save;
   }
 
-  private async runQuitSave(): Promise<QuitSaveFailure[]> {
+  private async runQuitSave(attemptId: number): Promise<QuitSaveFailure[]> {
     const { queueStore, transcriptStore, settingsStore, logger } = this.runtime;
     if (this.settingsFailureBeforeQuit === undefined) {
       this.settingsFailureBeforeQuit = settingsStore?.failedWrite ?? null;
@@ -1473,37 +1509,52 @@ export class ApplicationRuntime {
     await Promise.all([
       Promise.allSettled([...this.activeSaves.values()]),
       this.pipeline.shutdown(),
+      this.importTail,
+      Promise.allSettled([...this.activeCardChanges]),
     ]);
+    if (attemptId !== this.quitAttempt) return [];
+    await this.persistenceTail;
     await queueStore?.flush();
     await transcriptStore?.flush();
     await settingsStore?.flush();
     await this.runtime.layoutStore?.flush();
+    if (attemptId !== this.quitAttempt) return [];
 
     const failures: QuitSaveFailure[] = [];
-    const attempt = async (store: QuitSaveFailure, write: () => Promise<unknown>): Promise<void> => {
+    const attempt = async (store: QuitSaveFailure, write: () => Promise<unknown>): Promise<boolean> => {
       try {
         await write();
+        return true;
       } catch (error: unknown) {
         failures.push(store);
         await logger.error("quit.save-failed", "Could not save before quitting.", error, { store });
+        return false;
       }
     };
     const state = this.runtime.state;
     if (state !== null && queueStore !== null && transcriptStore !== null) {
-      // Writes only the text that differs from its file.
-      await attempt("transcripts", () => transcriptStore.writeChanged(state.cards));
-      if (this.queueBehind) {
-        await attempt("queue", () => queueStore.save(state));
-      }
-      if (failures.length === 0) {
-        this.queueBehind = false;
-        // Cleanup of removed cards' files, not the user's work: logged only.
-        await transcriptStore.removeAbsent(state.cards).catch((error: unknown) =>
-          logger.warn("quit.transcript-cleanup-failed", "Could not delete a removed card's text file.", {
-            error: serializeError(error),
-          }));
-      }
+      const snapshot = structuredClone(state);
+      const request = ++this.persistenceRequest;
+      const saveQueue = this.queueBehind;
+      await this.enqueuePersistence(async () => {
+        if (attemptId !== this.quitAttempt) return;
+        const transcriptsSaved = await attempt("transcripts", () => transcriptStore.writeChanged(snapshot.cards));
+        if (transcriptsSaved && saveQueue) {
+          await attempt("queue", () => queueStore.save(snapshot));
+        }
+        if (failures.length === 0) {
+          this.queueBehind = request !== this.persistenceRequest;
+          // Cleanup of removed cards' files, not the user's work: logged only.
+          await transcriptStore.removeAbsent(snapshot.cards).catch((error: unknown) =>
+            logger.warn("quit.transcript-cleanup-failed", "Could not delete a removed card's text file.", {
+              error: serializeError(error),
+            }));
+        } else {
+          this.queueBehind = true;
+        }
+      });
     }
+    if (attemptId !== this.quitAttempt) return failures;
     const settingsFailure = settingsStore?.failedWrite ?? null;
     if (settingsStore && settingsFailure !== null && settingsFailure !== this.settingsFailureBeforeQuit) {
       await attempt("settings", () => settingsStore.retryFailedWrite());
@@ -1514,6 +1565,10 @@ export class ApplicationRuntime {
   // The user cancelled the quit: the app takes work again. Runs a quit stopped
   // stay Cancelled, for the user to start again.
   async resumeAfterCancelledQuit(): Promise<void> {
+    // Already admitted producers and physical writes remain owned, but a later
+    // quit gets its own drain and a cancelled pass cannot publish a final snapshot.
+    this.quitAttempt += 1;
+    this.quitSave = null;
     this.closing = false;
     this.settingsFailureBeforeQuit = undefined;
     await this.runtime.logger.info("quit.cancelled", "Quit cancelled; Mumbler keeps running.");
@@ -1729,7 +1784,11 @@ export class ApplicationRuntime {
     }
   }
 
-  async removeCard(cardId: string): Promise<AppSnapshot> {
+  removeCard(cardId: string): Promise<AppSnapshot> {
+    return this.runCardChange(() => this.removeCardWorkingAudio(cardId));
+  }
+
+  private async removeCardWorkingAudio(cardId: string): Promise<AppSnapshot> {
     this.ensureReady();
     const state = this.runtime.state!;
     // requireIdleCard also refuses a "Queued" card: its working audio is one
@@ -1774,9 +1833,26 @@ export class ApplicationRuntime {
 
   // Runs one import-boundary operation after every earlier one has settled.
   private runImportExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    try { this.ensureAcceptingWork(); } catch (error: unknown) { return Promise.reject(error); }
     const run = this.importTail.then(operation);
     this.importTail = run.then(() => undefined, () => undefined);
     return run;
+  }
+
+  private runCardChange(operation: () => Promise<AppSnapshot>): Promise<AppSnapshot> {
+    try { this.ensureAcceptingWork(); } catch (error: unknown) { return Promise.reject(error); }
+    const run = operation();
+    this.activeCardChanges.add(run);
+    void run.then(
+      () => this.activeCardChanges.delete(run),
+      () => this.activeCardChanges.delete(run),
+    );
+    return run;
+  }
+
+  private ensureAcceptingWork(): void {
+    this.ensureReady();
+    if (this.closing) throw new OperationError("Mumbler is closing; new work cannot start.");
   }
 
   private async importPathsExclusive(
@@ -1932,35 +2008,57 @@ export class ApplicationRuntime {
     return card;
   }
 
+  private enqueuePersistence(work: () => Promise<void>): Promise<void> {
+    const run = this.persistenceTail.then(work);
+    this.persistenceTail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
   // The live state object is never replaced here: handlers and pipelines hold
   // `this.runtime.state` (and its cards) across awaits and mutate it afterwards,
   // so swapping in a copy would detach their later writes from what is saved.
   private async persistState(): Promise<void> {
-    const state = this.runtime.state!;
-    const cards = state.cards;
-    // Text reaches its own file before queue.json stops needing it, and a file
-    // is deleted only after queue.json no longer refers to it. Each store
-    // serializes its writes, so overlapping persistState calls never interleave
-    // on disk, and unchanged text is not written again.
-    try {
-      await this.runtime.transcriptStore!.writeChanged(cards);
-      await this.runtime.queueStore!.save(state);
-    } catch (error: unknown) {
-      this.queueBehind = true;
-      throw error;
-    }
-    this.queueBehind = false;
-    await this.runtime.transcriptStore!.removeAbsent(cards);
+    const snapshot = structuredClone(this.runtime.state!);
+    const request = ++this.persistenceRequest;
+    this.queueBehind = true;
+    await this.enqueuePersistence(async () => {
+      try {
+        await this.runtime.transcriptStore!.writeChanged(snapshot.cards);
+        await this.runtime.queueStore!.save(snapshot);
+      } catch (error: unknown) {
+        this.queueBehind = true;
+        throw error;
+      }
+      this.queueBehind = request !== this.persistenceRequest;
+      // Error-handling-conventions: secondary failures cannot deny the queue commit.
+      try {
+        await this.runtime.transcriptStore!.removeAbsent(snapshot.cards);
+      } catch (error: unknown) {
+        await this.runtime.logger.warn("queue.cleanup-transcripts", "Queue committed, but transcript cleanup failed.", {
+          error: serializeError(error),
+        });
+      }
+    });
     const selectedCardId = selectExistingCardId(
-      state.cards.map((card) => card.id),
+      this.runtime.state!.cards.map((card) => card.id),
       this.runtime.layout?.selectedCardId ?? null,
     );
     if (selectedCardId !== (this.runtime.layout?.selectedCardId ?? null)) {
-      await this.persistSelectedCard(selectedCardId);
+      try {
+        await this.persistSelectedCard(selectedCardId);
+      } catch (error: unknown) {
+        await this.runtime.logger.warn("queue.select-card", "Queue committed, but selection was not saved.", {
+          error: serializeError(error),
+        });
+      }
     }
 
-    if (this.onPipelineProgressCallback !== null) {
-      this.onPipelineProgressCallback();
+    try {
+      this.onPipelineProgressCallback?.();
+    } catch (error: unknown) {
+      await this.runtime.logger.warn("queue.progress", "Queue committed, but progress notification failed.", {
+        error: serializeError(error),
+      });
     }
   }
 
