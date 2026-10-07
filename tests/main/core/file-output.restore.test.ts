@@ -7,37 +7,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // finalizeOutputsAtomically's module imports electron; stub it so the module loads.
 vi.mock("electron", () => ({ app: { getVersion: () => "9.9.9-test" } }));
 
-const { capturedRenames, linkRefusal } = vi.hoisted(() => ({
-  capturedRenames: [] as Array<{ source: string; destination: string }>,
+const { capturedPublications, linkRefusal } = vi.hoisted(() => ({
+  capturedPublications: [] as Array<{ source: string; destination: string }>,
   // When set, link() fails with this code, the way a filesystem without hard
   // links (FAT, exFAT) refuses it.
   linkRefusal: { code: null as string | null },
 }));
 
-// Inject exactly one rename failure: the markdown finalize step, identified as a
-// ".tmp" source renamed onto the final ".md" path. Every other fs operation —
-// including the backup renames (dest ends ".bak") and the restore renames
-// (source ".bak", dest ".md") — runs for real, so the restore-from-backup branch
-// executes end to end. The whole node:fs/promises module is spread through
-// unchanged apart from this single wrapped function. Every rename call is also
-// recorded (source, destination), so the derived-filename shapes can be pinned
-// below without any further production-code hooks.
+// Fail the Markdown exclusive publication after earlier outputs committed.
+// Backup/restore links and all other file operations run against real files.
+// Capture link paths to verify each staged/backup name is distinct.
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
     link: (existing: string, created: string) => {
+      capturedPublications.push({ source: existing, destination: created });
+      if (linkRefusal.code === null && existing.endsWith(".tmp") && created.endsWith(".md")) {
+        return Promise.reject(new Error("injected publication failure"));
+      }
       if (linkRefusal.code !== null) {
         return Promise.reject(Object.assign(new Error(`link refused: ${linkRefusal.code}`), { code: linkRefusal.code }));
       }
       return actual.link(existing, created);
-    },
-    rename: (source: string, destination: string) => {
-      capturedRenames.push({ source: String(source), destination: String(destination) });
-      if (String(source).includes(".tmp") && String(destination).endsWith(".md")) {
-        return Promise.reject(new Error("injected rename failure"));
-      }
-      return actual.rename(source, destination);
     },
   };
 });
@@ -51,7 +43,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "mumbler-restore-"));
   sourceAudio = join(dir, "source.m4a");
   await writeFile(sourceAudio, "AUDIO-BYTES");
-  capturedRenames.length = 0;
+  capturedPublications.length = 0;
   linkRefusal.code = null;
 });
 
@@ -60,7 +52,7 @@ afterEach(async () => {
 });
 
 describe("finalizeOutputsAtomically — restore from backup on failure", () => {
-  it("restores the overwritten originals when a later rename fails mid-commit", async () => {
+  it("restores the overwritten originals when a later publication fails mid-commit", async () => {
     const targets = {
       audioPath: join(dir, "out.m4a"),
       jsonPath: join(dir, "out.json"),
@@ -94,8 +86,8 @@ describe("finalizeOutputsAtomically — restore from backup on failure", () => {
     // Pin the new derived-filename grammar: audio/json/markdown all share one
     // stem ("out"), so each temp/backup name must draw its own nanoid — never a
     // token shared across the three — or they would collide on disk.
-    const tempSources = capturedRenames.map((r) => r.source).filter((p) => p.endsWith(".tmp"));
-    const backupDestinations = capturedRenames
+    const tempSources = capturedPublications.map((r) => r.source).filter((p) => p.endsWith(".tmp"));
+    const backupDestinations = capturedPublications
       .map((r) => r.destination)
       .filter((p) => p.endsWith(".bak"));
     expect(tempSources.length).toBeGreaterThanOrEqual(3);
@@ -123,6 +115,20 @@ describe("finalizeOutputsAtomically — a filesystem without hard links", () => 
       markdownPath: join(dir, "out.md"),
     };
   }
+
+  it("replaces existing outputs with exclusive streamed backups on a filesystem without links", async () => {
+    linkRefusal.code = "ENOTSUP";
+    const t = targets();
+    await writeFile(t.audioPath, "OLD-AUDIO");
+    await writeFile(t.jsonPath, "OLD-JSON");
+    await writeFile(t.markdownPath, "OLD-MD");
+    const result = await finalizeOutputsAtomically({ sourceAudioPath: sourceAudio, targets: t,
+      overwrite: true, jsonContent: "NEW-JSON", markdownContent: "NEW-MD" });
+    expect(result.warnings).toEqual([]);
+    expect(await readFile(t.audioPath, "utf8")).toBe("AUDIO-BYTES");
+    expect(await readFile(t.jsonPath, "utf8")).toBe("NEW-JSON");
+    expect((await readdir(dir)).filter((name) => /\.(bak|tmp)$/.test(name))).toEqual([]);
+  });
 
   it("still publishes a new save, by exclusive copy that keeps the recording's modified time", async () => {
     linkRefusal.code = "ENOTSUP";

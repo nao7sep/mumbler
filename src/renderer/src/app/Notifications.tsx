@@ -13,7 +13,7 @@ export type AppNotification =
       owner: string;
       message: Message;
       kind: "persistent";
-      variant: "info" | "error";
+      variant: "info" | "warning" | "error";
     };
 
 export type PersistentNotification = Extract<AppNotification, { kind: "persistent" }>;

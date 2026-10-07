@@ -572,6 +572,12 @@ export type SaveCardResult =
       audioPath: string;
       jsonPath: string;
       markdownPath: string;
+      warnings?: Message[];
+    }
+  | {
+      kind: "failed";
+      snapshot: AppSnapshot;
+      message: Message;
     }
   | {
       kind: "conflict";

@@ -1,21 +1,19 @@
-import { constants as fsConstants } from "node:fs";
-import { chmod, copyFile, link, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { createReadStream, type Stats } from "node:fs";
+import { link, mkdir, open, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { nanoid } from "nanoid";
 
 import type { MumblerCard } from "@shared/app-shell";
 import { formatUtcIsoCompact } from "@shared/timestamps";
-import { CancelledError, isCancelledError } from "./cancellation";
+import { CancelledError, isCancelledError, isNodeAbortError } from "./cancellation";
 import {
   fileExists,
   formatError,
   keepReplacedMode,
-  keepSourceTimesAndMode,
   sameFileBytes,
   syncDirectory,
-  syncFile,
 } from "./file-io";
-import { FORMAT_VERSIONS } from "./format-versions";
+import { FORMAT_VERSIONS, NewerFormatError, recordedFormatVersion } from "./format-versions";
 
 // A save that must not overwrite found one of its targets already taken when
 // it came to publish: someone wrote that name after the conflict check.
@@ -36,33 +34,131 @@ function errorCode(error: unknown): string | undefined {
     : undefined;
 }
 
-// Publishes a staged file under a name only if that name is still free. link()
-// creates the name atomically and fails on an existing one; the staged copy is
-// then dropped. Where the filesystem has no hard links, an exclusive copy keeps
-// the refusal to replace, at the cost of the copy not being atomic.
-async function publishExclusive(tempPath: string, targetPath: string): Promise<void> {
+export interface OutputCleanupIssue {
+  operation: string;
+  path: string;
+  error: unknown;
+}
+
+// The primary failure is retained alongside every failed rollback/cleanup step.
+// Paths are diagnostic/recovery data, never arbitrary exception text for the UI.
+export class OutputPartialFailureError extends AggregateError {
+  constructor(readonly primary: unknown, readonly issues: OutputCleanupIssue[]) {
+    super([primary, ...issues.map((issue) => issue.error)], "Output save did not finish restoring or cleaning up.", { cause: primary });
+    this.name = "OutputPartialFailureError";
+  }
+}
+
+type OwnedFile = { path: string; identity: Stats | null };
+
+function sameFileState(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
+    left.mtimeMs === right.mtimeMs && left.mode === right.mode;
+}
+
+function sameIdentity(left: Stats, right: Stats): boolean {
+  return sameFileState(left, right) && left.ctimeMs === right.ctimeMs;
+}
+
+async function observedFile(path: string): Promise<Stats | null> {
+  try { return await stat(path); }
+  catch (error) { if (errorCode(error) === "ENOENT") return null; throw error; }
+}
+
+async function removeOwned(file: OwnedFile): Promise<void> {
+  const current = await observedFile(file.path);
+  if (current === null) return;
+  if (file.identity === null || !sameIdentity(current, file.identity)) throw new OutputConflictError(file.path);
+  await rm(file.path);
+}
+
+// Publishing/removing a hard link changes the staged inode's ctime. All other
+// observed fields must still match before this owner cleans up its stage.
+async function removeStage(file: OwnedFile): Promise<void> {
+  const current = await observedFile(file.path);
+  if (current === null) return;
+  if (file.identity === null || !sameFileState(current, file.identity)) throw new OutputConflictError(file.path);
+  await removeOwned({ path: file.path, identity: current });
+}
+
+// The descriptor owns an exclusive creation even if writing or syncing fails.
+// Audio is streamed; no complete recording is buffered on the main process.
+async function copyExclusive(source: string, destination: string, owned: (file: OwnedFile) => void,
+  signal?: AbortSignal, expectedSource?: Stats): Promise<void> {
+  if (expectedSource !== undefined && !sameIdentity(await stat(source), expectedSource)) throw new OutputConflictError(source);
+  if (signal?.aborted) throw new CancelledError("Save cancelled.");
+  const handle = await open(destination, "wx", 0o600);
+  owned({ path: destination, identity: null });
+  const stream = createReadStream(source, { signal });
+  // The iterator still rejects; this listener owns an early abort emission
+  // before writeFile has attached its iterator.
+  stream.on("error", () => undefined);
+  const failures: unknown[] = [];
   try {
-    await link(tempPath, targetPath);
-  } catch (error: unknown) {
-    const code = errorCode(error);
-    if (code === "EEXIST") {
-      throw new OutputConflictError(targetPath);
-    }
-    if (code === undefined || !HARD_LINK_UNSUPPORTED_CODES.has(code)) {
-      throw error;
-    }
-    try {
-      await copyFile(tempPath, targetPath, fsConstants.COPYFILE_EXCL);
-    } catch (copyError: unknown) {
-      if (errorCode(copyError) === "EEXIST") {
-        throw new OutputConflictError(targetPath);
-      }
-      await rm(targetPath, { force: true }).catch(() => undefined);
+    owned({ path: destination, identity: await handle.stat() });
+    await handle.writeFile(stream);
+    const sourceInfo = await stat(source);
+    if (expectedSource !== undefined && !sameIdentity(sourceInfo, expectedSource)) throw new OutputConflictError(source);
+    await handle.utimes(sourceInfo.atime, sourceInfo.mtime);
+    await handle.chmod(sourceInfo.mode);
+    await handle.sync();
+  } catch (error) { failures.push(error); }
+  finally {
+    stream.destroy();
+    try { owned({ path: destination, identity: await handle.stat() }); }
+    catch (error) { failures.push(error); }
+    try { await handle.close(); }
+    catch (error) { failures.push(error); }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "Exclusive output copy failed.", { cause: failures[0] });
+}
+
+// Never replace a contender. Hard links are atomic; the exclusive streamed copy
+// fallback on FAT/exFAT is not atomic, but owns and rolls back only its creation.
+async function publishExclusive(source: string, destination: string, owned: (file: OwnedFile) => void,
+  expectedSource: Stats): Promise<void> {
+  const sourceInfo = await stat(source);
+  if (!sameIdentity(sourceInfo, expectedSource)) throw new OutputConflictError(source);
+  try {
+    await link(source, destination);
+  } catch (error) {
+    if (errorCode(error) === "EEXIST") throw new OutputConflictError(destination);
+    if (!HARD_LINK_UNSUPPORTED_CODES.has(errorCode(error) ?? "")) throw error;
+    try { await copyExclusive(source, destination, owned, undefined, expectedSource); }
+    catch (copyError) {
+      if (errorCode(copyError) === "EEXIST") throw new OutputConflictError(destination);
       throw copyError;
     }
-    await syncFile(targetPath);
+    return;
   }
-  await rm(tempPath, { force: true });
+  // link changes ctime on both names. Capture the linked inode, never adopt a
+  // replacement that arrived during the following asynchronous stat.
+  owned({ path: destination, identity: sourceInfo });
+  const linked = await stat(destination);
+  if (linked.dev !== sourceInfo.dev || linked.ino !== sourceInfo.ino || linked.size !== sourceInfo.size ||
+      linked.mtimeMs !== sourceInfo.mtimeMs || linked.mode !== sourceInfo.mode) throw new OutputConflictError(destination);
+  owned({ path: destination, identity: linked });
+}
+
+async function admitOutputMarker(path: string, kind: "json" | "markdown"): Promise<void> {
+  let bytes: string;
+  try { bytes = await readFile(path, "utf8"); }
+  catch (error) { if (errorCode(error) === "ENOENT") return; throw error; }
+  let recorded: number | null = null;
+  if (kind === "json") {
+    try {
+      const value: unknown = JSON.parse(bytes);
+      if (typeof value === "object" && value !== null && !Array.isArray(value))
+        recorded = recordedFormatVersion(value as Record<string, unknown>);
+    } catch (error) { if (!(error instanceof SyntaxError)) throw error; }
+  } else {
+    const frontMatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(bytes)?.[1];
+    const marker = frontMatter?.match(/^format_version:[ \t]*(\d+)[ \t]*\r?$/m)?.[1];
+    if (marker !== undefined && Number.isSafeInteger(Number(marker)) && Number(marker) > 0) recorded = Number(marker);
+  }
+  const supported = kind === "json" ? FORMAT_VERSIONS.outputJson : FORMAT_VERSIONS.outputMarkdown;
+  if (recorded !== null && recorded > supported) throw new NewerFormatError(path, recorded, supported);
 }
 
 export interface SaveTargetPaths {
@@ -104,171 +200,141 @@ export async function finalizeOutputsAtomically(params: {
   overwrite: boolean;
   jsonContent: string;
   markdownContent: string;
-  // Cancels the save up to the moment it starts publishing; after that the
-  // renames run to completion or roll back, so nothing is left half-published.
+  // Cancel before retirement/publication. Once publication starts, finish or
+  // restore the group, retaining recovery files if another writer prevents it.
   signal?: AbortSignal;
-}): Promise<void> {
+}): Promise<{ warnings: OutputCleanupIssue[] }> {
   await mkdir(dirname(params.targets.audioPath), { recursive: true });
-
-  // not recorded: the finalized audio, JSON, and Markdown are output written for
-  // the user and then forgotten when the card leaves Mumbler's queue.
-
-  // Audio/json/markdown targets share one stem (see buildUniqueSuffixedTargets), so each temp/backup
-  // path draws its own nanoid rather than a token shared across the three — otherwise they would collide
-  // on the same derived name.
-  const stemOf = (targetPath: string): string => basename(targetPath, extname(targetPath));
-  const tempPathFor = (targetPath: string): string =>
-    join(dirname(targetPath), `${stemOf(targetPath)}-${nanoid(8)}.tmp`);
-  const backupPathFor = (targetPath: string): string =>
-    join(dirname(targetPath), `${stemOf(targetPath)}-${nanoid(8)}.bak`);
-
-  const audioTempPath = tempPathFor(params.targets.audioPath);
-  const jsonTempPath = tempPathFor(params.targets.jsonPath);
-  const markdownTempPath = tempPathFor(params.targets.markdownPath);
-  const targetDirectories = [
-    ...new Set(
-      [params.targets.audioPath, params.targets.jsonPath, params.targets.markdownPath].map(dirname),
-    ),
-  ];
-  const syncTargetDirectories = async (): Promise<void> => {
-    for (const directory of targetDirectories) {
-      await syncDirectory(directory);
-    }
+  // not recorded: finalized audio, JSON and Markdown are user outputs, forgotten
+  // by Mumbler once the card leaves the queue, rather than managed app stores.
+  const derived = (path: string, extension: string): string =>
+    join(dirname(path), `${basename(path, extname(path))}-${nanoid(8)}.${extension}`);
+  const members = [
+    { target: params.targets.audioPath, kind: "audio" as const },
+    { target: params.targets.jsonPath, kind: "json" as const },
+    { target: params.targets.markdownPath, kind: "markdown" as const },
+  ].map((member) => ({ ...member, temp: derived(member.target, "tmp"), backup: derived(member.target, "bak"),
+    stage: null as OwnedFile | null, previous: null as OwnedFile | null,
+    published: null as OwnedFile | null, retired: false, unchanged: null as Stats | null }));
+  const syncDirectories = async (): Promise<void> => {
+    for (const directory of new Set(members.map((member) => dirname(member.target)))) await syncDirectory(directory);
   };
-
-  const audioBackupPath = backupPathFor(params.targets.audioPath);
-  const jsonBackupPath = backupPathFor(params.targets.jsonPath);
-  const markdownBackupPath = backupPathFor(params.targets.markdownPath);
-
-  let audioHadExisting = false;
-  let jsonHadExisting = false;
-  let markdownHadExisting = false;
-  let audioFinalized = false;
-  let jsonFinalized = false;
-  let markdownFinalized = false;
-
-  // Staging sits inside the rollback too: a copy that fails or is cancelled
-  // part-way must not leave its temp file in the user's output folder.
+  const issues: OutputCleanupIssue[] = [];
+  const attempt = async (operation: string, path: string, action: () => Promise<void>): Promise<boolean> => {
+    try { await action(); return true; }
+    catch (error) { issues.push({ operation, path, error }); return false; }
+  };
   try {
-    await copyFile(params.sourceAudioPath, audioTempPath);
-    // A copied recording can inherit a read-only mode from removable media or the
-    // source file, so the staged copy is made writable for the durability syncs;
-    // the recording's own mode and modified time are put back once it is published.
-    await chmod(audioTempPath, 0o600);
-    await syncFile(audioTempPath);
-    await writeFile(jsonTempPath, params.jsonContent, "utf8");
-    await syncFile(jsonTempPath);
-    await writeFile(markdownTempPath, params.markdownContent, "utf8");
-    await syncFile(markdownTempPath);
-
-    if (params.signal?.aborted) {
-      throw new CancelledError("Save cancelled.");
+    await copyExclusive(params.sourceAudioPath, members[0]!.temp, (file) => { members[0]!.stage = file; }, params.signal);
+    for (const member of members.slice(1)) {
+      const handle = await open(member.temp, "wx", 0o600);
+      member.stage = { path: member.temp, identity: null };
+      const failures: unknown[] = [];
+      try {
+        member.stage = { path: member.temp, identity: await handle.stat() };
+        await handle.writeFile(member.kind === "json" ? params.jsonContent : params.markdownContent, "utf8");
+        // Private while being written; ordinary new output mode once complete.
+        await handle.chmod(0o666 & ~process.umask());
+        await handle.sync();
+      } catch (error) { failures.push(error); }
+      finally {
+        try { member.stage = { path: member.temp, identity: await handle.stat() }; }
+        catch (error) { failures.push(error); }
+        try { await handle.close(); }
+        catch (error) { failures.push(error); }
+      }
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) throw new AggregateError(failures, "Output staging failed.", { cause: failures[0] });
     }
-
-    // The JSON and Markdown an overwrite replaces keep their mode; the audio is a
-    // copy of the recording and takes the recording's own once published.
-    if (params.overwrite) {
-      await keepReplacedMode(params.targets.jsonPath, jsonTempPath);
-      await keepReplacedMode(params.targets.markdownPath, markdownTempPath);
+    // Check both sidecars before moving even the audio aside.
+    if (params.overwrite) for (const member of members.slice(1)) await admitOutputMarker(member.target, member.kind as "json" | "markdown");
+    for (const member of members) {
+      const current = await observedFile(member.target);
+      member.unchanged = params.overwrite && current !== null && await sameFileBytes(member.temp, member.target) ? current : null;
+      if (member.unchanged) {
+        // Equality must have compared our staged bytes, not a replacement that
+        // arrived during an earlier member's backup or the comparison itself.
+        if (!sameIdentity(await stat(member.temp), member.stage!.identity!)) throw new OutputConflictError(member.temp);
+        continue;
+      }
+      if (params.overwrite && current !== null) {
+        if (member.kind !== "audio") {
+          await admitOutputMarker(member.target, member.kind);
+          // Capture destination access mode at its retirement checkpoint, after
+          // any earlier output backup wait, rather than using a staged old mode.
+          const beforeMode = member.stage!.identity!;
+          if (!sameIdentity(await stat(member.temp), beforeMode)) throw new OutputConflictError(member.temp);
+          await keepReplacedMode(member.target, member.temp);
+          const afterMode = await stat(member.temp);
+          if (afterMode.dev !== beforeMode.dev || afterMode.ino !== beforeMode.ino ||
+              afterMode.size !== beforeMode.size || afterMode.mtimeMs !== beforeMode.mtimeMs)
+            throw new OutputConflictError(member.temp);
+          member.stage!.identity = afterMode;
+        }
+        if (params.signal?.aborted) throw new CancelledError("Save cancelled.");
+        await publishExclusive(member.target, member.backup, (file) => { member.previous = file; }, current);
+        const now = await stat(member.target);
+        // Own link creation changes ctime. All other observed identity/content
+        // changes still prevent retirement; the linked backup is also checked.
+        const backupIdentity = member.previous!.identity!;
+        const hardLinked = now.dev === backupIdentity.dev && now.ino === backupIdentity.ino;
+        if (!sameFileState(now, current) ||
+            !(hardLinked ? sameIdentity(now, backupIdentity) : sameIdentity(now, current)))
+          throw new OutputConflictError(member.target);
+        await rm(member.target);
+        member.retired = true;
+        const backupAfterRetirement = await stat(member.backup);
+        if (!sameFileState(backupAfterRetirement, backupIdentity)) throw new OutputConflictError(member.backup);
+        member.previous!.identity = backupAfterRetirement;
+      }
     }
-
-    // An overwrite leaves an output that already holds the same bytes as it is
-    // (content-lifecycle-conventions, "A write that changes nothing is skipped").
-    const unchanged = async (tempPath: string, targetPath: string): Promise<boolean> =>
-      params.overwrite && (await fileExists(targetPath)) && (await sameFileBytes(tempPath, targetPath));
-    const audioUnchanged = await unchanged(audioTempPath, params.targets.audioPath);
-    const jsonUnchanged = await unchanged(jsonTempPath, params.targets.jsonPath);
-    const markdownUnchanged = await unchanged(markdownTempPath, params.targets.markdownPath);
-
-    audioHadExisting = params.overwrite && !audioUnchanged && (await fileExists(params.targets.audioPath));
-    jsonHadExisting = params.overwrite && !jsonUnchanged && (await fileExists(params.targets.jsonPath));
-    markdownHadExisting =
-      params.overwrite && !markdownUnchanged && (await fileExists(params.targets.markdownPath));
-
-    if (audioHadExisting) {
-      await rename(params.targets.audioPath, audioBackupPath);
+    if (params.signal?.aborted) throw new CancelledError("Save cancelled.");
+    for (const member of members) {
+      if (!member.unchanged) await publishExclusive(member.temp, member.target, (file) => { member.published = file; }, member.stage!.identity!);
     }
-    if (jsonHadExisting) {
-      await rename(params.targets.jsonPath, jsonBackupPath);
+    for (const member of members) {
+      const expected = member.unchanged ?? member.published?.identity;
+      const current = await observedFile(member.target);
+      if (expected == null || current === null || !sameIdentity(current, expected))
+        throw new OutputConflictError(member.target);
     }
-    if (markdownHadExisting) {
-      await rename(params.targets.markdownPath, markdownBackupPath);
+    await syncDirectories();
+  } catch (error) {
+    const primary = isNodeAbortError(error) ? new CancelledError("Save cancelled.") : error;
+    for (const member of [...members].reverse()) {
+      if (member.published !== null) await attempt("remove published output", member.target, () => removeOwned(member.published!));
+      if (member.retired && member.previous !== null) {
+        const restored = await attempt("restore previous output", member.backup, async () => {
+          const current = await stat(member.backup);
+          if (!sameIdentity(current, member.previous!.identity!)) throw new OutputConflictError(member.backup);
+          let restoration: OwnedFile | null = null;
+          try { await publishExclusive(member.backup, member.target, (file) => { restoration = file; }, member.previous!.identity!); }
+          catch (error) {
+            if (restoration !== null) await attempt("remove failed restoration", member.target, () => removeOwned(restoration!));
+            throw error;
+          }
+          // Restoring the link changes backup ctime again.
+          const backupAfterRestore = await stat(member.backup);
+          if (!sameFileState(backupAfterRestore, member.previous!.identity!)) throw new OutputConflictError(member.backup);
+          member.previous!.identity = backupAfterRestore;
+        });
+        if (restored) await attempt("remove restored backup", member.backup, () => removeOwned(member.previous!));
+      } else if (member.previous !== null) {
+        await attempt("remove unused backup", member.backup, () => removeOwned(member.previous!));
+      }
+      if (member.stage !== null) await attempt("remove staging file", member.temp, () => removeStage(member.stage!));
     }
-
-    // An overwrite replaces what it moved aside above; any other save claims each
-    // name exclusively, so a target written after the conflict check is kept.
-    const publish = params.overwrite ? rename : publishExclusive;
-    if (audioUnchanged) {
-      await rm(audioTempPath, { force: true });
-    } else {
-      await publish(audioTempPath, params.targets.audioPath);
-      audioFinalized = true;
-      await keepSourceTimesAndMode(params.sourceAudioPath, params.targets.audioPath);
-    }
-    if (jsonUnchanged) {
-      await rm(jsonTempPath, { force: true });
-    } else {
-      await publish(jsonTempPath, params.targets.jsonPath);
-      jsonFinalized = true;
-    }
-    if (markdownUnchanged) {
-      await rm(markdownTempPath, { force: true });
-    } else {
-      await publish(markdownTempPath, params.targets.markdownPath);
-      markdownFinalized = true;
-    }
-
-    // The files were synced before publication; now make their directory entries
-    // durable before the caller is allowed to delete the only working recording.
-    // syncDirectory is best-effort on platforms (notably Windows) that cannot open
-    // directories for fsync, preserving their existing rename behavior.
-    await syncTargetDirectories();
-  } catch (error: unknown) {
-    if (markdownFinalized) {
-      await rm(params.targets.markdownPath, { force: true }).catch(() => undefined);
-    }
-    if (jsonFinalized) {
-      await rm(params.targets.jsonPath, { force: true }).catch(() => undefined);
-    }
-    if (audioFinalized) {
-      await rm(params.targets.audioPath, { force: true }).catch(() => undefined);
-    }
-
-    if (audioHadExisting && (await fileExists(audioBackupPath))) {
-      await rename(audioBackupPath, params.targets.audioPath).catch(() => undefined);
-    }
-    if (jsonHadExisting && (await fileExists(jsonBackupPath))) {
-      await rename(jsonBackupPath, params.targets.jsonPath).catch(() => undefined);
-    }
-    if (markdownHadExisting && (await fileExists(markdownBackupPath))) {
-      await rename(markdownBackupPath, params.targets.markdownPath).catch(() => undefined);
-    }
-
-    await rm(audioTempPath, { force: true }).catch(() => undefined);
-    await rm(jsonTempPath, { force: true }).catch(() => undefined);
-    await rm(markdownTempPath, { force: true }).catch(() => undefined);
-
-    if (isCancelledError(error) || error instanceof OutputConflictError) {
-      throw error;
-    }
-    throw new Error(`Failed to finalize output files: ${formatError(error)}`, { cause: error });
+    if (issues.length > 0) throw new OutputPartialFailureError(primary, issues);
+    if (isCancelledError(primary) || primary instanceof OutputConflictError || primary instanceof NewerFormatError) throw primary;
+    throw new Error(`Failed to finalize output files: ${formatError(primary)}`, { cause: primary });
   }
-
-  // Backup cleanup is best-effort: failure here cannot undo the already-committed
-  // renames above, so errors are swallowed to avoid masking a successful save.
-  if (audioHadExisting) {
-    await rm(audioBackupPath, { force: true }).catch(() => undefined);
+  // Publication committed. Cleanup errors are warnings, never a failed save.
+  for (const member of members) {
+    if (member.previous !== null) await attempt("remove previous output backup", member.backup, () => removeOwned(member.previous!));
+    if (member.stage !== null) await attempt("remove staging file", member.temp, () => removeStage(member.stage!));
   }
-  if (jsonHadExisting) {
-    await rm(jsonBackupPath, { force: true }).catch(() => undefined);
-  }
-  if (markdownHadExisting) {
-    await rm(markdownBackupPath, { force: true }).catch(() => undefined);
-  }
-  // Persist backup removal too, so a completed overwrite does not resurrect stale
-  // backups after a crash. This remains best-effort where directory fsync is not
-  // available.
-  await syncTargetDirectories();
+  await syncDirectories();
+  return { warnings: issues };
 }
 
 export function buildOutputPayload(params: {

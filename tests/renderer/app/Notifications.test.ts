@@ -108,6 +108,22 @@ describe("notification lifetime and severity surfaces", () => {
     expect(statuses.some((status) => status.textContent === "Recording duplicated.")).toBe(true);
   });
 
+  it("keeps independent saved-output cleanup warnings alongside other operation results", async () => {
+    let next = notifications;
+    for (const [index, folder] of ["/output", "/working"].entries()) {
+      next = upsertPersistentNotification(next, { id: `save-warning-${index}`, owner: `save-cleanup-card-${index}`,
+        kind: "persistent", variant: "warning", message: message("notice.saveCleanupFailed", { folder }) });
+    }
+    await render(React.createElement(PersistentNotifications, { notifications: next, onDismiss: vi.fn() }));
+    const notices = document.querySelectorAll(".persistent-notice--warning");
+    expect(notices).toHaveLength(2);
+    expect(notices[0]?.getAttribute("role")).toBe("status");
+    expect(notices[0]?.textContent).toContain("/output");
+    expect(notices[1]?.textContent).toContain("/working");
+    expect(notices[0]?.querySelector('button[aria-label="Close notification"]')).not.toBeNull();
+    expect(clearPersistentOwner(next, "save-cleanup-card-0").some((item) => item.id === "save-warning-1")).toBe(true);
+  });
+
   it("dismisses only the chosen persistent result", async () => {
     const onDismiss = vi.fn();
     await render(React.createElement(PersistentNotifications, { notifications, onDismiss }));

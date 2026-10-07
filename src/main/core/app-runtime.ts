@@ -63,6 +63,7 @@ import {
   computeFinalDuration,
   finalizeOutputsAtomically,
   OutputConflictError,
+  OutputPartialFailureError,
   pathsConflict,
   type SaveTargetPaths,
 } from "./file-output";
@@ -156,9 +157,10 @@ export type QuitSaveFailure = "queue" | "transcripts" | "settings";
 // What a save produced, before the snapshot that reports it is taken: the
 // snapshot is built only after the card's status has settled.
 type SaveOutcome =
-  | ({ kind: "saved" } & SaveTargetPaths)
+  | ({ kind: "saved"; warnings?: Message[] } & SaveTargetPaths)
   | ({ kind: "conflict" } & SaveTargetPaths)
-  | { kind: "cancelled" };
+  | { kind: "cancelled" }
+  | { kind: "failed"; message: Message };
 
 interface AppRuntimeState {
   paths: AppPaths | null;
@@ -1696,6 +1698,7 @@ export class ApplicationRuntime {
       signal,
     });
 
+    let committed: Extract<SaveOutcome, { kind: "saved" }> | null = null;
     try {
       const extension = extname(finalAudio.filePath) || extname(card.sourceFilePath);
       const baseName = `${formatUtcMarker(new Date(card.timestamps.effectiveUtc))}-${card.metadata.slug}`;
@@ -1750,8 +1753,9 @@ export class ApplicationRuntime {
         finalDurationSec,
       });
 
+      let warnings: Message[] = [];
       try {
-        await finalizeOutputsAtomically({
+        const result = await finalizeOutputsAtomically({
           sourceAudioPath: finalAudio.filePath,
           targets: targetPaths,
           overwrite: resolution === "overwrite",
@@ -1759,7 +1763,22 @@ export class ApplicationRuntime {
           markdownContent,
           signal,
         });
+        if (result.warnings.length > 0) {
+          await logger.warn("save.cleanup-failed", "Outputs committed but recovery/staging cleanup failed.", {
+            cardId, issues: result.warnings.map((issue) => ({ ...issue, error: serializeError(issue.error) })),
+          });
+          warnings = [message("notice.saveCleanupFailed", { folder: outputDirectory })];
+        }
       } catch (error: unknown) {
+        if (error instanceof OutputPartialFailureError || error instanceof NewerFormatError) {
+          await logger.error("save.incomplete", "Output save refused or could not restore every output.", error, {
+            cardId,
+            issues: error instanceof OutputPartialFailureError
+              ? error.issues.map((issue) => ({ ...issue, error: serializeError(issue.error) })) : undefined,
+          });
+          return { kind: "failed", message: message(error instanceof NewerFormatError
+            ? "error.saveNewerOutput" : "error.saveIncomplete", { folder: outputDirectory }) };
+        }
         if (!(error instanceof OutputConflictError)) {
           throw error;
         }
@@ -1778,9 +1797,16 @@ export class ApplicationRuntime {
         overwrite: resolution === "overwrite",
       });
 
-      return { kind: "saved", ...targetPaths };
+      committed = { kind: "saved", ...targetPaths, warnings };
+      return committed;
     } finally {
-      await finalAudio.cleanup();
+      try { await finalAudio.cleanup(); }
+      catch (error) {
+        await logger.warn("save.prepared-audio-cleanup-failed", "Could not clean up prepared save audio.", {
+          cardId, error: serializeError(error),
+        });
+        committed?.warnings?.push(message("notice.saveCleanupFailed", { folder: this.runtime.paths!.workingDir }));
+      }
     }
   }
 

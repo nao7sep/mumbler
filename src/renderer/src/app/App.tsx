@@ -989,10 +989,19 @@ function LoadedShell({
         return;
       }
 
+      if (result.kind === "failed") {
+        if (pendingSaveConflict?.cardId === cardId) setSaveConflictError(result.message);
+        else setCardActionError(cardId, "save-card", result.message);
+        return;
+      }
+
       setPendingSaveConflict(null);
       setSaveConflictError(null);
       clearCardActionErrors(cardId);
       addToast(message("notice.saved", { path: result.audioPath }));
+      for (const [index, warning] of (result.warnings ?? []).entries()) {
+        addPersistent(`save-cleanup-${cardId}-${index}`, warning, "warning");
+      }
       window.scrollTo({ top: 0 });
     } catch (error: unknown) {
       const failure = presentFailure(error, message("error.saveRecording"), "recording save failed");
