@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { apiKeyEnvVar, clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "@main/core/api-keys";
 import { closeBackupStore } from "@main/core/backupStore";
+import * as fileIo from "@main/core/file-io";
 import { NewerFormatError } from "@main/core/format-versions";
 
 // The secrets store is isolated by pointing MUMBLER_DATA_DIR at a throwaway directory
@@ -266,6 +267,7 @@ describe("API key secrets store", () => {
   it("leaves a key file in a newer format in place, reads no key from it, and refuses to write over it", async () => {
     const newer = JSON.stringify({ formatVersion: 2, keys: { gemini: "from-a-newer-build" } });
     await writeFile(apiKeysPath, newer, "utf8");
+    if (process.platform !== "win32") await chmod(apiKeysPath, 0o644);
     const warn = vi.fn();
 
     await expect(resolveApiKey(apiKeysPath, "gemini", warn)).resolves.toBeNull();
@@ -274,6 +276,23 @@ describe("API key secrets store", () => {
     await expect(clearApiKey(apiKeysPath, "gemini", warn)).rejects.toBeInstanceOf(NewerFormatError);
 
     expect(await readFile(apiKeysPath, "utf8")).toBe(newer);
+    if (process.platform !== "win32") expect((await stat(apiKeysPath)).mode & 0o777).toBe(0o644);
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
+});
+
+
+it("rechecks the current secret marker after reading keys and before replacing bytes", async () => {
+  await writeApiKey(apiKeysPath, "gemini", "old key");
+  const newer = JSON.stringify({ formatVersion: 2, keys: { gemini: "future" } });
+  const original = fileIo.writeJsonFile;
+  const spy = vi.spyOn(fileIo, "writeJsonFile").mockImplementationOnce(async (path, value, options) => {
+    await writeFile(apiKeysPath, newer);
+    return original(path, value, options);
+  });
+  try {
+    await expect(writeApiKey(apiKeysPath, "gemini", "replacement")).rejects.toBeInstanceOf(NewerFormatError);
+    expect(await readFile(apiKeysPath, "utf8")).toBe(newer);
+    expect(await readdir(home)).toEqual(["api-keys.json"]);
+  } finally { spy.mockRestore(); }
 });

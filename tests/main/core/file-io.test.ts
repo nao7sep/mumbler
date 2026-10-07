@@ -1,18 +1,25 @@
-import { chmod, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { backupRecord, capturedRenames, writeEvents } = vi.hoisted(() => {
+const { backupRecord, capturedRenames, writeEvents, stageModes, faults } = vi.hoisted(() => {
   const events: string[] = [];
   return {
     backupRecord: vi.fn((path: string, _bytes: Buffer): void => {
       events.push(`record:${path}`);
     }),
     capturedRenames: [] as Array<{ source: string; destination: string }>,
+    faults: { tempId: null as string | null, cleanup: false },
     writeEvents: events,
+    stageModes: [] as Array<{ mode: number; size: number }>,
   };
+});
+
+vi.mock("nanoid", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("nanoid")>();
+  return { ...actual, nanoid: (size?: number) => faults.tempId ?? actual.nanoid(size) };
 });
 
 vi.mock("@main/core/backupStore", () => ({ record: backupRecord }));
@@ -24,6 +31,18 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args);
+      if (args[1] === "wx") {
+        const info = await handle.stat();
+        stageModes.push({ mode: info.mode & 0o777, size: info.size });
+      }
+      return handle;
+    },
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      if (faults.cleanup && String(args[0]).endsWith(".tmp")) throw new Error("cleanup failed");
+      return actual.rm(...args);
+    },
     rename: async (source: string, destination: string) => {
       await actual.rename(source, destination);
       capturedRenames.push({ source: String(source), destination: String(destination) });
@@ -38,7 +57,10 @@ let dir: string;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "mumbler-file-io-"));
+  faults.tempId = null;
+  faults.cleanup = false;
   capturedRenames.length = 0;
+  stageModes.length = 0;
   writeEvents.length = 0;
   backupRecord.mockClear();
 });
@@ -196,4 +218,45 @@ describe("preserveAside", () => {
     expect(await preserveAside(target)).toBeNull();
     expect(capturedRenames).toEqual([]);
   });
+});
+
+
+it.skipIf(process.platform === "win32")("creates private staging before writing any secret bytes", async () => {
+  await writeJsonFile(join(dir, "secret.json"), { secret: "key" }, { mode: 0o600, record: false });
+  expect(stageModes).toEqual([{ mode: 0o600, size: 0 }]);
+});
+
+it.skipIf(process.platform === "win32")("creates replacement staging with the existing restricted mode", async () => {
+  const target = join(dir, "config.json");
+  await writeFile(target, "old", { mode: 0o600 });
+  await writeJsonFile(target, { updated: true });
+  expect(stageModes).toEqual([{ mode: 0o600, size: 0 }]);
+});
+
+it("preserves admission failure and removes only its staged file", async () => {
+  const target = join(dir, "config.json");
+  await writeFile(target, "old");
+  const primary = new Error("admission refused");
+  await expect(writeJsonFile(target, { updated: true }, { validateCurrent: async () => { throw primary; } })).rejects.toBe(primary);
+  expect(await readFile(target, "utf8")).toBe("old");
+  expect(await readdir(dir)).toEqual(["config.json"]);
+});
+
+
+it("does not remove or overwrite another writer's colliding staging file", async () => {
+  faults.tempId = "collision";
+  const foreign = join(dir, "config-collision.tmp");
+  await writeFile(foreign, "foreign bytes");
+  await expect(writeJsonFile(join(dir, "config.json"), { updated: true })).rejects.toMatchObject({ code: "EEXIST" });
+  expect(await readFile(foreign, "utf8")).toBe("foreign bytes");
+  expect(await readdir(dir)).toEqual(["config-collision.tmp"]);
+});
+
+it("cleanup failure does not replace the primary admission error", async () => {
+  const primary = new Error("admission refused");
+  faults.cleanup = true;
+  try {
+    await expect(writeJsonFile(join(dir, "config.json"), { updated: true }, { validateCurrent: async () => { throw primary; } })).rejects.toBe(primary);
+    expect(await readdir(dir)).toHaveLength(1);
+  } finally { faults.cleanup = false; }
 });

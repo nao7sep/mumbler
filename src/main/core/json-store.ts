@@ -135,7 +135,10 @@ export class JsonStore<T extends object> {
       await writeJsonFile(
         this.options.path,
         { formatVersion: this.options.formatVersion, ...wire },
-        { record: this.options.record },
+        {
+          record: this.options.record,
+          validateCurrent: async () => { await this.load(); },
+        },
       );
     } catch (error: unknown) {
       this.failure = { value };

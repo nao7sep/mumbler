@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -42,7 +42,8 @@ vi.mock("@main/core/binaries/archive", () => ({
 vi.mock("@main/core/binaries/arch", () => ({
   assertArm64Slice: vi.fn(),
 }));
-vi.mock("@main/core/binaries/integrity", () => ({
+vi.mock("@main/core/binaries/integrity", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@main/core/binaries/integrity")>(),
   parseSha256Sidecar: vi.fn(() => "a".repeat(64)),
   verifySha256: vi.fn(async () => undefined),
 }));
@@ -60,7 +61,8 @@ vi.mock("@main/core/binaries/installed-version", async (importOriginal) => {
   const { readFile } = await import("node:fs/promises");
   return {
     ...actual,
-    readInstalledVersion: vi.fn(async (name: ToolName, toolPath: string) => {
+    readInstalledVersion: vi.fn(async (name: ToolName, toolPath: string, binDir: string, source: import("@main/core/binaries/installed-version").InstalledVersionSource) => {
+      if (source.kind === "sidecar") return actual.readInstalledVersion(name, toolPath, binDir, source);
       try {
         return actual.parseVersionBanner(name, await readFile(toolPath, "utf8"));
       } catch {
@@ -73,6 +75,7 @@ vi.mock("@main/core/binaries/installed-version", async (importOriginal) => {
 import { assertArm64Slice } from "@main/core/binaries/arch";
 import { extractFileFromZip } from "@main/core/binaries/archive";
 import { downloadToFile, fetchText } from "@main/core/binaries/http";
+import * as installedVersion from "@main/core/binaries/installed-version";
 import { verifySha256 } from "@main/core/binaries/integrity";
 import { TOOL_INSTALL_WHOLE_TIMEOUT_MS, ToolManager } from "@main/core/binaries/manager";
 import { TOOL_EXTRACTED_MAX_BYTES, resolveLatest } from "@main/core/binaries/registry";
@@ -109,17 +112,17 @@ let binDir: string;
 let tempDir: string;
 const notify = vi.fn();
 
-async function makeManager(): Promise<ToolManager> {
+async function makeManager(platform = "darwin", logger = fakeLogger()): Promise<ToolManager> {
   const store = createDependenciesStore(join(dir, "dependencies.json"));
   const { value } = await store.load();
   return new ToolManager({
     binDir,
     tempDir,
-    platform: "darwin",
+    platform,
     arch: "arm64",
     value,
     store,
-    logger: fakeLogger(),
+    logger,
     notify,
   });
 }
@@ -540,4 +543,72 @@ describe("checkTools", () => {
       expect(status.lastCheckedAtUtc).not.toBeNull();
     }
   });
+});
+
+
+describe("committed binary and metadata outcome", () => {
+  it("refuses a newer Windows sidecar before replacing the executable", async () => {
+    await mkdir(binDir, { recursive: true });
+    const tool = join(binDir, "ffmpeg.exe");
+    await writeFile(tool, "old binary");
+    const sidecar = installedVersion.versionSidecarPath(binDir, "ffmpeg");
+    const newer = JSON.stringify({ formatVersion: 2, version: "future" });
+    await writeFile(sidecar, newer);
+    const manager = await makeManager("win32");
+    await manager.installTool("ffmpeg");
+    expect(await readFile(tool, "utf8")).toBe("old binary");
+    expect(await readFile(sidecar, "utf8")).toBe(newer);
+    expect(manager.listStatuses()[0].transient.kind).toBe("failed");
+    expect(await readdir(tempDir)).toEqual([]);
+  });
+
+  it("keeps a committed Windows binary truthful when sidecar persistence fails", async () => {
+    await mkdir(binDir, { recursive: true });
+    const tool = join(binDir, "ffmpeg.exe");
+    await writeFile(tool, "old binary");
+    await installedVersion.writeVersionSidecar(binDir, "ffmpeg", "autobuild-2026-08-19-19-21", 0, tool);
+    const logger = fakeLogger();
+    const manager = await makeManager("win32", logger);
+    const primary = new Error("sidecar disk full");
+    const spy = vi.spyOn(installedVersion, "writeVersionSidecar").mockRejectedValueOnce(primary);
+    try {
+      await manager.installTool("ffmpeg");
+      expect(await readFile(tool, "utf8")).not.toBe("old binary");
+      expect(manager.listStatuses()[0]).toMatchObject({ state: "installed-unchecked", installedVersion: null, transient: { kind: "idle" } });
+      const fresh = await makeManager("win32");
+      await fresh.reconcile();
+      expect(fresh.listStatuses()[0].installedVersion).toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith("tools.install-metadata-failed", expect.any(String), expect.objectContaining({ error: expect.objectContaining({ message: primary.message }) }));
+    } finally { spy.mockRestore(); }
+  });
+
+  it("keeps a committed binary installed when dependencies persistence fails", async () => {
+    const logger = fakeLogger();
+    const manager = await makeManager("darwin", logger);
+    const spy = vi.spyOn(JsonStore.prototype, "save").mockRejectedValueOnce(new Error("facts disk full"));
+    try {
+      await manager.installTool("ffmpeg");
+      expect(manager.listStatuses()[0]).toMatchObject({ installedVersion: "8.2", transient: { kind: "idle" } });
+      expect(await readFile(join(binDir, "ffmpeg"), "utf8")).toBe(banner("ffmpeg", "8.2"));
+      expect(logger.warn).toHaveBeenCalledWith("tools.install-metadata-failed", expect.any(String), expect.any(Object));
+    } finally { spy.mockRestore(); }
+  });
+});
+
+
+it("cancellation during Windows sidecar admission leaves the executable untouched", async () => {
+  await mkdir(binDir, { recursive: true });
+  const tool = join(binDir, "ffmpeg.exe");
+  await writeFile(tool, "old binary");
+  const manager = await makeManager("win32");
+  const spy = vi.spyOn(installedVersion, "admitVersionSidecar").mockImplementationOnce(async () => {
+    manager.cancelInstall("ffmpeg");
+  });
+  try {
+    await manager.installTool("ffmpeg");
+    expect(await readFile(tool, "utf8")).toBe("old binary");
+    expect(await readdir(binDir)).toEqual(["ffmpeg.exe"]);
+    expect(await readdir(tempDir)).toEqual([]);
+    expect(manager.listStatuses()[0].transient).toEqual({ kind: "idle" });
+  } finally { spy.mockRestore(); }
 });

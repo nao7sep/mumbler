@@ -1,4 +1,4 @@
-import { access, chmod, mkdir, open, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, open, readdir, readFile, rename, rm, stat, utimes } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { nanoid } from "nanoid";
@@ -21,6 +21,7 @@ import { record } from "./backupStore";
 export interface WriteJsonOptions {
   mode?: number;
   record?: boolean;
+  validateCurrent?: () => Promise<void>;
 }
 
 // undefined means no file: JSON has no undefined, so a file holding the literal
@@ -39,8 +40,8 @@ export async function readJsonFile<T>(filePath: string): Promise<T | undefined> 
 
 // The single managed-text atomic-write choke point. Atomic JSON write: temp file in the same directory ->
 // fsync -> rename over the target -> fsync the parent dir. When `mode` is given (e.g. 0o600 for a secrets
-// file), it is applied to the temp file *before* the rename, so the target is never momentarily readable
-// beyond that mode — the file appears at its final path already tightened. The mode is ignored on platforms
+// file), the exclusive temp is created with that mode before any bytes are written. A replacement starts
+// with the existing target mode otherwise. The mode is ignored on platforms
 // where chmod is a no-op (Windows), matching the secrets convention's POSIX-only permission rule.
 //
 // The data-backup record fires strictly AFTER the rename lands (data-backup conventions). Recording before
@@ -63,22 +64,36 @@ export async function writeJsonFile(
   if (await holdsBytes(filePath, bytes)) {
     return;
   }
+  let staged = false;
   try {
-    await writeFile(tempPath, bytes);
+    const mode = options.mode ?? await stat(filePath).then((value) => value.mode).catch((error: unknown) => {
+      if (isMissingFileError(error)) return undefined;
+      throw error;
+    });
+    const handle = await open(tempPath, "wx", mode);
+    staged = true;
+    try {
+      await handle.writeFile(bytes);
+      await handle.sync();
+    } catch (error: unknown) {
+      await handle.close().catch(() => undefined);
+      throw error;
+    }
+    await handle.close();
     if (options.mode !== undefined) {
       await chmod(tempPath, options.mode);
     }
-    await syncFile(tempPath);
     if (options.mode === undefined) {
       await keepReplacedMode(filePath, tempPath);
     }
+    await options.validateCurrent?.();
     await rename(tempPath, filePath);
     await syncDirectory(dirname(filePath));
   } catch (error) {
     // Best-effort removal of the half-written temp file; the original write error
     // is the meaningful one and is always rethrown below, so a failed cleanup is
     // deliberately not surfaced on top of it.
-    await rm(tempPath, { force: true }).catch(() => undefined);
+    if (staged) await rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   }
   // After the rename: the file is exactly where it belongs, so record the bytes we just wrote. Best-effort —

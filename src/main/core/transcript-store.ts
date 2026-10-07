@@ -115,7 +115,13 @@ export class TranscriptStore {
         const value = serialize(cardId, transcript);
         const text = JSON.stringify(value);
         if (this.onDisk.get(cardId) === text) continue;
-        await writeJsonFile(this.pathFor(cardId), value);
+        const path = this.pathFor(cardId);
+        await writeJsonFile(path, value, {
+          validateCurrent: async () => {
+            const current = await readJsonFile<unknown>(path);
+            if (current !== undefined) parse(path, current);
+          },
+        });
         this.onDisk.set(cardId, text);
         written += 1;
       }

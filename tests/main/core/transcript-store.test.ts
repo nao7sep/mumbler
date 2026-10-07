@@ -169,3 +169,17 @@ describe("TranscriptStore", () => {
     expect(await files()).toEqual(["notes.txt"]);
   });
 });
+
+
+it("refuses a changed write after the cached transcript becomes newer-format", async () => {
+  const store = new TranscriptStore(dir);
+  const take = card("take", "old words");
+  await store.writeChanged([take]);
+  const [name] = await files();
+  const newer = JSON.stringify({ formatVersion: 2, cardId: "take", transcription: "future" });
+  await writeFile(join(dir, name), newer);
+  take.transcription.text = "replacement";
+  await expect(store.writeChanged([take])).rejects.toBeInstanceOf(NewerFormatError);
+  expect(await readFile(join(dir, name), "utf8")).toBe(newer);
+  expect(await files()).toEqual([name]);
+});

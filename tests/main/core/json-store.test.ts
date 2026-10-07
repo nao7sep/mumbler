@@ -260,3 +260,17 @@ describe("JsonStore failed writes", () => {
     expect(await readFile(join(dir, "doc.json"), "utf8")).toBe("changed by hand");
   });
 });
+
+
+it("save and retry refuse a newer store appearing after load", async () => {
+  const store = makeStore();
+  await store.save({ value: "old" });
+  await store.load();
+  const newer = JSON.stringify({ formatVersion: 2, value: "future" });
+  await writeFile(store.path, newer);
+  await expect(store.save({ value: "replacement" })).rejects.toBeInstanceOf(NewerFormatError);
+  await expect(store.retryFailedWrite()).rejects.toBeInstanceOf(NewerFormatError);
+  await expect(store.flush()).resolves.toBeUndefined();
+  expect(await readFile(store.path, "utf8")).toBe(newer);
+  expect(await readdir(dir)).toEqual(["doc.json"]);
+});

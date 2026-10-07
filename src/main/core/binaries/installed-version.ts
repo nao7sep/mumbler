@@ -1,17 +1,16 @@
 import { execFile } from "node:child_process";
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-
-import { nanoid } from "nanoid";
 
 import type { ToolName } from "@shared/app-shell";
 import { FFMPEG_BUILD_TAG } from "@shared/dependency-status";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 
-import { keepReplacedMode } from "../file-io";
-import { FORMAT_VERSIONS, recordedFormatVersion } from "../format-versions";
+import { isMissingFileError, writeJsonFile } from "../file-io";
+import { FORMAT_VERSIONS, NewerFormatError, recordedFormatVersion } from "../format-versions";
 import { normalizeToolVersion } from "./registry";
+import { sha256OfFile } from "./integrity";
 
 const execFileAsync = promisify(execFile);
 
@@ -72,6 +71,28 @@ interface VersionSidecar {
   formatVersion: number;
   version: string;
   installedAt: string;
+  binarySha256: string;
+}
+
+export async function admitVersionSidecar(binDir: string, name: ToolName): Promise<void> {
+  const target = versionSidecarPath(binDir, name);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(target, "utf8"));
+  } catch (error: unknown) {
+    if (isMissingFileError(error) || error instanceof SyntaxError) return;
+    throw error;
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return;
+  const recorded = recordedFormatVersion(raw as Record<string, unknown>);
+  if (recorded !== null && recorded > FORMAT_VERSIONS.toolVersion) {
+    throw new NewerFormatError(target, recorded, FORMAT_VERSIONS.toolVersion);
+  }
+}
+
+function hashSignal(signal?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(PROBE_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, deadline]) : deadline;
 }
 
 // Record a just-published binary's version beside it. Called only for a
@@ -84,11 +105,14 @@ export async function writeVersionSidecar(
   name: ToolName,
   version: string,
   nowUtc: number,
+  toolPath: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const payload: VersionSidecar = {
     formatVersion: FORMAT_VERSIONS.toolVersion,
     version,
     installedAt: formatUtcIsoCompact(nowUtc),
+    binarySha256: await sha256OfFile(toolPath, hashSignal(signal)),
   };
   const target = versionSidecarPath(binDir, name);
   // Atomic replace through a same-directory temp, per the storage-path conventions.
@@ -96,16 +120,10 @@ export async function writeVersionSidecar(
   // the re-fetchable binary it sits beside — meaningless without that binary (itself
   // excluded as a re-fetchable binary) and rewritten by the next install, so it rides
   // along into exclusion rather than being recorded orphaned (data-backup conventions).
-  const staged = join(binDir, `${name}-${nanoid()}.tmp`);
-  try {
-    await writeFile(staged, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-    await keepReplacedMode(target, staged);
-    await rename(staged, target);
-  } catch (error) {
-    // A stranded temp is tolerated for a crash, not for an ordinary failure path.
-    await rm(staged, { force: true }).catch(() => undefined);
-    throw error;
-  }
+  await writeJsonFile(target, payload, {
+    record: false,
+    validateCurrent: () => admitVersionSidecar(binDir, name),
+  });
 }
 
 // The installed version of `name`, or null when it cannot be read — the binary will
@@ -121,7 +139,7 @@ export async function readInstalledVersion(
   source: InstalledVersionSource,
 ): Promise<string | null> {
   if (source.kind === "sidecar") {
-    return readSidecar(binDir, name);
+    return readSidecar(binDir, name, toolPath);
   }
   try {
     const { stdout } = await execFileAsync(toolPath, [...source.args], { timeout: PROBE_TIMEOUT_MS });
@@ -131,14 +149,16 @@ export async function readInstalledVersion(
   }
 }
 
-async function readSidecar(binDir: string, name: ToolName): Promise<string | null> {
+async function readSidecar(binDir: string, name: ToolName, toolPath: string): Promise<string | null> {
   try {
     const raw: unknown = JSON.parse(await readFile(versionSidecarPath(binDir, name), "utf8"));
     if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
     const recorded = recordedFormatVersion(raw as Record<string, unknown>);
     if (recorded === null || recorded > FORMAT_VERSIONS.toolVersion) return null;
-    const version = (raw as Partial<VersionSidecar>).version;
-    return typeof version === "string" && FFMPEG_BUILD_TAG.test(version) ? version : null;
+    const sidecar = raw as Partial<VersionSidecar>;
+    if (typeof sidecar.version !== "string" || !FFMPEG_BUILD_TAG.test(sidecar.version)
+      || typeof sidecar.binarySha256 !== "string" || !/^[a-f0-9]{64}$/.test(sidecar.binarySha256)) return null;
+    return await sha256OfFile(toolPath, hashSignal()) === sidecar.binarySha256 ? sidecar.version : null;
   } catch {
     return null;
   }

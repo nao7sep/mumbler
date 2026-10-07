@@ -2,6 +2,7 @@ import { chmod, stat } from "node:fs/promises";
 
 import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 import { FORMAT_VERSIONS, NewerFormatError, recordedFormatVersion } from "./format-versions";
+import { assertReadableFormat, CorruptStateError } from "./json-store";
 
 /**
  * API key storage and resolution — the secret store, kept in its own 0600 file
@@ -135,7 +136,6 @@ function normalize(raw: unknown): ApiKeysFile | null {
 
 // The stored keys, or the NewerFormatError of a file this build leaves alone.
 async function readAll(filePath: string, warn: WarnFn): Promise<ApiKeysFile | NewerFormatError> {
-  await warnIfInsecureMode(filePath, warn);
   let raw: unknown;
   try {
     raw = await readJsonFile<unknown>(filePath);
@@ -163,6 +163,7 @@ async function readAll(filePath: string, warn: WarnFn): Promise<ApiKeysFile | Ne
     });
     return newer;
   }
+  await warnIfInsecureMode(filePath, warn);
   const normalized = normalize(raw);
   if (normalized !== null) return normalized;
 
@@ -183,6 +184,14 @@ async function writeAll(filePath: string, data: ApiKeysFile): Promise<void> {
   await writeJsonFile(filePath, { formatVersion: FORMAT_VERSIONS.apiKeys, ...data }, {
     mode: ENFORCE_FILE_MODE ? SECRETS_FILE_MODE : undefined,
     record: false,
+    validateCurrent: async () => {
+      const raw = await readJsonFile<unknown>(filePath);
+      if (raw === undefined) return;
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new CorruptStateError(filePath, "file does not contain a JSON object");
+      }
+      assertReadableFormat(filePath, raw as Record<string, unknown>, FORMAT_VERSIONS.apiKeys);
+    },
   });
 }
 

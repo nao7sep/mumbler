@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ let binDir: string;
 
 beforeEach(async () => {
   binDir = await mkdtemp(join(tmpdir(), "mumbler-ver-"));
+  await writeFile(join(binDir, "ffmpeg.exe"), "binary bytes");
 });
 
 afterEach(async () => {
@@ -66,7 +68,7 @@ describe("the sidecar", () => {
   });
 
   it("round-trips the recorded build tag", async () => {
-    await writeVersionSidecar(binDir, "ffmpeg", "autobuild-2026-08-19-19-21", 1_700_000_000_000);
+    await writeVersionSidecar(binDir, "ffmpeg", "autobuild-2026-08-19-19-21", 1_700_000_000_000, join(binDir, "ffmpeg.exe"));
     const read = await readInstalledVersion("ffmpeg", join(binDir, "ffmpeg.exe"), binDir, {
       kind: "sidecar",
     });
@@ -75,29 +77,29 @@ describe("the sidecar", () => {
 
   it("reads anything but a build tag as version unreadable", async () => {
     for (const stored of ["Latest Auto-Build (2026-08-19 19:21)", "latest", "autobuild-next", ""]) {
-      await writeVersionSidecar(binDir, "ffmpeg", stored, 1_700_000_000_000);
+      await writeVersionSidecar(binDir, "ffmpeg", stored, 1_700_000_000_000, join(binDir, "ffmpeg.exe"));
       expect(await readInstalledVersion("ffmpeg", join(binDir, "ffmpeg.exe"), binDir, { kind: "sidecar" }), stored).toBeNull();
     }
   });
 
   it("records when it was installed, in canonical UTC", async () => {
-    await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000);
+    await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000, join(binDir, "ffmpeg.exe"));
     const raw: unknown = JSON.parse(await readFile(versionSidecarPath(binDir, "ffmpeg"), "utf8"));
-    expect(raw).toEqual({ formatVersion: 1, version: "8.2", installedAt: "2023-11-14T22:13:20.000Z" });
+    expect(raw).toEqual({ formatVersion: 1, version: "8.2", installedAt: "2023-11-14T22:13:20.000Z", binarySha256: createHash("sha256").update("binary bytes").digest("hex") });
   });
 
   it.skipIf(process.platform === "win32")("keeps the mode of the sidecar it replaces", async () => {
-    await writeVersionSidecar(binDir, "ffmpeg", "8.1", 1_700_000_000_000);
+    await writeVersionSidecar(binDir, "ffmpeg", "8.1", 1_700_000_000_000, join(binDir, "ffmpeg.exe"));
     await chmod(versionSidecarPath(binDir, "ffmpeg"), 0o640);
 
-    await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000);
+    await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000, join(binDir, "ffmpeg.exe"));
 
     expect((await stat(versionSidecarPath(binDir, "ffmpeg"))).mode & 0o777).toBe(0o640);
   });
 
   it("leaves no staging file behind", async () => {
-    await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000);
-    expect(await readdir(binDir)).toEqual(["ffmpeg.json"]);
+    await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000, join(binDir, "ffmpeg.exe"));
+    expect(await readdir(binDir)).toEqual(["ffmpeg.exe", "ffmpeg.json"]);
   });
 
   it("is null when absent — a hand-placed binary is unversioned, never assumed current", async () => {
@@ -137,5 +139,35 @@ describe("probing a binary that will not run", () => {
     expect(
       await readInstalledVersion("ffmpeg", missing, binDir, { kind: "probe", args: ["-version"] }),
     ).toBeNull();
+  });
+});
+
+
+describe("sidecar publication admission and identity", () => {
+  it("refuses to replace a newer sidecar through the writer", async () => {
+    const path = versionSidecarPath(binDir, "ffmpeg");
+    const newer = JSON.stringify({ formatVersion: 2, version: "future" });
+    await writeFile(path, newer);
+    await expect(writeVersionSidecar(binDir, "ffmpeg", "8.2", 0, join(binDir, "ffmpeg.exe"))).rejects.toMatchObject({ name: "NewerFormatError" });
+    expect(await readFile(path, "utf8")).toBe(newer);
+    expect(await readdir(binDir)).toEqual(["ffmpeg.exe", "ffmpeg.json"]);
+  });
+
+  it("does not attribute an old sidecar to a replaced binary on a fresh read", async () => {
+    const tool = join(binDir, "ffmpeg.exe");
+    await writeVersionSidecar(binDir, "ffmpeg", "autobuild-2026-08-19-19-21", 0, tool);
+    await writeFile(tool, "new binary bytes");
+    expect(await readInstalledVersion("ffmpeg", tool, binDir, { kind: "sidecar" })).toBeNull();
+  });
+
+  it("cancellation leaves the previous sidecar intact", async () => {
+    const path = versionSidecarPath(binDir, "ffmpeg");
+    await writeFile(path, "previous");
+    const controller = new AbortController();
+    const primary = new Error("cancelled");
+    controller.abort(primary);
+    await expect(writeVersionSidecar(binDir, "ffmpeg", "8.2", 0, join(binDir, "ffmpeg.exe"), controller.signal)).rejects.toBe(primary);
+    expect(await readFile(path, "utf8")).toBe("previous");
+    expect(await readdir(binDir)).toEqual(["ffmpeg.exe", "ffmpeg.json"]);
   });
 });

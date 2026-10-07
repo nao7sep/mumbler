@@ -10,13 +10,14 @@ import type { DependencyStatus, ToolFacts, ToolName, ToolTransient } from "@shar
 import { deriveStatus } from "@shared/dependency-status";
 
 import { syncDirectory, syncFile } from "../file-io";
-import type { AppLogger } from "../logger";
+import { serializeError, type AppLogger } from "../logger";
 import type { JsonStore } from "../json-store";
 import { OperationError } from "../operation-error";
 import { assertArm64Slice } from "./arch";
 import { extractFileFromZip } from "./archive";
 import { downloadToFile, fetchText } from "./http";
 import {
+  admitVersionSidecar,
   installedVersionSource,
   readInstalledVersion,
   writeVersionSidecar,
@@ -260,6 +261,10 @@ export class ToolManager {
         // executable binary — never mid-extract.
         await syncFile(stagedExe);
         signal.throwIfAborted();
+        if (installedVersionSource(this.deps.platform).kind === "sidecar") {
+          await admitVersionSidecar(this.deps.binDir, name);
+        }
+        signal.throwIfAborted();
         await rename(stagedExe, this.toolPath(name));
         published = true;
         await syncDirectory(this.deps.binDir);
@@ -272,16 +277,10 @@ export class ToolManager {
       // resolved one beside it — AFTER the publish, so a failure here leaves a
       // present tool reading version-unknown (which offers a re-acquire) rather
       // than an old binary wearing the new version's label.
-      try {
-        if (installedVersionSource(this.deps.platform).kind === "sidecar") {
-          await writeVersionSidecar(this.deps.binDir, name, resolved.version, Date.now());
-        }
-      } finally {
-        // Re-read the artifact even when the sidecar write fails: the binary in
-        // bin/ IS the new one, and presence/version must describe it rather than
-        // what was there before.
-        await this.readFromDisk(name);
+      if (installedVersionSource(this.deps.platform).kind === "sidecar") {
+        await writeVersionSidecar(this.deps.binDir, name, resolved.version, Date.now(), this.toolPath(name), signal);
       }
+      await this.readFromDisk(name);
       signal.throwIfAborted();
       // Only the upstream fact is persisted. What is now installed is read back
       // from the binary, so an install has nothing to record about it.
@@ -302,6 +301,17 @@ export class ToolManager {
       });
       this.setTransient(name, { kind: "idle" });
     } catch (error: unknown) {
+      if (published) {
+        await this.readFromDisk(name).catch((readError: unknown) =>
+          this.deps.logger.warn("tools.install-refresh-failed", "Installed audio tool metadata could not be refreshed.", {
+            tool: name, error: serializeError(readError),
+          }));
+        await this.deps.logger.warn("tools.install-metadata-failed", "Audio tool installed, but its metadata was not saved.", {
+          tool: name, error: serializeError(error),
+        });
+        this.setTransient(name, { kind: "idle" });
+        return;
+      }
       const detail = error instanceof Error ? error.message : String(error);
       if (userController.signal.aborted && !published) {
         await this.deps.logger.info("tools.install-cancelled", "Cancelled audio tool install.", {
