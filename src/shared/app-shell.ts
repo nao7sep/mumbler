@@ -58,16 +58,11 @@ export const APP_SHELL_EVENTS = {
   pendingEditsFlushed: "app-shell:event-pending-edits-flushed",
 } as const;
 
-export type CardStatus =
-  | "Pending Review"
-  | "Imported"
-  | "Queued"
-  | "Transcribing"
-  | "Generating Metadata"
-  | "Ready to Save"
-  | "Saving"
-  | "Cancelled"
-  | "Error";
+export const CARD_STATUSES = [
+  "Pending Review", "Imported", "Queued", "Transcribing", "Generating Metadata",
+  "Ready to Save", "Saving", "Cancelled", "Error",
+] as const;
+export type CardStatus = (typeof CARD_STATUSES)[number];
 
 export type CommandId =
   | "select-previous"

@@ -79,6 +79,14 @@ function stateWith(cards: MumblerCard[]): MumblerQueue {
   };
 }
 
+function pending(id: string) {
+  return {
+    id, originalFilename: "a.m4a", originalSourcePath: "/tmp/a.m4a", workingFilePath: "/tmp/w.m4a",
+    localTimestampText: "", timezone: "UTC", utcTimestampText: "",
+    deleteOriginalOnConfirm: false, copyToBackupOnConfirm: false,
+  };
+}
+
 describe("queue data store", () => {
   it("returns an empty state in memory when no file exists, without writing it", async () => {
     const store = createQueueStore(queuePath());
@@ -149,6 +157,14 @@ describe("queue data store", () => {
     ["pending imports that are not a list", { pendingImports: "none" }],
     ["a card that is not an object", { cards: [7] }],
     ["a card without a working recording path", { cards: [{ ...card(), sourceFilePath: 3 }] }],
+    ["an unknown card status", { cards: [card({ status: "Busy" as never })] }],
+    ["a text trim marker", { cards: [card({ trim: { frontMarkerSec: "5" as never, backMarkerSec: null } })] }],
+    ["a negative trim marker", { cards: [card({ trim: { frontMarkerSec: null, backMarkerSec: -1 } })] }],
+    ["an invalid transcribed trim", { cards: [card({ transcribedTrim: { frontMarkerSec: "5" as never, backMarkerSec: null } })] }],
+    ["an empty card identity", { cards: [card({ id: "" })] }],
+    ["duplicate card identities", { cards: [card(), card()] }],
+    ["an empty pending import identity", { pendingImports: [pending("")] }],
+    ["duplicate pending import identities", { pendingImports: [pending("p"), pending("p")] }],
     ["a card whose AI result is not an object", { cards: [{ ...card(), ai: { ...card().ai, title: "words" } }] }],
     ["a card whose title is not text", { cards: [{ ...card(), metadata: { title: 4, slug: null } }] }],
     ["a pending import whose delete choice is not true or false", {
@@ -174,6 +190,14 @@ describe("queue data store", () => {
   it("reads absent lists as empty", async () => {
     await writeFile(queuePath(), JSON.stringify({ formatVersion: 1 }), "utf8");
     expect((await createQueueStore(queuePath()).load()).value).toEqual({ pendingImports: [], cards: [] });
+  });
+
+  it("refuses a finite-looking JSON trim number that overflows without rewriting it", async () => {
+    const text = JSON.stringify({ formatVersion: 1, cards: [card({ trim: { frontMarkerSec: "overflow" as never, backMarkerSec: null } })] })
+      .replace('"overflow"', "1e400");
+    await writeFile(queuePath(), text);
+    await expect(createQueueStore(queuePath()).load()).rejects.toBeInstanceOf(CorruptStateError);
+    expect(await readFile(queuePath(), "utf8")).toBe(text);
   });
 
   it("writes UTC instants as canonical ISO strings and reads epoch-ms back", async () => {

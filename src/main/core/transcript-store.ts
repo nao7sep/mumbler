@@ -38,12 +38,13 @@ function serialize(cardId: string, transcript: CardTranscript): Record<string, u
   return { formatVersion: FORMAT_VERSIONS.transcript, cardId, ...transcript };
 }
 
-function parse(path: string, raw: unknown): CardTranscript {
+function parse(path: string, raw: unknown, cardId: string): CardTranscript {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new CorruptStateError(path, "file does not contain a JSON object");
   }
   const record = raw as Record<string, unknown>;
   assertReadableFormat(path, record, FORMAT_VERSIONS.transcript);
+  if (record.cardId !== cardId) throw new CorruptStateError(path, "cardId does not match the transcript filename");
   // A wrong type is unreadable: read as no text, a later save or cleanup would
   // overwrite or delete it (store-recovery-conventions). An absent field is no text.
   const text = (key: keyof CardTranscript): string | null => {
@@ -98,7 +99,7 @@ export class TranscriptStore {
         throw new CorruptStateError(path, formatError(error), { cause: error });
       }
       if (raw === undefined) continue;
-      const transcript = parse(path, raw);
+      const transcript = parse(path, raw, cardId);
       transcripts.set(cardId, transcript);
       this.onDisk.set(cardId, JSON.stringify(serialize(cardId, transcript)));
     }
@@ -119,7 +120,7 @@ export class TranscriptStore {
         await writeJsonFile(path, value, {
           validateCurrent: async () => {
             const current = await readJsonFile<unknown>(path);
-            if (current !== undefined) parse(path, current);
+            if (current !== undefined) parse(path, current, cardId);
           },
         });
         this.onDisk.set(cardId, text);
@@ -137,7 +138,10 @@ export class TranscriptStore {
         if (keep.has(cardId)) continue;
         // not recorded: a deletion writes no bytes; the file's last version is
         // already in the backup history.
-        await rm(this.pathFor(cardId), { force: true });
+        const path = this.pathFor(cardId);
+        const current = await readJsonFile<unknown>(path);
+        if (current !== undefined) parse(path, current, cardId);
+        await rm(path, { force: true });
         this.onDisk.delete(cardId);
       }
     });

@@ -18,7 +18,7 @@ import {
 } from "@shared/timestamps";
 import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
-import { THEME_PREFERENCES } from "@shared/app-shell";
+import { CARD_STATUSES, THEME_PREFERENCES } from "@shared/app-shell";
 import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
 import { FORMAT_VERSIONS } from "./format-versions";
 import { CorruptStateError, JsonStore, type LoadResult } from "./json-store";
@@ -278,8 +278,18 @@ function cardIssue(item: unknown): string | null {
   const issue = textIssue("a card's", card, ["id", "originalFilename", "sourceFilePath", "status"]) ??
     objectOrNullIssue("a card's", card, ["trimDecision", "transcribedTrim", "lastError"]);
   if (issue !== null) return issue;
+  if (!CARD_STATUSES.includes(card.status as MumblerCard["status"])) return "a card's status is unknown";
   const part = ["timestamps", "trim", "metadata", "ai"].find((key) => asRecord(card[key]) === null);
   if (part !== undefined) return `a card's ${part} is not an object`;
+  for (const [name, trim] of [["trim", card.trim], ["transcribedTrim", card.transcribedTrim]] as const) {
+    if (trim === null) continue;
+    for (const key of ["frontMarkerSec", "backMarkerSec"]) {
+      const value = (trim as Record<string, unknown>)[key];
+      if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+        return `a card's ${name} ${key} is not a non-negative finite number or null`;
+      }
+    }
+  }
   const metadata = card.metadata as Record<string, unknown>;
   const label = ["title", "slug"].find((key) => metadata[key] !== null && typeof metadata[key] !== "string");
   return textIssue("a card's timestamps", card.timestamps as Record<string, unknown>, ["confirmedLocal", "effectiveLocal", "timezone"]) ??
@@ -293,9 +303,13 @@ function queueShapeIssue(raw: Record<string, unknown>): string | null {
     if (!Object.hasOwn(raw, key)) continue;
     const list = raw[key];
     if (!Array.isArray(list)) return `${key} is not a list`;
+    const ids = new Set<string>();
     for (const item of list) {
       const issue = itemIssue(item);
       if (issue !== null) return issue;
+      const id = (item as Record<string, unknown>).id as string;
+      if (id.length === 0 || ids.has(id)) return `${key} contains an empty or duplicate id`;
+      ids.add(id);
     }
   }
   return null;

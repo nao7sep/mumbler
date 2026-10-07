@@ -168,6 +168,39 @@ describe("TranscriptStore", () => {
 
     expect(await files()).toEqual(["notes.txt"]);
   });
+
+  it("refuses text belonging to another card without changing either file", async () => {
+    const store = new TranscriptStore(dir);
+    const take = card("take", "old words");
+    await store.writeChanged([take]);
+    const [name] = await files();
+    const path = join(dir, name);
+    const foreign = JSON.stringify({ formatVersion: 1, cardId: "other", transcription: "other words" });
+    await writeFile(path, foreign);
+    await expect(new TranscriptStore(dir).open(["take"])).rejects.toBeInstanceOf(CorruptStateError);
+    take.transcription.text = "replacement";
+    await expect(store.writeChanged([take])).rejects.toBeInstanceOf(CorruptStateError);
+    expect(await readFile(path, "utf8")).toBe(foreign);
+  });
+
+  it.each([
+    { formatVersion: 2, cardId: "take", transcription: "future words" },
+    { formatVersion: 1, cardId: "other", transcription: "other words" },
+    { formatVersion: 1, cardId: "take", transcription: ["unreadable words"] },
+  ])("preserves a cached transcript that no longer admits deletion: %j", async (replacement) => {
+    const store = new TranscriptStore(dir);
+    await store.writeChanged([card("take", "old words")]);
+    const [name] = await files();
+    const path = join(dir, name);
+    const text = JSON.stringify(replacement);
+    await writeFile(path, text);
+    await expect(store.removeAbsent([])).rejects.toBeInstanceOf(Error);
+    expect(await readFile(path, "utf8")).toBe(text);
+    // A failed admission does not forget the file or wedge the store's tail.
+    await writeFile(path, JSON.stringify({ formatVersion: 1, cardId: "take", transcription: "old words" }));
+    await store.removeAbsent([]);
+    expect(await files()).toEqual([]);
+  });
 });
 
 
