@@ -842,18 +842,22 @@ describe("working with a card", () => {
     expect(await exists(card.sourceFilePath)).toBe(false);
   });
 
-  it.each([false, true])("refuses the startup-cleaned derived directory (alias: %s)", async (alias) => {
+  it.each([
+    ["working/derived", false], ["working/derived", true],
+    ["temp", false], ["temp", true],
+    ["temp/exports", false], ["temp/exports", true],
+  ] as const)("refuses the startup-cleaned %s directory (alias: %s)", async (directory, alias) => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
-    const derived = join(home, "working", "derived");
-    await mkdir(derived, { recursive: true });
-    const output = alias ? join(root, "derived-alias") : derived;
-    if (alias) await symlink(derived, output, "junction");
+    const disposable = join(home, directory);
+    await mkdir(disposable, { recursive: true });
+    const output = alias ? join(root, "disposable-alias") : disposable;
+    if (alias) await symlink(disposable, output, "junction");
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), outputDirectory: output });
     const result = await runtime.saveCard(card.id, "overwrite");
     expect(result.kind).toBe("failed");
     if (result.kind === "failed") expect(result.message.key).toBe("error.saveOutputLocationUnsafe");
-    expect(await readdir(derived)).toEqual([]);
+    expect(await readdir(disposable)).toEqual([]);
     expect(await exists(card.sourceFilePath)).toBe(true);
     expect(cards(result.snapshot)[0].status).toBe("Ready to Save");
   });

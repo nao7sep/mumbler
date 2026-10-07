@@ -1820,18 +1820,20 @@ export class ApplicationRuntime {
   }
 
   // These are actual deletion owners: card/import disposal removes input paths,
-  // and startup cleans working/derived. Resolve directory aliases and existing
+  // and startup cleans working/derived and temp. Resolve directory aliases and existing
   // hard links once; private staging needs no identity/rollback machinery.
   private async isSafeSaveLocation(targets: SaveTargetPaths, preparedAudioPath: string): Promise<boolean> {
     const working = await realpath(this.runtime.paths!.workingDir);
     const derivedPath = join(working, "derived");
-    const derived = await realpath(derivedPath).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return derivedPath;
-      throw error;
-    });
     const output = await realpath(dirname(targets.audioPath));
-    const withinDerived = relative(derived, output);
-    if (withinDerived === "" || (withinDerived !== ".." && !withinDerived.startsWith(`..${sep}`) && !isAbsolute(withinDerived))) return false;
+    for (const disposablePath of [derivedPath, this.runtime.paths!.tempDir]) {
+      const disposable = await realpath(disposablePath).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return disposablePath;
+        throw error;
+      });
+      const withinDisposable = relative(disposable, output);
+      if (withinDisposable === "" || (withinDisposable !== ".." && !withinDisposable.startsWith(`..${sep}`) && !isAbsolute(withinDisposable))) return false;
+    }
     const state = this.runtime.state!;
     const sources = new Set([
       preparedAudioPath,
