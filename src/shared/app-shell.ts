@@ -565,6 +565,11 @@ export interface ConfirmImportsResult {
 
 export type SaveConflictResolution = "overwrite" | "suffix" | "cancel";
 
+export interface SaveOutputFile {
+  path: string;
+  status: "saved" | "unchanged" | "failed" | "pending";
+}
+
 export type SaveCardResult =
   | {
       kind: "saved";
@@ -578,6 +583,7 @@ export type SaveCardResult =
       kind: "failed";
       snapshot: AppSnapshot;
       message: Message;
+      files?: SaveOutputFile[];
     }
   | {
       kind: "conflict";

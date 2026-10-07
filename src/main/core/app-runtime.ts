@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
-import { chmod, mkdir, rm, stat } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { chmod, mkdir, realpath, rm, stat } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { homedir } from "node:os";
 
 import { nanoid } from "nanoid";
@@ -22,6 +22,7 @@ import {
   type PendingImportReviewItem,
   type RendererErrorReport,
   type SaveCardResult,
+  type SaveOutputFile,
   type SaveConflictResolution,
   type SettingsDraft,
   type StartupFailure,
@@ -61,8 +62,9 @@ import {
   buildOutputPayload,
   buildUniqueSuffixedTargets,
   computeFinalDuration,
-  finalizeOutputsAtomically,
+  finalizeOutputs,
   OutputConflictError,
+  OutputLocationError,
   OutputPartialFailureError,
   pathsConflict,
   type SaveTargetPaths,
@@ -160,7 +162,7 @@ type SaveOutcome =
   | ({ kind: "saved"; warnings?: Message[] } & SaveTargetPaths)
   | ({ kind: "conflict" } & SaveTargetPaths)
   | { kind: "cancelled" }
-  | { kind: "failed"; message: Message };
+  | { kind: "failed"; message: Message; files?: SaveOutputFile[] };
 
 interface AppRuntimeState {
   paths: AppPaths | null;
@@ -1755,29 +1757,36 @@ export class ApplicationRuntime {
 
       let warnings: Message[] = [];
       try {
-        const result = await finalizeOutputsAtomically({
+        const result = await finalizeOutputs({
           sourceAudioPath: finalAudio.filePath,
           targets: targetPaths,
           overwrite: resolution === "overwrite",
           jsonContent: `${JSON.stringify(outputPayload, null, 2)}\n`,
           markdownContent,
           signal,
+          isSafeLocation: () => this.isSafeSaveLocation(targetPaths, finalAudio.filePath),
         });
         if (result.warnings.length > 0) {
-          await logger.warn("save.cleanup-failed", "Outputs committed but recovery/staging cleanup failed.", {
+          await logger.warn("save.cleanup-failed", "Outputs committed but staging cleanup failed.", {
             cardId, issues: result.warnings.map((issue) => ({ ...issue, error: serializeError(issue.error) })),
           });
           warnings = [message("notice.saveCleanupFailed", { folder: outputDirectory })];
         }
       } catch (error: unknown) {
+        if (error instanceof OutputLocationError) return { kind: "failed", message: message("error.saveOutputLocationUnsafe") };
         if (error instanceof OutputPartialFailureError || error instanceof NewerFormatError) {
-          await logger.error("save.incomplete", "Output save refused or could not restore every output.", error, {
+          await logger.error("save.incomplete", "Output save refused or did not finish every output.", error, {
             cardId,
             issues: error instanceof OutputPartialFailureError
               ? error.issues.map((issue) => ({ ...issue, error: serializeError(issue.error) })) : undefined,
           });
-          return { kind: "failed", message: message(error instanceof NewerFormatError
-            ? "error.saveNewerOutput" : "error.saveIncomplete", { folder: outputDirectory }) };
+          if (error instanceof NewerFormatError) return {
+            kind: "failed", message: message("error.saveNewerOutput", { folder: outputDirectory }),
+          };
+          const savedPaths = error.files.filter((file) => file.status === "saved").map((file) => basename(file.path));
+          return { kind: "failed", files: error.files, message: savedPaths.length > 0
+            ? message("error.saveIncomplete", { folder: outputDirectory, files: savedPaths.join(", ") })
+            : message("error.saveFailed", { folder: outputDirectory }) };
         }
         if (!(error instanceof OutputConflictError)) {
           throw error;
@@ -1808,6 +1817,45 @@ export class ApplicationRuntime {
         committed?.warnings?.push(message("notice.saveCleanupFailed", { folder: this.runtime.paths!.workingDir }));
       }
     }
+  }
+
+  // These are actual deletion owners: card/import disposal removes input paths,
+  // and startup cleans working/derived. Resolve directory aliases and existing
+  // hard links once; private staging needs no identity/rollback machinery.
+  private async isSafeSaveLocation(targets: SaveTargetPaths, preparedAudioPath: string): Promise<boolean> {
+    const working = await realpath(this.runtime.paths!.workingDir);
+    const derivedPath = join(working, "derived");
+    const derived = await realpath(derivedPath).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return derivedPath;
+      throw error;
+    });
+    const output = await realpath(dirname(targets.audioPath));
+    const withinDerived = relative(derived, output);
+    if (withinDerived === "" || (withinDerived !== ".." && !withinDerived.startsWith(`..${sep}`) && !isAbsolute(withinDerived))) return false;
+    const state = this.runtime.state!;
+    const sources = new Set([
+      preparedAudioPath,
+      ...state.cards.map((card) => card.sourceFilePath),
+      ...state.pendingImports.flatMap((item) => [item.workingFilePath, item.originalSourcePath]),
+    ]);
+    const sourceInfo = await Promise.all([...sources].map(async (path) => {
+      try { return { path: await realpath(path), info: await stat(path) }; }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      }
+    }));
+    for (const target of Object.values(targets)) {
+      const canonical = join(output, basename(target));
+      let targetInfo: Awaited<ReturnType<typeof stat>> | null = null;
+      try { targetInfo = await stat(target); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      for (const source of sourceInfo) {
+        if (source !== null && (canonical === source.path || (targetInfo !== null &&
+            targetInfo.dev === source.info.dev && targetInfo.ino === source.info.ino))) return false;
+      }
+    }
+    return true;
   }
 
   removeCard(cardId: string): Promise<AppSnapshot> {

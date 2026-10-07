@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -23,7 +23,7 @@ vi.mock("electron", () => ({
 // The filesystem is real; only a removal the OS refuses is simulated, for paths
 // registered in `undeletable`, so the case runs the same on every platform.
 const outputFaults = vi.hoisted(() => ({
-  beforeLink: null as ((source: string, destination: string) => Promise<void>) | null,
+  failTarget: null as string | null,
   refuseCleanup: false,
 }));
 const undeletable = vi.hoisted(() => new Set<string>());
@@ -42,12 +42,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
-    link: async (source: string, destination: string) => {
-      await outputFaults.beforeLink?.(source, destination);
-      return actual.link(source, destination);
-    },
     rm: async (path: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
-      if (outputFaults.refuseCleanup && String(path).endsWith(".bak")) throw new Error("backup cleanup denied");
+      if (outputFaults.refuseCleanup && basename(String(path)).startsWith(".mumbler-save-")) throw new Error("staging cleanup denied");
       if (undeletable.has(String(path))) {
         await duringRefusedRm.run?.();
         throw new Error("EACCES: permission denied");
@@ -55,6 +51,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       return actual.rm(path, options);
     },
     rename: async (from: Parameters<typeof actual.rename>[0], to: Parameters<typeof actual.rename>[1]) => {
+      if (outputFaults.failTarget === String(to)) throw new Error("publish refused");
       if (unmovable.has(String(from))) throw new Error("EBUSY: resource busy or locked");
       const held = unwritable.held;
       if (held !== null && held.path === String(to)) {
@@ -220,7 +217,7 @@ beforeEach(async () => {
   previousGeminiKey = process.env.GEMINI_API_KEY;
   delete process.env.GEMINI_API_KEY;
   undeletable.clear();
-  outputFaults.beforeLink = null;
+  outputFaults.failTarget = null;
   outputFaults.refuseCleanup = false;
   unmovable.clear();
   unwritable.refuses = () => false;
@@ -762,7 +759,7 @@ describe("working with a card", () => {
     expect((await readdir(join(home, "output"))).sort()).toEqual([basename(target)]);
   });
 
-  it("retains the working card and reports an incomplete restore with recovery files", async () => {
+  it("retains the working card and reports actual completed outputs after a later replacement fails", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
     const saved = cards(runtime.getSnapshot())[0];
@@ -771,19 +768,19 @@ describe("working with a card", () => {
     await writeFile(`${stem}.wav`, "OLD AUDIO");
     await writeFile(`${stem}.json`, "OLD JSON");
     await writeFile(`${stem}.md`, "OLD MARKDOWN");
-    outputFaults.beforeLink = async (source, destination) => {
-      if (source.endsWith(".tmp") && destination === `${stem}.md`) throw new Error("publish refused");
-      if (source.endsWith(".bak") && destination === `${stem}.json`) throw new Error("restore refused");
-    };
+    outputFaults.failTarget = `${stem}.md`;
     const result = await runtime.saveCard(card.id, "overwrite");
     expect(result.kind).toBe("failed");
     if (result.kind === "failed") expect(result.message.key).toBe("error.saveIncomplete");
     expect(cards(result.snapshot)[0].status).toBe("Ready to Save");
     expect(await exists(card.sourceFilePath)).toBe(true);
-    const files = await readdir(join(home, "output"));
-    const backup = files.find((file) => file.endsWith(".bak"))!;
-    expect(await readFile(join(home, "output", backup), "utf8")).toBe("OLD JSON");
-    expect(await readFile(`${stem}.wav`, "utf8")).toBe("OLD AUDIO");
+    if (result.kind === "failed") expect(result.files).toEqual([
+      { path: `${stem}.wav`, status: "saved" }, { path: `${stem}.json`, status: "saved" },
+      { path: `${stem}.md`, status: "failed" },
+    ]);
+    expect(await readFile(`${stem}.wav`, "utf8")).toBe("audio for take.wav");
+    expect(await readFile(`${stem}.md`, "utf8")).toBe("OLD MARKDOWN");
+    expect((await readdir(join(home, "output"))).sort()).toEqual([basename(`${stem}.json`), basename(`${stem}.md`), basename(`${stem}.wav`)]);
   });
 
   it("reports a committed save with cleanup warnings and removes its working card", async () => {
@@ -805,7 +802,7 @@ describe("working with a card", () => {
     }
     expect(cards(result.snapshot)).toEqual([]);
     expect(await exists(card.sourceFilePath)).toBe(false);
-    expect((await readdir(join(home, "output"))).filter((file) => file.endsWith(".bak"))).toHaveLength(3);
+    expect((await readdir(join(home, "output"))).filter((file) => file.startsWith(".mumbler-save-"))).toHaveLength(1);
   });
 
   it("keeps committed success and exposes prepared-audio cleanup failure separately", async () => {
@@ -833,6 +830,95 @@ describe("working with a card", () => {
     expect(cards(result.snapshot)[0].status).toBe("Ready to Save");
     expect(await exists(card.sourceFilePath)).toBe(true);
     expect(await readFile(`${stem}.json`, "utf8")).toBe('{"formatVersion":2}');
+  });
+
+  it("keeps exports in the working folder when they do not replace a working input", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), outputDirectory: join(home, "working") });
+    const result = await runtime.saveCard(card.id);
+    expect(result.kind).toBe("saved");
+    if (result.kind === "saved") expect(await readFile(result.audioPath, "utf8")).toBe("audio for take.wav");
+    expect(await exists(card.sourceFilePath)).toBe(false);
+  });
+
+  it.each([false, true])("refuses the startup-cleaned derived directory (alias: %s)", async (alias) => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    const derived = join(home, "working", "derived");
+    await mkdir(derived, { recursive: true });
+    const output = alias ? join(root, "derived-alias") : derived;
+    if (alias) await symlink(derived, output, "junction");
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), outputDirectory: output });
+    const result = await runtime.saveCard(card.id, "overwrite");
+    expect(result.kind).toBe("failed");
+    if (result.kind === "failed") expect(result.message.key).toBe("error.saveOutputLocationUnsafe");
+    expect(await readdir(derived)).toEqual([]);
+    expect(await exists(card.sourceFilePath)).toBe(true);
+    expect(cards(result.snapshot)[0].status).toBe("Ready to Save");
+  });
+
+  it.each(["card", "pending", "original"] as const)("refuses an output alias of a %s input", async (input) => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    const pending = input === "card" ? null : (await dropIn("next.wav"))[0]!;
+    const protectedPath = input === "card" ? card.sourceFilePath : input === "pending" ? pending!.workingFilePath : pending!.originalSourcePath;
+    const saved = cards(runtime.getSnapshot())[0];
+    const output = join(home, "output");
+    await mkdir(output, { recursive: true });
+    const target = join(output, `${formatUtcMarker(new Date(saved.timestamps.effectiveUtc))}-old-title.wav`);
+    await link(protectedPath, target);
+    const prior = await readFile(protectedPath, "utf8");
+    const result = await runtime.saveCard(card.id, "overwrite");
+    expect(result.kind).toBe("failed");
+    if (result.kind === "failed") expect(result.message.key).toBe("error.saveOutputLocationUnsafe");
+    expect(await readFile(protectedPath, "utf8")).toBe(prior);
+    expect(await readdir(output)).toEqual([basename(target)]);
+    expect(await exists(card.sourceFilePath)).toBe(true);
+  });
+
+  it("checks newly admitted pending inputs after a held final probe", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), outputDirectory: join(home, "working") });
+    const saved = cards(runtime.getSnapshot())[0];
+    const name = `${formatUtcMarker(new Date(saved.timestamps.effectiveUtc))}-old-title.wav`;
+    let release!: () => void;
+    probeGate.held = new Promise<void>((resolve) => { release = resolve; });
+    const saving = runtime.saveCard(card.id, "overwrite");
+    try {
+      await vi.waitFor(() => expect(probeGate.entered).toBeGreaterThan(0));
+      const [pending] = await dropIn(name);
+      expect(basename(pending!.workingFilePath)).toBe(name);
+      const prior = await readFile(pending!.workingFilePath, "utf8");
+      release();
+      const result = await saving;
+      expect(result.kind).toBe("failed");
+      if (result.kind === "failed") expect(result.message.key).toBe("error.saveOutputLocationUnsafe");
+      expect(await readFile(pending!.workingFilePath, "utf8")).toBe(prior);
+      expect(cards(result.snapshot)[0].status).toBe("Ready to Save");
+    } finally { release(); await saving.catch(() => undefined); }
+  });
+
+  it("refuses publishing over the card's own working filename, but permits a suffixed retry", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    await runtime.shutdown();
+    const store = createQueueStore(join(home, "queue.json"));
+    const loaded = await store.load();
+    const saved = loaded.value.cards[0]!;
+    const target = join(home, "working", `${formatUtcMarker(new Date(saved.timestamps.effectiveUtc))}-old-title.wav`);
+    await rename(saved.sourceFilePath, target);
+    saved.sourceFilePath = target;
+    await store.save(loaded.value);
+    runtime = await ApplicationRuntime.initialize();
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), outputDirectory: join(home, "working") });
+    const refused = await runtime.saveCard(card.id, "overwrite");
+    expect(refused.kind).toBe("failed");
+    expect(await readFile(target, "utf8")).toBe("audio for take.wav");
+    const retried = await runtime.saveCard(card.id, "suffix");
+    expect(retried.kind).toBe("saved");
+    if (retried.kind === "saved") expect(await readFile(retried.audioPath, "utf8")).toBe("audio for take.wav");
   });
 
   it("hands the card back as ready to save when a save stops at a conflict", async () => {

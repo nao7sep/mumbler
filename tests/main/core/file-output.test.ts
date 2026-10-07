@@ -29,12 +29,11 @@ const {
   buildMarkdownContent,
   buildOutputPayload,
   computeFinalDuration,
-  finalizeOutputsAtomically,
+  finalizeOutputs,
   yamlDoubleQuotedString,
 } = await import("@main/core/file-output");
-const { fileExists } = await import("@main/core/file-io");
 const { CancelledError } = await import("@main/core/cancellation");
-const { OutputConflictError } = await import("@main/core/file-output");
+const { OutputPartialFailureError, OutputConflictError } = await import("@main/core/file-output");
 
 function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
   return {
@@ -188,7 +187,7 @@ describe("buildOutputPayload", () => {
   });
 });
 
-describe("finalizeOutputsAtomically", () => {
+describe("finalizeOutputs", () => {
   let dir: string;
   let sourceAudio: string;
 
@@ -213,12 +212,12 @@ describe("finalizeOutputsAtomically", () => {
   }
 
   async function leftoverTempsAndBackups(): Promise<string[]> {
-    return (await readdir(dir)).filter((name) => name.includes(".tmp") || name.includes(".bak"));
+    return (await readdir(dir)).filter((name) => name.startsWith(".mumbler-save-"));
   }
 
   it("writes all three outputs and leaves no temp or backup files behind", async () => {
     const t = targets("out");
-    await finalizeOutputsAtomically({
+    await finalizeOutputs({
       sourceAudioPath: sourceAudio,
       targets: t,
       overwrite: false,
@@ -230,7 +229,7 @@ describe("finalizeOutputsAtomically", () => {
     expect(await readFile(t.jsonPath, "utf8")).toBe('{"k":1}');
     expect(await readFile(t.markdownPath, "utf8")).toBe("# md");
     expect(await leftoverTempsAndBackups()).toEqual([]);
-    expect(syncedDirectories).toEqual([dir, dir]);
+    expect(syncedDirectories).toEqual([dir]);
   });
 
   // A fixed time well in the past, so a copy that took the moment of copying fails.
@@ -241,7 +240,7 @@ describe("finalizeOutputsAtomically", () => {
     await writeFile(t.audioPath, "OLD-AUDIO");
     await utimes(sourceAudio, RECORDED, RECORDED);
 
-    await finalizeOutputsAtomically({
+    await finalizeOutputs({
       sourceAudioPath: sourceAudio,
       targets: overwrite ? t : targets("fresh"),
       overwrite,
@@ -257,7 +256,7 @@ describe("finalizeOutputsAtomically", () => {
     const t = targets("readonly-source");
     await chmod(sourceAudio, 0o400);
 
-    await finalizeOutputsAtomically({
+    await finalizeOutputs({
       sourceAudioPath: sourceAudio,
       targets: t,
       overwrite: false,
@@ -270,13 +269,13 @@ describe("finalizeOutputsAtomically", () => {
     expect(await leftoverTempsAndBackups()).toEqual([]);
   });
 
-  it("overwrites existing outputs and cleans up the backups", async () => {
+  it("overwrites existing outputs without backups", async () => {
     const t = targets("out");
     await writeFile(t.audioPath, "OLD-AUDIO");
     await writeFile(t.jsonPath, "OLD-JSON");
     await writeFile(t.markdownPath, "OLD-MD");
 
-    await finalizeOutputsAtomically({
+    await finalizeOutputs({
       sourceAudioPath: sourceAudio,
       targets: t,
       overwrite: true,
@@ -298,7 +297,7 @@ describe("finalizeOutputsAtomically", () => {
     await chmod(t.jsonPath, 0o640);
     await chmod(t.markdownPath, 0o604);
 
-    await finalizeOutputsAtomically({
+    await finalizeOutputs({
       sourceAudioPath: sourceAudio,
       targets: t,
       overwrite: true,
@@ -318,7 +317,7 @@ describe("finalizeOutputsAtomically", () => {
     const earlier = new Date(Date.UTC(2024, 4, 6, 7, 8, 9));
     for (const path of [t.audioPath, t.jsonPath, t.markdownPath]) await utimes(path, earlier, earlier);
 
-    await finalizeOutputsAtomically({
+    await finalizeOutputs({
       sourceAudioPath: sourceAudio,
       targets: t,
       overwrite: true,
@@ -342,7 +341,7 @@ describe("finalizeOutputsAtomically", () => {
     controller.abort();
 
     await expect(
-      finalizeOutputsAtomically({
+      finalizeOutputs({
         sourceAudioPath: sourceAudio,
         targets: t,
         overwrite: true,
@@ -362,7 +361,7 @@ describe("finalizeOutputsAtomically", () => {
     const t = targets("out");
 
     await expect(
-      finalizeOutputsAtomically({
+      finalizeOutputs({
         sourceAudioPath: join(dir, "missing.m4a"),
         targets: t,
         overwrite: false,
@@ -377,27 +376,29 @@ describe("finalizeOutputsAtomically", () => {
     expect(await readdir(dir)).toEqual(["source.m4a"]);
   });
 
-  it("keeps a target that appeared after the conflict check and rolls back its own outputs", async () => {
+  it("keeps a late occupied target and reports the earlier completed outputs", async () => {
     const t = targets("out");
     // Something else took the markdown name after the save checked for
     // conflicts: publishing the audio and JSON succeeds, the markdown is refused.
     await writeFile(t.markdownPath, "SOMEONE-ELSE");
 
-    const attempt = finalizeOutputsAtomically({
+    const attempt = finalizeOutputs({
       sourceAudioPath: sourceAudio,
       targets: t,
       overwrite: false,
       jsonContent: "J",
       markdownContent: "M",
     });
-    await expect(attempt).rejects.toBeInstanceOf(OutputConflictError);
-    await expect(attempt).rejects.toMatchObject({ targetPath: t.markdownPath });
+    await expect(attempt).rejects.toBeInstanceOf(OutputPartialFailureError);
+    await expect(attempt).rejects.toMatchObject({ primary: expect.any(OutputConflictError), files: [
+      { path: t.audioPath, status: "saved" }, { path: t.jsonPath, status: "saved" },
+      { path: t.markdownPath, status: "failed" },
+    ] });
 
     expect(await readFile(t.markdownPath, "utf8"), "the other file is untouched").toBe("SOMEONE-ELSE");
-    // A refused save must not leave the audio or json half-committed.
-    expect(await fileExists(t.audioPath)).toBe(false);
-    expect(await fileExists(t.jsonPath)).toBe(false);
+    expect(await readFile(t.audioPath, "utf8")).toBe("AUDIO-BYTES");
+    expect(await readFile(t.jsonPath, "utf8")).toBe("J");
     expect(await leftoverTempsAndBackups()).toEqual([]);
-    expect(syncedDirectories).toEqual([]);
+    expect(syncedDirectories).toEqual([dir]);
   });
 });
