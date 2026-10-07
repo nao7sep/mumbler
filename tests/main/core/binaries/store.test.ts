@@ -27,6 +27,19 @@ async function onDisk(): Promise<{ tools: Record<string, { lastCheckedAtUtc: unk
 }
 
 describe("dependencies store — timestamp persistence", () => {
+  it.each(["2023-11-14T22:13:20", "2023-11-14T22:13:20.000+09:00", "2023-11-14", "2023-02-30T22:13:20.000Z"])(
+    "ignores an invalid or non-UTC check fact: %s", async (time) => {
+      await writeFile(storePath(), JSON.stringify({
+        formatVersion: 1, lastCheckAttemptAtUtc: time,
+        tools: { ffmpeg: { desiredVersion: "8.2", lastCheckedAtUtc: time } },
+      }));
+      const loaded = (await createDependenciesStore(storePath()).load()).value;
+      expect(loaded.lastCheckAttemptAtUtc).toBeNull();
+      expect(loaded.tools.ffmpeg.lastCheckedAtUtc).toBeNull();
+      expect(launchCheckDue(loaded.lastCheckAttemptAtUtc, Date.now())).toBe(true);
+    },
+  );
+
   it("writes lastCheckedAtUtc as canonical ISO-8601 and round-trips back to epoch-ms", async () => {
     const store = createDependenciesStore(storePath());
     const { value } = await store.load();

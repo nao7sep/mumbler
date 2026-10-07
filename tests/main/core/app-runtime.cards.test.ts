@@ -709,6 +709,28 @@ describe("working with a card", () => {
     expect(persisted.value.cards[0].trim.frontMarkerSec).toBe(9);
   });
 
+  it("dates the trim edit when received rather than when held analysis finishes", async () => {
+    const card = await confirmed();
+    const editedAtUtc = card.updatedAtUtc + 1_000;
+    const now = vi.spyOn(Date, "now").mockReturnValue(editedAtUtc);
+    let release!: () => void;
+    trimGate.held = new Promise<void>((resolve) => { release = resolve; });
+    const editing = runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: null });
+    try {
+      await vi.waitFor(() => expect(trimGate.entered).toBe(1));
+      now.mockReturnValue(editedAtUtc + 60_000);
+      release();
+      await editing;
+      expect(cards(runtime.getSnapshot())[0].updatedAtUtc).toBe(editedAtUtc);
+      const stored = await createQueueStore(join(home, "queue.json")).load();
+      expect(stored.value.cards[0].updatedAtUtc).toBe(editedAtUtc);
+    } finally {
+      release();
+      now.mockRestore();
+      await editing.catch(() => undefined);
+    }
+  });
+
   it("leaves a card as it was when the trim it already holds is applied again", async () => {
     const card = await confirmed();
     const [trimmed] = cards(await runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: 200 }));

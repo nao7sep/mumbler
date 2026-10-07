@@ -210,14 +210,17 @@ export function formatUtcMarkerMs(date: Date): string {
   );
 }
 
-// Reads a stored UTC instant in the one form formatUtcIsoCompact writes, or null
-// when it is missing or in any other form. What stands in for an unreadable time
+// Reads explicit UTC ISO instants with 0–7 fractional digits. What stands in for
+// an unreadable time
 // is the caller's to decide from the times its item recorded
 // (content-lifecycle-conventions, "A missing time is not made up").
 export function parseUtcMs(value: unknown): number | null {
   if (typeof value !== "string") return null;
-  const ms = Date.parse(value);
-  return !Number.isNaN(ms) && formatUtcIsoCompact(ms) === value ? ms : null;
+  const parts = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?(?:Z|\+00:00)$/.exec(value);
+  if (parts === null) return null;
+  const canonical = `${parts[1]}.${(parts[2] ?? "").padEnd(3, "0").slice(0, 3)}Z`;
+  const ms = Date.parse(canonical);
+  return !Number.isNaN(ms) && formatUtcIsoCompact(ms) === canonical ? ms : null;
 }
 
 function parseLocalTimestamp(value: string): TimestampParts | null {

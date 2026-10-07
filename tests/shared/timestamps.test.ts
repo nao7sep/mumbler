@@ -151,12 +151,22 @@ describe("parseUtcMs", () => {
     expect(parseUtcMs("2026-04-22T00:44:00.007Z")).toBe(Date.UTC(2026, 3, 22, 0, 44, 0, 7));
   });
 
-  it("reads every other form as no stored time", () => {
+  it.each([
+    ["2026-04-22T00:44:00Z", 0],
+    ["2026-04-22T00:44:00.000+00:00", 0],
+    ["2026-04-22T00:44:00.1Z", 100],
+    ["2026-04-22T00:44:00.1234567+00:00", 123],
+  ])("reads explicit UTC %s at millisecond precision", (value, milliseconds) => {
+    expect(parseUtcMs(value)).toBe(Date.UTC(2026, 3, 22, 0, 44, 0, milliseconds));
+  });
+
+  it("reads incompatible or invalid forms as no stored time", () => {
     for (const other of [
       "2026-04-22 00:44:00",
       "20260422-004400-utc",
-      "2026-04-22T00:44:00Z",
-      "2026-04-22T00:44:00.000+00:00",
+      "2026-04-22T00:44:00.000+01:00",
+      "2026-04-22T00:44:00.12345678Z",
+      "2026-04-22T24:00:00Z",
       "2026-02-30T00:00:00.000Z",
     ]) {
       expect(parseUtcMs(other), other).toBeNull();

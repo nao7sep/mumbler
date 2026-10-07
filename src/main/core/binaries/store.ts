@@ -1,5 +1,5 @@
 import type { ToolName } from "@shared/app-shell";
-import { formatUtcIsoCompact } from "@shared/timestamps";
+import { formatUtcIsoCompact, parseUtcMs } from "@shared/timestamps";
 
 import { FORMAT_VERSIONS } from "../format-versions";
 import { JsonStore } from "../json-store";
@@ -60,21 +60,11 @@ function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-// Read a UTC instant written as canonical ISO-8601. Garbage yields null rather
-// than a false "checked just now".
-function asUtcMs(value: unknown): number | null {
-  if (typeof value === "string") {
-    const ms = Date.parse(value);
-    return Number.isNaN(ms) ? null : ms;
-  }
-  return null;
-}
-
 function normalizeFacts(raw: unknown): PersistedToolFacts {
   const record = raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
     desiredVersion: asString(record.desiredVersion),
-    lastCheckedAtUtc: asUtcMs(record.lastCheckedAtUtc),
+    lastCheckedAtUtc: parseUtcMs(record.lastCheckedAtUtc),
   };
 }
 
@@ -84,7 +74,7 @@ function normalize(raw: Record<string, unknown>): DependenciesValue {
   for (const name of TOOL_NAMES) {
     out.tools[name] = normalizeFacts(tools[name]);
   }
-  out.lastCheckAttemptAtUtc = asUtcMs(raw.lastCheckAttemptAtUtc);
+  out.lastCheckAttemptAtUtc = parseUtcMs(raw.lastCheckAttemptAtUtc);
   return out;
 }
 

@@ -1160,6 +1160,7 @@ export class ApplicationRuntime {
     }
 
     const request = ++this.lastTrimRequest;
+    const editedAtUtc = Date.now();
     this.trimRequests.set(cardId, request);
     try {
       const trimDecision = await analyzeTrimDecision(
@@ -1170,7 +1171,7 @@ export class ApplicationRuntime {
       if (this.trimRequests.get(cardId) !== request) {
         return this.getSnapshot();
       }
-      await this.applyCardTrim(card, normalizedTrim, trimDecision);
+      await this.applyCardTrim(card, normalizedTrim, trimDecision, editedAtUtc);
     } finally {
       if (this.trimRequests.get(cardId) === request) {
         this.trimRequests.delete(cardId);
@@ -1183,6 +1184,7 @@ export class ApplicationRuntime {
     card: MumblerCard,
     normalizedTrim: CardTrim,
     trimDecision: TrimDecision,
+    editedAtUtc: number,
   ): Promise<void> {
     const state = this.runtime.state!;
     const cardId = card.id;
@@ -1193,7 +1195,7 @@ export class ApplicationRuntime {
     card.trim = normalizedTrim;
     card.trimDecision = trimDecision;
     card.timestamps = applyFrontTrimOffset(card.timestamps, normalizedTrim.frontMarkerSec ?? 0);
-    card.updatedAtUtc = Date.now();
+    card.updatedAtUtc = editedAtUtc;
 
     state.cards.sort((left, right) =>
       left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
