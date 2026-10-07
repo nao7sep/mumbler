@@ -48,7 +48,7 @@ export interface SessionLogger extends AppLogger {
   readonly session: string;
   // Reads the records database after every entry already given.
   readRecords<R extends RecordsRead>(read: R): Promise<RecordsReadResults[R["op"]]>;
-  // Writes every entry already given, then releases the database.
+  // Tries to drain and release the database within the optional logging bound.
   close(): Promise<void>;
   // Called after each entry the database stored; an entry that went to the
   // fallback file is not in the database, so it calls nothing.
@@ -69,6 +69,7 @@ export interface LoggerPaths {
 
 const MAX_ERROR_CAUSE_DEPTH = 8;
 const CLOSE_TIMEOUT_MS = 5_000;
+const RECORD_TIMEOUT_MS = 5_000;
 
 // Captures the full exception — type, message, stack — and follows the `cause`
 // chain for wrapped errors, so a log line carries enough to reconstruct the
@@ -111,8 +112,8 @@ function cardIdOf(details: unknown): string | null {
 
 // Every entry of this process launch goes to the records database through one
 // worker thread (logging-conventions, Where logs go); a write it cannot make
-// lands in this session's text file under logs/. Each call resolves once its
-// entry is written.
+// lands in this session's text file under logs/. A stalled optional record is
+// reported and releases its caller; its physical fallback remains ordered.
 export function createLogger(paths: LoggerPaths, options: LoggerOptions): SessionLogger {
   const sessionStart = new Date();
   const session = sessionStart.toISOString();
@@ -128,6 +129,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
   const pending = new Map<number, { entry: RecordEntry; resolve: () => void }>();
   const reads = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>();
   let fallbackTail: Promise<void> = Promise.resolve();
+  let termination: Promise<void> = Promise.resolve();
   let storedListener: (() => void) | null = null;
 
   const appendFallback = (entry: RecordEntry): Promise<void> => {
@@ -144,12 +146,12 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
     return fallbackTail;
   };
 
-  // Entries the worker had not confirmed go to the fallback file, so a worker
-  // that fails or does not close in time loses none of them.
+  // Unconfirmed entries may already have committed before a worker fails.
+  // Fallback can duplicate diagnostics; it never resends provider work.
   const fallBackPending = (): void => {
-    const unwritten = [...pending.values()];
+    const unconfirmed = [...pending.values()];
     pending.clear();
-    for (const { entry, resolve } of unwritten) {
+    for (const { entry, resolve } of unconfirmed) {
       void appendFallback(entry).then(resolve);
     }
   };
@@ -160,6 +162,14 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
     for (const { reject } of unanswered) reject(new Error("The records database could not be read."));
   };
 
+  const terminate = (current: Worker): void => {
+    try {
+      termination = current.terminate().then(() => undefined, reportRecordsFailure);
+    } catch (error) {
+      reportRecordsFailure(error);
+    }
+  };
+
   const failWorker = (error: unknown): void => {
     if (!workerFailed) {
       workerFailed = true;
@@ -167,8 +177,21 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
     }
     fallBackPending();
     failReads();
-    void worker?.terminate();
+    if (worker !== null) terminate(worker);
     worker = null;
+  };
+
+  // A timeout releases only the optional waiter, never the physical append
+  // tail. Later appends cannot overtake a still-running earlier one.
+  const boundedWrite = (work: Promise<void>, timeoutMs: number, onTimeout: () => void): Promise<void> => {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { onTimeout(); resolve(); }, timeoutMs);
+      void work.then(() => { clearTimeout(timer); resolve(); }, (error) => {
+        clearTimeout(timer);
+        reportRecordsFailure(error);
+        resolve();
+      });
+    });
   };
 
   const ensureWorker = (): Worker => {
@@ -204,9 +227,10 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
 
   const writeEntry = (entry: RecordEntry): Promise<void> => {
     if (workerFailed || closing !== null) {
-      return appendFallback(entry);
+      return boundedWrite(appendFallback(entry), RECORD_TIMEOUT_MS, () =>
+        reportRecordsFailure(new Error("Records fallback timed out; the entry may still be written."), fallbackLine(entry)));
     }
-    return new Promise<void>((resolve) => {
+    const write = new Promise<void>((resolve) => {
       const id = nextId++;
       pending.set(id, { entry, resolve });
       try {
@@ -215,6 +239,8 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
         failWorker(error);
       }
     });
+    return boundedWrite(write, RECORD_TIMEOUT_MS, () =>
+      failWorker(new Error("Records write timed out; its database outcome is unconfirmed.")));
   };
 
   const readRecords = <R extends RecordsRead>(read: R): Promise<RecordsReadResults[R["op"]]> => {
@@ -223,7 +249,11 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
     }
     return new Promise((resolve, reject) => {
       const id = nextId++;
-      reads.set(id, { resolve: resolve as (value: never) => void, reject });
+      const timer = setTimeout(() => failWorker(new Error("Records read timed out.")), RECORD_TIMEOUT_MS);
+      reads.set(id, {
+        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        reject: (error) => { clearTimeout(timer); reject(error); },
+      });
       try {
         ensureWorker().postMessage({ type: "read", id, read } satisfies RecordsWorkerRequest);
       } catch (error: unknown) {
@@ -252,32 +282,27 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
   const close = (): Promise<void> => {
     if (closing !== null) return closing;
     const current = worker;
-    if (current === null) {
-      closing = Promise.resolve();
-      return closing;
-    }
-    closing = new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, CLOSE_TIMEOUT_MS);
-      const settle = (): void => {
-        clearTimeout(timer);
-        resolve();
-      };
-      current.once("exit", settle);
-      current.on("message", (message: RecordsWorkerResponse) => {
-        if (message.type === "closed") settle();
-      });
-      try {
-        current.postMessage({ type: "close" } satisfies RecordsWorkerRequest);
-      } catch {
-        settle();
+    const work = (async () => {
+      if (current !== null) {
+        await new Promise<void>((resolve) => {
+          current.once("exit", resolve);
+          current.on("message", (message: RecordsWorkerResponse) => {
+            if (message.type === "closed") resolve();
+          });
+          try { current.postMessage({ type: "close" } satisfies RecordsWorkerRequest); }
+          catch (error) { failWorker(error); resolve(); }
+        });
+        if (worker === current) {
+          worker = null;
+          terminate(current);
+        }
       }
-    }).then(async () => {
-      worker = null;
-      await current.terminate().catch(() => undefined);
       fallBackPending();
       failReads();
-      await fallbackTail;
-    });
+      await Promise.all([termination, fallbackTail]);
+    })();
+    closing = boundedWrite(work, CLOSE_TIMEOUT_MS, () =>
+      failWorker(new Error("Records close timed out; unconfirmed entries may still be written.")));
     return closing;
   };
 
