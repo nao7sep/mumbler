@@ -1,11 +1,11 @@
-import { access, copyFile, mkdir, readdir, rm, unlink } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { access, copyFile, link, mkdir, mkdtemp, open, readdir, rm, stat, unlink } from "node:fs/promises";
+import { constants as fsConstants, createReadStream } from "node:fs";
 import { basename, join } from "node:path";
 
 import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
-import { fileExists, formatError, isMissingFileError, keepSourceTimesAndMode, uniquePathInDirectory } from "./file-io";
+import { fileExists, formatError, isMissingFileError, keepSourceTimesAndMode, syncDirectory, uniquePathInDirectory } from "./file-io";
 
-import { type AppLogger } from "./logger";
+import { type AppLogger, serializeError } from "./logger";
 
 export interface WorkingReconciliationResult {
   state: MumblerQueue;
@@ -47,23 +47,68 @@ export async function copyIntoWorking(
   return workingFilePath;
 }
 
+// Keep the descriptor writable through metadata and sync, including read-only
+// source copies on Windows. An exclusive public fallback can be incomplete on
+// failure; the caller reports failure and keeps the original recording.
+async function copyBackupFile(source: string, destination: string): Promise<void> {
+  const handle = await open(destination, "wx", 0o600);
+  const stream = createReadStream(source);
+  stream.on("error", () => undefined);
+  let primary: unknown;
+  try {
+    await handle.writeFile(stream);
+    const sourceInfo = await stat(source);
+    await handle.utimes(sourceInfo.atime, sourceInfo.mtime);
+    await handle.chmod(sourceInfo.mode);
+    await handle.sync();
+  } catch (error) { primary = error; }
+  finally {
+    stream.destroy();
+    try { await handle.close(); }
+    catch (error) {
+      if (primary !== undefined) throw new AggregateError([primary, error], "Backup copy and close failed.", { cause: primary });
+      throw error;
+    }
+  }
+  if (primary !== undefined) throw primary;
+}
+
 export async function copyOriginalToBackup(
   sourcePath: string,
   backupDir: string,
+  logger?: Pick<AppLogger, "warn">,
 ): Promise<string> {
-  await mkdir(backupDir, { recursive: true });
-  const targetPath = await uniquePathInDirectory(backupDir, basename(sourcePath));
-
+  let stageDir: string | undefined;
+  let targetPath: string | undefined;
   try {
+    await mkdir(backupDir, { recursive: true });
+    targetPath = await uniquePathInDirectory(backupDir, basename(sourcePath));
+    stageDir = await mkdtemp(join(backupDir, ".mumbler-backup-"));
+    const stagePath = join(stageDir, "audio");
     // not recorded: this is a user-requested copy of the original audio binary,
     // written as output and never reopened as Mumbler-managed state.
-    await copyFile(sourcePath, targetPath);
-    await keepSourceTimesAndMode(sourcePath, targetPath);
+    await copyBackupFile(sourcePath, stagePath);
+    try { await link(stagePath, targetPath); }
+    catch (error) {
+      if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      await copyBackupFile(stagePath, targetPath);
+    }
+    await syncDirectory(backupDir);
+    return targetPath;
   } catch (error: unknown) {
-    throw new Error(`Failed to copy ${sourcePath} to backup directory: ${formatError(error)}`, { cause: error });
+    throw new Error(`Failed to copy ${sourcePath} to backup directory ${backupDir}${targetPath === undefined ? "" : ` (target ${targetPath})`}: ${formatError(error)}`, { cause: error });
+  } finally {
+    if (stageDir !== undefined) {
+      try { await rm(stageDir, { recursive: true, force: true }); }
+      catch (error) {
+        try {
+          await logger?.warn("import.backup-cleanup", "Could not remove original-backup staging.", {
+            sourcePath, targetPath, stageDir, error: serializeError(error),
+          });
+        } catch { /* Cleanup reporting cannot deny a committed backup or mask its failure. */ }
+      }
+    }
   }
-
-  return targetPath;
 }
 
 // Startup cleanup deletes only what is temporary by location: derived/ holds

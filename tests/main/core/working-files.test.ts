@@ -1,6 +1,6 @@
 import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,11 +12,36 @@ import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } fro
 // only for paths registered in `undeletable`, so the retained-orphan path is
 // exercised without depending on POSIX permissions.
 const undeletable = vi.hoisted(() => new Set<string>());
+const backupFaults = vi.hoisted(() => ({
+  beforeLink: null as ((source: string, target: string) => Promise<void>) | null,
+  unsupported: null as string | null,
+  stageFailure: null as Error | null,
+  publicFailure: null as Error | null,
+  refuseStageCleanup: false,
+}));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    link: async (source: Parameters<typeof actual.link>[0], target: Parameters<typeof actual.link>[1]) => {
+      await backupFaults.beforeLink?.(String(source), String(target));
+      if (backupFaults.unsupported !== null) throw Object.assign(new Error("links unsupported"), { code: backupFaults.unsupported });
+      return actual.link(source, target);
+    },
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args);
+      const stage = basename(String(args[0])) === "audio";
+      if (stage && backupFaults.refuseStageCleanup) undeletable.add(dirname(String(args[0])));
+      const failure = stage ? backupFaults.stageFailure : backupFaults.publicFailure;
+      if (args[1] === "wx" && failure !== null) {
+        vi.spyOn(handle, "writeFile").mockImplementationOnce(async () => {
+          await handle.write("partial", 0, "utf8");
+          throw failure;
+        });
+      }
+      return handle;
+    },
     rm: async (path: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
       if (undeletable.has(String(path))) {
         throw new Error("EACCES: permission denied");
@@ -116,6 +141,11 @@ function makeState(overrides: Partial<MumblerQueue> = {}): MumblerQueue {
 
 beforeEach(async () => {
   undeletable.clear();
+  backupFaults.beforeLink = null;
+  backupFaults.unsupported = null;
+  backupFaults.stageFailure = null;
+  backupFaults.publicFailure = null;
+  backupFaults.refuseStageCleanup = false;
   dir = await mkdtemp(join(tmpdir(), "mumbler-working-files-"));
 });
 
@@ -168,6 +198,84 @@ describe("working audio copies", () => {
 
     expect(copied).toBe(join(backup, "source.m4a"));
     expect(await readFile(copied, "utf8")).toBe("audio");
+  });
+
+  it("keeps a public file that arrives after backup name selection", async () => {
+    const source = join(dir, "source.m4a");
+    const backup = join(dir, "backup");
+    await writeFile(source, "complete audio");
+    backupFaults.beforeLink = async (stage, target) => {
+      expect(await readFile(stage, "utf8")).toBe("complete audio");
+      await writeFile(target, "user file");
+    };
+    await expect(copyOriginalToBackup(source, backup)).rejects.toMatchObject({ cause: { code: "EEXIST" } });
+    expect(await readFile(join(backup, "source.m4a"), "utf8")).toBe("user file");
+    expect(await readFile(source, "utf8")).toBe("complete audio");
+    expect(await readdir(backup)).toEqual(["source.m4a"]);
+  });
+
+  it.each(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"])("copies exclusively when links fail with %s", async (code) => {
+    const source = join(dir, "source.m4a");
+    const backup = join(dir, "backup");
+    const recorded = new Date("2024-05-06T07:08:09.500Z");
+    await writeFile(source, "complete audio");
+    await utimes(source, recorded, recorded);
+    await chmod(source, 0o444);
+    backupFaults.unsupported = code;
+    const copied = await copyOriginalToBackup(source, backup);
+    expect(await readFile(copied, "utf8")).toBe("complete audio");
+    expect((await stat(copied)).mtime.getTime()).toBe(recorded.getTime());
+    if (process.platform !== "win32") expect((await stat(copied)).mode & 0o777).toBe(0o444);
+    expect(await readdir(backup)).toEqual(["source.m4a"]);
+  });
+
+  it("keeps a public contender even on the unsupported-link fallback", async () => {
+    const source = join(dir, "source.m4a");
+    const backup = join(dir, "backup");
+    await writeFile(source, "complete audio");
+    backupFaults.unsupported = "ENOTSUP";
+    backupFaults.beforeLink = async (_stage, target) => { await writeFile(target, "user file"); };
+    await expect(copyOriginalToBackup(source, backup)).rejects.toMatchObject({ cause: { code: "EEXIST" } });
+    expect(await readFile(join(backup, "source.m4a"), "utf8")).toBe("user file");
+    expect(await readdir(backup)).toEqual(["source.m4a"]);
+  });
+
+  it("reports backup staging cleanup secondarily after publication", async () => {
+    const source = join(dir, "source.m4a");
+    const backup = join(dir, "backup");
+    await writeFile(source, "complete audio");
+    backupFaults.refuseStageCleanup = true;
+    const logger = makeLogger();
+    vi.mocked(logger.warn).mockRejectedValueOnce(new Error("optional logger failed"));
+    const copied = await copyOriginalToBackup(source, backup, logger);
+    expect(await readFile(copied, "utf8")).toBe("complete audio");
+    expect(logger.warn).toHaveBeenCalledWith("import.backup-cleanup", expect.any(String), expect.objectContaining({ targetPath: copied, error: expect.objectContaining({ message: "EACCES: permission denied" }) }));
+    expect((await readdir(backup)).some((name) => name.startsWith(".mumbler-backup-"))).toBe(true);
+  });
+
+  it("keeps a failed staged copy's primary cause while cleaning its private partial bytes", async () => {
+    const source = join(dir, "source.m4a");
+    const backup = join(dir, "backup");
+    await writeFile(source, "complete audio");
+    const primary = new Error("stream refused");
+    backupFaults.stageFailure = primary;
+    await expect(copyOriginalToBackup(source, backup)).rejects.toMatchObject({ cause: primary });
+    expect(await readdir(backup)).toEqual([]);
+    expect(await readFile(source, "utf8")).toBe("complete audio");
+  });
+
+  it("names an incomplete exclusive fallback and keeps the original on failure", async () => {
+    const source = join(dir, "source.m4a");
+    const backup = join(dir, "backup");
+    await writeFile(source, "complete audio");
+    backupFaults.unsupported = "ENOTSUP";
+    const primary = new Error("stream refused");
+    backupFaults.publicFailure = primary;
+    const error = await copyOriginalToBackup(source, backup).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ cause: primary, message: expect.stringContaining(join(backup, "source.m4a")) });
+    expect(await readFile(source, "utf8")).toBe("complete audio");
+    expect(await readFile(join(backup, "source.m4a"), "utf8")).toBe("partial");
+    expect(await readdir(backup)).toEqual(["source.m4a"]);
   });
 
   // A fixed time well in the past, so a copy that took the moment of copying fails.

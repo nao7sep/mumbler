@@ -984,7 +984,7 @@ export class ApplicationRuntime {
       const file = pendingImport.originalSourcePath;
       if (merged.copyToBackupOnConfirm) {
         try {
-          const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir);
+          const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir, this.runtime.logger);
           await this.runtime.logger.info("import.backup-original", "Copied original to backup directory.", {
             originalSourcePath: pendingImport.originalSourcePath,
             backupPath,
