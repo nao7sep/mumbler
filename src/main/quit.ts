@@ -18,11 +18,11 @@ export type QuitOrigin = "user" | "session-end";
 export type QuitChoice = "retry" | "quit-anyway" | "cancel";
 
 /** What could not be saved: the stores named, or a save that did not finish in time. */
-export type QuitFailure = readonly QuitSaveFailure[] | "stalled";
+export type QuitFailure = readonly (QuitSaveFailure | "edits")[] | "stalled";
 
 export interface QuitSteps {
   /** Asks the main window to send the edits it has not sent yet. */
-  flushEdits(): Promise<void>;
+  flushEdits(signal: AbortSignal): Promise<void>;
   /** Saves the user's own work; resolves with what could not be saved. */
   save(): Promise<QuitSaveFailure[]>;
   /** The user cancelled the quit: the app takes work again. */
@@ -70,6 +70,7 @@ export interface QuitController {
   /** Starts a quit, or holds one that arrives while a quit runs; a session end
    * that arrives then turns the running quit into a session end. */
   request(origin: QuitOrigin): void;
+  isRunning(): boolean;
 }
 
 export function createQuitController(steps: QuitSteps): QuitController {
@@ -97,13 +98,17 @@ export function createQuitController(steps: QuitSteps): QuitController {
 
   async function run(): Promise<void> {
     for (;;) {
-      if (!(await within(steps.flushEdits(), budget().flush)).done) {
+      const flush = new AbortController();
+      const flushed = await within(Promise.resolve().then(() => steps.flushEdits(flush.signal)), budget().flush);
+      flush.abort();
+      if (!flushed.done) {
         steps.warn("quit.flush-incomplete", "The window did not send its unsent edits in time.", {
           boundMs: budget().flush,
         });
       }
       const saved = await within(steps.save(), budget().save);
-      const failure: QuitFailure | null = !saved.done ? "stalled" : saved.value.length > 0 ? saved.value : null;
+      const unsaved = saved.done ? [...saved.value, ...(!flushed.done ? ["edits" as const] : [])] : [];
+      const failure: QuitFailure | null = !saved.done ? "stalled" : unsaved.length > 0 ? unsaved : null;
       if (failure === "stalled") {
         steps.warn("quit.save-incomplete", "Saving before quitting did not finish in time.", {
           boundMs: budget().save,
@@ -115,7 +120,15 @@ export function createQuitController(steps: QuitSteps): QuitController {
       if (sessionEnding) {
         return finish({ origin: "session-end", unsaved: failure });
       }
-      const choice = await steps.ask(failure);
+      let choice: QuitChoice;
+      try {
+        choice = await steps.ask(failure);
+      } catch (error: unknown) {
+        steps.warn("quit.question-failed", "The quit question could not be shown; cancelling the quit.", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        choice = "cancel";
+      }
       // A session end closed the question: save once more within its budget.
       if (sessionEnding || choice === "retry") continue;
       if (choice === "quit-anyway") {
@@ -133,6 +146,7 @@ export function createQuitController(steps: QuitSteps): QuitController {
   }
 
   return {
+    isRunning: () => running,
     request(origin) {
       if (exited) return;
       if (origin === "session-end" && !sessionEnding) {
@@ -150,10 +164,14 @@ export function createQuitController(steps: QuitSteps): QuitController {
       if (running) return;
       running = true;
       void run().catch((error: unknown) => {
-        steps.warn("quit.failed", "The quit failed; exiting.", {
+        steps.warn("quit.failed", "The quit failed.", {
           error: error instanceof Error ? error.message : String(error),
         });
-        exit();
+        if (sessionEnding) exit();
+        else {
+          running = false;
+          void steps.resume().catch((resumeError: unknown) => steps.warn("quit.resume-failed", "Could not resume after the failed quit.", { error: String(resumeError) }));
+        }
       });
     },
   };
@@ -163,7 +181,8 @@ const FAILURE_NAMES = {
   queue: "quit.queue",
   transcripts: "quit.transcripts",
   settings: "quit.settings",
-} as const satisfies Record<QuitSaveFailure, string>;
+  edits: "quit.edits",
+} as const satisfies Record<QuitSaveFailure | "edits", string>;
 
 /** The question a failed save asks: Cancel keeps the app running, Retry saves
  * again, and Quit anyway, the destructive choice, is last and never focused. */

@@ -1116,6 +1116,33 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
+  it("attempts required stores before held layout work and does not await optional error logging", async () => {
+    await withCard(async (runtime, card) => {
+      type Stores = {
+        transcriptStore: InstanceType<typeof TranscriptStore>;
+        queueStore: ReturnType<typeof createQueueStore>;
+        layoutStore: { flush(): Promise<void> };
+      };
+      const stores = (runtime as unknown as { runtime: Stores }).runtime;
+      card.transcription.text = "required before optional";
+      const held = gate();
+      const layout = vi.spyOn(stores.layoutStore, "flush").mockImplementation(() => held.promise);
+      const text = vi.spyOn(stores.transcriptStore, "writeChanged").mockRejectedValueOnce(new Error("text failure"));
+      const diagnostic = vi.spyOn(runtime.currentLogger(), "error").mockImplementation(() => held.promise);
+      const quit = runtime.saveForQuit();
+      try {
+        await vi.waitFor(() => expect(layout).toHaveBeenCalledOnce());
+        expect(text).toHaveBeenCalledOnce();
+        expect(diagnostic).toHaveBeenCalledOnce();
+        held.release();
+        expect(await quit).toEqual(["transcripts"]);
+      } finally {
+        held.release(); await quit;
+        layout.mockRestore(); text.mockRestore(); diagnostic.mockRestore();
+      }
+    });
+  });
+
   it.each(["transcripts", "queue"] as const)("preserves quit's %s failure category and retries through the owner", async (failedStore) => {
     await withCard(async (runtime, card, queuePath) => {
       card.metadata.title = "unsaved title";

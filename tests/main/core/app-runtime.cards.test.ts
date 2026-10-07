@@ -1392,6 +1392,18 @@ describe("settings, secrets and the window's own state", () => {
     expect(await exists(card.sourceFilePath)).toBe(true);
   });
 
+  it("retries failed pending review bytes when the retained draft equals live state", async () => {
+    const [pending] = await dropIn("take.wav");
+    const draft = review(pending, { timezone: "Europe/Berlin" });
+    const queuePath = join(home, "queue.json");
+    unwritable.refuses = (path) => path === queuePath;
+    await expect(runtime.updatePendingImportDrafts([draft])).rejects.toThrow();
+    expect((await createQueueStore(queuePath).load()).value.pendingImports[0]!.timezone).toBe("Asia/Tokyo");
+    unwritable.refuses = () => false;
+    await runtime.updatePendingImportDrafts([draft]);
+    expect((await createQueueStore(queuePath).load()).value.pendingImports[0]!.timezone).toBe("Europe/Berlin");
+  });
+
   it("does not materialize sets when an unchanged draft is saved", async () => {
     await runtime.saveSettingsDraft(runtime.getSettingsDraft());
     expect(await exists(join(home, "config.json"))).toBe(false);
@@ -1769,6 +1781,38 @@ describe("the save a quit makes", () => {
     unwritable.refuses = () => false;
     expect(await runtime.saveForQuit(), "Retry").toEqual([]);
     expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({ defaultTimezone: "Europe/Berlin" });
+  });
+
+  it("retries settings before a held optional transcript cleanup", async () => {
+    const stores = (runtime as unknown as { runtime: {
+      settingsStore: { retryFailedWrite(): Promise<unknown> };
+      transcriptStore: { removeAbsent(cards: MumblerCard[]): Promise<void> };
+    } }).runtime;
+    const configPath = join(home, "config.json");
+    let releaseWrite!: () => void;
+    let releaseCleanup!: () => void;
+    unwritable.held = { path: configPath, release: new Promise((resolve) => { releaseWrite = resolve; }), entered: 0 };
+    unwritable.refuses = (path) => path === configPath;
+    const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+    const retry = vi.spyOn(stores.settingsStore, "retryFailedWrite");
+    const cleanup = vi.spyOn(stores.transcriptStore, "removeAbsent").mockImplementation(() => cleanupGate);
+    const saving = runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" })
+      .then(() => "saved", () => "failed");
+    let quit: Promise<unknown> | undefined;
+    try {
+      await vi.waitFor(() => expect(unwritable.held?.entered).toBe(1));
+      quit = runtime.saveForQuit();
+      releaseWrite();
+      await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+      expect(retry).toHaveBeenCalledOnce();
+      expect(await saving).toBe("failed");
+      releaseCleanup();
+      expect(await quit).toEqual(["settings"]);
+    } finally {
+      releaseWrite(); releaseCleanup();
+      await Promise.allSettled([saving, ...(quit ? [quit] : [])]);
+      retry.mockRestore(); cleanup.mockRestore();
+    }
   });
 
   it("leaves a settings change that failed before the quit to where it was reported", async () => {

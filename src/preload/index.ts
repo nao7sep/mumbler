@@ -21,11 +21,11 @@ import type { InterfaceLanguage } from "@shared/i18n/languages";
 import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery } from "@shared/records";
 
 // What sends each part of the window's unsent edits. A quit's request is
-// answered once all of them have finished, whatever their outcome.
+// answered with the request identity and whether every save succeeded.
 const pendingEditFlushes = new Set<() => Promise<void>>();
-ipcRenderer.on(APP_SHELL_EVENTS.flushPendingEdits, () => {
-  void Promise.allSettled([...pendingEditFlushes].map((flush) => flush())).then(() => {
-    ipcRenderer.send(APP_SHELL_EVENTS.pendingEditsFlushed);
+ipcRenderer.on(APP_SHELL_EVENTS.flushPendingEdits, (_event, request: unknown) => {
+  void Promise.allSettled([...pendingEditFlushes].map((flush) => Promise.resolve().then(flush))).then((results) => {
+    ipcRenderer.send(APP_SHELL_EVENTS.pendingEditsFlushed, request, results.every((result) => result.status === "fulfilled"));
   });
 });
 

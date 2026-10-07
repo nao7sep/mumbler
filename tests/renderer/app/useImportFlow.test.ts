@@ -515,6 +515,37 @@ describe("useImportFlow at quit", () => {
     expect(sent, "the debounce no longer sends it again").toHaveBeenCalledOnce();
   });
 
+  it("rejects a failed quit flush and retains the draft for Retry", async () => {
+    vi.useFakeTimers();
+    const { edit, flush, sent } = await mount();
+    const failure = new Error("review write failed");
+    sent.mockRejectedValueOnce(failure);
+    await edit();
+    await expect(flush()).rejects.toBe(failure);
+    await flush();
+    expect(sent).toHaveBeenCalledTimes(2);
+    expect(sent.mock.calls[1]![0]).toEqual([expect.objectContaining({ timezone: "Europe/Berlin" })]);
+  });
+
+  it("joins an already admitted debounce save before acknowledging quit", async () => {
+    vi.useFakeTimers();
+    const { edit, flush, sent } = await mount();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    sent.mockReturnValueOnce(gate);
+    await edit();
+    await act(async () => vi.advanceTimersByTime(250));
+    let done = false;
+    const flushing = flush().then(() => { done = true; });
+    try {
+      await Promise.resolve();
+      expect(done).toBe(false);
+      expect(sent).toHaveBeenCalledOnce();
+      release();
+      await flushing;
+    } finally { release(); await flushing; }
+  });
+
   it("sends nothing when no edit is waiting", async () => {
     vi.useFakeTimers();
     const { flush, sent } = await mount();

@@ -13,7 +13,8 @@ const state = vi.hoisted(() => ({
   quitChoice: "cancel" as "retry" | "quit-anyway" | "cancel",
   questions: [] as unknown[],
   dependenciesWatched: false,
-  ipcListeners: new Map<string, (event: { sender: unknown }) => void>(),
+  flushSucceeded: true,
+  ipcListeners: new Map<string, (event: { sender: unknown }, request: unknown, success: boolean) => void>(),
   powerListeners: new Map<string, () => void>(),
 }));
 
@@ -30,9 +31,11 @@ const mainWindow = vi.hoisted(() => {
     isDestroyed: () => false,
     close: () => { window.closes += 1; },
     webContents: {
-      send: (channel: string) => {
+      once: vi.fn(),
+      removeListener: vi.fn(),
+      send: (channel: string, request: unknown) => {
         window.flushRequests += 1;
-        queueMicrotask(() => state.ipcListeners.get(`${channel}:reply`)?.({ sender: window.webContents }));
+        queueMicrotask(() => state.ipcListeners.get(`${channel}:reply`)?.({ sender: window.webContents }, request, state.flushSucceeded));
       },
     },
   };
@@ -55,7 +58,7 @@ vi.mock("electron", () => ({
   // The window's reply arrives on the reply channel; the test keys it by the
   // request it answers.
   ipcMain: {
-    on: (channel: string, listener: (event: { sender: unknown }) => void) => {
+    on: (channel: string, listener: (event: { sender: unknown }, request: unknown, success: boolean) => void) => {
       state.ipcListeners.set(`${channel.replace("pending-edits-flushed", "flush-pending-edits")}:reply`, listener);
     },
     removeListener: vi.fn(),
@@ -119,6 +122,7 @@ beforeEach(() => {
   state.quitChoice = "cancel";
   state.questions.length = 0;
   state.dependenciesWatched = false;
+  state.flushSucceeded = true;
   state.ipcListeners.clear();
   state.powerListeners.clear();
   mainWindow.handlers.clear();
@@ -268,6 +272,17 @@ describe("quit", () => {
 
     expect(close.preventDefault).toHaveBeenCalledOnce();
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+  });
+
+  it("retains the Mac window when its edit save fails", async () => {
+    onPlatform("darwin");
+    state.flushSucceeded = false;
+    await boot();
+    mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    expect(mainWindow.closes).toBe(0);
+    expect(state.exits).toEqual([]);
+    expect(runtime.saveForQuit).not.toHaveBeenCalled();
   });
 
   it("only closes the main window on macOS, after it sends its unsent edits", async () => {

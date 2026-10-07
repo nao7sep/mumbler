@@ -53,7 +53,7 @@ export const APP_SHELL_EVENTS = {
   interfaceLanguageChanged: "app-shell:event-interface-language-changed",
   recordsChanged: "app-shell:event-records-changed",
   // A quit asks the main window to send the edits it has not sent yet; the
-  // window replies on pendingEditsFlushed once they are sent.
+  // window replies with the request identity and whether every edit save succeeded.
   flushPendingEdits: "app-shell:event-flush-pending-edits",
   pendingEditsFlushed: "app-shell:event-pending-edits-flushed",
 } as const;

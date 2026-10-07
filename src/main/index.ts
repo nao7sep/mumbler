@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, powerMonitor, protocol, type IpcMainEvent } from "electron";
+import { app, BrowserWindow, powerMonitor, protocol } from "electron";
 import { extname } from "node:path";
 
 import { APP_SHELL_EVENTS } from "@shared/app-shell";
@@ -11,8 +11,10 @@ import { showStartupFailureDialog } from "./startup-failure-dialog";
 import { loadInterfaceCatalogue, mainTranslator } from "./i18n";
 import { installApplicationMenu } from "./app-menu";
 import { notifyRecordsChanged, openRecordsWindow } from "./records-window";
-import { createQuitController, QUIT_BUDGETS, quitFailureDialog, within, type QuitController } from "./quit";
+import { createQuitController, quitFailureDialog, type QuitController } from "./quit";
 import { showPlainDialog, type OpenPlainDialog } from "./plain-dialog";
+import { flushWindowEdits } from "./pending-edits";
+import { createWindowCloseController } from "./window-close";
 
 app.setName("Mumbler");
 
@@ -45,26 +47,15 @@ let sessionEnding = false;
 // on Windows and Linux, and on macOS the Dock reopens it.
 let mainWindow: BrowserWindow | null = null;
 
-// Asks the window to send the edits it has not sent yet, and resolves when it
-// replies; the quit bounds the wait.
-function flushWindowEdits(window: BrowserWindow | null): Promise<void> {
-  if (window === null || window.isDestroyed()) return Promise.resolve();
-  const contents = window.webContents;
-  return new Promise<void>((resolve) => {
-    const replied = (event: IpcMainEvent): void => {
-      if (event.sender !== contents) return;
-      ipcMain.removeListener(APP_SHELL_EVENTS.pendingEditsFlushed, replied);
-      resolve();
-    };
-    ipcMain.on(APP_SHELL_EVENTS.pendingEditsFlushed, replied);
-    contents.send(APP_SHELL_EVENTS.flushPendingEdits);
-  });
-}
+let cancelWindowClose: (() => void) | null = null;
 
 function createQuit(runtime: ApplicationRuntime): QuitController {
   let question: OpenPlainDialog<"retry" | "quit-anyway" | "cancel"> | null = null;
   return createQuitController({
-    flushEdits: () => flushWindowEdits(mainWindow),
+    flushEdits: (signal) => {
+      cancelWindowClose?.();
+      return flushWindowEdits(mainWindow, signal);
+    },
     save: () => runtime.saveForQuit(),
     resume: () => runtime.resumeAfterCancelledQuit(),
     close: (details) => runtime.closeForQuit(details),
@@ -89,6 +80,29 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
   const window = await createMainWindow(runtime);
   mainWindow = window;
   let editsSentForClose = false;
+  let notice: OpenPlainDialog<"dismiss"> | null = null;
+  const close = createWindowCloseController({
+    flush: (signal) => flushWindowEdits(window, signal),
+    close: () => {
+      editsSentForClose = true;
+      if (!window.isDestroyed()) window.close();
+    },
+    failed: async () => {
+      const translator = runtime.translator();
+      notice = showPlainDialog({
+        language: translator.language,
+        title: translator.t("windowClose.title"),
+        bodyLabel: translator.t("quit.detailsLabel"),
+        body: translator.t("windowClose.body"),
+        actions: [{ choice: "dismiss", label: translator.t("common.close") }],
+        focus: "dismiss",
+        dismiss: "dismiss",
+      });
+      try { await notice.choice; } finally { notice = null; }
+    },
+    dismiss: () => notice?.close(),
+  });
+  cancelWindowClose = () => close.cancel();
   window.on("close", (event) => {
     // Closing the main window quits on Windows and Linux, through the same
     // save as every other quit, which a failed save can cancel.
@@ -101,10 +115,7 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
     // On macOS it only closes the window, after it sends its unsent edits.
     if (editsSentForClose) return;
     event.preventDefault();
-    void within(flushWindowEdits(window), QUIT_BUDGETS.user.flush).then(() => {
-      editsSentForClose = true;
-      if (!window.isDestroyed()) window.close();
-    });
+    if (!quitController?.isRunning()) close.request();
   });
   // Windows asks before a logout, restart or shutdown and never sends
   // before-quit. Holding the answer gives the save its bounded time; the
@@ -120,7 +131,11 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
     quitController?.request("session-end");
   });
   window.once("closed", () => {
-    if (mainWindow === window) mainWindow = null;
+    close.cancel();
+    if (mainWindow === window) {
+      mainWindow = null;
+      cancelWindowClose = null;
+    }
     if (process.platform !== "darwin") app.quit();
   });
 }

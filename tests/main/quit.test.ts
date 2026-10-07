@@ -68,6 +68,30 @@ describe("a quit the user started", () => {
     expect(quit.calls).toEqual(["flush", "save", "close", "exit"]);
   });
 
+  it("asks about pending edits even when the required stores saved", async () => {
+    const quit = harness({ flushEdits: async () => { throw new Error("draft save failed"); } });
+    createQuitController(quit.steps).request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quit.asked).toEqual([["edits"]]);
+    expect(quit.exits()).toBe(0);
+    quit.answer("cancel");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quit.calls).toContain("resume");
+  });
+
+  it("a failed question cancels quit and permits a later successful attempt", async () => {
+    const quit = harness({ ask: async () => { throw new Error("dialog failed"); } });
+    quit.steps.save = failingSave(["queue"], 1, quit.calls);
+    const controller = createQuitController(quit.steps);
+    controller.request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quit.exits()).toBe(0);
+    expect(quit.calls).toContain("resume");
+    controller.request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quit.exits()).toBe(1);
+  });
+
   it("holds a quit that arrives while one runs, and exits once", async () => {
     let finishSave!: (failures: QuitSaveFailure[]) => void;
     const quit = harness();

@@ -1,0 +1,33 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { createWindowCloseController } from "@main/window-close";
+vi.mock("electron", () => ({}));
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
+it("retains unsent edits after timeout and admits a later successful close", async () => {
+  const close = vi.fn();
+  const failed = vi.fn(async () => undefined);
+  let signal!: AbortSignal;
+  const flush = vi.fn((value: AbortSignal) => { signal = value; return new Promise<void>(() => undefined); });
+  const controller = createWindowCloseController({ flush, close, failed, dismiss: vi.fn() });
+  controller.request(); controller.request();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(flush).toHaveBeenCalledTimes(1);
+  expect(failed).toHaveBeenCalledTimes(1);
+  expect(signal.aborted).toBe(true);
+  expect(close).not.toHaveBeenCalled();
+  flush.mockImplementation(async () => undefined);
+  controller.request();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(close).toHaveBeenCalledTimes(1);
+});
+it("quit cancels the window-close attempt without a late close or competing notice", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const close = vi.fn(); const failed = vi.fn(async () => undefined); const dismiss = vi.fn();
+  const controller = createWindowCloseController({ flush: () => gate, close, failed, dismiss });
+  controller.request();
+  await vi.advanceTimersByTimeAsync(0);
+  controller.cancel(); release();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(close).not.toHaveBeenCalled(); expect(failed).not.toHaveBeenCalled(); expect(dismiss).toHaveBeenCalledOnce();
+});

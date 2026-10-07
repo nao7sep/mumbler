@@ -92,17 +92,22 @@ export function useImportFlow({
       return;
     }
 
-    const send = (): Promise<void> => window.mumbler
-      .updatePendingImportDrafts(pendingReviewDrafts)
-      .then(() => undefined, (error: unknown) => {
+    let sending: Promise<void> | null = null;
+    const send = (): Promise<void> => {
+      sending ??= window.mumbler.updatePendingImportDrafts(pendingReviewDrafts).then(() => {
+        if (unsentDrafts.current?.send === send) unsentDrafts.current = null;
+      }, (error: unknown) => {
+        sending = null;
         onError(
           "import-review-save",
           presentFailure(error, message("error.reviewSave"), "pending import review save failed"),
         );
+        throw error;
       });
+      return sending;
+    };
     const timer = window.setTimeout(() => {
-      unsentDrafts.current = null;
-      void send();
+      void send().catch(() => undefined);
     }, 250);
     unsentDrafts.current = { timer, send };
 
@@ -117,7 +122,6 @@ export function useImportFlow({
   useEffect(() => window.mumbler.onFlushPendingEdits(async () => {
     const unsent = unsentDrafts.current;
     if (unsent === null) return;
-    unsentDrafts.current = null;
     window.clearTimeout(unsent.timer);
     await unsent.send();
   }), []);

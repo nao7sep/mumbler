@@ -882,8 +882,8 @@ export class ApplicationRuntime {
       const draft = draftsById.get(authoritative.id);
       return draft ? applyPendingImportDraft(authoritative, draft) : authoritative;
     });
-    // A draft that changes nothing leaves queue.json as it is.
-    if (state.pendingImports.some((item, index) => item !== current[index])) {
+    // Equal drafts still retry a packet whose previous write failed.
+    if (this.queueBehind || state.pendingImports.some((item, index) => item !== current[index])) {
       await this.persistState();
     }
     return this.getSnapshot();
@@ -1549,7 +1549,6 @@ export class ApplicationRuntime {
     await queueStore?.flush();
     await transcriptStore?.flush();
     await settingsStore?.flush();
-    await this.runtime.layoutStore?.flush();
     if (attemptId !== this.quitAttempt) return [];
 
     const failures: QuitSaveFailure[] = [];
@@ -1559,8 +1558,15 @@ export class ApplicationRuntime {
         return true;
       } catch (error: unknown) {
         failures.push(store);
-        await logger.error("quit.save-failed", "Could not save before quitting.", error, { store });
+        void logger.error("quit.save-failed", "Could not save before quitting.", error, { store }).catch(() => undefined);
         return false;
+      }
+    };
+    const retrySettings = async (): Promise<void> => {
+      if (attemptId !== this.quitAttempt) return;
+      const settingsFailure = settingsStore?.failedWrite ?? null;
+      if (settingsStore && settingsFailure !== null && settingsFailure !== this.settingsFailureBeforeQuit) {
+        await attempt("settings", () => settingsStore.retryFailedWrite());
       }
     };
     const state = this.runtime.state;
@@ -1574,23 +1580,21 @@ export class ApplicationRuntime {
         if (transcriptsSaved && saveQueue) {
           await attempt("queue", () => queueStore.save(snapshot));
         }
-        if (failures.length === 0) {
-          this.queueBehind = request !== this.persistenceRequest;
+        const packetSaved = failures.length === 0;
+        this.queueBehind = !packetSaved || request !== this.persistenceRequest;
+        await retrySettings();
+        if (packetSaved && attemptId === this.quitAttempt) {
           // Cleanup of removed cards' files, not the user's work: logged only.
-          await transcriptStore.removeAbsent(snapshot.cards).catch((error: unknown) =>
-            logger.warn("quit.transcript-cleanup-failed", "Could not delete a removed card's text file.", {
+          await transcriptStore.removeAbsent(snapshot.cards).catch((error: unknown) => {
+            void logger.warn("quit.transcript-cleanup-failed", "Could not delete a removed card's text file.", {
               error: serializeError(error),
-            }));
-        } else {
-          this.queueBehind = true;
+            }).catch(() => undefined);
+          });
         }
       });
-    }
+    } else await retrySettings();
     if (attemptId !== this.quitAttempt) return failures;
-    const settingsFailure = settingsStore?.failedWrite ?? null;
-    if (settingsStore && settingsFailure !== null && settingsFailure !== this.settingsFailureBeforeQuit) {
-      await attempt("settings", () => settingsStore.retryFailedWrite());
-    }
+    await this.runtime.layoutStore?.flush();
     return failures;
   }
 
@@ -1603,8 +1607,8 @@ export class ApplicationRuntime {
     this.quitSave = null;
     this.closing = false;
     this.settingsFailureBeforeQuit = undefined;
-    await this.runtime.logger.info("quit.cancelled", "Quit cancelled; Mumbler keeps running.");
     await this.pipeline.resume();
+    void this.runtime.logger.info("quit.cancelled", "Quit cancelled; Mumbler keeps running.").catch(() => undefined);
   }
 
   // The quit's last step, after its save: closes the backup history and the
@@ -1612,10 +1616,10 @@ export class ApplicationRuntime {
   closeForQuit(details: Record<string, unknown> = {}): Promise<void> {
     this.closePromise ??= (async () => {
       await closeBackupStore();
-      await this.runtime.logger.info("app.shutdown", "Shutdown complete.", {
+      void this.runtime.logger.info("app.shutdown", "Shutdown complete.", {
         ...details,
         cardCount: this.runtime.state?.cards.length ?? 0,
-      });
+      }).catch(() => undefined);
       await this.runtime.logger.close();
     })();
     return this.closePromise;
