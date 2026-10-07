@@ -11,7 +11,7 @@ import type {
 } from "@shared/records";
 
 import { FORMAT_VERSIONS } from "./format-versions.ts";
-import { openVersionedDatabase } from "./sqlite-store.ts";
+import { admitDatabaseFormat, openVersionedDatabase } from "./sqlite-store.ts";
 
 // The records database (data-lifecycle-conventions, Records): one row per log
 // line or provider call, each carrying its session, its time and the card it
@@ -164,10 +164,21 @@ export class RecordsEngine {
 
   // Whether the entry reached the database.
   write(entry: RecordEntry): boolean {
+    let db: DatabaseSync | undefined;
+    let transactionOpen = false;
     try {
-      this.insert(this.open(), entry);
+      db = this.open();
+      db.exec("BEGIN IMMEDIATE");
+      transactionOpen = true;
+      admitDatabaseFormat(db, this.target.databasePath, FORMAT_VERSIONS.records);
+      this.insert(db, entry);
+      db.exec("COMMIT");
+      transactionOpen = false;
       return true;
     } catch (error: unknown) {
+      if (transactionOpen) {
+        try { db?.exec("ROLLBACK"); } catch { /* The insert/admission error is primary. */ }
+      }
       this.report(recordsFailureText(error));
       this.writeFallback(entry);
       return false;
@@ -176,9 +187,17 @@ export class RecordsEngine {
 
   read(read: RecordsRead): RecordsReadResults[RecordsRead["op"]] {
     const db = this.open();
-    if (read.op === "page") return readPage(db, read.query);
-    if (read.op === "sources") return readSources(db);
-    return readDetail(db, read.kind, read.id);
+    db.exec("BEGIN");
+    try {
+      admitDatabaseFormat(db, this.target.databasePath, FORMAT_VERSIONS.records);
+      const result = read.op === "page" ? readPage(db, read.query)
+        : read.op === "sources" ? readSources(db) : readDetail(db, read.kind, read.id);
+      db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* Preserve the read/admission error. */ }
+      throw error;
+    }
   }
 
   close(): void {
@@ -197,7 +216,7 @@ export class RecordsEngine {
     this.opened = true;
     // A database in a newer format is left untouched: entries go to the
     // fallback file and reads fail, as for any database that cannot be opened.
-    this.db = openVersionedDatabase(this.target.databasePath, FORMAT_VERSIONS.records, SCHEMA);
+    this.db = openVersionedDatabase(this.target.databasePath, FORMAT_VERSIONS.records, SCHEMA, (error) => this.report(recordsFailureText(error)));
     return this.db;
   }
 

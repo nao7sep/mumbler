@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import { FORMAT_VERSIONS } from "./format-versions.ts";
-import { openVersionedDatabase } from "./sqlite-store.ts";
+import { admitDatabaseFormat, openVersionedDatabase } from "./sqlite-store.ts";
 
 export type BackupEngineWarn = (message: string, details: Record<string, unknown>) => void;
 
@@ -44,6 +44,7 @@ export class BackupStoreEngine {
       // every app process while retaining per-path revert history.
       store.exec("BEGIN IMMEDIATE");
       transactionOpen = true;
+      admitDatabaseFormat(store, this.file, FORMAT_VERSIONS.backups);
       const latest = store
         .prepare("SELECT content_sha256 AS h FROM backups WHERE path = ? ORDER BY id DESC LIMIT 1")
         .get(absolutePath) as { h: string } | undefined;
@@ -87,7 +88,9 @@ export class BackupStoreEngine {
     try {
       // A history in a newer format is left untouched, like any other that
       // cannot be opened: recording stays off for the session.
-      this.db = openVersionedDatabase(this.file, FORMAT_VERSIONS.backups, SCHEMA);
+      this.db = openVersionedDatabase(this.file, FORMAT_VERSIONS.backups, SCHEMA, (error) => {
+        this.warnOnce("backup store: initialization cleanup failed", { file: this.file, error: errorInfo(error) });
+      });
     } catch (error: unknown) {
       this.warnOnce("backup store: could not open; recording disabled for this session", {
         file: this.file,
