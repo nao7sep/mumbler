@@ -37,12 +37,35 @@ const unwritable = vi.hoisted(() => ({
   refuses: (_path: string): boolean => false,
   held: null as { path: string; release: Promise<void>; entered: number } | null,
 }));
+const secretReadGate = vi.hoisted(() => ({ held: null as { path: string; release: Promise<void>; entered: number } | null }));
+const catalogueGate = vi.hoisted(() => ({ held: null as Promise<void> | null, entered: 0 }));
+vi.mock("@main/i18n", async (original) => {
+  const actual = await original<typeof import("@main/i18n")>();
+  return {
+    ...actual,
+    loadInterfaceCatalogue: async (...args: Parameters<typeof actual.loadInterfaceCatalogue>) => {
+      if (catalogueGate.held !== null) {
+        catalogueGate.entered += 1;
+        await catalogueGate.held;
+      }
+      return actual.loadInterfaceCatalogue(...args);
+    },
+  };
+});
 // Runs while a refused removal is in flight, the way another card's save can.
 const duringRefusedRm = vi.hoisted(() => ({ run: null as (() => Promise<unknown>) | null }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    readFile: async (...args: Parameters<typeof actual.readFile>) => {
+      const held = secretReadGate.held;
+      if (held !== null && held.path === String(args[0])) {
+        held.entered += 1;
+        await held.release;
+      }
+      return actual.readFile(...args);
+    },
     rm: async (path: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
       if (outputFaults.refuseCleanup && basename(String(path)).startsWith(".mumbler-save-")) throw new Error("staging cleanup denied");
       if (undeletable.has(String(path))) {
@@ -229,6 +252,9 @@ beforeEach(async () => {
   unmovable.clear();
   unwritable.refuses = () => false;
   unwritable.held = null;
+  secretReadGate.held = null;
+  catalogueGate.held = null;
+  catalogueGate.entered = 0;
   duringRefusedRm.run = null;
   audioGate.cleanupFailure = false;
   audioGate.held = null;
@@ -1591,6 +1617,99 @@ describe("an unreadable work store", () => {
 
 describe("the save a quit makes", () => {
   type Internals = { runtime: { state: { cards: MumblerCard[] } } };
+
+  function observeFinalTranscriptWrite() {
+    const { transcriptStore } = (runtime as unknown as { runtime: { transcriptStore: { writeChanged(cards: MumblerCard[]): Promise<void> } } }).runtime;
+    return vi.spyOn(transcriptStore, "writeChanged");
+  }
+
+  it("waits for an admitted settings save before its first persistence and seals new settings work", async () => {
+    let release!: () => void;
+    catalogueGate.held = new Promise((resolve) => { release = resolve; });
+    const finalWrite = observeFinalTranscriptWrite();
+    const saving = runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
+    let quit: Promise<unknown> | undefined;
+    try {
+      await vi.waitFor(() => expect(catalogueGate.entered).toBe(1));
+      quit = runtime.saveForQuit();
+      // Every other drain is already settled in this empty fixture. A final
+      // packet can reach transcript.writeChanged on this turn only if it omitted the producer.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(finalWrite).not.toHaveBeenCalled();
+      await expect(runtime.saveSettingsDraft(runtime.getSettingsDraft())).rejects.toThrow("Mumbler is closing");
+      await expect(runtime.saveToolSettings(false)).rejects.toThrow("Mumbler is closing");
+      await expect(runtime.setGeminiApiKey("new-key")).rejects.toThrow("Mumbler is closing");
+      await expect(runtime.clearGeminiApiKey()).rejects.toThrow("Mumbler is closing");
+      await expect(runtime.chooseOutputDirectory({} as never)).rejects.toThrow("Mumbler is closing");
+      release();
+      await saving;
+      expect(await quit).toEqual([]);
+      expect(finalWrite).toHaveBeenCalledOnce();
+      expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toMatchObject({ defaultTimezone: "Europe/Berlin" });
+    } finally {
+      release();
+      catalogueGate.held = null;
+      await Promise.allSettled([saving, ...(quit === undefined ? [] : [quit])]);
+      finalWrite.mockRestore();
+    }
+  });
+
+  it.each(["set", "failed-clear"] as const)("drains an API-key %s held before its write and preserves its result", async (operation) => {
+    await runtime.setGeminiApiKey("old-key");
+    const secret = join(home, "api-keys.json");
+    const before = await readFile(secret, "utf8");
+    let release!: () => void;
+    secretReadGate.held = { path: secret, release: new Promise((resolve) => { release = resolve; }), entered: 0 };
+    if (operation === "failed-clear") unwritable.refuses = (path) => path === secret;
+    const finalWrite = observeFinalTranscriptWrite();
+    const saving = (operation === "set" ? runtime.setGeminiApiKey("new-key") : runtime.clearGeminiApiKey())
+      .then(() => "saved", () => "failed");
+    let quit: Promise<unknown> | undefined;
+    try {
+      await vi.waitFor(() => expect(secretReadGate.held?.entered).toBe(1));
+      quit = runtime.saveForQuit();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(finalWrite).not.toHaveBeenCalled();
+      release();
+      expect(await saving).toBe(operation === "set" ? "saved" : "failed");
+      expect(await quit).toEqual([]);
+      expect(finalWrite).toHaveBeenCalledOnce();
+      if (operation === "failed-clear") expect(await readFile(secret, "utf8")).toBe(before);
+      else {
+        const { resolveApiKey } = await import("@main/core/api-keys");
+        expect(await resolveApiKey(secret, "gemini", () => undefined)).toBe("new-key");
+      }
+    } finally {
+      release();
+      secretReadGate.held = null;
+      unwritable.refuses = () => false;
+      await Promise.allSettled([saving, ...(quit === undefined ? [] : [quit])]);
+      finalWrite.mockRestore();
+    }
+  });
+
+  it("waits for an admitted output-folder choice before the final packet", async () => {
+    let release!: (path: string) => void;
+    const output = join(root, "chosen");
+    const picker = vi.spyOn(runtime, "pickOutputDirectory").mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    const finalWrite = observeFinalTranscriptWrite();
+    const choosing = runtime.chooseOutputDirectory({} as never);
+    const quit = runtime.saveForQuit();
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(finalWrite).not.toHaveBeenCalled();
+      release(output);
+      await choosing;
+      expect(await quit).toEqual([]);
+      expect(finalWrite).toHaveBeenCalledOnce();
+      expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toMatchObject({ outputDirectory: output });
+    } finally {
+      release(output);
+      await Promise.allSettled([choosing, quit]);
+      picker.mockRestore();
+      finalWrite.mockRestore();
+    }
+  });
 
   it("writes the queue its last save could not write, and reports it while it still cannot", async () => {
     const [pending] = await dropIn("take.wav");

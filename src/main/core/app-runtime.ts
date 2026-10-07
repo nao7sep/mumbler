@@ -218,7 +218,7 @@ export class ApplicationRuntime {
   private importTail: Promise<void> = Promise.resolve();
   // Card producers must be reached before quit snapshots the store tails: a
   // copy, deletion, trim analysis or key lookup can create its first write after an await.
-  private readonly activeCardChanges = new Set<Promise<unknown>>();
+  private readonly activeStateChanges = new Set<Promise<unknown>>();
   // In-flight saves, so shutdown can cancel each one and await its completed
   // publication attempt before the stores are flushed.
   private readonly activeSaves = new Map<AbortController, Promise<unknown>>();
@@ -588,7 +588,11 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  async saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot> {
+  saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot> {
+    return this.runStateChange(() => this.persistToolSettings(checkUpdatesAtLaunch));
+  }
+
+  private async persistToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot> {
     this.ensureReady();
     const nextSettings = { ...this.runtime.settings!, checkUpdatesAtLaunch };
     await this.runtime.settingsStore!.save(nextSettings);
@@ -1104,7 +1108,7 @@ export class ApplicationRuntime {
   }
 
   duplicateCard(cardId: string): Promise<AppSnapshot> {
-    return this.runCardChange(() => this.duplicateCardFromWorking(cardId));
+    return this.runStateChange(() => this.duplicateCardFromWorking(cardId));
   }
 
   private async duplicateCardFromWorking(cardId: string): Promise<AppSnapshot> {
@@ -1138,7 +1142,7 @@ export class ApplicationRuntime {
   }
 
   updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot> {
-    return this.runCardChange(() => this.analyzeAndApplyCardTrim(cardId, trim));
+    return this.runStateChange(() => this.analyzeAndApplyCardTrim(cardId, trim));
   }
 
   private async analyzeAndApplyCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot> {
@@ -1242,7 +1246,7 @@ export class ApplicationRuntime {
   }
 
   generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
-    return this.runCardChange(() => this.generateCardFromStep(cardId, target));
+    return this.runStateChange(() => this.generateCardFromStep(cardId, target));
   }
 
   private async generateCardFromStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
@@ -1413,7 +1417,11 @@ export class ApplicationRuntime {
     return this.runtime.settings?.theme ?? "system";
   }
 
-  async saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
+  saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
+    return this.runStateChange(() => this.persistSettingsDraft(draft));
+  }
+
+  private async persistSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
     this.ensureReady();
 
     const previousPreference = this.languagePreference();
@@ -1444,7 +1452,11 @@ export class ApplicationRuntime {
   // settings store), refresh the cached presence flag, then admit any queued
   // cards that were waiting only on a missing key. The raw key never enters the
   // snapshot or the log — only the resulting presence boolean is reported.
-  async setGeminiApiKey(apiKey: string): Promise<AppSnapshot> {
+  setGeminiApiKey(apiKey: string): Promise<AppSnapshot> {
+    return this.runStateChange(() => this.storeGeminiApiKey(apiKey));
+  }
+
+  private async storeGeminiApiKey(apiKey: string): Promise<AppSnapshot> {
     this.ensureReady();
     const trimmed = apiKey.trim();
     if (trimmed.length === 0) {
@@ -1463,7 +1475,11 @@ export class ApplicationRuntime {
 
   // Remove the stored key from the secrets file. An environment-supplied key, if
   // present, still resolves afterward — so hasGeminiApiKey may remain true.
-  async clearGeminiApiKey(): Promise<AppSnapshot> {
+  clearGeminiApiKey(): Promise<AppSnapshot> {
+    return this.runStateChange(() => this.removeGeminiApiKey());
+  }
+
+  private async removeGeminiApiKey(): Promise<AppSnapshot> {
     this.ensureReady();
     await clearApiKey(this.runtime.paths!.apiKeysPath, "gemini", this.apiKeyWarn());
     await this.refreshHasGeminiApiKey();
@@ -1526,7 +1542,7 @@ export class ApplicationRuntime {
       Promise.allSettled([...this.activeSaves.values()]),
       this.pipeline.shutdown(),
       this.importTail,
-      Promise.allSettled([...this.activeCardChanges]),
+      Promise.allSettled([...this.activeStateChanges]),
     ]);
     if (attemptId !== this.quitAttempt) return [];
     await this.persistenceTail;
@@ -1612,7 +1628,11 @@ export class ApplicationRuntime {
     await this.closeForQuit({ unsaved });
   }
 
-  async chooseOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
+  chooseOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
+    return this.runStateChange(() => this.pickAndSaveOutputDirectory(window));
+  }
+
+  private async pickAndSaveOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
     const outputDirectory = await this.pickOutputDirectory(window);
     if (outputDirectory === null) {
       return this.getSnapshot();
@@ -1876,7 +1896,7 @@ export class ApplicationRuntime {
   }
 
   removeCard(cardId: string): Promise<AppSnapshot> {
-    return this.runCardChange(() => this.removeCardWorkingAudio(cardId));
+    return this.runStateChange(() => this.removeCardWorkingAudio(cardId));
   }
 
   private async removeCardWorkingAudio(cardId: string): Promise<AppSnapshot> {
@@ -1930,13 +1950,13 @@ export class ApplicationRuntime {
     return run;
   }
 
-  private runCardChange(operation: () => Promise<AppSnapshot>): Promise<AppSnapshot> {
+  private runStateChange(operation: () => Promise<AppSnapshot>): Promise<AppSnapshot> {
     try { this.ensureAcceptingWork(); } catch (error: unknown) { return Promise.reject(error); }
     const run = operation();
-    this.activeCardChanges.add(run);
+    this.activeStateChanges.add(run);
     void run.then(
-      () => this.activeCardChanges.delete(run),
-      () => this.activeCardChanges.delete(run),
+      () => this.activeStateChanges.delete(run),
+      () => this.activeStateChanges.delete(run),
     );
     return run;
   }
