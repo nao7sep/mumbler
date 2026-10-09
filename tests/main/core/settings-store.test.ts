@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -416,13 +416,10 @@ describe("settings store", () => {
     expect((await store.load()).value).toEqual(createDefaultSettings());
   });
 
-  it("keeps the file holding only its format version when its final set is saved equal to its built-in, dropping unknown keys too", async () => {
-    await writeFile(settingsPath(), JSON.stringify({
-      formatVersion: 1,
-      prompts: { structured: "custom", title: "custom", slug: "custom" },
-      retired: true,
-    }));
+  it("keeps the file when its final set is saved equal to its built-in, with only its format version", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, concurrencyLimit: 5 }));
     const store = createSettingsStore(settingsPath());
+    await store.load();
     await store.save(createDefaultSettings());
 
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1 });
@@ -477,10 +474,15 @@ describe("settings store", () => {
   });
 
   it("writes nothing when the file already holds what the settings store", async () => {
-    const raw = JSON.stringify({ formatVersion: 1, concurrencyLimit: 5 });
+    const raw = `${JSON.stringify({ formatVersion: 1, concurrencyLimit: 5 }, null, 2)}\n`;
     await writeFile(settingsPath(), raw, "utf8");
-    await createSettingsStore(settingsPath()).save(settings({ concurrencyLimit: 5 }));
+    const earlier = new Date(Date.UTC(2024, 4, 6, 7, 8, 9));
+    await utimes(settingsPath(), earlier, earlier);
+    const store = createSettingsStore(settingsPath());
+    await store.load();
+    await store.save(settings({ concurrencyLimit: 5 }));
     expect(await readFile(settingsPath(), "utf8")).toBe(raw);
+    expect((await stat(settingsPath())).mtime.getTime()).toBe(earlier.getTime());
   });
 
   it("loads no file without seeding and writes just one changed set", async () => {
@@ -492,13 +494,16 @@ describe("settings store", () => {
     expect((await store.load()).value).toEqual(settings({ concurrencyLimit: 5 }));
   });
 
-  it("drops unknown keys at the next write", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, version: 99, theme: "dark", retired: true }));
+  it("keeps keys this build does not know through every save, as a newer Mumbler wrote them", async () => {
+    const future = { added: { by: "a newer Mumbler" }, timestampPatterns: ["(?<year>\\d{4})"] };
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, theme: "dark", ...future }));
     const store = createSettingsStore(settingsPath());
-    const loaded = (await store.load()).value;
-    expect(loaded.theme).toBe("dark");
-    await store.save({ ...loaded, concurrencyLimit: 5 });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, theme: "dark", concurrencyLimit: 5 });
+    const loaded = await store.load();
+    expect(loaded.value).toEqual(settings({ theme: "dark" }));
+    expect(loaded.unusable).toEqual([]);
+    await store.save({ ...loaded.value, concurrencyLimit: 5 });
+    await store.save({ ...loaded.value, concurrencyLimit: 6 }, { replaceUnusable: true });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, theme: "dark", concurrencyLimit: 6, ...future });
   });
 
   it("builds the file from the settings it is given, not onto the stored bytes, one save after another", async () => {
@@ -509,30 +514,7 @@ describe("settings store", () => {
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, skipIntervalSec: 20 });
   });
 
-  it("ignores an old timestampPatterns list and drops it at the next write", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, timestampPatterns: ["(?<year>\\d{4})"] }));
-    const store = createSettingsStore(settingsPath());
-    expect((await store.load()).value).toEqual(createDefaultSettings());
-    await store.save(settings({ concurrencyLimit: 5 }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
-  });
-
-  it("drops retired model-selection keys without migrating them into role sets", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, geminiModels: ["old"], transcriptionModel: "old", metadataModel: "old" }));
-    const store = createSettingsStore(settingsPath());
-    expect((await store.load()).value).toEqual(createDefaultSettings());
-    await store.save(settings({ "gemini.outline": "unknown-model" }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.outline": "unknown-model" });
-  });
-  it("ignores the retired provider and extra-model keys and drops them at the next write", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, provider: "gemini", extraModelIds: { gemini: ["custom"] } }));
-    const store = createSettingsStore(settingsPath());
-    expect((await store.load()).value).toEqual(createDefaultSettings());
-    await store.save(settings({ concurrencyLimit: 5 }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
-  });
-
-  it("falls back for a malformed whole set, warns with its key, and heals at the next save", async () => {
+  it("uses the built-in for a set it cannot use, names it, keeps it through other saves and replaces it at a Settings save", async () => {
     const warnings: string[] = [];
     await writeFile(settingsPath(), JSON.stringify({
       formatVersion: 1,
@@ -542,11 +524,27 @@ describe("settings store", () => {
       theme: "sepia",
     }));
     const store = createSettingsStore(settingsPath(), dir, (key) => warnings.push(key));
-    const loaded = (await store.load()).value;
+    const { value: loaded, unusable } = await store.load();
     expect(loaded).toEqual(createDefaultSettings());
     expect(warnings).toEqual(["theme", "prompts", "retryPolicy", "timeouts"]);
+    expect(unusable).toEqual(["prompts", "retryPolicy", "timeouts", "theme"]);
+
+    // A save that does not come from the Settings window keeps them as written.
     await store.save({ ...loaded, concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({
+      formatVersion: 1,
+      concurrencyLimit: 5,
+      prompts: { structured: "custom" },
+      retryPolicy: { maxRetries: 5 },
+      timeouts: { transcriptionMs: 10 },
+      theme: "sepia",
+    });
+
+    // Saving the Settings window, which showed the built-ins, replaces them.
+    await store.save({ ...loaded, concurrencyLimit: 5 }, { replaceUnusable: true });
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
+    await store.save({ ...loaded, concurrencyLimit: 6 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 6 });
   });
 
   it.each([
@@ -579,12 +577,11 @@ describe("settings store", () => {
     expect(await readFile(settingsPath(), "utf8")).toBe(unmarked);
   });
 
-  it("refuses a config.json in a newer format, on load and on save, and leaves it untouched", async () => {
+  it("refuses a config.json in a newer format on load and leaves it untouched", async () => {
     const newer = JSON.stringify({ formatVersion: 2, theme: "dark" });
     await writeFile(settingsPath(), newer, "utf8");
     const store = createSettingsStore(settingsPath());
     await expect(store.load()).rejects.toBeInstanceOf(NewerFormatError);
-    await expect(store.save(settings({ concurrencyLimit: 5 }))).rejects.toBeInstanceOf(NewerFormatError);
     expect(await readFile(settingsPath(), "utf8")).toBe(newer);
   });
 

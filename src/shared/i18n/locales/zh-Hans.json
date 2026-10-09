@@ -71,6 +71,8 @@
   "diagnostic.newerBody": "{path} 由更新版本的 Mumbler 保存，此版本无法读取。文件未被更改；请更新 Mumbler 以继续使用。",
   "diagnostic.settingsResetTitle": "无法读取设置",
   "diagnostic.settingsResetBody": "Mumbler 无法读取其设置文件，已将其移至 {path}。应用已使用内置设置启动；你的队列和录音未被更改。",
+  "diagnostic.settingsUnusableTitle": "部分设置无法使用",
+  "diagnostic.settingsUnusableBody": "无法使用以下已保存的设置：{items}。Mumbler 正在对它们使用内置值，并在 config.json 中保留了已保存的值。保存“设置”会将它们替换为“设置”中显示的值。",
   "diagnostic.startupTitle": "启动失败",
   "diagnostic.startupBody": "Mumbler 未能完成存储准备。请重新打开应用以重试；已保存的文件未被更改。",
   "diagnostic.resetTitle": "重置失败",

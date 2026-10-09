@@ -71,6 +71,8 @@
   "diagnostic.newerBody": "{path}は新しいバージョンのMumblerで保存されたため、このバージョンでは読み込めません。ファイルは変更されていません。引き続き使うには、Mumblerを更新してください。",
   "diagnostic.settingsResetTitle": "設定を読み込めませんでした",
   "diagnostic.settingsResetBody": "Mumblerは設定ファイルを読み込めなかったため、{path}に移動しました。既定の設定で起動しました。キューと録音は変更されていません。",
+  "diagnostic.settingsUnusableTitle": "一部の設定を使用できませんでした",
+  "diagnostic.settingsUnusableBody": "保存された次の設定を使用できませんでした：{items}。Mumblerはこれらに既定の値を使用しており、保存された値はconfig.jsonに残しています。「設定」を保存すると、「設定」に表示されている値に置き換わります。",
   "diagnostic.startupTitle": "起動に失敗しました",
   "diagnostic.startupBody": "Mumblerは保存領域の準備を完了できませんでした。アプリを開き直してもう一度お試しください。保存済みのファイルは変更されていません。",
   "diagnostic.resetTitle": "リセットに失敗しました",

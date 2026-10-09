@@ -156,18 +156,6 @@ export class JsonStore<T extends object> {
     return this.queue;
   }
 
-  /** Serialize a read-modify-write; undefined leaves the file as it is. */
-  async update(change: (current: T) => T | undefined): Promise<void> {
-    const work = async (): Promise<void> => {
-      const { value } = await this.load();
-      const next = change(value);
-      if (next === undefined) return;
-      await this.write(next);
-    };
-    this.queue = this.queue.then(work, work);
-    return this.queue;
-  }
-
   private async write(value: T): Promise<void> {
     const wire = this.options.serialize ? this.options.serialize(value) : value;
     try {

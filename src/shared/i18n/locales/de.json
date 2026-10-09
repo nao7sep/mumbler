@@ -71,6 +71,8 @@
   "diagnostic.newerBody": "Die Datei {path} wurde von einer neueren Version von Mumbler gespeichert und kann mit dieser Version nicht gelesen werden. Die Datei wurde nicht verändert; aktualisieren Sie Mumbler, um sie weiter zu verwenden.",
   "diagnostic.settingsResetTitle": "Einstellungen konnten nicht gelesen werden",
   "diagnostic.settingsResetBody": "Mumbler konnte seine Einstellungsdatei nicht lesen und hat sie nach {path} verschoben. Die App wurde mit den Standardeinstellungen gestartet; Ihre Warteschlange und Aufnahmen sind unverändert.",
+  "diagnostic.settingsUnusableTitle": "Einige Einstellungen konnten nicht verwendet werden",
+  "diagnostic.settingsUnusableBody": "Diese gespeicherten Einstellungen konnten nicht verwendet werden: {items}. Mumbler verwendet für sie die integrierten Werte und hat die gespeicherten in config.json behalten. Wenn Sie die Einstellungen speichern, werden sie durch die dort angezeigten Werte ersetzt.",
   "diagnostic.startupTitle": "Start fehlgeschlagen",
   "diagnostic.startupBody": "Mumbler konnte seinen Speicher nicht vollständig vorbereiten. Öffnen Sie die App erneut, um es noch einmal zu versuchen; gespeicherte Dateien wurden nicht verändert.",
   "diagnostic.resetTitle": "Zurücksetzen fehlgeschlagen",

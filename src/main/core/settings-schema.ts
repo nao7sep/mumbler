@@ -145,8 +145,23 @@ const SETTINGS_SETS = {
 } satisfies Record<keyof MumblerSettings, SetValidator>;
 const SETTINGS_SET_KEYS = Object.keys(SETTINGS_SETS) as (keyof MumblerSettings)[];
 
-function knownSettings(raw: Record<string, unknown>): Partial<MumblerSettings> {
-  return Object.fromEntries(SETTINGS_SET_KEYS.filter((key) => Object.hasOwn(raw, key)).map((key) => [key, raw[key]]));
+// What a settings file holds that this build cannot use (config-sets-conventions):
+// keys it does not know, as a newer Mumbler may write, and known sets whose value
+// fails their check. Both are kept as written, so a save never erases them.
+interface UnusableSets {
+  unknown: Record<string, unknown>;
+  invalid: Partial<Record<keyof MumblerSettings, unknown>>;
+}
+
+function unusableSets(raw: Record<string, unknown>): UnusableSets {
+  const unknown: Record<string, unknown> = {};
+  const invalid: Partial<Record<keyof MumblerSettings, unknown>> = {};
+  for (const key of Object.keys(raw)) {
+    if (key === "formatVersion") continue;
+    if (!Object.hasOwn(SETTINGS_SETS, key)) unknown[key] = raw[key];
+    else if (SETTINGS_SETS[key as keyof MumblerSettings](raw[key]) !== null) invalid[key as keyof MumblerSettings] = raw[key];
+  }
+  return { unknown, invalid };
 }
 
 const MODEL_SET_KEYS: ReadonlySet<string> = new Set(AI_ROLES.map((role) => `gemini.${role.id}`));
@@ -176,12 +191,6 @@ function storedSets(settings: MumblerSettings): Partial<MumblerSettings> {
   return Object.fromEntries(
     SETTINGS_SET_KEYS.filter((key) => !equalsBuiltIn(key, settings, builtIn)).map((key) => [key, settings[key]]),
   );
-}
-
-function sameSets(a: Partial<MumblerSettings>, b: Partial<MumblerSettings>): boolean {
-  const keys = Object.keys(a) as (keyof MumblerSettings)[];
-  return keys.length === Object.keys(b).length &&
-    keys.every((key) => Object.hasOwn(b, key) && JSON.stringify(a[key]) === JSON.stringify(b[key]));
 }
 
 function normalizeSettings(
@@ -569,7 +578,11 @@ export function createDefaultSettings(): MumblerSettings {
 // Settings keep the user map separate from effective built-ins. Saves run inside
 // the JsonStore write queue; the app holds a single-instance lock.
 export class SettingsStore {
-  private readonly store: JsonStore<Partial<MumblerSettings>>;
+  private readonly store: JsonStore<Record<string, unknown>>;
+  // What the file held that this build cannot use, carried into every save.
+  private unusable: UnusableSets = { unknown: {}, invalid: {} };
+  // Whether config.json exists; first run writes nothing until a set differs.
+  private exists = false;
 
   constructor(
     path: string,
@@ -579,7 +592,7 @@ export class SettingsStore {
     this.store = new JsonStore({
       path,
       formatVersion: FORMAT_VERSIONS.config,
-      validate: knownSettings,
+      validate: (raw) => raw,
       createDefault: () => ({}),
       // Settings are what the user authors, the one store the backup history protects.
       record: true,
@@ -588,18 +601,37 @@ export class SettingsStore {
 
   get path(): string { return this.store.path; }
 
-  async load() {
+  /** Loads the settings; `unusable` names the known sets whose saved value is
+   * kept but replaced by its built-in for this session. */
+  async load(): Promise<LoadResult<MumblerSettings> & { unusable: (keyof MumblerSettings)[] }> {
     const loaded = await this.store.load();
-    return { ...loaded, value: normalizeSettings(loaded.value, this.homeDirectory, this.warn) };
+    this.exists = loaded.origin === "loaded";
+    this.unusable = unusableSets(loaded.value);
+    const known = Object.fromEntries(SETTINGS_SET_KEYS.filter((key) => Object.hasOwn(loaded.value, key)).map((key) => [key, loaded.value[key]]));
+    return {
+      ...loaded,
+      value: normalizeSettings(known, this.homeDirectory, this.warn),
+      unusable: Object.keys(this.unusable.invalid) as (keyof MumblerSettings)[],
+    };
   }
 
-  // The one owner of what a save stores: the file is built from the full settings
-  // the app holds, every set that differs from its built-in written whole. A save
-  // that changes nothing on disk writes nothing, and one that leaves no set writes
-  // only the format version.
-  async save(settings: MumblerSettings): Promise<void> {
-    const next = storedSets(settings);
-    await this.store.update((current) => (sameSets(current, next) ? undefined : next));
+  // The one owner of what a save stores: every set that differs from its built-in,
+  // written whole, plus what this build could not use, as it was written. An
+  // unusable set stays until the user saves the Settings window, which showed its
+  // built-in in its place (`replaceUnusable`); unknown keys always stay. Each save
+  // writes from memory: the single-instance lock makes this process the file's only
+  // writer, and a write of unchanged bytes is skipped.
+  async save(settings: MumblerSettings, options: { replaceUnusable?: boolean } = {}): Promise<void> {
+    const invalid = options.replaceUnusable ? {} : this.unusable.invalid;
+    const sets: Record<string, unknown> = { ...storedSets(settings) };
+    for (const [key, value] of Object.entries(invalid)) {
+      if (equalsBuiltIn(key as keyof MumblerSettings, settings, createDefaultSettings())) sets[key] = value;
+    }
+    const next = { ...sets, ...this.unusable.unknown };
+    if (!this.exists && Object.keys(next).length === 0) return;
+    await this.store.save(next);
+    this.exists = true;
+    this.unusable = { unknown: this.unusable.unknown, invalid };
   }
 
   get failedWrite(): object | null { return this.store.failedWrite; }

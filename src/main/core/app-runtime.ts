@@ -344,6 +344,14 @@ export class ApplicationRuntime {
         }
         settingsLoad = await settingsStore.load();
       }
+      // Sets whose saved value this build cannot use run on their built-ins and
+      // stay in the file until the user saves Settings; the user is told which.
+      if (settingsLoad.unusable.length > 0) {
+        settingsNotice = {
+          title: message("diagnostic.settingsUnusableTitle"),
+          message: message("diagnostic.settingsUnusableBody", { items: [...settingsLoad.unusable] }),
+        };
+      }
       const settings = settingsLoad.value;
       await loadInterfaceCatalogue(settings.language);
       // Resolve whether a Gemini key is available (env-first, then the dedicated
@@ -1439,7 +1447,9 @@ export class ApplicationRuntime {
     const previousLanguage = this.interfaceLanguage().language;
     const nextSettings = applySettingsDraft(this.runtime.settings!, draft);
     await loadInterfaceCatalogue(nextSettings.language);
-    await this.runtime.settingsStore!.save(nextSettings);
+    // The Settings window showed the built-in in place of any saved value this
+    // build could not use, so saving it replaces those values.
+    await this.runtime.settingsStore!.save(nextSettings, { replaceUnusable: true });
     this.runtime.settings = nextSettings;
     applyThemePreference(nextSettings.theme);
     this.followLanguageChange(previousPreference, previousLanguage);

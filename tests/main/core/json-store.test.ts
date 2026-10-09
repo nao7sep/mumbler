@@ -114,21 +114,6 @@ describe("JsonStore.save / flush", () => {
     expect(await readFile(store.path, "utf8")).toBe('{\n  "formatVersion": 1,\n  "value": "written"\n}\n');
   });
 
-  it("update() writes the format version with the changed value", async () => {
-    const store = makeStore();
-    await writeFile(store.path, JSON.stringify({ formatVersion: 1, value: "stored" }), "utf8");
-    await store.update((current) => ({ value: `${current.value}!` }));
-    expect(await read(store.path)).toEqual({ formatVersion: 1, value: "stored!" });
-  });
-
-  it("update() refuses a newer file and writes nothing over it", async () => {
-    const store = makeStore();
-    const newer = JSON.stringify({ formatVersion: 2, value: "future" });
-    await writeFile(store.path, newer, "utf8");
-    await expect(store.update(() => ({ value: "older" }))).rejects.toBeInstanceOf(NewerFormatError);
-    expect(await readFile(store.path, "utf8")).toBe(newer);
-  });
-
   it("serializes overlapping saves so the last one wins and none are lost", async () => {
     const store = makeStore();
     const writes = Array.from({ length: 20 }, (_, i) =>

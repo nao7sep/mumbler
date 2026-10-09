@@ -196,7 +196,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
 });
 
 const { ApplicationRuntime, startupFailureDiagnostic } = await import("@main/core/app-runtime");
-const { createQueueStore } = await import("@main/core/settings-schema");
+const { createDefaultSettings, createQueueStore } = await import("@main/core/settings-schema");
 const { TranscriptStore } = await import("@main/core/transcript-store");
 const backupStore = await import("@main/core/backupStore");
 
@@ -1453,6 +1453,30 @@ describe("settings, secrets and the window's own state", () => {
     });
     expect(cards(snapshot).map((entry) => entry.id)).toEqual([card.id]);
     expect(await exists(card.sourceFilePath)).toBe(true);
+  });
+
+  it("names settings it cannot use at launch, keeps them through the updates switch and replaces them at a Settings save", async () => {
+    await runtime.shutdown();
+    const path = join(home, "config.json");
+    const unusable = { structured: "no placeholder", title: "{transcript}", slug: "{title}" };
+    await writeFile(path, JSON.stringify({ formatVersion: 1, prompts: unusable, addedLater: "kept" }));
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(runtime.getSnapshot().appWideError).toEqual({
+      title: { key: "diagnostic.settingsUnusableTitle" },
+      message: { key: "diagnostic.settingsUnusableBody", values: { items: ["prompts"] } },
+    });
+    expect(runtime.getSettingsDraft().structuredPrompt).toBe(createDefaultSettings().prompts.structured);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ formatVersion: 1, prompts: unusable, addedLater: "kept" });
+
+    await runtime.saveToolSettings(false);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      formatVersion: 1, checkUpdatesAtLaunch: false, prompts: unusable, addedLater: "kept",
+    });
+
+    await runtime.saveSettingsDraft(runtime.getSettingsDraft());
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ formatVersion: 1, checkUpdatesAtLaunch: false, addedLater: "kept" });
   });
 
   it("halts on a config.json it cannot read, moving nothing and offering no Reset", async () => {
