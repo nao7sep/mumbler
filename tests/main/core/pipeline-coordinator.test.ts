@@ -7,6 +7,9 @@ import type { AppLogger } from "@main/core/logger";
 // per-card deferred so a test can hold a "pipeline" running and settle it when
 // it chooses. Everything else in card-pipeline stays real (types only here).
 const pipelineDeferreds = new Map<string, { resolve: () => void; promise: Promise<void> }>();
+// Provider work a stubbed run hands to the coordinator, as an upload the SDK
+// cannot abort is.
+const untrackedWork = new Map<string, Promise<unknown>>();
 vi.mock("@main/core/card-pipeline", async (importOriginal) => {
   const original = await importOriginal<typeof import("@main/core/card-pipeline")>();
   return {
@@ -17,6 +20,8 @@ vi.mock("@main/core/card-pipeline", async (importOriginal) => {
         resolve = r;
       });
       pipelineDeferreds.set(cardId, { resolve, promise });
+      const work = untrackedWork.get(cardId);
+      if (work !== undefined) ctx.trackWork(work);
       ctx.signal.addEventListener("abort", resolve, { once: true });
       if (ctx.signal.aborted) resolve();
       try {
@@ -285,20 +290,24 @@ describe("PipelineCoordinator.detachAndAbort", () => {
     expect(coordinator.detachAndAbort("a")).toBe(false);
   });
 
-  it("takes the card from its run at once, and frees the slot only when the run's work settles", async () => {
+  it("takes the card from its run at once, and frees the slot only when the provider work it started settles", async () => {
     const first = makeCard({ id: "a" });
     const second = makeCard({ id: "b" });
     const { coordinator } = harness([first, second], 1);
+    let uploaded!: () => void;
+    untrackedWork.set("a", new Promise<void>((resolve) => { uploaded = resolve; }));
+    try {
+      await coordinator.startOrEnqueue("a", "generate", "transcription");
+      await coordinator.startOrEnqueue("b", "generate", "transcription");
 
-    await coordinator.startOrEnqueue("a", "generate", "transcription");
-    await coordinator.startOrEnqueue("b", "generate", "transcription");
+      expect(coordinator.detachAndAbort("a")).toBe(true);
+      expect(coordinator.hasRun("a")).toBe(false);
+      await settle("a");
+      expect(coordinator.hasRun("b"), "the upload the cancelled run started still holds the slot").toBe(false);
 
-    expect(coordinator.detachAndAbort("a")).toBe(true);
-    expect(coordinator.hasRun("a")).toBe(false);
-    expect(coordinator.hasRun("b"), "the cancelled run still holds its slot").toBe(false);
-
-    await settle("a");
-    await vi.waitFor(() => expect(coordinator.hasRun("b")).toBe(true));
+      uploaded();
+      await vi.waitFor(() => expect(coordinator.hasRun("b")).toBe(true));
+    } finally { untrackedWork.delete("a"); }
   });
 });
 

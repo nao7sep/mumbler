@@ -122,6 +122,7 @@ function makeContext(card: MumblerCard, signal: AbortSignal): CardPipelineContex
     persistState: vi.fn().mockResolvedValue(undefined),
     releaseTranscriptionSlot: vi.fn().mockResolvedValue(undefined),
     ownsCard: () => true,
+    trackWork: () => undefined,
   };
 }
 

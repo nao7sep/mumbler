@@ -47,6 +47,9 @@ export interface CardPipelineContext {
   // away. Only the owner writes to the card, and only an owner not cancelled
   // applies a result.
   ownsCard: () => boolean;
+  // Provider work that may outlive the run's cancellation; the run's slot is
+  // held until it settles.
+  trackWork: (work: Promise<unknown>) => void;
 }
 
 export type PipelineMode = "generate";
@@ -161,6 +164,7 @@ export async function executeCardPipeline(
               signal: ctx.signal,
               logger,
               recordCall,
+              trackWork: ctx.trackWork,
             }),
         }, ctx);
 

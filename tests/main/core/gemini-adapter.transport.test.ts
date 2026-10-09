@@ -376,6 +376,25 @@ describe("every provider call is recorded whole", () => {
     expect(request.config).toEqual({ safetySettings: SAFETY_SETTINGS, thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } });
   });
 
+  it("stops waiting for an upload on Cancel, hands the upload to its owner, and deletes a file it finishes later", async () => {
+    stat.mockResolvedValue({ size: SAFE + 1 });
+    let finish!: (file: { name: string; uri: string; mimeType: string }) => void;
+    upload.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    deleteFile.mockResolvedValue({});
+    const controller = new AbortController();
+    const tracked: Promise<unknown>[] = [];
+
+    const transcribing = transcribeWithGemini({ ...baseParams(), signal: controller.signal, trackWork: (work) => tracked.push(work) });
+    await vi.waitFor(() => expect(upload).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(transcribing).rejects.toBeInstanceOf(CancelledError);
+    expect(tracked).toHaveLength(1);
+    expect(generateContent).not.toHaveBeenCalled();
+    finish({ name: "files/late", uri: "gs://late", mimeType: "audio/mp4" });
+    await vi.waitFor(() => expect(deleteFile).toHaveBeenCalledWith(expect.objectContaining({ name: "files/late" })));
+  });
+
   it("records the upload, the generation and the delete of a Files-API transcription", async () => {
     stat.mockResolvedValue({ size: SAFE + 1 });
     upload.mockResolvedValue({ name: "files/abc", uri: "gs://u", mimeType: "audio/mp4" });

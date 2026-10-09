@@ -45,6 +45,8 @@ export interface PipelineHooks {
 interface ActivePipelineRun {
   controller: AbortController;
   slot: TranscriptionSlot | null;
+  // Provider work the run started that may go on after it was cancelled.
+  work: Set<Promise<unknown>>;
 }
 
 // Owns everything about *running* pipelines — the concurrency slots, the active
@@ -212,7 +214,7 @@ export class PipelineCoordinator {
     slot: TranscriptionSlot | null,
   ): void {
     const controller = new AbortController();
-    const run: ActivePipelineRun = { controller, slot };
+    const run: ActivePipelineRun = { controller, slot, work: new Set() };
     this.activeRuns.set(cardId, run);
 
     // Resolve the key just-in-time inside the spawned chain (env-first, then the
@@ -243,8 +245,13 @@ export class PipelineCoordinator {
         signal: controller.signal,
         apiKey,
         persistState: () => this.hooks.persistState(),
-        releaseTranscriptionSlot: () => this.releaseSlotAndDrain(slot),
+        releaseTranscriptionSlot: () => this.releaseRunSlot(run),
         ownsCard: () => this.activeRuns.get(cardId) === run,
+        trackWork: (work) => {
+          run.work.add(work);
+          const settled = (): void => { run.work.delete(work); };
+          work.then(settled, settled);
+        },
       };
       await executeCardPipeline(cardId, startStep, mode, ctx);
     })()
@@ -263,6 +270,17 @@ export class PipelineCoordinator {
     void pipeline.finally(() => {
       this.activePipelines.delete(pipeline);
     });
+  }
+
+  // Frees a run's slot once the provider work it started has settled; work the
+  // SDK cannot abort keeps the slot after Cancel without holding anyone who
+  // awaits the run, so the concurrency limit counts real uploads.
+  private async releaseRunSlot(run: ActivePipelineRun): Promise<void> {
+    if (run.work.size === 0) {
+      await this.releaseSlotAndDrain(run.slot);
+      return;
+    }
+    void Promise.allSettled([...run.work]).then(() => this.releaseRunSlot(run)).catch(() => undefined);
   }
 
   // Frees one transcription slot (if still held) and admits any queued cards into
@@ -284,7 +302,7 @@ export class PipelineCoordinator {
       // Only the still-current run for this card may touch the run bookkeeping,
       // so an orphaned pipeline cannot clobber its replacement.
       if (this.activeRuns.get(cardId) === run) this.activeRuns.delete(cardId);
-      await this.releaseSlotAndDrain(run.slot);
+      await this.releaseRunSlot(run);
     } catch (error: unknown) {
       await this.runtime.logger.error(
         "pipeline.finalize-failed",

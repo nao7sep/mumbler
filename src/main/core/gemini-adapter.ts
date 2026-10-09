@@ -61,6 +61,9 @@ export interface GeminiAudioTranscriptionParams {
   signal?: AbortSignal;
   logger?: AppLogger;
   recordCall?: RecordProviderCall;
+  // Receives provider work that goes on after Cancel because the SDK cannot
+  // abort it (the Files API upload), so its owner can hold capacity until it ends.
+  trackWork?: (work: Promise<unknown>) => void;
 }
 
 export interface GeminiTextGenerationParams {
@@ -165,7 +168,14 @@ export async function transcribeWithGemini(
       transport = "files-api";
       throwIfExternallyCancelled(params.signal);
       const upload = { file: params.filePath, config: { mimeType: params.mimeType } };
-      const uploadedFile = await record("files.upload", null, upload, () => ai.files.upload(upload));
+      // The upload ignores an abort signal, so the caller stops waiting for it on
+      // Cancel instead (a quit is not held for its length); the upload goes on,
+      // and a file it finishes after that is deleted again.
+      const uploading = ai.files.upload(upload);
+      params.trackWork?.(uploading);
+      const uploadedFile = await record("files.upload", null, upload, () => untilCancelled(uploading, params.signal, (late) => {
+        if (late.name) void deleteUploadedFile(ai, late.name, record, params.logger);
+      }));
       uploadedFileName = uploadedFile.name ?? null;
 
       const request = {
@@ -429,6 +439,29 @@ function createGeminiAbortState(
       externalSignal?.removeEventListener("abort", onExternalAbort);
     },
   };
+}
+
+// Settles with `work`, or rejects with CancelledError as soon as `signal`
+// aborts; a value `work` delivers after that goes to `late` instead.
+function untilCancelled<T>(work: Promise<T>, signal: AbortSignal | undefined, late: (value: T) => void): Promise<T> {
+  if (signal === undefined) return work;
+  return new Promise<T>((resolve, reject) => {
+    let cancelled = false;
+    const onAbort = (): void => {
+      cancelled = true;
+      reject(new CancelledError());
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    work.then((value) => {
+      signal.removeEventListener("abort", onAbort);
+      if (cancelled) late(value);
+      else resolve(value);
+    }, (error: unknown) => {
+      signal.removeEventListener("abort", onAbort);
+      if (!cancelled) reject(error);
+    });
+  });
 }
 
 function throwIfExternallyCancelled(signal: AbortSignal | undefined): void {
