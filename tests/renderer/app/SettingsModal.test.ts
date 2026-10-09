@@ -56,6 +56,7 @@ function draft(): SettingsDraft {
     retryJitterRatio: 0.2,
     transcriptionTimeoutMs: 60000,
     metadataTimeoutMs: 30000,
+    checkReleasesAtLaunch: true,
   };
 }
 

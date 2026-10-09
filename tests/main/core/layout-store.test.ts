@@ -1,3 +1,7 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { QUEUE_WIDTH, RECORDS_LIST_WIDTH } from "@shared/layout";
@@ -5,6 +9,7 @@ import {
   clampQueueWidth,
   clampRecordsListWidth,
   createDefaultLayout,
+  createLayoutStore,
   normalizeLayout,
   selectExistingCardId,
 } from "@main/core/layout-store";
@@ -46,6 +51,7 @@ describe("createDefaultLayout", () => {
       queueWidth: QUEUE_WIDTH.default,
       recordsListWidth: RECORDS_LIST_WIDTH.default,
       selectedCardId: null,
+      releaseCheckAttemptAtUtc: null,
     });
   });
 });
@@ -56,6 +62,7 @@ describe("normalizeLayout", () => {
       queueWidth: 640,
       recordsListWidth: RECORDS_LIST_WIDTH.max,
       selectedCardId: null,
+      releaseCheckAttemptAtUtc: null,
     });
   });
 
@@ -85,5 +92,21 @@ describe("selectExistingCardId", () => {
   it("returns null when the queue is empty", () => {
     expect(selectExistingCardId([], "anything")).toBeNull();
     expect(selectExistingCardId([], null)).toBeNull();
+  });
+});
+
+describe("the release check's attempt time in layout.json", () => {
+  it("is stored as canonical UTC and read back as the same instant; anything else reads as none", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mumbler-layout-"));
+    try {
+      const store = createLayoutStore(join(dir, "layout.json"));
+      const at = Date.UTC(2026, 9, 9, 12, 30, 0);
+      await store.save({ ...createDefaultLayout(), releaseCheckAttemptAtUtc: at });
+      expect(JSON.parse(await readFile(join(dir, "layout.json"), "utf8")).releaseCheckAttemptAtUtc).toBe("2026-10-09T12:30:00.000Z");
+      expect((await store.load()).value.releaseCheckAttemptAtUtc).toBe(at);
+      expect(normalizeLayout({ releaseCheckAttemptAtUtc: "yesterday" }).releaseCheckAttemptAtUtc).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

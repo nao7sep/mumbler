@@ -14,10 +14,12 @@ import type {
   GenerateTarget,
   MumblerCard,
   PendingImportReviewItem,
+  ReleaseCheckOutcome,
   SaveCardResult,
   StatusRole,
   ToolName,
 } from "@shared/app-shell";
+import { RELEASE_PAGE_URL } from "@shared/release";
 import { DETAIL_MIN_WIDTH, QUEUE_WIDTH, WORKSPACE_GAP, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT } from "@shared/layout";
 import { rollUpRole } from "@shared/dependency-status";
 import {
@@ -304,13 +306,15 @@ function LoadedShell({
     owner: string,
     notice: Message,
     variant: Extract<AppNotification, { kind: "persistent" }>["variant"] = "info",
+    action?: Extract<AppNotification, { kind: "persistent" }>["action"],
   ) => {
     const id = nanoid();
     setNotifications(prev => upsertPersistentNotification(
       prev,
-      { id, owner, message: notice, kind: "persistent", variant },
+      { id, owner, message: notice, kind: "persistent", variant, ...(action ? { action } : {}) },
     ));
   }, []);
+
 
   const clearPersistent = useCallback((owner: string) => {
     setNotifications(prev => clearPersistentOwner(prev, owner));
@@ -319,6 +323,35 @@ function LoadedShell({
   const dismissNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
+
+  // The app-release check (github-release-check-conventions): once when the
+  // window is ready, quiet unless a newer release exists, and from the menu,
+  // where every outcome is shown. GitHub opens only from the notice's button.
+  const presentRelease = useCallback((outcome: ReleaseCheckOutcome, manual: boolean) => {
+    if (outcome.kind === "newer") {
+      addPersistent("release", message("notice.releaseAvailable", { version: outcome.version }), "info", {
+        label: message("notice.viewRelease"),
+        run: () => {
+          void window.mumbler.openExternal(RELEASE_PAGE_URL).catch((error: unknown) =>
+            reportRendererDiagnostic(error, "release page open failed"));
+        },
+      });
+    } else if (!manual) {
+      return;
+    } else if (outcome.kind === "current") {
+      clearPersistent("release");
+      addToast(message("notice.releaseCurrent", { version: outcome.version }));
+    } else {
+      addPersistent("release", message("error.releaseCheck"), "error");
+    }
+  }, [addPersistent, addToast, clearPersistent]);
+
+  const releaseChecked = useRef(false);
+  useEffect(() => {
+    if (releaseChecked.current) return;
+    releaseChecked.current = true;
+    void window.mumbler.checkForRelease("automatic").then((outcome) => presentRelease(outcome, false), () => undefined);
+  }, [presentRelease]);
   const [activePipelineCards, setActivePipelineCards] = useState<string[]>([]);
   const [cardActionErrors, setCardActionErrors] = useState<CardActionError[]>([]);
   const [pendingSaveConflict, setPendingSaveConflict] = useState<{
@@ -1108,6 +1141,17 @@ function LoadedShell({
                 }}
               >
                 {t("menu.records")}
+              </MenuItem>
+              <MenuItem
+                className="app-menu-item"
+                onSelect={() => {
+                  void window.mumbler.checkForRelease("manual").then(
+                    (outcome) => presentRelease(outcome, true),
+                    () => presentRelease({ kind: "failed" }, true),
+                  );
+                }}
+              >
+                {t("menu.checkForRelease")}
               </MenuItem>
               <MenuItem
                 className="app-menu-item"

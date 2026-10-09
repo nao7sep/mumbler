@@ -21,6 +21,7 @@ import {
   type MumblerQueue,
   type PendingImportReviewItem,
   type RendererErrorReport,
+  type ReleaseCheckOutcome,
   type SaveCardResult,
   type SaveOutputFile,
   type SaveConflictResolution,
@@ -89,6 +90,8 @@ import { createTranslator, message, type Message, type Translator } from "@share
 import type { MessageKey } from "@shared/i18n/catalogues";
 import { clearCardResultsFromStep, resolveGenerateStartStep } from "./card-pipeline";
 import { PipelineCoordinator } from "./pipeline-coordinator";
+import { ReleaseChecker } from "./release-check";
+import { fetchText } from "./binaries/http";
 
 
 // Debug logging is developer-only: on for an unpackaged/dev build, or when an
@@ -210,6 +213,7 @@ export class ApplicationRuntime {
   private closing = false;
   private quitSave: Promise<QuitSaveFailure[]> | null = null;
   private quitAttempt = 0;
+  private releaseChecker: ReleaseChecker | null = null;
   // The settings write that had failed before this quit began, if any: that
   // failure was reported where the change was made, so only a later one is the
   // quit's to retry. Undefined while no quit is under way.
@@ -605,6 +609,30 @@ export class ApplicationRuntime {
   cancelToolCheck(): AppSnapshot {
     this.ensureToolManager().cancelCheck();
     return this.getSnapshot();
+  }
+
+  // The app-release check (github-release-check-conventions): the window asks
+  // once when it is ready (automatic) and from its menu (manual). Its attempt
+  // time lives in layout.json, disposable state; a layout this session cannot
+  // write makes an automatic check skip and leaves a manual one to go ahead.
+  checkForRelease(kind: "automatic" | "manual"): Promise<ReleaseCheckOutcome> {
+    if (kind === "automatic" && this.runtime.settings?.checkReleasesAtLaunch !== true) {
+      return Promise.resolve({ kind: "skipped" });
+    }
+    this.releaseChecker ??= new ReleaseChecker({
+      installedVersion: __APP_VERSION__,
+      fetchLatest: (url, headers, timeoutMs) => fetchText(url, headers, timeoutMs),
+      lastAttemptAtUtc: () => this.runtime.layout?.releaseCheckAttemptAtUtc ?? null,
+      saveAttemptAtUtc: async (timeUtc) => {
+        const store = this.runtime.layoutStore;
+        if (store === null) throw new Error("layout.json is not written this session.");
+        const next: MumblerLayout = { ...(this.runtime.layout ?? createDefaultLayout()), releaseCheckAttemptAtUtc: timeUtc };
+        this.runtime.layout = next;
+        await store.save(next);
+      },
+      warn: (text, details) => { void this.runtime.logger.warn("release.check", text, details).catch(() => undefined); },
+    });
+    return this.releaseChecker.check(kind);
   }
 
   saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot> {

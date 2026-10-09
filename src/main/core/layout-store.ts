@@ -1,5 +1,6 @@
 import type { MumblerLayout } from "@shared/app-shell";
 import { QUEUE_WIDTH, RECORDS_LIST_WIDTH } from "@shared/layout";
+import { formatUtcIsoCompact, parseUtcMs } from "@shared/timestamps";
 
 import { FORMAT_VERSIONS } from "./format-versions";
 import { JsonStore } from "./json-store";
@@ -28,6 +29,7 @@ export function createDefaultLayout(): MumblerLayout {
     queueWidth: QUEUE_WIDTH.default,
     recordsListWidth: RECORDS_LIST_WIDTH.default,
     selectedCardId: null,
+    releaseCheckAttemptAtUtc: null,
   };
 }
 
@@ -36,6 +38,14 @@ export function normalizeLayout(raw: Record<string, unknown>): MumblerLayout {
     queueWidth: clampQueueWidth(raw.queueWidth),
     recordsListWidth: clampRecordsListWidth(raw.recordsListWidth),
     selectedCardId: typeof raw.selectedCardId === "string" ? raw.selectedCardId : null,
+    releaseCheckAttemptAtUtc: parseUtcMs(raw.releaseCheckAttemptAtUtc),
+  };
+}
+
+function serializeLayout(layout: MumblerLayout): object {
+  return {
+    ...layout,
+    releaseCheckAttemptAtUtc: layout.releaseCheckAttemptAtUtc === null ? null : formatUtcIsoCompact(layout.releaseCheckAttemptAtUtc),
   };
 }
 
@@ -55,6 +65,7 @@ export function createLayoutStore(path: string): JsonStore<MumblerLayout> {
     formatVersion: FORMAT_VERSIONS.layout,
     validate: (raw) => normalizeLayout(raw),
     createDefault: () => createDefaultLayout(),
+    serialize: serializeLayout,
     // Volatile state (pane widths, selected card) only: not recorded in backups.sqlite3.
     record: false,
   });

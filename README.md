@@ -12,6 +12,7 @@ Transcribe voice recordings with AI, structure the transcript, and generate titl
 - **Save outputs** — stages audio + JSON + Markdown together, then publishes each file independently. Overwrite replaces files without backups or rollback: a later failure can leave a mix of new and previous outputs, and replaced files cannot be recovered by Mumbler. An incomplete save names completed outputs and retains the working recording and transcript in the queue for another attempt. Successful saves report temporary-file cleanup that still needs attention. Working recordings and the app’s disposable audio directory cannot be used as output targets
 - **IME-safe** — Japanese/Chinese/Korean input works in every text field
 - **Light and dark themes** — follows the system by default; pick Light or Dark in Settings
+- **New-release notice** — asks GitHub at most once a day whether a newer Mumbler is published and says so; it never downloads or installs anything. Turn it off in Settings, or check from the menu at any time
 
 ## Requirements
 

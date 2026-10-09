@@ -253,6 +253,21 @@ export function SettingsModal({
             </section>
 
             <section className="settings-section">
+              <h3>{t("settings.updates")}</h3>
+              <div className="field-stack">
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={draft.checkReleasesAtLaunch}
+                    onChange={(event) => onChange({ ...draft, checkReleasesAtLaunch: event.target.checked })}
+                  />
+                  <span>{t("settings.checkReleasesAtLaunch")}</span>
+                </label>
+                <p className="field-hint">{t("settings.checkReleasesAtLaunchHint")}</p>
+              </div>
+            </section>
+
+            <section className="settings-section">
               <h3>{t("settings.files")}</h3>
               <div className="field-stack">
                 <label className="field">

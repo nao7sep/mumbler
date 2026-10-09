@@ -37,6 +37,7 @@ export const APP_SHELL_CHANNELS = {
   checkTools: "app-shell:check-tools",
   cancelToolCheck: "app-shell:cancel-tool-check",
   saveToolSettings: "app-shell:save-tool-settings",
+  checkForRelease: "app-shell:check-for-release",
   saveLayout: "app-shell:save-layout",
   openRecordsWindow: "app-shell:open-records-window",
   readRecordsPage: "app-shell:read-records-page",
@@ -62,6 +63,13 @@ export const APP_SHELL_EVENTS = {
   unsavedDraftsReported: "app-shell:event-unsaved-drafts-reported",
   discardUnsavedDrafts: "app-shell:event-discard-unsaved-drafts",
 } as const;
+
+/** What a release check found (github-release-check-conventions). */
+export type ReleaseCheckOutcome =
+  | { kind: "newer"; version: string }
+  | { kind: "current"; version: string }
+  | { kind: "failed" }
+  | { kind: "skipped" };
 
 /** A draft that lives only in the window until the user saves it. */
 export type UnsavedDraft = "settings";
@@ -168,6 +176,9 @@ export interface MumblerSettings {
   // gated) latest-version check at launch. Nothing auto-downloads or auto-installs;
   // every install/update is user-triggered in the Audio Tools surface.
   checkUpdatesAtLaunch: boolean;
+  // Whether launch asks GitHub, at most once a day, for a newer Mumbler release
+  // (github-release-check-conventions); separate from the audio tools' check.
+  checkReleasesAtLaunch: boolean;
 }
 
 export type ImportSource = "file-picker" | "drag-and-drop";
@@ -384,6 +395,7 @@ export interface SettingsDraft {
   retryJitterRatio: number;
   transcriptionTimeoutMs: number;
   metadataTimeoutMs: number;
+  checkReleasesAtLaunch: boolean;
 }
 
 export interface QueueSummary {
@@ -512,6 +524,9 @@ export interface MumblerLayout {
   queueWidth: number;
   recordsListWidth: number;
   selectedCardId: string | null;
+  // When the app-release check last tried GitHub (epoch ms, canonical ISO on
+  // disk): disposable, so a lost one only lets the next launch check again.
+  releaseCheckAttemptAtUtc: number | null;
 }
 
 export interface AppSnapshot {
@@ -641,6 +656,8 @@ export interface MumblerShellApi {
   checkTools(): Promise<AppSnapshot>;
   cancelToolCheck(): Promise<AppSnapshot>;
   saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot>;
+  /** Asks GitHub for a newer Mumbler release; an automatic check may be skipped. */
+  checkForRelease(kind: "automatic" | "manual"): Promise<ReleaseCheckOutcome>;
   // Persist the queue (left) pane's dragged width intent to layout.json and return
   // a fresh snapshot. Called only on a splitter drag-commit; a window resize
   // re-derives the displayed width in the renderer and persists nothing.
