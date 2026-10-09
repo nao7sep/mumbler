@@ -211,7 +211,7 @@ const DISCARD_DRAFT_BODIES = {
 } as const;
 
 /** Asked before a user's quit or window close discards a session-only draft:
- * Cancel, the default, keeps it; Discard goes on without saving it. */
+ * Keep editing, the default, keeps it; Discard goes on without saving it. */
 export function discardDraftsDialog(translator: Translator, action: "quit" | "close"): PlainDialog<"discard" | "cancel"> {
   return {
     language: translator.language,
@@ -219,7 +219,7 @@ export function discardDraftsDialog(translator: Translator, action: "quit" | "cl
     bodyLabel: translator.t("quit.detailsLabel"),
     body: translator.t(DISCARD_DRAFT_BODIES[action]),
     actions: [
-      { choice: "cancel", label: translator.t("common.cancel") },
+      { choice: "cancel", label: translator.t("decision.keepEditing") },
       { choice: "discard", label: translator.t("decision.discard"), tone: "danger" },
     ],
     focus: "cancel",

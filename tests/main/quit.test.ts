@@ -309,10 +309,10 @@ describe("a session end", () => {
 });
 
 describe("the unsaved-changes question", () => {
-  it("offers Cancel, focused, then Discard, and names the quit or the window close", () => {
+  it("offers Keep editing, focused, then Discard, and names the quit or the window close", () => {
     const translator = createTranslator("en");
     const quit = discardDraftsDialog(translator, "quit");
-    expect(quit.actions.map((action) => [action.choice, action.tone])).toEqual([["cancel", undefined], ["discard", "danger"]]);
+    expect(quit.actions.map((action) => [action.choice, action.label, action.tone])).toEqual([["cancel", "Keep editing", undefined], ["discard", "Discard", "danger"]]);
     expect([quit.focus, quit.dismiss]).toEqual(["cancel", "cancel"]);
     expect(quit.body).toBe("You have unsaved changes in Settings. Discard them and quit?");
     expect(discardDraftsDialog(translator, "close").body).toBe("You have unsaved changes in Settings. Discard them and close the window?");
