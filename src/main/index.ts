@@ -40,9 +40,6 @@ const AUDIO_MIME_TYPES: Record<string, string> = {
 let runtimeForShutdown: ApplicationRuntime | null = null;
 // Every quit path goes through it once the runtime exists.
 let quitController: QuitController | null = null;
-// macOS posts a logout, restart or shutdown before it sends the quit, so the
-// quit that follows is a session end, which never asks the user.
-let sessionEnding = false;
 // The main window, apart from the records window beside it: closing it quits
 // on Windows and Linux, and on macOS the Dock reopens it.
 let mainWindow: BrowserWindow | null = null;
@@ -181,10 +178,12 @@ async function bootstrap(): Promise<void> {
   const runtime = await ApplicationRuntime.initialize();
   runtimeForShutdown = runtime;
   quitController = createQuit(runtime);
-  // A logout, restart or shutdown on macOS (and Linux); the OS then sends the
-  // quit, which before-quit takes as a session end.
+  // A logout, restart or shutdown on macOS (and Linux) starts the session-end
+  // quit at once: it closes any open question, saves within its bound and
+  // exits. The OS's own quit that follows joins it. Nothing is remembered for a
+  // later quit, so one after another app cancelled the logout asks as usual.
   powerMonitor.on("shutdown", () => {
-    sessionEnding = true;
+    quitController?.request("session-end");
   });
 
   protocol.handle("mumbler-asset", async (request) => {
@@ -358,6 +357,6 @@ if (!app.requestSingleInstanceLock()) {
       app.exit(0);
       return;
     }
-    quitController.request(sessionEnding ? "session-end" : "user");
+    quitController.request("user");
   });
 }

@@ -288,6 +288,16 @@ describe("quit", () => {
     expect(state.questions).toEqual([]);
   });
 
+  it("starts the session-end quit on the macOS shutdown signal itself, before any quit arrives", async () => {
+    state.saveForQuit = () => Promise.resolve(["queue"]);
+    await boot();
+
+    state.powerListeners.get("shutdown")!();
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+
+    expect(state.questions).toEqual([]);
+  });
+
   it("holds a Windows logout, which never reaches before-quit, saves without asking, and exits", async () => {
     state.saveForQuit = () => Promise.resolve(["settings"]);
     await boot();
