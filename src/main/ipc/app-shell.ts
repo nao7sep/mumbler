@@ -305,9 +305,6 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
   handle(APP_SHELL_CHANNELS.checkTools, () => runtime.checkTools());
   handle(APP_SHELL_CHANNELS.cancelToolCheck, () => runtime.cancelToolCheck());
 
-  handle(APP_SHELL_CHANNELS.checkForRelease, (_event, kind: unknown) =>
-    runtime.checkForRelease(kind === "manual" ? "manual" : "automatic"),
-  );
   handle(APP_SHELL_CHANNELS.saveToolSettings, (_event, checkUpdatesAtLaunch: boolean) => {
     if (typeof checkUpdatesAtLaunch !== "boolean") {
       throw new Error("Invalid IPC parameter: checkUpdatesAtLaunch must be a boolean.");

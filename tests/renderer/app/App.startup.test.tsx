@@ -82,34 +82,6 @@ describe("App startup snapshot gate", () => {
   });
 });
 
-describe("the release check", () => {
-  it("shows a newer release found at launch as a notice whose button alone opens GitHub", async () => {
-    getSnapshot.mockResolvedValue(readySnapshot());
-    const checkForRelease = vi.fn(async () => ({ kind: "newer" as const, version: "0.2.0" }));
-    const openExternal = vi.fn(async () => undefined);
-    Object.assign(window.mumbler, { checkForRelease, openExternal });
-
-    await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Mumbler 0.2.0 is available."));
-
-    expect(checkForRelease).toHaveBeenCalledExactlyOnceWith("automatic");
-    expect(openExternal).not.toHaveBeenCalled();
-    await act(async () => button("View Release on GitHub")!.click());
-    expect(openExternal).toHaveBeenCalledExactlyOnceWith("https://github.com/nao7sep/mumbler/releases/latest");
-  });
-
-  it("stays quiet at launch when the release is current or the check failed", async () => {
-    getSnapshot.mockResolvedValue(readySnapshot());
-    Object.assign(window.mumbler, { checkForRelease: vi.fn(async () => ({ kind: "failed" as const })) });
-
-    await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(document.querySelector(".app-shell")).not.toBeNull());
-    await act(async () => undefined);
-
-    expect(document.body.textContent).not.toContain("could not check GitHub");
-  });
-});
-
 describe("a startup diagnostic", () => {
   it("names a store from a newer version and offers no reset", async () => {
     getSnapshot.mockResolvedValue({

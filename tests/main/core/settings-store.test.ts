@@ -619,15 +619,6 @@ describe("settings store", () => {
     expect((await createSettingsStore(settingsPath()).load()).value.checkUpdatesAtLaunch).toBe(false);
   });
 
-  it("defaults the release check at launch on when absent, separately from the tools' check, and preserves an explicit off", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, checkUpdatesAtLaunch: false }), "utf8");
-    expect((await createSettingsStore(settingsPath()).load()).value.checkReleasesAtLaunch).toBe(true);
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, checkReleasesAtLaunch: false }), "utf8");
-    const loaded = (await createSettingsStore(settingsPath()).load()).value;
-    expect(loaded.checkReleasesAtLaunch).toBe(false);
-    expect(loaded.checkUpdatesAtLaunch).toBe(true);
-  });
-
   it("resolves hand-edited configured paths against HOME rather than cwd", async () => {
     const home = join(dir, "home");
     await writeFile(

@@ -142,7 +142,6 @@ const SETTINGS_SETS = {
   retryPolicy: retryPolicyIssue,
   timeouts: timeoutsIssue,
   checkUpdatesAtLaunch: (value) => (typeof value === "boolean" ? null : "Check for updates at launch must be on or off."),
-  checkReleasesAtLaunch: (value) => (typeof value === "boolean" ? null : "Check GitHub for new releases at launch must be on or off."),
 } satisfies Record<keyof MumblerSettings, SetValidator>;
 const SETTINGS_SET_KEYS = Object.keys(SETTINGS_SETS) as (keyof MumblerSettings)[];
 
@@ -573,9 +572,6 @@ export function createDefaultSettings(): MumblerSettings {
     // Nothing auto-downloads: a missing required tool opens the Audio Tools
     // surface for the user to install it.
     checkUpdatesAtLaunch: true,
-    // The app-release check defaults on (github-release-check-conventions); an
-    // explicitly saved off stays off.
-    checkReleasesAtLaunch: true,
   };
 }
 
@@ -786,7 +782,6 @@ export function buildSettingsDraft(
     retryJitterRatio: settings.retryPolicy.jitterRatio,
     transcriptionTimeoutMs: settings.timeouts.transcriptionMs,
     metadataTimeoutMs: settings.timeouts.metadataMs,
-    checkReleasesAtLaunch: settings.checkReleasesAtLaunch,
   };
 }
 
@@ -848,7 +843,6 @@ export function applySettingsDraft(
       transcriptionMs: draft.transcriptionTimeoutMs,
       metadataMs: draft.metadataTimeoutMs,
     },
-    checkReleasesAtLaunch: draft.checkReleasesAtLaunch,
   };
   for (const key of SETTINGS_SET_KEYS) {
     const issue = SETTINGS_SETS[key](next[key]);

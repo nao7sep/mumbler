@@ -14,8 +14,6 @@ export type AppNotification =
       message: Message;
       kind: "persistent";
       variant: "info" | "warning" | "error";
-      // One button beside the message, such as View Release on GitHub.
-      action?: { label: Message; run: () => void };
     };
 
 export type PersistentNotification = Extract<AppNotification, { kind: "persistent" }>;
@@ -77,11 +75,6 @@ export function PersistentNotifications({
           className={`persistent-notice persistent-notice--${notification.variant}`}
         >
           <span className="persistent-notice__message">{i18n.text(notification.message)}</span>
-          {notification.action ? (
-            <button type="button" className="button button--ghost" onClick={notification.action.run}>
-              {i18n.text(notification.action.label)}
-            </button>
-          ) : null}
           <button
             type="button"
             className="result-close"

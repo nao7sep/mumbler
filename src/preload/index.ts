@@ -16,7 +16,6 @@ import {
   type SaveConflictResolution,
   type SettingsDraft,
   type ToolName,
-  type ReleaseCheckOutcome,
   type UnsavedDraft,
 } from "@shared/app-shell";
 import type { InterfaceLanguage } from "@shared/i18n/languages";
@@ -112,8 +111,6 @@ const api: MumblerShellApi = {
   checkTools: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.checkTools) as Promise<AppSnapshot>,
   cancelToolCheck: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelToolCheck) as Promise<AppSnapshot>,
-  checkForRelease: (kind: "automatic" | "manual") =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.checkForRelease, kind) as Promise<ReleaseCheckOutcome>,
   saveToolSettings: (checkUpdatesAtLaunch: boolean) =>
     ipcRenderer.invoke(
       APP_SHELL_CHANNELS.saveToolSettings,
