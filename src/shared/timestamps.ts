@@ -195,7 +195,8 @@ export function formatUtcMarker(date: Date): string {
 
 // Millisecond-precision sibling of formatUtcMarker: `yyyymmdd-hhmmss-fff-utc`. Used
 // wherever a filename stamp must stay unique across events that can land in the
-// same second (a session-log start, a backup archive); formatUtcMarker's
+// same second (a session's fallback log, a file set aside as .invalid, where a
+// same-second name would be replaced on POSIX); formatUtcMarker's
 // whole-second form stays the one used where that extra segment isn't needed
 // (e.g. the exported card filename).
 export function formatUtcMarkerMs(date: Date): string {
