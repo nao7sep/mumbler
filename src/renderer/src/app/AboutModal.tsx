@@ -83,6 +83,8 @@ export function AboutModal({
         ) : null}
         <p className="about-meta">
           {t("about.copyright", { year: "2026", author: "Yoshinao Inoguchi" })}
+          <br />
+          GPL-3.0-or-later
         </p>
       </div>
     </ModalShell>

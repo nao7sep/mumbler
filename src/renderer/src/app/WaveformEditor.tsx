@@ -19,6 +19,9 @@ import { InlineError } from "./InlineResult";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 import { presentFailure } from "./presentFailure";
 import { useWaveformPalette } from "./waveform-palette";
+
+type Regions = ReturnType<typeof RegionsPlugin.create>;
+
 const MARKER_EPSILON_SEC = 0.05;
 
 // Renders a symmetric waveform by merging all channels and centering bars.
@@ -109,7 +112,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 }, ref): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const waveSurferRef = useRef<WaveSurfer | null>(null);
-  const regionsRef = useRef<RegionsPlugin | null>(null);
+  const regionsRef = useRef<Regions | null>(null);
   const regionRef = useRef<Region | null>(null);
   // Theme colors for the canvas; the ref lets the create-once effect and the
   // region sync read the current palette without re-creating the player.
@@ -707,7 +710,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 // synchronous "region-removed" on remove(), which the handler recognizes by
 // regionRef already being null.
 function syncRegionToTrim(
-  regions: RegionsPlugin,
+  regions: Regions,
   regionRef: MutableRefObject<Region | null>,
   trim: CardTrim,
   durationSec: number,

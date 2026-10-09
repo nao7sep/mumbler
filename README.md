@@ -18,7 +18,7 @@ Transcribe voice recordings with AI, structure the transcript, and generate titl
 - macOS 13 or later (Apple Silicon) or Windows (x64) — Electron desktop app
 - A Google Gemini API key (the AI features call Gemini, billed to your key)
 - **ffmpeg and ffprobe**, used to read and trim audio. When you choose to install them, Mumbler downloads checksum-verified builds from the third-party community builders [Martin Riedl](https://ffmpeg.martin-riedl.de/) (macOS) or [BtbN](https://github.com/BtbN/FFmpeg-Builds) (Windows). Installing both currently downloads about 60 MB on macOS or 340 MB on Windows; nothing downloads or updates silently. FFmpeg's licence and source information are published at [ffmpeg.org](https://ffmpeg.org/legal.html).
-- Node.js 20.19+ on the Node 20 line, or Node.js 22.12+ — only to build or run from source
+- Node.js 22.22.2+ on the Node 22 line, 24.15+ on the Node 24 line, or 26+ — only to build or run from source
 
 ## Download
 

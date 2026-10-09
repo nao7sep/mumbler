@@ -22,6 +22,8 @@ const READ_ATTRIBUTES = new Set([
 const LITERAL_TEXT = new Set([
   "Mumbler",
   "GitHub",
+  // The application's SPDX licence identifier is not translated.
+  "GPL-3.0-or-later",
   // The named groups a timestamp pattern uses, and the environment variable
   // that supplies the API key: identifiers, shown as code.
   "year",
