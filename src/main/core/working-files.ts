@@ -28,16 +28,16 @@ export async function copyIntoWorking(
   const workingFilePath = await uniquePathInDirectory(workingDir, preferredName);
 
   try {
-    // not recorded: working/ contains managed audio binaries; queue.json records
-    // the durable queue/work metadata that gives those copies meaning.
-    await copyFile(sourcePath, workingFilePath);
+    // Created exclusively, so a name taken after the directory scan fails
+    // rather than being overwritten, and that file is never removed below.
+    await copyFile(sourcePath, workingFilePath, fsConstants.COPYFILE_EXCL);
     await keepSourceTimesAndMode(sourcePath, workingFilePath);
     await access(workingFilePath, fsConstants.R_OK);
   } catch (error: unknown) {
-    // Best-effort removal of the partial copy; the wrapped error below is the
-    // meaningful failure and is always thrown, so a failed cleanup is deliberately
-    // not surfaced on top of it.
-    await rm(workingFilePath, { force: true }).catch(() => undefined);
+    // Best-effort removal of this call's own partial copy; the wrapped error
+    // below is the meaningful failure and is always thrown, so a failed cleanup
+    // is deliberately not surfaced on top of it.
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") await rm(workingFilePath, { force: true }).catch(() => undefined);
     throw new Error(
       `Failed to create a readable working copy for ${preferredName}: ${formatError(error)}`,
       { cause: error },

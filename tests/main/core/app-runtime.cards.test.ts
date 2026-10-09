@@ -299,7 +299,22 @@ describe("the durable queue store", () => {
     } finally { afterResetMove.run = null; }
   });
 
-  it.each(["config.json", "queue.json", "layout.json", "transcripts/6c6f7374.json"])(
+  it("resets saved work around a newer layout.json, leaving it as it is and unwritten", async () => {
+    const [pending] = await dropIn("take.wav");
+    await runtime.confirmPendingImports([review(pending)]);
+    const path = join(home, "layout.json");
+    const newer = JSON.stringify({ formatVersion: 2, queueWidth: 400 });
+    await writeFile(path, newer);
+
+    const snapshot = await runtime.resetState();
+
+    expect(snapshot.startupDiagnostic).toBeNull();
+    expect(cards(snapshot)).toEqual([]);
+    await runtime.saveLayout(430);
+    expect(await readFile(path, "utf8")).toBe(newer);
+  });
+
+  it.each(["config.json", "queue.json", "transcripts/6c6f7374.json"])(
     "refuses reset before moving any sibling when %s is newer", async (name) => {
       const [pending] = await dropIn("take.wav");
       const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
@@ -835,7 +850,7 @@ describe("working with a card", () => {
     await expect(runtime.saveCard(card.id), "no save starts while closing").rejects.toThrow(/closing/);
   });
 
-  it("reports a save as saved once its files are out, even when the queue then cannot be written", async () => {
+  it("reports a save as saved once its files are out, and keeps the working audio when the queue then cannot be written", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
     const queueStore = (runtime as unknown as { runtime: { queueStore: { save(value: unknown): Promise<void> } } })
@@ -854,7 +869,7 @@ describe("working with a card", () => {
     expect(result.kind).toBe("saved");
     expect(cards(result.snapshot), "the saved card is out of the queue").toEqual([]);
     expect((await readdir(join(home, "output"))).length).toBe(3);
-    expect(await exists(card.sourceFilePath), "the working audio is gone").toBe(false);
+    expect(await exists(card.sourceFilePath), "a relaunch still finds the card's audio").toBe(true);
   });
 
   it("preserves the primary save rejection when persisting its ready state also fails", async () => {

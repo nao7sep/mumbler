@@ -353,8 +353,10 @@ export class ToolManager {
   // desired version (→ up-to-date / update-available). The attempt time is written
   // first; beyond it a failed check writes nothing (the displayed wording stays at
   // the last successful knowledge), logs the failure, and rethrows so an explicit
-  // Check can show a transient "couldn't check" notice.
-  async checkTools(): Promise<void> {
+  // Check can show a transient "couldn't check" notice. When the attempt time
+  // cannot be written, the automatic launch check skips, so it cannot repeat on
+  // every launch, while the user's own Check goes ahead.
+  async checkTools(options: { automatic?: boolean } = {}): Promise<void> {
     if (this.checkController !== null) {
       throw new OperationError("Audio tool updates are already being checked.");
     }
@@ -370,7 +372,14 @@ export class ToolManager {
     }
     try {
       const attemptedAt = Date.now();
-      await this.mutateDependencies((value) => ({ ...value, lastCheckAttemptAtUtc: attemptedAt }));
+      try {
+        await this.mutateDependencies((value) => ({ ...value, lastCheckAttemptAtUtc: attemptedAt }));
+      } catch (error: unknown) {
+        if (options.automatic) throw error;
+        await this.deps.logger.warn("tools.check-attempt-unrecorded", "Could not record the check attempt; checking anyway.", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       const resolved = await resolveLatest(this.deps.platform, this.deps.arch, controller.signal);
       const now = Date.now();
       controller.signal.throwIfAborted();

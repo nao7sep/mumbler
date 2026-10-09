@@ -18,12 +18,17 @@ const backupFaults = vi.hoisted(() => ({
   stageFailure: null as Error | null,
   publicFailure: null as Error | null,
   refuseStageCleanup: false,
+  beforeCopy: null as ((target: string) => Promise<void>) | null,
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    copyFile: async (...args: Parameters<typeof actual.copyFile>) => {
+      await backupFaults.beforeCopy?.(String(args[1]));
+      return actual.copyFile(...args);
+    },
     link: async (source: Parameters<typeof actual.link>[0], target: Parameters<typeof actual.link>[1]) => {
       await backupFaults.beforeLink?.(String(source), String(target));
       if (backupFaults.unsupported !== null) throw Object.assign(new Error("links unsupported"), { code: backupFaults.unsupported });
@@ -142,6 +147,7 @@ function makeState(overrides: Partial<MumblerQueue> = {}): MumblerQueue {
 beforeEach(async () => {
   undeletable.clear();
   backupFaults.beforeLink = null;
+  backupFaults.beforeCopy = null;
   backupFaults.unsupported = null;
   backupFaults.stageFailure = null;
   backupFaults.publicFailure = null;
@@ -166,6 +172,17 @@ describe("working audio copies", () => {
 
     expect(basename(copied).toLowerCase()).not.toBe("clip.wav");
     expect(await readFile(copied, "utf8")).toBe("audio");
+  });
+
+  it("neither overwrites nor removes a file that takes the chosen name after the folder was read", async () => {
+    const source = join(dir, "source.wav");
+    const working = join(dir, "working");
+    await writeFile(source, "audio", "utf8");
+    backupFaults.beforeCopy = async (target) => { await writeFile(target, "someone else's", "utf8"); };
+
+    await expect(copyIntoWorking(source, working, "clip.wav")).rejects.toMatchObject({ cause: { code: "EEXIST" } });
+
+    expect(await readFile(join(working, "clip.wav"), "utf8")).toBe("someone else's");
   });
 
   it("names the import that could not be copied, and leaves no partial copy behind", async () => {

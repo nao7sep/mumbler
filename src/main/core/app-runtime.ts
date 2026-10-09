@@ -571,7 +571,7 @@ export class ApplicationRuntime {
     }
     if (settings.checkUpdatesAtLaunch && manager.launchCheckDue()) {
       try {
-        await manager.checkTools();
+        await manager.checkTools({ automatic: true });
       } catch (error: unknown) {
         await this.runtime.logger.warn("tools.maintenance", "Background tool update check failed.", {
           error: error instanceof Error ? error.message : String(error),
@@ -783,10 +783,15 @@ export class ApplicationRuntime {
       return result;
     };
     try {
-      // Admit every reset-owned store before moving any sibling aside.
+      // Admit every reset-owned store before moving any sibling aside. The
+      // layout is disposable: one from a newer Mumbler is left as it is and not
+      // written this session, rather than blocking the reset of saved work.
       await settingsStore.admitReset();
       await queueStore.admitReset();
-      await layoutStore.admitReset();
+      const layoutNewer = await layoutStore.admitReset().then(() => false, (error: unknown) => {
+        if (error instanceof NewerFormatError) return true;
+        throw error;
+      });
       await transcriptStore.admitReset();
       await loadInterfaceCatalogue(settings.language);
       await ensureDirectories(paths, this.runtime.logger);
@@ -798,7 +803,7 @@ export class ApplicationRuntime {
       const preservedTranscripts = moved(paths.transcriptsDir, await transcriptStore.preserveExistingFiles());
       const preservedRecordings = moved(paths.workingDir, await preserveAside(paths.workingDir));
       await mkdir(paths.workingDir, { recursive: true });
-      const preservedLayoutFiles = moved(paths.layoutPath, await layoutStore.preserveExistingFiles());
+      const preservedLayoutFiles = layoutNewer ? [] : moved(paths.layoutPath, await layoutStore.preserveExistingFiles());
       // Reuse the per-launch session logger rather than building a new one, so a
       // reset keeps writing to the same file as the rest of the launch.
       const logger = this.runtime.logger;
@@ -818,7 +823,7 @@ export class ApplicationRuntime {
       this.runtime.queueStore = queueStore;
       this.runtime.transcriptStore = new TranscriptStore(paths.transcriptsDir);
       this.queueBehind = false;
-      this.runtime.layoutStore = layoutStore;
+      this.runtime.layoutStore = layoutNewer ? null : layoutStore;
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
       this.runtime.recoveredInterruptedCards = 0;
@@ -1484,12 +1489,12 @@ export class ApplicationRuntime {
       throw new OperationError("Enter a Gemini API key.");
     }
 
+    this.runtime.logger.maskSecret(trimmed);
     await writeApiKey(this.runtime.paths!.apiKeysPath, "gemini", trimmed, this.apiKeyWarn());
     await this.refreshHasGeminiApiKey();
     await this.runtime.logger.info("settings.api-key-set", "Stored Gemini API key.", {
       hasGeminiApiKey: this.runtime.hasGeminiApiKey,
     });
-    this.runtime.logger.maskSecret(trimmed);
 
     await this.pipeline.drainQueued();
     return this.getSnapshot();
@@ -2226,9 +2231,27 @@ export class ApplicationRuntime {
     await this.runtime.logger.error("app.unhandled", createTranslator("en").text(title), error, details);
   }
 
-  // Never throws: it runs after a save has published its files.
+  // Never throws: it runs after a save has published its files. The queue is
+  // saved first and the working audio deleted only once it no longer lists the
+  // card: deleting first would bring the card back at the next launch as an
+  // error with its audio missing. When the queue cannot be saved the audio stays,
+  // so a relaunch shows the card intact; if a later queue save drops it, its
+  // working copy remains in working/ unreferenced (launch never deletes a
+  // recording).
   private async discardWorkingCard(card: MumblerCard): Promise<void> {
     this.runtime.state!.cards = this.runtime.state!.cards.filter((entry) => entry.id !== card.id);
+    try {
+      await this.persistState();
+    } catch (error: unknown) {
+      await this.runtime.logger.error(
+        "card.cleanup",
+        "Saved card was removed from the queue, but the queue could not be saved; its working audio is kept.",
+        error,
+        { cardId: card.id },
+      );
+      return;
+    }
+
     try {
       await rm(card.sourceFilePath, { force: true });
     } catch (error: unknown) {
@@ -2240,19 +2263,6 @@ export class ApplicationRuntime {
           sourceFilePath: card.sourceFilePath,
           error: error instanceof Error ? error.message : String(error),
         },
-      );
-    }
-
-    try {
-      await this.persistState();
-    } catch (error: unknown) {
-      // The next successful save of the queue drops the card. If none happens,
-      // startup finds its working audio gone and drops it then.
-      await this.runtime.logger.error(
-        "card.cleanup",
-        "Saved card was removed from the queue, but the queue could not be saved.",
-        error,
-        { cardId: card.id },
       );
     }
   }

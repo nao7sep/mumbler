@@ -496,6 +496,22 @@ describe("checkTools", () => {
     }
   });
 
+  it("goes ahead with the user's Check when the attempt time cannot be written, while the launch check skips", async () => {
+    const store = createDependenciesStore(join(dir, "dependencies.json"));
+    const { value } = await store.load();
+    let refuse = true;
+    const failing = { save: async (next: typeof value) => { if (refuse) { refuse = false; throw new Error("disk full"); } return store.save(next); } };
+    const manager = new ToolManager({ binDir, tempDir, platform: "darwin", arch: "arm64", value, store: failing, logger: fakeLogger(), notify });
+
+    await manager.checkTools();
+    expect(manager.listStatuses().every((status) => status.desiredVersion === "8.2")).toBe(true);
+
+    refuse = true;
+    vi.mocked(resolveLatest).mockClear();
+    await expect(manager.checkTools({ automatic: true })).rejects.toThrow("disk full");
+    expect(resolveLatest).not.toHaveBeenCalled();
+  });
+
   it("cancels an explicit check through its network edge without changing facts", async () => {
     const manager = await makeManager();
     let markStarted!: () => void;
@@ -528,7 +544,7 @@ describe("checkTools", () => {
       .spyOn(JsonStore.prototype, "save")
       .mockRejectedValueOnce(new Error("dependencies disk full"));
 
-    await expect(manager.checkTools()).rejects.toThrow("dependencies disk full");
+    await expect(manager.checkTools({ automatic: true })).rejects.toThrow("dependencies disk full");
     expect(saveSpy).toHaveBeenCalledTimes(1);
     for (const status of manager.listStatuses()) {
       expect(status.desiredVersion).toBeNull();
