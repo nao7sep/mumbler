@@ -1,9 +1,28 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { promisify } from "node:util";
+
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// A stand-in tool is a Node script, which no OS can execute by itself: the real
+// execFile runs it through this Node instead, keeping production's spawn, bound
+// and kill path, with no .cmd launcher (Node refuses those without a shell on
+// Windows) and no shell hop elsewhere.
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const viaNode = (file: string, args: readonly string[]): [string, string[]] =>
+    file.endsWith(".cjs") ? [process.execPath, [file, ...args]] : [file, [...args]];
+  const execFile = ((file: string, args: readonly string[], ...rest: unknown[]) =>
+    (actual.execFile as (...all: unknown[]) => unknown)(...viaNode(file, args), ...rest)) as unknown as typeof actual.execFile;
+  const custom = (actual.execFile as unknown as Record<symbol, (...all: unknown[]) => unknown>)[promisify.custom];
+  Object.defineProperty(execFile, promisify.custom, {
+    value: (file: string, args: readonly string[], ...rest: unknown[]) => custom(...viaNode(file, args), ...rest),
+  });
+  return { ...actual, execFile };
+});
 
 import { analyzeTrimDecision, configureToolResolver, prepareAudioForTranscription, probeAudioProfile } from "@main/core/audio-tools";
 import type { TrimDecision } from "@shared/app-shell";
@@ -60,27 +79,10 @@ beforeAll(() => {
       "writeFileSync(args[args.length - 1], 'trimmed audio');",
     ].join("\n"),
   );
-  ffprobePath = launcher("ffprobe", script);
-  ffmpegPath = launcher("ffmpeg", ffmpegScript);
+  ffprobePath = script;
+  ffmpegPath = ffmpegScript;
   configureToolResolver((name) => (name === "ffmpeg" ? ffmpegPath : ffprobePath));
 });
-
-/**
- * The app runs its tools as programs with their own arguments, so a stand-in has
- * to be one: a launcher the OS can execute, in that OS's own form.
- */
-function launcher(name: string, script: string): string {
-  const windows = process.platform === "win32";
-  const toolPath = join(toolDir, windows ? `${name}.cmd` : name);
-  writeFileSync(
-    toolPath,
-    windows
-      ? `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`
-      : `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`,
-  );
-  chmodSync(toolPath, 0o755);
-  return toolPath;
-}
 
 /** What the stand-in ffmpeg was asked to do on its last run. */
 function ffmpegArgs(): string[] {

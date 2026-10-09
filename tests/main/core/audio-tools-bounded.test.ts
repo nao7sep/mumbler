@@ -44,10 +44,10 @@ describe("audio tools are bounded and cancellable", () => {
   // The reason the kill escalates: a tool that ignores SIGTERM would otherwise
   // outlive the bound it was given, and the await would hang exactly as before.
   it.skipIf(process.platform === "win32")("follows an ignored SIGTERM with SIGKILL", async () => {
-    await expect(runTool(process.execPath, [stubbornScript], { timeoutMs: 200 })).rejects.toThrow(
+    await expect(runTool(process.execPath, [stubbornScript], { timeoutMs: 200, killEscalationMs: 50 })).rejects.toThrow(
       /did not finish within/i,
     );
-  }, 30_000);
+  });
 
   it("answers a cancel with the pipeline's cancelled error, not a failure", async () => {
     const controller = new AbortController();

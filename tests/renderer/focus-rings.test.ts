@@ -13,10 +13,10 @@
 // below with the reason it is neither. A new one that is none of these fails.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const ROOT = join(__dirname, "..");
+const ROOT = join(__dirname, "..", "..");
 const SOURCE_DIR = "src";
 const COVERING_STYLESHEET = "src/renderer/src/styles.css";
 
@@ -106,7 +106,8 @@ function withoutComments(text: string): string {
 function focusSites(): Site[] {
   return sourceFiles(join(ROOT, SOURCE_DIR)).flatMap((path) => {
     const text = withoutComments(readFileSync(path, "utf8"));
-    const file = relative(ROOT, path);
+    // Forward slashes on every platform, so the exception list keys match on Windows.
+    const file = relative(ROOT, path).split(sep).join("/");
     return [...text.matchAll(FOCUS_SITE)].map((match) => {
       const at = match.index ?? 0;
       const token = match[0];

@@ -34,6 +34,8 @@ const KILL_ESCALATION_MS = 5_000;
 interface RunToolOptions {
   timeoutMs: number;
   signal?: AbortSignal;
+  /** How long SIGTERM gets before SIGKILL; the shipped value unless a test shortens it. */
+  killEscalationMs?: number;
 }
 
 /**
@@ -73,7 +75,7 @@ export async function runTool(
       } catch {
         // The process exited between the deadline and the escalation.
       }
-    }, KILL_ESCALATION_MS);
+    }, options.killEscalationMs ?? KILL_ESCALATION_MS);
     escalation.unref?.();
   };
 

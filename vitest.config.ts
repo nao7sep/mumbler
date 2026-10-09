@@ -9,7 +9,8 @@ import { readFileSync } from "node:fs";
 const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
 
 // Tests live under tests/, mirroring the src/ tree, and reach their subjects
-// through the same path aliases the app uses. The default node environment suits
+// through the same path aliases the app uses; tests/i18n spans the shared and
+// renderer catalogues, and tests/config checks build and packaging files. The default node environment suits
 // the pure main/shared logic; the keyboard/DOM helpers under the renderer opt
 // into jsdom via a per-file `// @vitest-environment jsdom` pragma, so no
 // glob-based environment matching is needed here.
