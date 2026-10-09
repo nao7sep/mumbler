@@ -125,7 +125,7 @@ const SETTINGS_SETS = {
   theme: (value) => (THEME_PREFERENCES.some(({ value: theme }) => theme === value) ? null : "Theme must be System, Light, or Dark."),
   uiFontFamily: text("UI font"),
   outputDirectory: path("Output directory"),
-  backupDirectory: path("Backup directory"),
+  backupDirectory: path("Originals directory"),
   defaultTimezone: (value) => (isText(value) && (value === SYSTEM_TIMEZONE || isValidTimezone(value)) ? null : "Default timezone must be a valid IANA timezone."),
   timestampPattern: timestampPatternIssue,
   skipIntervalSec: positive("Skip interval"),

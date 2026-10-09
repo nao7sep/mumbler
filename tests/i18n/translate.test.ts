@@ -78,7 +78,7 @@ describe("createRendererTranslator", () => {
     const filled = parts.map((part) =>
       isValidElement(part) ? (part as ReactElement<{ children: unknown }>).props.children : part,
     );
-    expect(filled.join("")).toBe("Backups are saved to P. Configure the location in Settings.");
+    expect(filled.join("")).toBe("Copies are saved to P. Configure the location in Settings.");
   });
 });
 

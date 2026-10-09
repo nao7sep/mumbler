@@ -260,21 +260,21 @@ describe("what blocks the import", () => {
 });
 
 describe("what happens to the user's own files", () => {
-  it("offers backup and deletion for the batch, unticked, and names where backups go", async () => {
+  it("offers a copy and deletion for the batch, unticked, and names where copies go", async () => {
     await mountModal([makeItem(), makeItem({ id: "pending-2" })], { backupDirectoryLabel: "/Volumes/Archive" });
 
-    expect(checkbox("Copy originals to backup folder").checked).toBe(false);
+    expect(checkbox("Keep a copy of the originals").checked).toBe(false);
     expect(checkbox("Permanently delete originals after import").checked).toBe(false);
     expect(document.body.textContent).toContain("/Volumes/Archive");
     expect(document.body.textContent, "the order of the two is stated").toContain(
-      "A failed backup cancels the deletion for that file.",
+      "A failed copy cancels the deletion for that file.",
     );
   });
 
   it("turns each option on for every recording at once", async () => {
     await mountModal([makeItem(), makeItem({ id: "pending-2" })]);
 
-    await toggle(checkbox("Copy originals to backup folder"), true);
+    await toggle(checkbox("Keep a copy of the originals"), true);
     await toggle(checkbox("Permanently delete originals after import"), true);
 
     expect(onSetCopyToBackupForAll).toHaveBeenCalledExactlyOnceWith(true);
@@ -287,7 +287,7 @@ describe("what happens to the user's own files", () => {
       makeItem({ id: "pending-2", copyToBackupOnConfirm: false }),
     ]);
 
-    expect(checkbox("Copy originals to backup folder").checked, "one of two is not the batch").toBe(false);
+    expect(checkbox("Keep a copy of the originals").checked, "one of two is not the batch").toBe(false);
 
     await act(async () => root?.unmount());
     root = null;
@@ -296,6 +296,6 @@ describe("what happens to the user's own files", () => {
     document.body.append(container);
     await mountModal([makeItem({ copyToBackupOnConfirm: true }), makeItem({ id: "pending-2", copyToBackupOnConfirm: true })]);
 
-    expect(checkbox("Copy originals to backup folder").checked).toBe(true);
+    expect(checkbox("Keep a copy of the originals").checked).toBe(true);
   });
 });

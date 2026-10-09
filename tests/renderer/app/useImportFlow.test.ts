@@ -580,7 +580,7 @@ describe("useImportFlow confirming a review", () => {
     const result = container.querySelector("[data-result]");
     expect(result?.getAttribute("data-result")).toBe("warning");
     expect(result?.textContent).toContain(
-      "/rec/a.wav was added to the queue, but it could not be copied to the backup folder /backups, so it was not deleted.",
+      "/rec/a.wav was added to the queue, but it could not be copied to the originals folder /backups, so it was not deleted.",
     );
     expect(result?.textContent).toContain("/rec/b.wav was added to the queue, but it could not be deleted.");
   });

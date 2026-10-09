@@ -1013,13 +1013,13 @@ export class ApplicationRuntime {
       if (merged.copyToBackupOnConfirm) {
         try {
           const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir, this.runtime.logger);
-          await this.runtime.logger.info("import.backup-original", "Copied original to backup directory.", {
+          await this.runtime.logger.info("import.backup-original", "Copied original to the originals directory.", {
             originalSourcePath: pendingImport.originalSourcePath,
             backupPath,
           });
         } catch (error: unknown) {
           backupSucceeded = false;
-          await this.runtime.logger.warn("import.backup-original", "Failed to copy original to backup directory.", {
+          await this.runtime.logger.warn("import.backup-original", "Failed to copy original to the originals directory.", {
             originalSourcePath: pendingImport.originalSourcePath,
             backupDir,
             error: error instanceof Error ? error.message : String(error),

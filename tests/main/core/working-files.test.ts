@@ -327,7 +327,7 @@ describe("working audio copies", () => {
     const source = join(dir, "gone.m4a");
 
     await expect(copyOriginalToBackup(source, join(dir, "backup"))).rejects.toThrow(
-      new RegExp(`Failed to copy ${source} to backup directory`),
+      new RegExp(`Failed to copy ${source} to the originals directory`),
     );
     await expect(copyOriginalToBackup(source, join(dir, "backup"))).rejects.toMatchObject({
       cause: { code: "ENOENT" },

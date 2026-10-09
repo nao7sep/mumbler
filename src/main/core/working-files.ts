@@ -96,7 +96,7 @@ export async function copyOriginalToBackup(
     await syncDirectory(backupDir);
     return targetPath;
   } catch (error: unknown) {
-    throw new Error(`Failed to copy ${sourcePath} to backup directory ${backupDir}${targetPath === undefined ? "" : ` (target ${targetPath})`}: ${formatError(error)}`, { cause: error });
+    throw new Error(`Failed to copy ${sourcePath} to the originals directory ${backupDir}${targetPath === undefined ? "" : ` (target ${targetPath})`}: ${formatError(error)}`, { cause: error });
   } finally {
     if (stageDir !== undefined) {
       try { await rm(stageDir, { recursive: true, force: true }); }
