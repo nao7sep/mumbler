@@ -2,13 +2,17 @@ import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import { FORMAT_VERSIONS } from "./format-versions.ts";
-import { openVersionedDatabase } from "./sqlite-store.ts";
+import { openVersionedDatabase, type UpgradeDatabase } from "./sqlite-store.ts";
 
 export type BackupEngineWarn = (message: string, details: Record<string, unknown>) => void;
 
+// One row per file per session (one process launch): the session's first save
+// of a path inserts its row, and later saves that session replace its content
+// (data-backup-conventions). Rows of earlier sessions are never changed.
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS backups (
   id             INTEGER PRIMARY KEY,
+  session_id     TEXT,
   path           TEXT NOT NULL,
   content        BLOB NOT NULL,
   content_sha256 TEXT NOT NULL,
@@ -16,17 +20,26 @@ CREATE TABLE IF NOT EXISTS backups (
   written_at_utc TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_backups_path_id ON backups (path, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_backups_path_session ON backups (path, session_id);
 `;
+
+// Format 1 had no sessions: its rows stay as earlier history, with a NULL
+// session_id, which the unique index lets repeat.
+const upgrade: UpgradeDatabase = (db, recorded) => {
+  if (recorded < 2) db.exec("ALTER TABLE backups ADD COLUMN session_id TEXT");
+};
 
 export class BackupStoreEngine {
   private db: DatabaseSync | null = null;
   private initialized = false;
   private failureReported = false;
   private readonly file: string;
+  private readonly session: string;
   private readonly warn: BackupEngineWarn;
 
-  constructor(file: string, warn: BackupEngineWarn) {
+  constructor(file: string, session: string, warn: BackupEngineWarn) {
     this.file = file;
+    this.session = session;
     this.warn = warn;
   }
 
@@ -37,22 +50,24 @@ export class BackupStoreEngine {
     try {
       const content = Buffer.from(bytes);
       const hash = createHash("sha256").update(content).digest("hex");
-      // Acquire SQLite's one writer slot before reading the predecessor. In WAL
-      // mode a deferred/read transaction could observe an old predecessor while
-      // another process is committing the same successor, then append a duplicate
-      // after waiting at INSERT. BEGIN IMMEDIATE serializes that decision across
-      // every app process while retaining per-path revert history.
+      // The latest-row check and the write share one writer transaction, so the
+      // decision is made on the row it changes.
       store.exec("BEGIN IMMEDIATE");
       transactionOpen = true;
       const latest = store
-        .prepare("SELECT content_sha256 AS h FROM backups WHERE path = ? ORDER BY id DESC LIMIT 1")
-        .get(absolutePath) as { h: string } | undefined;
-      if (latest?.h !== hash) {
+        .prepare("SELECT session_id AS session, content_sha256 AS h FROM backups WHERE path = ? ORDER BY id DESC LIMIT 1")
+        .get(absolutePath) as { session: string | null; h: string } | undefined;
+      // A session's first save that equals the latest earlier version adds nothing.
+      if (latest === undefined || latest.session === this.session || latest.h !== hash) {
         store
           .prepare(
-            "INSERT INTO backups (path, content, content_sha256, byte_size, written_at_utc) VALUES (?, ?, ?, ?, ?)",
+            `INSERT INTO backups (session_id, path, content, content_sha256, byte_size, written_at_utc)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT (path, session_id) DO UPDATE SET content = excluded.content,
+               content_sha256 = excluded.content_sha256, byte_size = excluded.byte_size,
+               written_at_utc = excluded.written_at_utc`,
           )
-          .run(absolutePath, content, hash, content.byteLength, writtenAtUtc);
+          .run(this.session, absolutePath, content, hash, content.byteLength, writtenAtUtc);
       }
       store.exec("COMMIT");
       transactionOpen = false;
@@ -89,7 +104,7 @@ export class BackupStoreEngine {
       // cannot be opened: recording stays off for the session.
       this.db = openVersionedDatabase(this.file, FORMAT_VERSIONS.backups, SCHEMA, (error) => {
         this.warnOnce("backup store: initialization cleanup failed", { file: this.file, error: errorInfo(error) });
-      });
+      }, upgrade);
     } catch (error: unknown) {
       this.warnOnce("backup store: could not open; recording disabled for this session", {
         file: this.file,

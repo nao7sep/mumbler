@@ -1,6 +1,6 @@
 /**
  * Pins the write-through backup store (data-backup conventions): byte-identical BLOB fidelity, the
- * serialized ISO-8601-ms `written_at_utc` shape (NOT a filename stamp), content-hash dedup per path, and
+ * serialized ISO-8601-ms `written_at_utc` shape (NOT a filename stamp), one row per path per session, and
  * the best-effort contract (a store failure never throws, logs exactly one warn, and never touches the
  * caller's bytes). The store resolves its file from MUMBLER_DATA_DIR, which the global setup points at a
  * throwaway root and closes between tests; each test here overrides MUMBLER_DATA_DIR with its own root so it
@@ -17,8 +17,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  abandonBackupStore,
   closeBackupStore,
   record,
+  setBackupStoreSession,
   setBackupStoreWarn,
   type BackupWarn,
 } from "@main/core/backupStore";
@@ -30,6 +32,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "mumbler-backupstore-"));
   process.env.MUMBLER_DATA_DIR = root;
   storeFilePath = join(root, "backups.sqlite3");
+  setBackupStoreSession("session-a");
 });
 
 afterEach(async () => {
@@ -43,6 +46,7 @@ afterEach(async () => {
 });
 
 interface Row {
+  session_id: string | null;
   path: string;
   content: Uint8Array;
   content_sha256: string;
@@ -56,7 +60,7 @@ function readRows(path: string): Row[] {
   const db = new DatabaseSync(storeFilePath);
   try {
     return db
-      .prepare("SELECT path, content, content_sha256, byte_size, written_at_utc FROM backups WHERE path = ? ORDER BY id ASC")
+      .prepare("SELECT session_id, path, content, content_sha256, byte_size, written_at_utc FROM backups WHERE path = ? ORDER BY id ASC")
       .all(path) as unknown as Row[];
   } finally {
     db.close();
@@ -102,84 +106,87 @@ describe("record — written_at_utc shape", () => {
   });
 });
 
-describe("record — dedup by content hash per path", () => {
-  it("skips an unchanged re-save (same bytes → no second row)", async () => {
+const text = (row: Row): string => Buffer.from(row.content).toString("utf8");
+
+describe("record — one row per path per session", () => {
+  it("keeps one row for a path within a session, holding its latest save", async () => {
     const file = join(root, "config.json");
-    const bytes = Buffer.from('{"a":1}\n', "utf8");
-    record(file, bytes);
-    record(file, Buffer.from('{"a":1}\n', "utf8")); // identical content, fresh buffer
-    await closeBackupStore();
-
-    expect(readRows(file)).toHaveLength(1);
-  });
-
-  it("records a changed save, and records a revert to an earlier value as a new row", async () => {
-    const file = join(root, "config.json");
-    const v1 = Buffer.from('{"v":1}\n', "utf8");
-    const v2 = Buffer.from('{"v":2}\n', "utf8");
-
-    record(file, v1); // row 1
-    record(file, v2); // row 2 — changed
-    record(file, v1); // row 3 — a revert differs from the immediately preceding row (v2), so it records
+    record(file, Buffer.from('{"v":1}\n', "utf8"));
+    record(file, Buffer.from('{"v":2}\n', "utf8"));
+    record(file, Buffer.from('{"v":3}\n', "utf8"));
     await closeBackupStore();
 
     const rows = readRows(file);
-    expect(rows).toHaveLength(3);
-    expect(Buffer.from(rows[0]!.content).toString("utf8")).toBe('{"v":1}\n');
-    expect(Buffer.from(rows[1]!.content).toString("utf8")).toBe('{"v":2}\n');
-    expect(Buffer.from(rows[2]!.content).toString("utf8")).toBe('{"v":1}\n');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ session_id: "session-a", byte_size: 8 });
+    expect(text(rows[0]!)).toBe('{"v":3}\n');
   });
 
-  it("dedups per path independently — the same content under two paths records twice", async () => {
+  it("adds nothing when a session's first save equals the latest earlier version, and a row when it differs", async () => {
+    const file = join(root, "config.json");
+    record(file, Buffer.from('{"v":1}\n', "utf8"));
+    await closeBackupStore();
+
+    setBackupStoreSession("session-b");
+    record(file, Buffer.from('{"v":1}\n', "utf8"));
+    await closeBackupStore();
+    expect(readRows(file).map((row) => row.session_id)).toEqual(["session-a"]);
+
+    record(file, Buffer.from('{"v":2}\n', "utf8"));
+    await closeBackupStore();
+    const rows = readRows(file);
+    expect(rows.map((row) => row.session_id)).toEqual(["session-a", "session-b"]);
+    expect(rows.map(text)).toEqual(['{"v":1}\n', '{"v":2}\n']);
+  });
+
+  it("never changes an earlier session's row", async () => {
+    const file = join(root, "config.json");
+    record(file, Buffer.from("first", "utf8"));
+    await closeBackupStore();
+    setBackupStoreSession("session-b");
+    record(file, Buffer.from("second", "utf8"));
+    record(file, Buffer.from("third", "utf8"));
+    await closeBackupStore();
+
+    expect(readRows(file).map(text)).toEqual(["first", "third"]);
+  });
+
+  it("keeps each path's row independently", async () => {
     const a = join(root, "config.json");
-    const b = join(root, "state.json");
-    const bytes = Buffer.from("same", "utf8");
-    record(a, bytes);
-    record(b, bytes);
-    record(a, Buffer.from("same", "utf8")); // dedup skip on a
+    const b = join(root, "other.json");
+    record(a, Buffer.from("same", "utf8"));
+    record(b, Buffer.from("same", "utf8"));
+    record(a, Buffer.from("same", "utf8"));
     await closeBackupStore();
 
     expect(readRows(a)).toHaveLength(1);
     expect(readRows(b)).toHaveLength(1);
   });
+});
 
-  it("dedups an identical successor committed by another process while its worker waits", async () => {
+describe("record — an OS session end skips the history", () => {
+  it("accepts nothing after abandoning, waits for nothing and reports nothing", async () => {
+    const warn = vi.fn<BackupWarn>();
+    setBackupStoreWarn(warn);
     const file = join(root, "config.json");
-    const before = Buffer.from('{"v":1}\n', "utf8");
-    const successor = Buffer.from('{"v":2}\n', "utf8");
-    const successorHash = createHash("sha256").update(successor).digest("hex");
+    record(file, Buffer.from("before", "utf8"));
+    abandonBackupStore();
+    record(file, Buffer.from("after", "utf8"));
+    await delay(200);
 
-    record(file, before);
+    expect(warn).not.toHaveBeenCalled();
     await closeBackupStore();
+    const rows = readdirSync(root).includes("backups.sqlite3") ? readRows(file) : [];
+    expect(rows.map(text)).not.toContain("after");
+  });
 
-    // Model a second app process publishing the successor while this process's
-    // backup worker starts the same record. WAL readers can observe the old row
-    // while another connection owns the writer lock, so SELECT + INSERT must
-    // acquire that lock before reading or both processes append the same bytes.
-    const competing = new DatabaseSync(storeFilePath);
-    try {
-      competing.exec("PRAGMA busy_timeout = 5000");
-      competing.exec("BEGIN IMMEDIATE");
-      competing
-        .prepare(
-          "INSERT INTO backups (path, content, content_sha256, byte_size, written_at_utc) VALUES (?, ?, ?, ?, ?)",
-        )
-        .run(file, successor, successorHash, successor.byteLength, new Date().toISOString());
-
-      record(file, successor);
-      // Let the fresh worker reach the locked database before the competing
-      // commit. Without a write transaction it reads the stale predecessor,
-      // waits only at INSERT, and creates a duplicate after this commit.
-      await delay(500);
-      competing.exec("COMMIT");
-    } finally {
-      competing.close();
-    }
-
+  it("records again after the abandoned store is closed", async () => {
+    abandonBackupStore();
     await closeBackupStore();
-    const rows = readRows(file);
-    expect(rows).toHaveLength(2);
-    expect(Buffer.from(rows[1]!.content).equals(successor)).toBe(true);
+    const file = join(root, "config.json");
+    record(file, Buffer.from("later", "utf8"));
+    await closeBackupStore();
+    expect(readRows(file).map(text)).toEqual(["later"]);
   });
 });
 
@@ -225,14 +232,14 @@ describe("record — format version", () => {
     await closeBackupStore();
     const db = new DatabaseSync(storeFilePath);
     try {
-      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
+      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
     } finally {
       db.close();
     }
   });
 
   it.each([
-    ["in a newer format", "CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 2;", "newer than this build reads"],
+    ["in a newer format", "CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 3;", "newer than this build reads"],
     ["without its format version", "CREATE TABLE backups (id INTEGER PRIMARY KEY);", "records no format version"],
   ])("leaves a history %s untouched, warning once and recording nothing", async (_kind, setup, reported) => {
     const existing = new DatabaseSync(storeFilePath);
@@ -253,6 +260,37 @@ describe("record — format version", () => {
     );
     expect(createHash("sha256").update(readFileSync(storeFilePath)).digest("hex")).toBe(before);
     expect(readdirSync(root)).not.toContain("backups.sqlite3-wal");
+  });
+});
+
+describe("record — upgrading a history written before sessions", () => {
+  it("keeps every earlier row as history and records this session beside them", async () => {
+    const file = join(root, "config.json");
+    const old = new DatabaseSync(storeFilePath);
+    old.exec(`CREATE TABLE backups (
+      id INTEGER PRIMARY KEY, path TEXT NOT NULL, content BLOB NOT NULL, content_sha256 TEXT NOT NULL,
+      byte_size INTEGER NOT NULL, written_at_utc TEXT NOT NULL);
+      CREATE INDEX idx_backups_path_id ON backups (path, id);
+      PRAGMA user_version = 1;`);
+    const insert = old.prepare("INSERT INTO backups (path, content, content_sha256, byte_size, written_at_utc) VALUES (?, ?, ?, ?, ?)");
+    for (const value of ["one", "two"]) {
+      const bytes = Buffer.from(value, "utf8");
+      insert.run(file, bytes, createHash("sha256").update(bytes).digest("hex"), bytes.byteLength, "2026-10-01T00:00:00.000Z");
+    }
+    old.close();
+
+    record(file, Buffer.from("two", "utf8"));
+    record(file, Buffer.from("three", "utf8"));
+    await closeBackupStore();
+
+    const rows = readRows(file);
+    expect(rows.map((row) => [row.session_id, text(row)])).toEqual([[null, "one"], [null, "two"], ["session-a", "three"]]);
+    const db = new DatabaseSync(storeFilePath);
+    try {
+      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+    } finally {
+      db.close();
+    }
   });
 });
 

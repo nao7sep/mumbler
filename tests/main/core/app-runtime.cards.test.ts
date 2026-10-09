@@ -198,6 +198,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
 const { ApplicationRuntime, startupFailureDiagnostic } = await import("@main/core/app-runtime");
 const { createQueueStore } = await import("@main/core/settings-schema");
 const { TranscriptStore } = await import("@main/core/transcript-store");
+const backupStore = await import("@main/core/backupStore");
 
 type Runtime = Awaited<ReturnType<typeof ApplicationRuntime.initialize>>;
 
@@ -1306,6 +1307,35 @@ describe("each card's text in its own file", () => {
     await runtime.shutdown();
     runtime = await ApplicationRuntime.initialize();
     expect(await readdir(join(home, "transcripts")), "the new queue never referred to them").toEqual(files);
+  });
+});
+
+describe("closing at quit", () => {
+  it("closes the records alongside the backup history rather than after it", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const close = vi.spyOn(backupStore, "closeBackupStore").mockReturnValue(held);
+    const query = { session: null, kind: null, level: null, cardId: null, search: "", after: null };
+    try {
+      await expect(runtime.readRecordsPage(query)).resolves.toBeDefined();
+      const closing = runtime.closeForQuit({ origin: "user" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(close).toHaveBeenCalledWith(1_000);
+      // The records are already closing while the backup history still drains.
+      await expect(runtime.readRecordsPage(query)).rejects.toThrow("could not be read");
+      release();
+      await closing;
+    } finally { close.mockRestore(); }
+  });
+
+  it("skips the backup history at an OS session end", async () => {
+    const abandon = vi.spyOn(backupStore, "abandonBackupStore");
+    const close = vi.spyOn(backupStore, "closeBackupStore");
+    try {
+      await runtime.closeForQuit({ origin: "session-end" });
+      expect(abandon).toHaveBeenCalledOnce();
+      expect(close).not.toHaveBeenCalled();
+    } finally { abandon.mockRestore(); close.mockRestore(); }
   });
 });
 

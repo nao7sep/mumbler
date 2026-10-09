@@ -182,14 +182,14 @@ describe("SQLite creation and admission", () => {
 
 describe("SQLite engine admission at open", () => {
   it("leaves a newer backup store untouched and records nothing into it", () => {
-    connect().exec("PRAGMA user_version = 2");
+    connect().exec("PRAGMA user_version = 3");
     const warn = vi.fn();
-    const engine = new BackupStoreEngine(file, warn);
+    const engine = new BackupStoreEngine(file, "session", warn);
     engines.push(engine);
     engine.record("recording", Buffer.from("refused"), "2026-10-07T00:00:00.000Z");
     expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: expect.stringContaining("newer than this build reads") }));
     const db = connect();
-    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 3 });
     expect(db.prepare("SELECT name FROM sqlite_master").all()).toEqual([]);
   });
 

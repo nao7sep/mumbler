@@ -8,11 +8,16 @@ import { NewerFormatError } from "./format-versions.ts";
 // single-instance lock keeps any other Mumbler off the data root, so the format
 // cannot change while this process holds the connection, and reads and writes on
 // it do not check again. A present, unversioned database is never a fresh store.
-function admitDatabaseFormat(db: DatabaseSync, file: string, supported: number): void {
+function admitDatabaseFormat(db: DatabaseSync, file: string, supported: number): number {
   const { user_version: recorded } = db.prepare("PRAGMA user_version").get() as { user_version: number };
   if (recorded > supported) throw new NewerFormatError(file, recorded, supported);
   if (recorded < 1) throw new Error(`${file} records no format version (user_version ${recorded}).`);
+  return recorded;
 }
+
+/** Brings a store written in an older format up to the current one, in place,
+ * inside the opening transaction; `recorded` is the version it was written in. */
+export type UpgradeDatabase = (db: DatabaseSync, recorded: number) => void;
 
 type ReportCleanup = (error: unknown) => void;
 
@@ -61,7 +66,13 @@ function createDatabase(file: string, formatVersion: number, schema: string, rep
 }
 
 /** Opens a versioned store. WAL is initialized once, never rewritten on ordinary opens. */
-export function openVersionedDatabase(file: string, formatVersion: number, schema: string, reportCleanup: ReportCleanup = () => undefined): DatabaseSync {
+export function openVersionedDatabase(
+  file: string,
+  formatVersion: number,
+  schema: string,
+  reportCleanup: ReportCleanup = () => undefined,
+  upgrade?: UpgradeDatabase,
+): DatabaseSync {
   mkdirSync(path.dirname(file), { recursive: true });
   if (!existsSync(file)) createDatabase(file, formatVersion, schema, reportCleanup);
   const db = new DatabaseSync(file);
@@ -70,7 +81,12 @@ export function openVersionedDatabase(file: string, formatVersion: number, schem
     db.exec("PRAGMA busy_timeout = 5000");
     db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
-    admitDatabaseFormat(db, file, formatVersion);
+    const recorded = admitDatabaseFormat(db, file, formatVersion);
+    if (recorded < formatVersion) {
+      if (upgrade === undefined) throw new Error(`${file} is in format ${recorded}, which this build does not upgrade.`);
+      upgrade(db, recorded);
+      db.exec(`PRAGMA user_version = ${formatVersion}`);
+    }
     db.exec(schema);
     db.exec("COMMIT");
     transactionOpen = false;

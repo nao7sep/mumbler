@@ -18,8 +18,8 @@ export const FORMAT_VERSIONS = {
   toolVersion: 1,
   /** records.sqlite3 */
   records: 1,
-  /** backups.sqlite3 */
-  backups: 1,
+  /** backups.sqlite3; 2 added session_id, one row per file per launch */
+  backups: 2,
   /** The .json written beside a saved recording */
   outputJson: 1,
   /** The front matter of the .md written beside a saved recording */

@@ -15,8 +15,8 @@ if (parentPort === null) {
 }
 
 const port = parentPort;
-const data = workerData as { file: string };
-const engine = new BackupStoreEngine(data.file, (message, details) => {
+const data = workerData as { file: string; session: string };
+const engine = new BackupStoreEngine(data.file, data.session, (message, details) => {
   port.postMessage({ type: "warning", message, details } satisfies WorkerResponse);
 });
 

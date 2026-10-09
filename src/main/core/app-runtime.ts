@@ -50,7 +50,7 @@ import {
   recomputeUtcFromLocal,
   resolveTimezone,
 } from "@shared/timestamps";
-import { closeBackupStore, setBackupStoreWarn } from "./backupStore";
+import { abandonBackupStore, closeBackupStore, setBackupStoreSession, setBackupStoreWarn } from "./backupStore";
 import { NewerFormatError } from "./format-versions";
 import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
@@ -111,6 +111,9 @@ function rendererReportError(report: RendererErrorReport): Error {
   };
   return build(report, 0);
 }
+
+// How long a user's quit waits for queued backup-history writes.
+const BACKUP_QUIT_DRAIN_MS = 1_000;
 
 /** Stable presentation for a failed user-commanded reset, naming what it had
  * already set aside in `folder`; the error itself is only logged. */
@@ -309,6 +312,7 @@ export class ApplicationRuntime {
     setBackupStoreWarn((message, details) => {
       void logger.warn("backup.record", message, details);
     });
+    setBackupStoreSession(logger.session);
 
     const settingsStore = createLoggedSettingsStore(paths.settingsPath, logger);
     const queueStore = createQueueStore(paths.queuePath);
@@ -1620,14 +1624,19 @@ export class ApplicationRuntime {
 
   // The quit's last step, after its save: closes the backup history and the
   // records, which log their own failures. Called once; later calls share it.
+  // The history is best effort and never holds up an exit: a user's quit gives
+  // its pending writes a short bound alongside the records close, and an OS
+  // session end skips them (data-backup-conventions).
   closeForQuit(details: Record<string, unknown> = {}): Promise<void> {
     this.closePromise ??= (async () => {
-      await closeBackupStore();
+      let backups: Promise<void> = Promise.resolve();
+      if (details.origin === "session-end") abandonBackupStore();
+      else backups = closeBackupStore(BACKUP_QUIT_DRAIN_MS);
       void this.runtime.logger.info("app.shutdown", "Shutdown complete.", {
         ...details,
         cardCount: this.runtime.state?.cards.length ?? 0,
       }).catch(() => undefined);
-      await this.runtime.logger.close();
+      await Promise.all([backups, this.runtime.logger.close()]);
     })();
     return this.closePromise;
   }
