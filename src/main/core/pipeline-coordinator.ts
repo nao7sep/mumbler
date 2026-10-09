@@ -38,14 +38,6 @@ export interface PipelineHooks {
   resolveApiKey(): Promise<string | null>;
 }
 
-// A run removed from the coordinator's bookkeeping by cancel. The caller aborts
-// and frees it after attempting to persist the cancelled card. Detaching first
-// keeps an orphaned pipeline from touching a replacement's slot, even when that
-// persistence attempt fails.
-export interface DetachedRun {
-  abortAndRelease(): Promise<void>;
-}
-
 // One active (non-detached) pipeline per card: its abort controller plus the
 // transcription slot it holds (null for a metadata-only run). Cancel detaches a
 // run by removing it here; the detached run keeps its own reference and so can
@@ -84,24 +76,21 @@ export class PipelineCoordinator {
     return this.activeRuns.has(cardId);
   }
 
-  // Remove a run from the bookkeeping without aborting it yet. Returns null when
-  // the card has no active run (a queued-only cancel, or a run that already
-  // settled). The returned handle aborts the pipeline and frees its slot.
-  detachRun(cardId: string): DetachedRun | null {
+  // Takes the card away from its run and aborts it at once, before anything
+  // awaits, so no result the run receives afterwards can reach the card.
+  // Returns false when the card had no active run (a queued-only cancel, or a
+  // run that already settled). The run keeps its concurrency slot until its
+  // physical work settles: an upload the provider SDK cannot abort goes on after
+  // Cancel, and releasing its slot early would let more real uploads run than
+  // the limit allows (it is released in finalizeCardPipeline).
+  detachAndAbort(cardId: string): boolean {
     const run = this.activeRuns.get(cardId);
     if (run === undefined) {
-      return null;
+      return false;
     }
     this.activeRuns.delete(cardId);
-    return {
-      abortAndRelease: async (): Promise<void> => {
-        run.controller.abort();
-        // Releasing the run's own slot is idempotent and admits any queued cards
-        // into the freed capacity. A no-op if the slot was already released (e.g.
-        // the card was cancelled during the metadata phase).
-        await this.releaseSlotAndDrain(run.slot);
-      },
-    };
+    run.controller.abort();
+    return true;
   }
 
   startOrEnqueue(
@@ -255,6 +244,7 @@ export class PipelineCoordinator {
         apiKey,
         persistState: () => this.hooks.persistState(),
         releaseTranscriptionSlot: () => this.releaseSlotAndDrain(slot),
+        ownsCard: () => this.activeRuns.get(cardId) === run,
       };
       await executeCardPipeline(cardId, startStep, mode, ctx);
     })()
@@ -289,14 +279,11 @@ export class PipelineCoordinator {
 
   private async finalizeCardPipeline(cardId: string, run: ActivePipelineRun): Promise<void> {
     try {
-      // Only the still-current run for this card may touch shared bookkeeping. A
-      // run detached by cancel was replaced (or removed) in activeRuns, so this
-      // identity check stops an orphaned pipeline from clobbering its replacement;
-      // the orphan's own slot was already freed on its release path.
-      if (this.activeRuns.get(cardId) !== run) {
-        return;
-      }
-      this.activeRuns.delete(cardId);
+      // Every run frees its own slot once its work has settled, a detached one
+      // included (slots are per acquisition, so this never frees another's).
+      // Only the still-current run for this card may touch the run bookkeeping,
+      // so an orphaned pipeline cannot clobber its replacement.
+      if (this.activeRuns.get(cardId) === run) this.activeRuns.delete(cardId);
       await this.releaseSlotAndDrain(run.slot);
     } catch (error: unknown) {
       await this.runtime.logger.error(

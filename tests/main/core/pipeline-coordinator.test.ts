@@ -279,13 +279,13 @@ describe("PipelineCoordinator drain on completion", () => {
   });
 });
 
-describe("PipelineCoordinator.detachRun", () => {
-  it("returns null for a card with no active run", () => {
+describe("PipelineCoordinator.detachAndAbort", () => {
+  it("reports a card with no active run", () => {
     const { coordinator } = harness([makeCard({ id: "a" })]);
-    expect(coordinator.detachRun("a")).toBeNull();
+    expect(coordinator.detachAndAbort("a")).toBe(false);
   });
 
-  it("frees the slot and admits a queued card on abortAndRelease", async () => {
+  it("takes the card from its run at once, and frees the slot only when the run's work settles", async () => {
     const first = makeCard({ id: "a" });
     const second = makeCard({ id: "b" });
     const { coordinator } = harness([first, second], 1);
@@ -293,18 +293,12 @@ describe("PipelineCoordinator.detachRun", () => {
     await coordinator.startOrEnqueue("a", "generate", "transcription");
     await coordinator.startOrEnqueue("b", "generate", "transcription");
 
-    const detached = coordinator.detachRun("a");
-    expect(detached).not.toBeNull();
+    expect(coordinator.detachAndAbort("a")).toBe(true);
     expect(coordinator.hasRun("a")).toBe(false);
+    expect(coordinator.hasRun("b"), "the cancelled run still holds its slot").toBe(false);
 
-    await detached!.abortAndRelease();
-
-    expect(coordinator.hasRun("b")).toBe(true);
-
-    // The orphaned pipeline settling later must not disturb the bookkeeping the
-    // replacement now owns (the finalize identity check).
     await settle("a");
-    expect(coordinator.hasRun("b")).toBe(true);
+    await vi.waitFor(() => expect(coordinator.hasRun("b")).toBe(true));
   });
 });
 

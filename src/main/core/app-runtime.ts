@@ -1199,7 +1199,13 @@ export class ApplicationRuntime {
       if (this.trimRequests.get(cardId) !== request) {
         return this.getSnapshot();
       }
-      await this.applyCardTrim(card, normalizedTrim, trimDecision, editedAtUtc);
+      // Processing may have started while the trim was analyzed; a run works
+      // from the trim it started with, so this one would not match its results.
+      const current = this.requireCard(cardId, "Card to update does not exist.");
+      if (isCardBusy(current) || this.pipeline.hasRun(cardId)) {
+        throw new OperationError("Cannot change trim markers while this card is being processed.");
+      }
+      await this.applyCardTrim(current, normalizedTrim, trimDecision, editedAtUtc);
     } finally {
       if (this.trimRequests.get(cardId) === request) {
         this.trimRequests.delete(cardId);
@@ -1331,9 +1337,11 @@ export class ApplicationRuntime {
 
     const failedStep = oldCard.activeStep ?? "transcription";
 
-    // Immediately replace the card with a cancelled copy.
-    // The orphaned pipeline still holds a reference to the old card object,
-    // so any further writes it makes are invisible to the live state.
+    // Take the card from its run and abort it before anything awaits: from here
+    // the run no longer owns the card, so a result it receives later is dropped.
+    this.pipeline.detachAndAbort(cardId);
+
+    // The card shows as cancelled at once.
     state.cards[cardIndex] = {
       ...oldCard,
       status: "Cancelled",
@@ -1347,16 +1355,7 @@ export class ApplicationRuntime {
       },
     };
 
-    // Detach the run so its later unwind can't touch a replacement's bookkeeping,
-    // then abort it and free its slot even when saving the cancelled card fails,
-    // so the user can generate again at once.
-    const detached = this.pipeline.detachRun(cardId);
-
-    try {
-      await this.persistState();
-    } finally {
-      await detached?.abortAndRelease();
-    }
+    await this.persistState();
 
     await this.runtime.logger.info("pipeline.cancel-immediate", "Immediately detached and cancelled card pipeline.", {
       cardId,

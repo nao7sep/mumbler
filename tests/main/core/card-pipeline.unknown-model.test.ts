@@ -88,6 +88,7 @@ function makeContext(card: MumblerCard, dir: string): CardPipelineContext {
     apiKey: "fixture-key",
     persistState: vi.fn().mockResolvedValue(undefined),
     releaseTranscriptionSlot: vi.fn().mockResolvedValue(undefined),
+    ownsCard: () => true,
   };
 }
 

@@ -121,6 +121,7 @@ function makeContext(card: MumblerCard, signal: AbortSignal): CardPipelineContex
     apiKey: "test-key",
     persistState: vi.fn().mockResolvedValue(undefined),
     releaseTranscriptionSlot: vi.fn().mockResolvedValue(undefined),
+    ownsCard: () => true,
   };
 }
 
@@ -223,6 +224,31 @@ describe("executeCardPipeline", () => {
     expect(card.status).toBe("Ready to Save");
     expect(card.lastError).toBeNull();
     expect(ctx.releaseTranscriptionSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a result that arrives after a cancel took the card, leaving the card that replaced it untouched", async () => {
+    let answer!: (value: { text: string; modelVersion: string; usageMetadata: null }) => void;
+    mockGenerateText.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+    const card = makeCard();
+    const controller = new AbortController();
+    const ctx = makeContext(card, controller.signal);
+    let owns = true;
+    ctx.ownsCard = () => owns;
+
+    const run = executeCardPipeline(card.id, "structured", "generate", ctx);
+    await vi.waitFor(() => expect(mockGenerateText).toHaveBeenCalledOnce());
+    // What a cancel does: take the card from the run, abort it and show a copy.
+    owns = false;
+    controller.abort();
+    const replacement: MumblerCard = { ...ctx.state.cards[0]!, status: "Cancelled", activeStep: null };
+    ctx.state.cards[0] = replacement;
+    answer({ text: "late outline", modelVersion: "m", usageMetadata: null });
+    await run;
+
+    expect(replacement.metadata.structured).toBeNull();
+    expect(replacement.ai.structured).toBeNull();
+    expect(replacement.status).toBe("Cancelled");
+    expect(ctx.state.cards[0]).toBe(replacement);
   });
 
   it("routes the outline separately from title and slug, using the configured endpoint", async () => {
