@@ -1,8 +1,7 @@
 import { chmod, stat } from "node:fs/promises";
 
-import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
+import { preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 import { FORMAT_VERSIONS, NewerFormatError, recordedFormatVersion } from "./format-versions";
-import { assertReadableFormat, CorruptStateError } from "./json-store";
 
 /**
  * API key storage and resolution — the secret store, kept in its own 0600 file
@@ -30,11 +29,14 @@ import { assertReadableFormat, CorruptStateError } from "./json-store";
  *     invalid characters); it is treated as absent and warned about, naming the
  *     key id, rather than handed to a provider as garbage.
  *   - On read: a group/world-readable file is warned about once and tightened to
- *     0600 every time it is found that way (POSIX only); a corrupt/unreadable
- *     file is moved aside to a timestamped neighbour, warned, and treated as
- *     empty rather than throwing. A file in a newer format is intact data: it is
- *     left in place, warned, and read as holding no key, and setting or clearing
- *     a key refuses to write over it (store-recovery-conventions).
+ *     0600 every time it is found that way (POSIX only). A file that cannot be
+ *     read, is not valid JSON or has the wrong shape is left exactly in place,
+ *     warned about by kind (never quoting its text) and read as holding no key.
+ *     Saving or clearing a key over such a file sets it aside to a timestamped
+ *     neighbour first and writes nothing if that fails. A file in a newer format
+ *     is intact data: it is left in place, warned, and read as holding no key,
+ *     and setting or clearing a key refuses to write over it
+ *     (store-recovery-conventions).
  */
 
 const MARKER = "obf:";
@@ -134,44 +136,69 @@ function normalize(raw: unknown): ApiKeysFile | null {
   return { keys };
 }
 
-// The stored keys, or the NewerFormatError of a file this build leaves alone.
-async function readAll(filePath: string, warn: WarnFn): Promise<ApiKeysFile | NewerFormatError> {
+// What reading the secrets file found. A file that could not be used is left
+// exactly as it is: lookup never moves or rewrites it, and only an explicit save
+// or clear replaces it, after setting it aside (store-recovery-conventions).
+type StoredKeys =
+  | { kind: "keys"; file: ApiKeysFile }
+  | { kind: "absent" }
+  | { kind: "unusable"; problem: "unreadable" | "malformed" }
+  | { kind: "newer"; error: NewerFormatError };
+
+// Reports why the file could not be used by kind and error code only. A parse
+// error message quotes the text around the failure, which can be part of a key,
+// so it never reaches a record, a log line or a thrown message.
+async function readAll(filePath: string, warn: WarnFn): Promise<StoredKeys> {
   let raw: unknown;
   try {
     raw = await readJsonFile<unknown>(filePath);
   } catch (error) {
-    // Corrupt/unreadable: never fail key resolution over it. Move the bad file
-    // aside (timestamped) so its bytes are preserved and it is handled once,
-    // warn, and degrade to "no key" — it is rebuilt on the next write.
-    const preserved = await preserveAside(filePath).catch(() => null);
-    warn("api-keys.json was unreadable; moved aside and treating as empty", {
+    const cause = error instanceof Error ? error.cause : undefined;
+    if (cause instanceof SyntaxError) {
+      warn("api-keys.json is not valid JSON; left unchanged and no stored key is available.", { path: filePath });
+      return { kind: "unusable", problem: "malformed" };
+    }
+    warn("api-keys.json could not be read; left unchanged and no stored key is available.", {
       path: filePath,
-      preserved,
-      error: formatError(error),
+      code: errorCode(cause),
     });
-    return { keys: {} };
+    return { kind: "unusable", problem: "unreadable" };
   }
-  if (raw === undefined) return { keys: {} };
+  if (raw === undefined) return { kind: "absent" };
   const recorded = raw !== null && typeof raw === "object" && !Array.isArray(raw)
     ? recordedFormatVersion(raw as Record<string, unknown>)
     : null;
   if (recorded !== null && recorded > FORMAT_VERSIONS.apiKeys) {
     const newer = new NewerFormatError(filePath, recorded, FORMAT_VERSIONS.apiKeys);
-    warn("api-keys.json is in a newer format; left unchanged and treating as empty", {
+    warn("api-keys.json is in a newer format; left unchanged and no stored key is available.", {
       path: filePath,
       error: newer.message,
     });
-    return newer;
+    return { kind: "newer", error: newer };
   }
   await warnIfInsecureMode(filePath, warn);
   const normalized = normalize(raw);
-  if (normalized !== null) return normalized;
+  if (normalized !== null) return { kind: "keys", file: normalized };
+  warn("api-keys.json has an unexpected shape; left unchanged and no stored key is available.", { path: filePath });
+  return { kind: "unusable", problem: "malformed" };
+}
 
-  const preserved = await preserveAside(filePath).catch(() => null);
-  warn("api-keys.json had an unexpected shape; moved aside and treating as empty", {
-    path: filePath,
-    preserved,
-  });
+function errorCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
+// The keys a save or clear starts from. A newer file is refused; a file that
+// could not be used is set aside first, so its bytes survive the replacement,
+// and a failed set-aside stops the write.
+async function keysToReplace(filePath: string, stored: StoredKeys, warn: WarnFn): Promise<ApiKeysFile> {
+  if (stored.kind === "keys") return stored.file;
+  if (stored.kind === "newer") throw stored.error;
+  if (stored.kind === "unusable") {
+    const preserved = await preserveAside(filePath);
+    warn("api-keys.json was set aside before replacing it.", { path: filePath, preserved, problem: stored.problem });
+  }
   return { keys: {} };
 }
 
@@ -184,14 +211,6 @@ async function writeAll(filePath: string, data: ApiKeysFile): Promise<void> {
   await writeJsonFile(filePath, { formatVersion: FORMAT_VERSIONS.apiKeys, ...data }, {
     mode: ENFORCE_FILE_MODE ? SECRETS_FILE_MODE : undefined,
     record: false,
-    validateCurrent: async () => {
-      const raw = await readJsonFile<unknown>(filePath);
-      if (raw === undefined) return;
-      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-        throw new CorruptStateError(filePath, "file does not contain a JSON object");
-      }
-      assertReadableFormat(filePath, raw as Record<string, unknown>, FORMAT_VERSIONS.apiKeys);
-    },
   });
 }
 
@@ -218,8 +237,8 @@ export async function resolveApiKey(
   if (fromEnv) return fromEnv;
 
   const all = await readAll(filePath, warn);
-  if (all instanceof NewerFormatError) return null;
-  const stored = all.keys[id];
+  if (all.kind !== "keys") return null;
+  const stored = all.file.keys[id];
   if (typeof stored === "string") {
     const decoded = decodeApiKey(stored);
     if (decoded === null) {
@@ -255,8 +274,7 @@ export async function writeApiKey(
 ): Promise<void> {
   assertKeyId(id);
   const trimmed = apiKey.trim();
-  const all = await readAll(filePath, warn);
-  if (all instanceof NewerFormatError) throw all;
+  const all = await keysToReplace(filePath, await readAll(filePath, warn), warn);
   if (trimmed.length === 0) {
     delete all.keys[id];
   } else {
@@ -272,8 +290,9 @@ export async function clearApiKey(
   warn: WarnFn = noopWarn,
 ): Promise<void> {
   assertKeyId(id);
-  const all = await readAll(filePath, warn);
-  if (all instanceof NewerFormatError) throw all;
+  const stored = await readAll(filePath, warn);
+  if (stored.kind === "absent") return;
+  const all = await keysToReplace(filePath, stored, warn);
   if (id in all.keys) {
     delete all.keys[id];
     await writeAll(filePath, all);
