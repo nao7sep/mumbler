@@ -409,3 +409,59 @@ describe("duplicating the recording", () => {
     expect(text()).toContain("The recording could not be duplicated");
   });
 });
+
+describe("text typed but not yet committed", () => {
+  async function show(next: Partial<MumblerCard>): Promise<void> {
+    await act(async () => {
+      root?.render(
+        React.createElement(WaveformEditor, {
+          ref: handle,
+          card: { ...card, ...next },
+          previewSnippetSeconds: 10,
+          skipIntervalSec: 5,
+          disabled: false,
+          onDuplicateCard,
+          onTrimCommit,
+        }),
+      );
+    });
+  }
+
+  async function typeOnly(side: "front" | "back", value: string): Promise<void> {
+    const input = markerInput(side);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set?.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  it("survives the saved trim arriving for a commit of the other marker", async () => {
+    await mountEditor();
+    await typeOnly("back", "4:12");
+    await typeMarker("front", "30");
+    await show({ trim: { frontMarkerSec: 30, backMarkerSec: null } });
+    expect(markerInput("back").value).toBe("4:12");
+    expect(markerInput("front").value).toBe("0:30.0");
+  });
+
+  it("stays with its card across a switch to another card and back", async () => {
+    await mountEditor();
+    await typeMarker("front", "1:xx");
+    await show({ id: "card-2" });
+    expect(markerInput("front").value).toBe("");
+    await show({ id: "card-1" });
+    expect(markerInput("front").value).toBe("1:xx");
+  });
+
+  it("is not touched by a late failure of a commit made for another card", async () => {
+    let fail!: (error: Error) => void;
+    onTrimCommit.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { fail = reject; }));
+    await mountEditor();
+    await typeMarker("front", "30");
+    await show({ id: "card-2", trim: { frontMarkerSec: 10, backMarkerSec: null } });
+    await act(async () => fail(new Error("Cannot change trim markers while this card is being processed")));
+    expect(markerInput("front").value).toBe("0:10.0");
+    expect(text()).not.toContain("trim markers could not be saved");
+  });
+});
+

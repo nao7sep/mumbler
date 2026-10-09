@@ -75,6 +75,11 @@ function renderSymmetricWaveform(
   ctx.fill();
 }
 
+interface TypedMarkers {
+  front: string | null;
+  back: string | null;
+}
+
 interface WaveformEditorProps {
   card: MumblerCard;
   previewSnippetSeconds: number;
@@ -129,6 +134,18 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const [draftTrim, setDraftTrim] = useState<CardTrim>(card.trim);
   const [frontInput, setFrontInput] = useState(formatMarkerInput(card.trim.frontMarkerSec));
   const [backInput, setBackInput] = useState(formatMarkerInput(card.trim.backMarkerSec));
+  // Marker text typed but not yet committed, per side, survives a snapshot of
+  // the card's saved trim and, per card, a switch to another card and back for
+  // the session (unsaved-edits-conventions). Null means the side shows the
+  // saved value.
+  const typedRef = useRef<TypedMarkers>({ front: null, back: null });
+  const typedByCardRef = useRef(new Map<string, TypedMarkers>());
+  const shownCardRef = useRef(card.id);
+  // Trim commits still in flight for the shown card: while any is, a snapshot
+  // from an earlier one does not replace the newer draft.
+  const pendingCommitsRef = useRef(0);
+  const cardTrimRef = useRef(card.trim);
+  cardTrimRef.current = card.trim;
 
   const frontComposing = useComposing();
   const backComposing = useComposing();
@@ -138,10 +155,31 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const draftTrimRef = useRef(draftTrim);
   draftTrimRef.current = draftTrim;
 
+  function showTrim(trim: CardTrim): void {
+    setFrontInput(typedRef.current.front ?? formatMarkerInput(trim.frontMarkerSec));
+    setBackInput(typedRef.current.back ?? formatMarkerInput(trim.backMarkerSec));
+  }
+
+  function typeMarker(side: "front" | "back", value: string): void {
+    typedRef.current = { ...typedRef.current, [side]: value };
+    if (side === "front") setFrontInput(value);
+    else setBackInput(value);
+  }
+
   useEffect(() => {
+    if (shownCardRef.current !== card.id) {
+      const left = typedRef.current;
+      if (left.front !== null || left.back !== null) typedByCardRef.current.set(shownCardRef.current, left);
+      else typedByCardRef.current.delete(shownCardRef.current);
+      typedRef.current = typedByCardRef.current.get(card.id) ?? { front: null, back: null };
+      shownCardRef.current = card.id;
+      pendingCommitsRef.current = 0;
+    } else if (pendingCommitsRef.current > 0) {
+      showTrim(card.trim);
+      return;
+    }
     setDraftTrim(card.trim);
-    setFrontInput(formatMarkerInput(card.trim.frontMarkerSec));
-    setBackInput(formatMarkerInput(card.trim.backMarkerSec));
+    showTrim(card.trim);
   }, [card.id, card.trim.backMarkerSec, card.trim.frontMarkerSec]);
 
   useEffect(() => {
@@ -304,19 +342,32 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     regionRef.current?.setOptions({ color: palette.region });
   }, [palette]);
 
-  async function commitTrim(nextTrim: CardTrim): Promise<void> {
+  // `sides` are the markers this commit sets, whose typed text it consumes;
+  // text typed on the other side stays. Its outcome touches the view only while
+  // the card it was submitted for is still shown; success leaves the draft to the
+  // snapshot that follows, and a failure reverts to the latest saved trim only
+  // once no newer commit is in flight.
+  async function commitTrim(nextTrim: CardTrim, sides: readonly ("front" | "back")[] = ["front", "back"]): Promise<void> {
     const normalizedTrim = normalizeTrimDraft(nextTrim, resolvedDurationSec);
+    const submittedFor = cardIdRef.current;
+    for (const side of sides) typedRef.current = { ...typedRef.current, [side]: null };
     setDraftTrim(normalizedTrim);
-    setFrontInput(formatMarkerInput(normalizedTrim.frontMarkerSec));
-    setBackInput(formatMarkerInput(normalizedTrim.backMarkerSec));
+    showTrim(normalizedTrim);
     setPlayerError(null);
+    pendingCommitsRef.current += 1;
+    let failure: unknown = null;
     try {
-      await onTrimCommitRef.current(cardIdRef.current, normalizedTrim);
+      await onTrimCommitRef.current(submittedFor, normalizedTrim);
     } catch (error: unknown) {
-      setPlayerError(presentFailure(error, message("player.markersSaveFailed"), "trim marker save failed"));
-      setDraftTrim(card.trim);
-      setFrontInput(formatMarkerInput(card.trim.frontMarkerSec));
-      setBackInput(formatMarkerInput(card.trim.backMarkerSec));
+      failure = error;
+    }
+    if (shownCardRef.current !== submittedFor) return;
+    pendingCommitsRef.current = Math.max(0, pendingCommitsRef.current - 1);
+    if (failure === null) return;
+    setPlayerError(presentFailure(failure, message("player.markersSaveFailed"), "trim marker save failed"));
+    if (pendingCommitsRef.current === 0) {
+      setDraftTrim(cardTrimRef.current);
+      showTrim(cardTrimRef.current);
     }
   }
 
@@ -334,7 +385,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               backMarkerSec: currentTime,
             };
 
-      await commitTrim(nextTrim);
+      await commitTrim(nextTrim, [side]);
     } catch {
       return;
     }
@@ -356,7 +407,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               backMarkerSec: nextValue,
             };
 
-      await commitTrim(nextTrim);
+      await commitTrim(nextTrim, [side]);
     } catch {
       return;
     }
@@ -372,7 +423,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           ? { frontMarkerSec: parsed, backMarkerSec: draftTrim.backMarkerSec }
           : { frontMarkerSec: draftTrim.frontMarkerSec, backMarkerSec: parsed };
 
-      await commitTrim(nextTrim);
+      await commitTrim(nextTrim, [side]);
     } catch (error: unknown) {
       setPlayerError(presentFailure(error, message("player.markerInvalid"), "trim marker validation failed"));
     }
@@ -549,7 +600,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
             <span>{t("player.keepFrom")}</span>
             <input
               value={frontInput}
-              onChange={(event) => setFrontInput(event.target.value)}
+              onChange={(event) => typeMarker("front", event.target.value)}
               onBlur={() => void handleMarkerInputCommit("front")}
               onCompositionStart={frontComposing.handlers.onCompositionStart}
               onCompositionEnd={frontComposing.handlers.onCompositionEnd}
@@ -600,7 +651,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
             <span>{t("player.discardAfter")}</span>
             <input
               value={backInput}
-              onChange={(event) => setBackInput(event.target.value)}
+              onChange={(event) => typeMarker("back", event.target.value)}
               onBlur={() => void handleMarkerInputCommit("back")}
               onCompositionStart={backComposing.handlers.onCompositionStart}
               onCompositionEnd={backComposing.handlers.onCompositionEnd}
