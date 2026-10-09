@@ -56,7 +56,15 @@ export const APP_SHELL_EVENTS = {
   // window replies with the request identity and whether every edit save succeeded.
   flushPendingEdits: "app-shell:event-flush-pending-edits",
   pendingEditsFlushed: "app-shell:event-pending-edits-flushed",
+  // A user's quit or window close asks which session-only drafts the window
+  // holds, and may then tell it to discard them.
+  queryUnsavedDrafts: "app-shell:event-query-unsaved-drafts",
+  unsavedDraftsReported: "app-shell:event-unsaved-drafts-reported",
+  discardUnsavedDrafts: "app-shell:event-discard-unsaved-drafts",
 } as const;
+
+/** A draft that lives only in the window until the user saves it. */
+export type UnsavedDraft = "settings";
 
 export const CARD_STATUSES = [
   "Pending Review", "Imported", "Queued", "Transcribing", "Generating Metadata",
@@ -655,4 +663,7 @@ export interface MumblerShellApi {
   onRecordsChanged(listener: () => void): () => void;
   /** Registers what sends the window's unsent edits when a quit asks for them. */
   onFlushPendingEdits(flush: () => Promise<void>): () => void;
+  /** Registers what reports, and what discards, a session-only draft when a
+   * user's quit or window close asks. */
+  onUnsavedDrafts(report: () => UnsavedDraft[], discard: () => void): () => void;
 }

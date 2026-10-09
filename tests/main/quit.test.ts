@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { QuitSaveFailure } from "@main/core/app-runtime";
-import { createQuitController, quitFailureDialog, type QuitChoice, type QuitFailure, type QuitSteps } from "@main/quit";
+import { createQuitController, discardDraftsDialog, quitFailureDialog, type QuitChoice, type QuitFailure, type QuitSteps } from "@main/quit";
 import { loadCatalogue } from "@shared/i18n/catalogues";
 import { createTranslator } from "@shared/i18n/translate";
 
@@ -24,6 +24,7 @@ function harness(overrides: Partial<QuitSteps> = {}): Harness {
   let exits = 0;
   let answer: (choice: QuitChoice) => void = () => undefined;
   const steps: QuitSteps = {
+    confirmDiscardDrafts: async () => true,
     flushEdits: async () => { calls.push("flush"); },
     save: async () => { calls.push("save"); return []; },
     resume: async () => { calls.push("resume"); },
@@ -185,6 +186,72 @@ describe("a quit the user started", () => {
   });
 });
 
+describe("unsaved Settings changes at a user's quit", () => {
+  function asking(): { quit: Harness; answer: (proceed: boolean) => void; asked: () => number } {
+    let answer: (proceed: boolean) => void = () => undefined;
+    let asked = 0;
+    const quit = harness({
+      confirmDiscardDrafts: () => {
+        asked += 1;
+        return new Promise<boolean>((resolve) => { answer = resolve; });
+      },
+    });
+    return { quit, answer: (proceed) => answer(proceed), asked: () => asked };
+  }
+
+  it("asks first and goes no further while the question is open", async () => {
+    const drafts = asking();
+    const controller = createQuitController(drafts.quit.steps);
+    controller.request("user");
+    controller.request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drafts.asked()).toBe(1);
+    expect(drafts.quit.calls).toEqual([]);
+    drafts.answer(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drafts.quit.calls).toEqual(["flush", "save", "close", "exit"]);
+  });
+
+  it("keeps running with nothing saved or resumed when the user keeps the changes, and asks again next time", async () => {
+    const drafts = asking();
+    const controller = createQuitController(drafts.quit.steps);
+    controller.request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    drafts.answer(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drafts.quit.calls).toEqual([]);
+    expect(controller.isRunning()).toBe(false);
+    controller.request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drafts.asked()).toBe(2);
+  });
+
+  it("cancels the quit when the question cannot be shown", async () => {
+    const quit = harness({ confirmDiscardDrafts: async () => { throw new Error("dialog failed"); } });
+    createQuitController(quit.steps).request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quit.calls).toEqual(["warn:quit.drafts-question-failed"]);
+    expect(quit.exits()).toBe(0);
+  });
+
+  it("never asks at a session end, and a session end during the question goes on", async () => {
+    const quit = harness({ confirmDiscardDrafts: vi.fn(async () => true) });
+    createQuitController(quit.steps).request("session-end");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quit.steps.confirmDiscardDrafts).not.toHaveBeenCalled();
+    expect(quit.exits()).toBe(1);
+
+    const drafts = asking();
+    drafts.quit.steps.dismissQuestion = () => { drafts.quit.calls.push("dismiss"); drafts.answer(false); };
+    const controller = createQuitController(drafts.quit.steps);
+    controller.request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    controller.request("session-end");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(drafts.quit.calls).toEqual(["dismiss", "flush", "save", "close", "exit"]);
+  });
+});
+
 describe("a session end", () => {
   it("never asks, logs what failed and exits", async () => {
     const quit = harness();
@@ -238,6 +305,17 @@ describe("a session end", () => {
     expect(quit.asked).toEqual([]);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(quit.exits(), "the process ends once").toBe(1);
+  });
+});
+
+describe("the unsaved-changes question", () => {
+  it("offers Cancel, focused, then Discard, and names the quit or the window close", () => {
+    const translator = createTranslator("en");
+    const quit = discardDraftsDialog(translator, "quit");
+    expect(quit.actions.map((action) => [action.choice, action.tone])).toEqual([["cancel", undefined], ["discard", "danger"]]);
+    expect([quit.focus, quit.dismiss]).toEqual(["cancel", "cancel"]);
+    expect(quit.body).toBe("You have unsaved changes in Settings. Discard them and quit?");
+    expect(discardDraftsDialog(translator, "close").body).toBe("You have unsaved changes in Settings. Discard them and close the window?");
   });
 });
 

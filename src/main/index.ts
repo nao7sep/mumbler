@@ -11,9 +11,9 @@ import { showStartupFailureDialog } from "./startup-failure-dialog";
 import { loadInterfaceCatalogue, mainTranslator } from "./i18n";
 import { installApplicationMenu } from "./app-menu";
 import { notifyRecordsChanged, openRecordsWindow } from "./records-window";
-import { createQuitController, quitFailureDialog, type QuitController } from "./quit";
+import { createQuitController, discardDraftsDialog, QUIT_BUDGETS, quitFailureDialog, type QuitController } from "./quit";
 import { showPlainDialog, type OpenPlainDialog } from "./plain-dialog";
-import { flushWindowEdits } from "./pending-edits";
+import { discardWindowDrafts, flushWindowEdits, queryWindowDrafts } from "./pending-edits";
 import { createWindowCloseController } from "./window-close";
 
 app.setName("Mumbler");
@@ -49,9 +49,38 @@ let mainWindow: BrowserWindow | null = null;
 
 let cancelWindowClose: (() => void) | null = null;
 
+// Asks before a user's quit or window close discards the window's session-only
+// drafts, such as unsaved Settings changes; true goes on. A window that does
+// not answer in time is taken to hold none, so it cannot hold the quit open.
+async function confirmDiscardDrafts(
+  runtime: ApplicationRuntime,
+  window: BrowserWindow | null,
+  action: "quit" | "close",
+  shown: (question: OpenPlainDialog<"discard" | "cancel"> | null) => void,
+): Promise<boolean> {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), QUIT_BUDGETS.user.flush);
+  const drafts = await queryWindowDrafts(window, timeout.signal).finally(() => clearTimeout(timer));
+  if (drafts.length === 0) return true;
+  const question = showPlainDialog(discardDraftsDialog(runtime.translator(), action));
+  shown(question);
+  try {
+    if ((await question.choice) !== "discard") return false;
+  } finally {
+    shown(null);
+  }
+  discardWindowDrafts(window);
+  return true;
+}
+
 function createQuit(runtime: ApplicationRuntime): QuitController {
   let question: OpenPlainDialog<"retry" | "quit-anyway" | "cancel"> | null = null;
+  let draftsQuestion: OpenPlainDialog<"discard" | "cancel"> | null = null;
   return createQuitController({
+    confirmDiscardDrafts: () => {
+      cancelWindowClose?.();
+      return confirmDiscardDrafts(runtime, mainWindow, "quit", (shown) => { draftsQuestion = shown; });
+    },
     flushEdits: (signal) => {
       cancelWindowClose?.();
       return flushWindowEdits(mainWindow, signal);
@@ -67,7 +96,10 @@ function createQuit(runtime: ApplicationRuntime): QuitController {
         question = null;
       }
     },
-    dismissQuestion: () => question?.close(),
+    dismissQuestion: () => {
+      question?.close();
+      draftsQuestion?.close();
+    },
     warn: (event, message, details) => {
       console.error(`[mumbler] ${message}`, details);
       void runtime.currentLogger().warn(event, message, details);
@@ -81,7 +113,9 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
   mainWindow = window;
   let editsSentForClose = false;
   let notice: OpenPlainDialog<"dismiss"> | null = null;
+  let draftsQuestion: OpenPlainDialog<"discard" | "cancel"> | null = null;
   const close = createWindowCloseController({
+    confirm: () => confirmDiscardDrafts(runtime, window, "close", (shown) => { draftsQuestion = shown; }),
     flush: (signal) => flushWindowEdits(window, signal),
     close: () => {
       editsSentForClose = true;
@@ -100,7 +134,10 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
       });
       try { await notice.choice; } finally { notice = null; }
     },
-    dismiss: () => notice?.close(),
+    dismiss: () => {
+      notice?.close();
+      draftsQuestion?.close();
+    },
   });
   cancelWindowClose = () => close.cancel();
   window.on("close", (event) => {

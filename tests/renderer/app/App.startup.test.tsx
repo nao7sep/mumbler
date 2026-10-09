@@ -199,6 +199,7 @@ function rendererApi(): MumblerShellApi {
       onDependenciesUpdated: () => unsubscribe,
       onPipelineProgressUpdated: () => unsubscribe,
       onFlushPendingEdits: () => unsubscribe,
+      onUnsavedDrafts: () => unsubscribe,
     } as Partial<MumblerShellApi>,
     {
       get(target, property: keyof MumblerShellApi) {

@@ -16,6 +16,7 @@ import {
   type SaveConflictResolution,
   type SettingsDraft,
   type ToolName,
+  type UnsavedDraft,
 } from "@shared/app-shell";
 import type { InterfaceLanguage } from "@shared/i18n/languages";
 import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery } from "@shared/records";
@@ -27,6 +28,16 @@ ipcRenderer.on(APP_SHELL_EVENTS.flushPendingEdits, (_event, request: unknown) =>
   void Promise.allSettled([...pendingEditFlushes].map((flush) => Promise.resolve().then(flush))).then((results) => {
     ipcRenderer.send(APP_SHELL_EVENTS.pendingEditsFlushed, request, results.every((result) => result.status === "fulfilled"));
   });
+});
+
+// What reports and discards each session-only draft the window holds.
+const unsavedDrafts = new Set<{ report: () => UnsavedDraft[]; discard: () => void }>();
+ipcRenderer.on(APP_SHELL_EVENTS.queryUnsavedDrafts, (_event, request: unknown) => {
+  const drafts = [...unsavedDrafts].flatMap((owner) => owner.report());
+  ipcRenderer.send(APP_SHELL_EVENTS.unsavedDraftsReported, request, drafts);
+});
+ipcRenderer.on(APP_SHELL_EVENTS.discardUnsavedDrafts, () => {
+  for (const owner of unsavedDrafts) owner.discard();
 });
 
 const api: MumblerShellApi = {
@@ -168,6 +179,13 @@ const api: MumblerShellApi = {
     pendingEditFlushes.add(flush);
     return () => {
       pendingEditFlushes.delete(flush);
+    };
+  },
+  onUnsavedDrafts: (report: () => UnsavedDraft[], discard: () => void) => {
+    const owner = { report, discard };
+    unsavedDrafts.add(owner);
+    return () => {
+      unsavedDrafts.delete(owner);
     };
   },
 };

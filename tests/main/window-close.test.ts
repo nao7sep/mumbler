@@ -8,7 +8,7 @@ it("retains unsent edits after timeout and admits a later successful close", asy
   const failed = vi.fn(async () => undefined);
   let signal!: AbortSignal;
   const flush = vi.fn((value: AbortSignal) => { signal = value; return new Promise<void>(() => undefined); });
-  const controller = createWindowCloseController({ flush, close, failed, dismiss: vi.fn() });
+  const controller = createWindowCloseController({ confirm: async () => true, flush, close, failed, dismiss: vi.fn() });
   controller.request(); controller.request();
   await vi.advanceTimersByTimeAsync(1_000);
   expect(flush).toHaveBeenCalledTimes(1);
@@ -24,10 +24,27 @@ it("quit cancels the window-close attempt without a late close or competing noti
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const close = vi.fn(); const failed = vi.fn(async () => undefined); const dismiss = vi.fn();
-  const controller = createWindowCloseController({ flush: () => gate, close, failed, dismiss });
+  const controller = createWindowCloseController({ confirm: async () => true, flush: () => gate, close, failed, dismiss });
   controller.request();
   await vi.advanceTimersByTimeAsync(0);
   controller.cancel(); release();
   await vi.advanceTimersByTimeAsync(0);
   expect(close).not.toHaveBeenCalled(); expect(failed).not.toHaveBeenCalled(); expect(dismiss).toHaveBeenCalledOnce();
+});
+it("keeps the window and sends no edits when the user keeps unsaved Settings changes", async () => {
+  const close = vi.fn(); const flush = vi.fn(async () => undefined);
+  let answer!: (keep: boolean) => void;
+  const confirm = vi.fn(() => new Promise<boolean>((resolve) => { answer = (keep) => resolve(!keep); }));
+  const controller = createWindowCloseController({ confirm, flush, close, failed: vi.fn(async () => undefined), dismiss: vi.fn() });
+  controller.request(); controller.request();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(confirm).toHaveBeenCalledOnce();
+  answer(true);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(flush).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled();
+  controller.request();
+  await vi.advanceTimersByTimeAsync(0);
+  answer(false);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(flush).toHaveBeenCalledOnce(); expect(close).toHaveBeenCalledOnce();
 });

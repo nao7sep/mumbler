@@ -21,6 +21,9 @@ export type QuitChoice = "retry" | "quit-anyway" | "cancel";
 export type QuitFailure = readonly (QuitSaveFailure | "edits")[] | "stalled";
 
 export interface QuitSteps {
+  /** A user's quit first: when the window holds session-only drafts, asks
+   * whether to discard them; resolves false when the user keeps them. */
+  confirmDiscardDrafts(): Promise<boolean>;
   /** Asks the main window to send the edits it has not sent yet. */
   flushEdits(signal: AbortSignal): Promise<void>;
   /** Saves the user's own work; resolves with what could not be saved. */
@@ -97,6 +100,24 @@ export function createQuitController(steps: QuitSteps): QuitController {
   }
 
   async function run(): Promise<void> {
+    // Session-only drafts are not quit-time saves: a user's quit asks before it
+    // discards them, and a session end never asks (unsaved-edits-conventions).
+    if (!sessionEnding) {
+      let proceed: boolean;
+      try {
+        proceed = await steps.confirmDiscardDrafts();
+      } catch (error: unknown) {
+        steps.warn("quit.drafts-question-failed", "The unsaved-changes question could not be shown; cancelling the quit.", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        proceed = false;
+      }
+      // A session end that closed the question goes on without asking.
+      if (!proceed && !sessionEnding) {
+        running = false;
+        return;
+      }
+    }
     for (;;) {
       const flush = new AbortController();
       const flushed = await within(Promise.resolve().then(() => steps.flushEdits(flush.signal)), budget().flush);
@@ -183,6 +204,28 @@ const FAILURE_NAMES = {
   settings: "quit.settings",
   edits: "quit.edits",
 } as const satisfies Record<QuitSaveFailure | "edits", string>;
+
+const DISCARD_DRAFT_BODIES = {
+  quit: "quit.discardSettingsBody",
+  close: "windowClose.discardSettingsBody",
+} as const;
+
+/** Asked before a user's quit or window close discards a session-only draft:
+ * Cancel, the default, keeps it; Discard goes on without saving it. */
+export function discardDraftsDialog(translator: Translator, action: "quit" | "close"): PlainDialog<"discard" | "cancel"> {
+  return {
+    language: translator.language,
+    title: translator.t("decision.discardTitle"),
+    bodyLabel: translator.t("quit.detailsLabel"),
+    body: translator.t(DISCARD_DRAFT_BODIES[action]),
+    actions: [
+      { choice: "cancel", label: translator.t("common.cancel") },
+      { choice: "discard", label: translator.t("decision.discard"), tone: "danger" },
+    ],
+    focus: "cancel",
+    dismiss: "cancel",
+  };
+}
 
 /** The question a failed save asks: Cancel keeps the app running, Retry saves
  * again, and Quit anyway, the destructive choice, is last and never focused. */

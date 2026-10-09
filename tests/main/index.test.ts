@@ -14,7 +14,9 @@ const state = vi.hoisted(() => ({
   questions: [] as unknown[],
   dependenciesWatched: false,
   flushSucceeded: true,
-  ipcListeners: new Map<string, (event: { sender: unknown }, request: unknown, success: boolean) => void>(),
+  unsavedDrafts: [] as string[],
+  draftsChoice: "cancel" as "discard" | "cancel",
+  ipcListeners: new Map<string, (event: { sender: unknown }, request: unknown, reply: unknown) => void>(),
   powerListeners: new Map<string, () => void>(),
 }));
 
@@ -25,6 +27,7 @@ const mainWindow = vi.hoisted(() => {
   const window = {
     handlers,
     flushRequests: 0,
+    discards: 0,
     closes: 0,
     on: (event: string, handler: (event: { preventDefault: () => void }) => void) => { handlers.set(event, handler); return window; },
     once: () => window,
@@ -34,6 +37,14 @@ const mainWindow = vi.hoisted(() => {
       once: vi.fn(),
       removeListener: vi.fn(),
       send: (channel: string, request: unknown) => {
+        if (channel.endsWith("query-unsaved-drafts")) {
+          queueMicrotask(() => state.ipcListeners.get(`${channel}:reply`)?.({ sender: window.webContents }, request, state.unsavedDrafts));
+          return;
+        }
+        if (channel.endsWith("discard-unsaved-drafts")) {
+          window.discards += 1;
+          return;
+        }
         window.flushRequests += 1;
         queueMicrotask(() => state.ipcListeners.get(`${channel}:reply`)?.({ sender: window.webContents }, request, state.flushSucceeded));
       },
@@ -58,8 +69,9 @@ vi.mock("electron", () => ({
   // The window's reply arrives on the reply channel; the test keys it by the
   // request it answers.
   ipcMain: {
-    on: (channel: string, listener: (event: { sender: unknown }, request: unknown, success: boolean) => void) => {
-      state.ipcListeners.set(`${channel.replace("pending-edits-flushed", "flush-pending-edits")}:reply`, listener);
+    on: (channel: string, listener: (event: { sender: unknown }, request: unknown, reply: unknown) => void) => {
+      const asked = channel.replace("pending-edits-flushed", "flush-pending-edits").replace("unsaved-drafts-reported", "query-unsaved-drafts");
+      state.ipcListeners.set(`${asked}:reply`, listener);
     },
     removeListener: vi.fn(),
   },
@@ -95,9 +107,10 @@ vi.mock("@main/window", () => ({
   createMainWindow: () => state.windowLoadFailure ? Promise.reject(state.windowLoadFailure) : Promise.resolve(mainWindow),
 }));
 vi.mock("@main/plain-dialog", () => ({
-  showPlainDialog: (dialog: unknown) => {
+  showPlainDialog: (dialog: { actions: { choice: string }[] }) => {
     state.questions.push(dialog);
-    return { choice: Promise.resolve(state.quitChoice), close: vi.fn() };
+    const drafts = dialog.actions.some((action) => action.choice === "discard");
+    return { choice: Promise.resolve(drafts ? state.draftsChoice : state.quitChoice), close: vi.fn() };
   },
 }));
 vi.mock("@main/startup-failure-dialog", () => ({
@@ -123,10 +136,13 @@ beforeEach(() => {
   state.questions.length = 0;
   state.dependenciesWatched = false;
   state.flushSucceeded = true;
+  state.unsavedDrafts = [];
+  state.draftsChoice = "cancel";
   state.ipcListeners.clear();
   state.powerListeners.clear();
   mainWindow.handlers.clear();
   mainWindow.flushRequests = 0;
+  mainWindow.discards = 0;
   mainWindow.closes = 0;
   runtime.saveForQuit.mockClear();
   runtime.resumeAfterCancelledQuit.mockClear();
@@ -225,6 +241,39 @@ describe("quit", () => {
 
     expect(state.questions).toHaveLength(1);
     expect(state.exits).toEqual([]);
+  });
+
+  it("asks before discarding unsaved Settings changes, and keeps running with nothing saved on Cancel", async () => {
+    state.unsavedDrafts = ["settings"];
+    const beforeQuit = await boot();
+    beforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mainWindow.flushRequests).toBe(0);
+    expect(runtime.saveForQuit).not.toHaveBeenCalled();
+    expect(mainWindow.discards).toBe(0);
+    expect(state.exits).toEqual([]);
+  });
+
+  it("discards unsaved Settings changes on Discard and quits through the ordinary save", async () => {
+    state.unsavedDrafts = ["settings"];
+    state.draftsChoice = "discard";
+    const beforeQuit = await boot();
+    beforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    expect(mainWindow.discards).toBe(1);
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the Mac window open when the user keeps unsaved Settings changes", async () => {
+    onPlatform("darwin");
+    state.unsavedDrafts = ["settings"];
+    await boot();
+    mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mainWindow.closes).toBe(0);
+    expect(mainWindow.flushRequests).toBe(0);
   });
 
   it("takes a macOS logout as a session end: saves, never asks, and exits", async () => {

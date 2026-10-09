@@ -11,6 +11,7 @@ let state: ReturnType<typeof useSettingsModal>;
 const saveSettingsDraft = vi.fn<MumblerShellApi["saveSettingsDraft"]>();
 const initial = () => buildSettingsDraft(createDefaultSettings(), "", "", true);
 let opened = initial;
+let unsaved: { report: () => string[]; discard: () => void } | null = null;
 function Harness() { state = useSettingsModal({ onSnapshotUpdate: vi.fn(), onError: vi.fn(), onNotice: vi.fn() }); return null; }
 beforeEach(async () => {
   saveSettingsDraft.mockReset();
@@ -22,6 +23,7 @@ beforeEach(async () => {
       getSettingsDraft: vi.fn(async () => opened()),
       getDefaultPrompts: vi.fn(async () => createDefaultSettings().prompts),
       saveSettingsDraft,
+      onUnsavedDrafts: (report, discard) => { unsaved = { report, discard }; return () => { unsaved = null; }; },
     } satisfies Partial<MumblerShellApi>,
   });
   const node = document.createElement("div"); document.body.append(node); root = createRoot(node);
@@ -50,6 +52,20 @@ describe("Reset prompts", () => {
     await act(async () => state.handleRequestCloseSettings());
     await act(async () => state.handleConfirmDiscardSettings());
     expect(state.settingsDraft).toBeNull();
+    expect(saveSettingsDraft).not.toHaveBeenCalled();
+  });
+});
+
+describe("a quit or window close", () => {
+  it("reports unsaved Settings changes, and closes Settings without saving when they are discarded", async () => {
+    expect(unsaved?.report()).toEqual([]);
+    await act(async () => state.handleOpenSettings());
+    expect(unsaved?.report()).toEqual([]);
+    await act(async () => state.setSettingsDraft((draft) => draft && { ...draft, structuredPrompt: "Edited {transcript}" }));
+    expect(unsaved?.report()).toEqual(["settings"]);
+    await act(async () => unsaved?.discard());
+    expect(state.settingsDraft).toBeNull();
+    expect(unsaved?.report()).toEqual([]);
     expect(saveSettingsDraft).not.toHaveBeenCalled();
   });
 });

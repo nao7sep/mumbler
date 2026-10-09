@@ -34,3 +34,15 @@ it("captures synchronous flusher failure and acknowledges a subsequent successfu
   electron.handlers.get(APP_SHELL_EVENTS.flushPendingEdits)!({}, 43);
   await vi.waitFor(() => expect(electron.send).toHaveBeenCalledWith(APP_SHELL_EVENTS.pendingEditsFlushed, 43, true));
 });
+it("reports every registered session-only draft and discards them on request", () => {
+  const discard = vi.fn();
+  const remove = electron.api!.onUnsavedDrafts(() => ["settings"], discard);
+  const removeClean = electron.api!.onUnsavedDrafts(() => [], vi.fn());
+  electron.handlers.get(APP_SHELL_EVENTS.queryUnsavedDrafts)!({}, 7);
+  expect(electron.send).toHaveBeenCalledWith(APP_SHELL_EVENTS.unsavedDraftsReported, 7, ["settings"]);
+  electron.handlers.get(APP_SHELL_EVENTS.discardUnsavedDrafts)!({});
+  expect(discard).toHaveBeenCalledOnce();
+  remove(); removeClean();
+  electron.handlers.get(APP_SHELL_EVENTS.queryUnsavedDrafts)!({}, 8);
+  expect(electron.send).toHaveBeenCalledWith(APP_SHELL_EVENTS.unsavedDraftsReported, 8, []);
+});

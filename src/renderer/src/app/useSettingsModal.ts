@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
 
 import type { AppSnapshot, SettingsDraft } from "@shared/app-shell";
 import { presentFailure } from "./presentFailure";
@@ -217,6 +217,18 @@ export function useSettingsModal({
     setShowDiscardConfirm(false);
     initialDraftRef.current = null;
   }
+
+  // A user's quit or window close asks before it discards unsaved Settings
+  // changes, and closes Settings without saving when the user discards them
+  // (unsaved-edits-conventions). The ref keeps the registration stable.
+  const unsavedRef = useRef(isSettingsDirty);
+  unsavedRef.current = isSettingsDirty;
+  const closeRef = useRef(handleCloseSettings);
+  closeRef.current = handleCloseSettings;
+  useEffect(() => window.mumbler.onUnsavedDrafts(
+    () => (unsavedRef.current ? ["settings"] : []),
+    () => closeRef.current(),
+  ), []);
 
   function handleRequestCloseSettings(): void {
     if (showDiscardConfirm) {
