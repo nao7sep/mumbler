@@ -19,6 +19,14 @@ function admitDatabaseFormat(db: DatabaseSync, file: string, supported: number):
  * inside the opening transaction; `recorded` is the version it was written in. */
 export type UpgradeDatabase = (db: DatabaseSync, recorded: number) => void;
 
+// How long a statement waits for another connection's lock. Only a process
+// outside Mumbler can hold one (each store has a single worker, under the
+// single-instance lock), and a worker blocked in that wait holds up process exit
+// for its full length, past the quit's deadline (measured: Electron's app.exit
+// waits for it). The stores are optional records and history, so a short wait
+// that then fails is the better outcome.
+const BUSY_TIMEOUT_MS = 250;
+
 type ReportCleanup = (error: unknown) => void;
 
 // Journal mode cannot change inside a transaction. Initialize it on a private
@@ -33,7 +41,7 @@ function createDatabase(file: string, formatVersion: number, schema: string, rep
   try {
     closeSync(openSync(stage, "wx", 0o600));
     db = new DatabaseSync(stage);
-    db.exec("PRAGMA busy_timeout = 5000; BEGIN IMMEDIATE");
+    db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}; BEGIN IMMEDIATE`);
     db.exec(schema);
     db.exec(`PRAGMA user_version = ${formatVersion}; COMMIT`);
     db.exec("PRAGMA journal_mode = WAL");
@@ -78,7 +86,7 @@ export function openVersionedDatabase(
   const db = new DatabaseSync(file);
   let transactionOpen = false;
   try {
-    db.exec("PRAGMA busy_timeout = 5000");
+    db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
     const recorded = admitDatabaseFormat(db, file, formatVersion);
