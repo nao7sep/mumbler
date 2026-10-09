@@ -563,18 +563,16 @@ describe("checkTools", () => {
 
 
 describe("committed binary and metadata outcome", () => {
-  it("refuses a newer Windows sidecar before replacing the executable", async () => {
+  it("installs over a Windows sidecar a newer Mumbler wrote, replacing both", async () => {
     await mkdir(binDir, { recursive: true });
     const tool = join(binDir, "ffmpeg.exe");
     await writeFile(tool, "old binary");
     const sidecar = installedVersion.versionSidecarPath(binDir, "ffmpeg");
-    const newer = JSON.stringify({ formatVersion: 2, version: "future" });
-    await writeFile(sidecar, newer);
+    await writeFile(sidecar, JSON.stringify({ formatVersion: 2, version: "future" }));
     const manager = await makeManager("win32");
     await manager.installTool("ffmpeg");
-    expect(await readFile(tool, "utf8")).toBe("old binary");
-    expect(await readFile(sidecar, "utf8")).toBe(newer);
-    expect(manager.listStatuses()[0].transient.kind).toBe("failed");
+    expect(await readFile(tool, "utf8")).not.toBe("old binary");
+    expect(JSON.parse(await readFile(sidecar, "utf8"))).toMatchObject({ formatVersion: 1 });
     expect(await readdir(tempDir)).toEqual([]);
   });
 
@@ -609,22 +607,4 @@ describe("committed binary and metadata outcome", () => {
       expect(logger.warn).toHaveBeenCalledWith("tools.install-metadata-failed", expect.any(String), expect.any(Object));
     } finally { spy.mockRestore(); }
   });
-});
-
-
-it("cancellation during Windows sidecar admission leaves the executable untouched", async () => {
-  await mkdir(binDir, { recursive: true });
-  const tool = join(binDir, "ffmpeg.exe");
-  await writeFile(tool, "old binary");
-  const manager = await makeManager("win32");
-  const spy = vi.spyOn(installedVersion, "admitVersionSidecar").mockImplementationOnce(async () => {
-    manager.cancelInstall("ffmpeg");
-  });
-  try {
-    await manager.installTool("ffmpeg");
-    expect(await readFile(tool, "utf8")).toBe("old binary");
-    expect(await readdir(binDir)).toEqual(["ffmpeg.exe"]);
-    expect(await readdir(tempDir)).toEqual([]);
-    expect(manager.listStatuses()[0].transient).toEqual({ kind: "idle" });
-  } finally { spy.mockRestore(); }
 });

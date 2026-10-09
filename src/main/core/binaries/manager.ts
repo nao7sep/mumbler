@@ -17,7 +17,6 @@ import { assertArm64Slice } from "./arch";
 import { extractFileFromZip } from "./archive";
 import { downloadToFile, fetchText } from "./http";
 import {
-  admitVersionSidecar,
   installedVersionSource,
   readInstalledVersion,
   writeVersionSidecar,
@@ -261,10 +260,8 @@ export class ToolManager {
         // executable binary — never mid-extract.
         await syncFile(stagedExe);
         signal.throwIfAborted();
-        if (installedVersionSource(this.deps.platform).kind === "sidecar") {
-          await admitVersionSidecar(this.deps.binDir, name);
-        }
-        signal.throwIfAborted();
+        // A sidecar from a newer Mumbler is no reason to refuse: the tool and
+        // its version record are re-downloadable, and this install rewrites both.
         await rename(stagedExe, this.toolPath(name));
         published = true;
         await syncDirectory(this.deps.binDir);

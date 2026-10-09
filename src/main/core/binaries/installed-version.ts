@@ -7,8 +7,8 @@ import type { ToolName } from "@shared/app-shell";
 import { FFMPEG_BUILD_TAG } from "@shared/dependency-status";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 
-import { isMissingFileError, writeJsonFile } from "../file-io";
-import { FORMAT_VERSIONS, NewerFormatError, recordedFormatVersion } from "../format-versions";
+import { writeJsonFile } from "../file-io";
+import { FORMAT_VERSIONS, recordedFormatVersion } from "../format-versions";
 import { normalizeToolVersion } from "./registry";
 import { sha256OfFile } from "./integrity";
 
@@ -74,22 +74,6 @@ interface VersionSidecar {
   binarySha256: string;
 }
 
-export async function admitVersionSidecar(binDir: string, name: ToolName): Promise<void> {
-  const target = versionSidecarPath(binDir, name);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(await readFile(target, "utf8"));
-  } catch (error: unknown) {
-    if (isMissingFileError(error) || error instanceof SyntaxError) return;
-    throw error;
-  }
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return;
-  const recorded = recordedFormatVersion(raw as Record<string, unknown>);
-  if (recorded !== null && recorded > FORMAT_VERSIONS.toolVersion) {
-    throw new NewerFormatError(target, recorded, FORMAT_VERSIONS.toolVersion);
-  }
-}
-
 function hashSignal(signal?: AbortSignal): AbortSignal {
   const deadline = AbortSignal.timeout(PROBE_TIMEOUT_MS);
   return signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -120,8 +104,6 @@ export async function writeVersionSidecar(
   // the re-fetchable binary it sits beside — meaningless without that binary (itself
   // excluded as a re-fetchable binary) and rewritten by the next install, so it rides
   // along into exclusion rather than being recorded orphaned (data-backup conventions).
-  // The install admitted the existing sidecar before publishing the binary, so it
-  // is not re-read here.
   await writeJsonFile(target, payload, { record: false });
 }
 
