@@ -11,7 +11,7 @@ import type {
 } from "@shared/records";
 
 import { FORMAT_VERSIONS } from "./format-versions.ts";
-import { admitDatabaseFormat, openVersionedDatabase } from "./sqlite-store.ts";
+import { openVersionedDatabase } from "./sqlite-store.ts";
 
 // The records database (data-lifecycle-conventions, Records): one row per log
 // line or provider call, each carrying its session, its time and the card it
@@ -170,14 +170,13 @@ export class RecordsEngine {
       db = this.open();
       db.exec("BEGIN IMMEDIATE");
       transactionOpen = true;
-      admitDatabaseFormat(db, this.target.databasePath, FORMAT_VERSIONS.records);
       this.insert(db, entry);
       db.exec("COMMIT");
       transactionOpen = false;
       return true;
     } catch (error: unknown) {
       if (transactionOpen) {
-        try { db?.exec("ROLLBACK"); } catch { /* The insert/admission error is primary. */ }
+        try { db?.exec("ROLLBACK"); } catch { /* The insert error is primary. */ }
       }
       this.report(recordsFailureText(error));
       this.writeFallback(entry);
@@ -189,13 +188,12 @@ export class RecordsEngine {
     const db = this.open();
     db.exec("BEGIN");
     try {
-      admitDatabaseFormat(db, this.target.databasePath, FORMAT_VERSIONS.records);
       const result = read.op === "page" ? readPage(db, read.query)
         : read.op === "sources" ? readSources(db) : readDetail(db, read.kind, read.id);
       db.exec("COMMIT");
       return result;
     } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* Preserve the read/admission error. */ }
+      try { db.exec("ROLLBACK"); } catch { /* Preserve the read error. */ }
       throw error;
     }
   }

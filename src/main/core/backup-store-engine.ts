@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import { FORMAT_VERSIONS } from "./format-versions.ts";
-import { admitDatabaseFormat, openVersionedDatabase } from "./sqlite-store.ts";
+import { openVersionedDatabase } from "./sqlite-store.ts";
 
 export type BackupEngineWarn = (message: string, details: Record<string, unknown>) => void;
 
@@ -44,7 +44,6 @@ export class BackupStoreEngine {
       // every app process while retaining per-path revert history.
       store.exec("BEGIN IMMEDIATE");
       transactionOpen = true;
-      admitDatabaseFormat(store, this.file, FORMAT_VERSIONS.backups);
       const latest = store
         .prepare("SELECT content_sha256 AS h FROM backups WHERE path = ? ORDER BY id DESC LIMIT 1")
         .get(absolutePath) as { h: string } | undefined;

@@ -180,40 +180,31 @@ describe("SQLite creation and admission", () => {
   });
 });
 
-describe("cached SQLite engine admission", () => {
-  it("refuses a cached backup write after the marker changes and releases its transaction", () => {
+describe("SQLite engine admission at open", () => {
+  it("leaves a newer backup store untouched and records nothing into it", () => {
+    connect().exec("PRAGMA user_version = 2");
     const warn = vi.fn();
     const engine = new BackupStoreEngine(file, warn);
     engines.push(engine);
-    engine.record("recording", Buffer.from("first"), "2026-10-07T00:00:00.000Z");
-    const db = connect();
-    db.exec("PRAGMA user_version = 2");
-    engine.record("recording", Buffer.from("refused"), "2026-10-07T00:00:01.000Z");
-    expect(db.prepare("SELECT COUNT(*) AS count FROM backups").get()).toEqual({ count: 1 });
+    engine.record("recording", Buffer.from("refused"), "2026-10-07T00:00:00.000Z");
     expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: expect.stringContaining("newer than this build reads") }));
-    db.exec("PRAGMA user_version = 1");
-    engine.record("recording", Buffer.from("later"), "2026-10-07T00:00:02.000Z");
-    expect(db.prepare("SELECT COUNT(*) AS count FROM backups").get()).toEqual({ count: 2 });
+    const db = connect();
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+    expect(db.prepare("SELECT name FROM sqlite_master").all()).toEqual([]);
   });
 
-  it("falls back on a cached records write and refuses cached reads of a newer format", () => {
+  it("falls back from a newer records store at open and refuses to read it", () => {
+    connect().exec("PRAGMA user_version = 2");
     const fallback = join(root, "fallback.log");
-    const report = vi.fn();
-    const engine = new RecordsEngine({ databasePath: file, fallbackPath: fallback }, report);
+    const engine = new RecordsEngine({ databasePath: file, fallbackPath: fallback }, vi.fn());
     engines.push(engine);
-    expect(engine.write(entry("first"))).toBe(true);
-    const db = connect();
-    db.exec("PRAGMA user_version = 2");
     expect(engine.write(entry("refused"))).toBe(false);
     expect(JSON.parse(readFileSync(fallback, "utf8"))).toMatchObject({ message: "refused" });
-    expect(db.prepare("SELECT COUNT(*) AS count FROM logs").get()).toEqual({ count: 1 });
-    expect(() => engine.read({ op: "sources" })).toThrow("newer than this build reads");
-    db.exec("PRAGMA user_version = 1");
-    expect(engine.write(entry("later"))).toBe(true);
-    expect(engine.read({ op: "sources" })).toEqual({ sessions: ["session"], cardIds: [] });
+    expect(() => engine.read({ op: "sources" })).toThrow("records database is unavailable");
+    expect(connect().prepare("SELECT name FROM sqlite_master").all()).toEqual([]);
   });
 
-  it("keeps multi-query sources in the admitted read snapshot", () => {
+  it("keeps multi-query sources in one read snapshot", () => {
     const engine = new RecordsEngine({ databasePath: file, fallbackPath: join(root, "fallback.log") }, vi.fn());
     engines.push(engine);
     engine.write(entry("first"));
@@ -223,11 +214,11 @@ describe("cached SQLite engine admission", () => {
     vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (this: DatabaseSync, ...args) {
       if (args[0].includes("SELECT card_id AS cardId") && insert) {
         insert = false;
-        db.exec("INSERT INTO logs (session,time,level,op,message,card_id) VALUES ('new','2026-10-07T00:00:01.000Z','info','test','new','new-card'); PRAGMA user_version = 2");
+        db.exec("INSERT INTO logs (session,time,level,op,message,card_id) VALUES ('new','2026-10-07T00:00:01.000Z','info','test','new','new-card')");
       }
       return prepare.apply(this, args);
     });
     expect(engine.read({ op: "sources" })).toEqual({ sessions: ["session"], cardIds: [] });
-    expect(() => engine.read({ op: "sources" })).toThrow("newer than this build reads");
+    expect(engine.read({ op: "sources" })).toEqual({ sessions: ["session", "new"], cardIds: ["new-card"] });
   });
 });

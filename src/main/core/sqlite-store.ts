@@ -4,9 +4,11 @@ import { DatabaseSync } from "node:sqlite";
 
 import { NewerFormatError } from "./format-versions.ts";
 
-// Call within the transaction that owns the read or mutation, including on a
-// cached connection. A present, unversioned database is never a fresh store.
-export function admitDatabaseFormat(db: DatabaseSync, file: string, supported: number): void {
+// A database's format is checked once, inside the transaction that opens it. The
+// single-instance lock keeps any other Mumbler off the data root, so the format
+// cannot change while this process holds the connection, and reads and writes on
+// it do not check again. A present, unversioned database is never a fresh store.
+function admitDatabaseFormat(db: DatabaseSync, file: string, supported: number): void {
   const { user_version: recorded } = db.prepare("PRAGMA user_version").get() as { user_version: number };
   if (recorded > supported) throw new NewerFormatError(file, recorded, supported);
   if (recorded < 1) throw new Error(`${file} records no format version (user_version ${recorded}).`);
@@ -66,7 +68,6 @@ export function openVersionedDatabase(file: string, formatVersion: number, schem
   let transactionOpen = false;
   try {
     db.exec("PRAGMA busy_timeout = 5000");
-    admitDatabaseFormat(db, file, formatVersion);
     db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
     admitDatabaseFormat(db, file, formatVersion);
