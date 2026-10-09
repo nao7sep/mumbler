@@ -40,7 +40,7 @@ import {
   probeAudioProfile,
 } from "./audio-tools";
 import { ToolManager } from "./binaries/manager";
-import { createDefaultDependencies, createDependenciesStore } from "./binaries/store";
+import { createDefaultDependencies, createDependenciesStore, type DependenciesValue } from "./binaries/store";
 import {
   formatUtcForDisplay,
   formatUtcMarker,
@@ -52,7 +52,7 @@ import {
 } from "@shared/timestamps";
 import { closeBackupStore, setBackupStoreWarn } from "./backupStore";
 import { NewerFormatError } from "./format-versions";
-import { CorruptStateError, type JsonStore } from "./json-store";
+import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
 import { formatError, preserveAside } from "./file-io";
@@ -124,8 +124,11 @@ export function resetFailureDiagnostic(movedAside: readonly string[], folder: st
   };
 }
 
-// A store in a newer format is named and left exactly in place, so Reset, which
-// would set it aside, is not offered (store-recovery-conventions).
+// Reset, which sets the saved work aside and starts empty, is offered only when
+// damaged content in a work store stopped launch: that is the one stop it can
+// clear. A file that could not be read or is from a newer Mumbler is named and
+// left exactly in place, and any other failure is left for a reopen, with no
+// Reset (developer decision; store-recovery-conventions).
 export function startupFailureDiagnostic(error: unknown): StartupFailure {
   if (error instanceof NewerFormatError) {
     return {
@@ -134,15 +137,20 @@ export function startupFailureDiagnostic(error: unknown): StartupFailure {
       canReset: false,
     };
   }
-  // A halted work store is named and left in place, with no Reset, which would
-  // set it aside for a fresh queue (store-recovery-conventions).
+  if (error instanceof UnreadableStoreError) {
+    return {
+      title: message("diagnostic.unreadableTitle"),
+      message: message("diagnostic.unreadableBody", { path: error.filePath }),
+      canReset: false,
+    };
+  }
   return error instanceof CorruptStateError
     ? {
         title: message("diagnostic.corruptTitle"),
         message: message("diagnostic.corruptBody", { path: error.filePath }),
-        canReset: false,
+        canReset: true,
       }
-    : { title: message("diagnostic.startupTitle"), message: message("diagnostic.startupBody"), canReset: true };
+    : { title: message("diagnostic.startupTitle"), message: message("diagnostic.startupBody"), canReset: false };
 }
 
 // A source that is not importable, with the reason the interface shows (in the
@@ -276,7 +284,7 @@ export class ApplicationRuntime {
         startupDiagnostic: {
           title: message("diagnostic.storageTitle"),
           message: message("diagnostic.storageBody"),
-          canReset: true,
+          canReset: false,
         },
         appWideError: null,
         recoveredInterruptedCards: 0,
@@ -308,9 +316,10 @@ export class ApplicationRuntime {
     try {
       await ensureDirectories(paths, logger);
 
-      // Authored settings that cannot be read are set aside and the app starts on
+      // Authored settings with damaged content are set aside and the app starts on
       // the built-ins, leaving the work stores alone (store-recovery-conventions).
-      // A newer-format file halts launch below; a failed set-aside propagates.
+      // A file that could not be read or is in a newer format halts launch below,
+      // left in place; a failed set-aside propagates.
       let settingsLoad;
       let settingsNotice: AppSnapshot["appWideError"] = null;
       try {
@@ -320,7 +329,7 @@ export class ApplicationRuntime {
         const [quarantinedTo] = await settingsStore.preserveExistingFiles();
         await logger.warn(
           "settings.corrupt-quarantined",
-          "config.json was unreadable; quarantined aside and started with the built-in settings.",
+          "config.json was damaged; quarantined aside and started with the built-in settings.",
           { path: paths.settingsPath, quarantinedTo, reason: error.message },
         );
         if (quarantinedTo !== undefined) {
@@ -369,30 +378,25 @@ export class ApplicationRuntime {
         await queueStore.save(reconciliation.state);
       }
 
-      // Presentation state (disposable, volatile). A missing layout loads defaults
-      // in memory and is written only once the user changes the pane width or card
-      // selection. A layout.json in a newer format is left as it is: the session
-      // runs on defaults and never writes it. A corrupt one must not halt launch
-      // either, so it self-heals to defaults and overwrites the bad file.
+      // Presentation state (disposable, volatile). No layout problem halts launch:
+      // the session runs on defaults, and nothing is set aside. A missing or
+      // damaged layout.json is written only once the user changes the pane width
+      // or card selection, which replaces a damaged one. One that could not be
+      // read or is in a newer format is left as it is and not written this session.
       let layoutStore: JsonStore<MumblerLayout> | null = createLayoutStore(paths.layoutPath);
       let layout: MumblerLayout;
       try {
         layout = (await layoutStore.load()).value;
       } catch (error: unknown) {
         layout = createDefaultLayout();
-        if (error instanceof NewerFormatError) {
-          layoutStore = null;
-          await logger.warn("app.layout-newer", "Layout file is in a newer format; left unchanged and not saved this session.", {
-            layoutPath: paths.layoutPath,
-            error: error.message,
-          });
-        } else {
-          await layoutStore.save(layout);
-          await logger.warn("app.layout-recovered", "Layout file was unreadable; reset to defaults.", {
-            layoutPath: paths.layoutPath,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+        const damaged = error instanceof CorruptStateError;
+        if (!damaged) layoutStore = null;
+        await logger.warn("app.layout-defaults", damaged
+          ? "Layout file was damaged; using defaults until the next layout save replaces it."
+          : "Layout file could not be used; using defaults and not saving it this session.", {
+          layoutPath: paths.layoutPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
       layout = {
         ...layout,
@@ -449,32 +453,35 @@ export class ApplicationRuntime {
       // notifies the runtime to re-emit the snapshot as state changes. The tool
       // resolver is wired so audio-tools can find the managed binaries; a missing
       // tool surfaces through the Audio Tools surface, never a hard startup failure.
-      const dependenciesStore = createDependenciesStore(paths.dependenciesPath);
-      // dependencies.json is a re-derivable facts cache, so corruption does
-      // not block launch. A failed set-aside still propagates.
-      let dependenciesLoad;
+      // dependencies.json is a re-derivable facts cache, so no problem with it
+      // blocks launch and nothing is set aside. A damaged file starts from the
+      // defaults and is replaced by the next facts save. One that could not be
+      // read or is in a newer format is left as it is: this session keeps its
+      // facts in memory only.
+      const dependenciesFile = createDependenciesStore(paths.dependenciesPath);
+      let dependenciesStore: Pick<JsonStore<DependenciesValue>, "save"> = dependenciesFile;
+      let dependenciesValue: DependenciesValue;
       try {
-        dependenciesLoad = await dependenciesStore.load();
-      } catch (error) {
-        // A newer format halts launch below, leaving the file for the build that wrote it.
-        if (!(error instanceof CorruptStateError)) throw error;
-        const quarantinedTo = await dependenciesStore.preserveExistingFiles();
-        await logger.warn(
-          "dependencies.corrupt-quarantined",
-          "dependencies.json was corrupt; quarantined aside and reset to defaults.",
-          { path: paths.dependenciesPath, quarantinedTo, reason: error.message },
-        );
-        dependenciesLoad = { value: createDefaultDependencies(), origin: "created" as const };
-      }
-      if (dependenciesLoad.origin === "created") {
-        await dependenciesStore.save(dependenciesLoad.value);
+        const loaded = await dependenciesFile.load();
+        dependenciesValue = loaded.value;
+        if (loaded.origin === "created") await dependenciesStore.save(dependenciesValue);
+      } catch (error: unknown) {
+        dependenciesValue = createDefaultDependencies();
+        const damaged = error instanceof CorruptStateError;
+        if (!damaged) dependenciesStore = { save: async () => undefined };
+        await logger.warn("dependencies.defaults", damaged
+          ? "dependencies.json was damaged; using defaults until the next facts save replaces it."
+          : "dependencies.json could not be used; keeping tool facts in memory this session.", {
+          path: paths.dependenciesPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
       const toolManager = new ToolManager({
         binDir: paths.binDir,
         tempDir: paths.tempDir,
         platform: process.platform,
         arch: process.arch,
-        value: dependenciesLoad.value,
+        value: dependenciesValue,
         store: dependenciesStore,
         logger,
         notify: () => runtime.emitDependenciesChanged(),
@@ -1813,15 +1820,11 @@ export class ApplicationRuntime {
         }
       } catch (error: unknown) {
         if (error instanceof OutputLocationError) return { kind: "failed", message: message("error.saveOutputLocationUnsafe") };
-        if (error instanceof OutputPartialFailureError || error instanceof NewerFormatError) {
-          await logger.error("save.incomplete", "Output save refused or did not finish every output.", error, {
+        if (error instanceof OutputPartialFailureError) {
+          await logger.error("save.incomplete", "Output save did not finish every output.", error, {
             cardId,
-            issues: error instanceof OutputPartialFailureError
-              ? error.issues.map((issue) => ({ ...issue, error: serializeError(issue.error) })) : undefined,
+            issues: error.issues.map((issue) => ({ ...issue, error: serializeError(issue.error) })),
           });
-          if (error instanceof NewerFormatError) return {
-            kind: "failed", message: message("error.saveNewerOutput", { folder: outputDirectory }),
-          };
           const savedPaths = error.files.filter((file) => file.status === "saved").map((file) => basename(file.path));
           return { kind: "failed", files: error.files, message: savedPaths.length > 0
             ? message("error.saveIncomplete", { folder: outputDirectory, files: savedPaths.join(", ") })

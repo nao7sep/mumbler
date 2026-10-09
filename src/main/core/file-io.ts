@@ -21,7 +21,6 @@ import { record } from "./backupStore";
 export interface WriteJsonOptions {
   mode?: number;
   record?: boolean;
-  validateCurrent?: () => Promise<void>;
 }
 
 // undefined means no file: JSON has no undefined, so a file holding the literal
@@ -86,7 +85,6 @@ export async function writeJsonFile(
     if (options.mode === undefined) {
       await keepReplacedMode(filePath, tempPath);
     }
-    await options.validateCurrent?.();
     await rename(tempPath, filePath);
     await syncDirectory(dirname(filePath));
   } catch (error) {
@@ -247,8 +245,9 @@ export function formatError(error: unknown): string {
 
 // Moves an existing file aside to "<stem>-<yyyymmdd-hhmmss-fff-utc>.invalid", in
 // the same directory, returning the new path (or null if there was nothing to
-// move). Used by explicit recovery (e.g. Reset) and by a corrupt/unreadable read
-// so a user's unreadable data is preserved rather than silently overwritten.
+// move). Used by explicit recovery (Reset, replacing an unusable key file) and by
+// malformed settings, so invalid content is preserved rather than overwritten.
+// A failed read never reaches here: access failure is not damage.
 export async function preserveAside(filePath: string): Promise<string | null> {
   if (!(await fileExists(filePath))) {
     return null;

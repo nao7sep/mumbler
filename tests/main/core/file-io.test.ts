@@ -11,7 +11,7 @@ const { backupRecord, capturedRenames, writeEvents, stageModes, faults } = vi.ho
       events.push(`record:${path}`);
     }),
     capturedRenames: [] as Array<{ source: string; destination: string }>,
-    faults: { tempId: null as string | null, cleanup: false },
+    faults: { tempId: null as string | null, cleanup: false, rename: null as Error | null },
     writeEvents: events,
     stageModes: [] as Array<{ mode: number; size: number }>,
   };
@@ -44,6 +44,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       return actual.rm(...args);
     },
     rename: async (source: string, destination: string) => {
+      if (faults.rename !== null) throw faults.rename;
       await actual.rename(source, destination);
       capturedRenames.push({ source: String(source), destination: String(destination) });
       writeEvents.push(`rename:${destination}`);
@@ -233,11 +234,14 @@ it.skipIf(process.platform === "win32")("creates replacement staging with the ex
   expect(stageModes).toEqual([{ mode: 0o600, size: 0 }]);
 });
 
-it("preserves admission failure and removes only its staged file", async () => {
+it("preserves a failed publication and removes only its staged file", async () => {
   const target = join(dir, "config.json");
   await writeFile(target, "old");
-  const primary = new Error("admission refused");
-  await expect(writeJsonFile(target, { updated: true }, { validateCurrent: async () => { throw primary; } })).rejects.toBe(primary);
+  const primary = new Error("rename refused");
+  faults.rename = primary;
+  try {
+    await expect(writeJsonFile(target, { updated: true })).rejects.toBe(primary);
+  } finally { faults.rename = null; }
   expect(await readFile(target, "utf8")).toBe("old");
   expect(await readdir(dir)).toEqual(["config.json"]);
 });
@@ -252,11 +256,12 @@ it("does not remove or overwrite another writer's colliding staging file", async
   expect(await readdir(dir)).toEqual(["config-collision.tmp"]);
 });
 
-it("cleanup failure does not replace the primary admission error", async () => {
-  const primary = new Error("admission refused");
+it("cleanup failure does not replace the primary publication error", async () => {
+  const primary = new Error("rename refused");
   faults.cleanup = true;
+  faults.rename = primary;
   try {
-    await expect(writeJsonFile(join(dir, "config.json"), { updated: true }, { validateCurrent: async () => { throw primary; } })).rejects.toBe(primary);
+    await expect(writeJsonFile(join(dir, "config.json"), { updated: true })).rejects.toBe(primary);
     expect(await readdir(dir)).toHaveLength(1);
-  } finally { faults.cleanup = false; }
+  } finally { faults.cleanup = false; faults.rename = null; }
 });

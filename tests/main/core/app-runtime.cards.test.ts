@@ -195,7 +195,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
   };
 });
 
-const { ApplicationRuntime } = await import("@main/core/app-runtime");
+const { ApplicationRuntime, startupFailureDiagnostic } = await import("@main/core/app-runtime");
 const { createQueueStore } = await import("@main/core/settings-schema");
 const { TranscriptStore } = await import("@main/core/transcript-store");
 
@@ -337,16 +337,38 @@ describe("the durable queue store", () => {
   it.each([
     ["unparseable", "broken queue"],
     ["without its format version", JSON.stringify({ pendingImports: [], cards: [] })],
-  ])("halts on a queue.json that is %s and leaves it untouched", async (_kind, bytes) => {
+  ])("halts on a queue.json that is %s, leaves it untouched and offers Reset", async (_kind, bytes) => {
     await runtime.shutdown();
     await writeFile(join(home, "queue.json"), bytes);
     runtime = await ApplicationRuntime.initialize();
     expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({
       title: { key: "diagnostic.corruptTitle" },
       message: { key: "diagnostic.corruptBody", values: { path: join(home, "queue.json") } },
-      canReset: false,
+      canReset: true,
     });
     expect(await readFile(join(home, "queue.json"), "utf8")).toBe(bytes);
+  });
+
+  it("halts on a queue.json it cannot read, moving nothing and offering no Reset", async () => {
+    await runtime.shutdown();
+    await rm(join(home, "queue.json"), { force: true });
+    await mkdir(join(home, "queue.json"));
+    runtime = await ApplicationRuntime.initialize();
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual({
+      title: { key: "diagnostic.unreadableTitle" },
+      message: { key: "diagnostic.unreadableBody", values: { path: join(home, "queue.json") } },
+      canReset: false,
+    });
+    expect((await stat(join(home, "queue.json"))).isDirectory()).toBe(true);
+    expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
+  });
+
+  it("offers no Reset for a startup failure that is not a damaged work file", () => {
+    expect(startupFailureDiagnostic(new Error("storage could not be prepared"))).toEqual({
+      title: { key: "diagnostic.startupTitle" },
+      message: { key: "diagnostic.startupBody" },
+      canReset: false,
+    });
   });
 
   it("keeps the working recordings at a launch that finds no queue.json", async () => {
@@ -953,7 +975,7 @@ describe("working with a card", () => {
     expect(await exists(join(home, "working", "prepared-save.wav"))).toBe(true);
   });
 
-  it("refuses newer output metadata while retaining the ready working card", async () => {
+  it("overwrites output metadata from a newer build when the user chooses Overwrite", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
     const saved = cards(runtime.getSnapshot())[0];
@@ -961,11 +983,8 @@ describe("working with a card", () => {
     await mkdir(join(home, "output"), { recursive: true });
     await writeFile(`${stem}.json`, '{"formatVersion":2}');
     const result = await runtime.saveCard(card.id, "overwrite");
-    expect(result.kind).toBe("failed");
-    if (result.kind === "failed") expect(result.message.key).toBe("error.saveNewerOutput");
-    expect(cards(result.snapshot)[0].status).toBe("Ready to Save");
-    expect(await exists(card.sourceFilePath)).toBe(true);
-    expect(await readFile(`${stem}.json`, "utf8")).toBe('{"formatVersion":2}');
+    expect(result.kind).toBe("saved");
+    expect(JSON.parse(await readFile(`${stem}.json`, "utf8"))).toMatchObject({ formatVersion: 1 });
   });
 
   it("keeps exports in the working folder when they do not replace a working input", async () => {
@@ -1305,7 +1324,7 @@ describe("a store in a newer format", () => {
     return card;
   }
 
-  it.each(["queue.json", "config.json", "dependencies.json"])(
+  it.each(["queue.json", "config.json"])(
     "halts launch naming %s, leaves it untouched and offers no reset",
     async (name) => {
       await confirmedCard();
@@ -1345,6 +1364,20 @@ describe("a store in a newer format", () => {
       canReset: false,
     });
     expect(await readFile(path, "utf8")).toBe(newer);
+  });
+
+  it("opens on default tool facts and never writes a dependencies.json from a newer build", async () => {
+    await confirmedCard();
+    await runtime.shutdown();
+    const path = join(home, "dependencies.json");
+    const newer = await makeNewer(path);
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+    await runtime.shutdown();
+    expect(await readFile(path, "utf8")).toBe(newer);
+    expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
 
   it("opens on a default layout and never writes a layout.json from a newer build", async () => {
@@ -1390,6 +1423,46 @@ describe("settings, secrets and the window's own state", () => {
     });
     expect(cards(snapshot).map((entry) => entry.id)).toEqual([card.id]);
     expect(await exists(card.sourceFilePath)).toBe(true);
+  });
+
+  it("halts on a config.json it cannot read, moving nothing and offering no Reset", async () => {
+    await runtime.shutdown();
+    await rm(join(home, "config.json"), { force: true });
+    await mkdir(join(home, "config.json"));
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual({
+      title: { key: "diagnostic.unreadableTitle" },
+      message: { key: "diagnostic.unreadableBody", values: { path: join(home, "config.json") } },
+      canReset: false,
+    });
+    expect((await stat(join(home, "config.json"))).isDirectory()).toBe(true);
+    expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
+  });
+
+  it("opens on a default layout over a damaged layout.json and replaces it at the next layout save", async () => {
+    await runtime.shutdown();
+    const path = join(home, "layout.json");
+    await writeFile(path, "broken layout");
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+    expect(await readFile(path, "utf8"), "launch itself writes nothing").toBe("broken layout");
+    await runtime.saveLayout(430);
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ formatVersion: 1, queueWidth: 430 });
+    expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
+  });
+
+  it("opens over a damaged dependencies.json without setting it aside", async () => {
+    await runtime.shutdown();
+    await writeFile(join(home, "dependencies.json"), "broken facts");
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+    expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
 
   it("retries failed pending review bytes when the retained draft equals live state", async () => {

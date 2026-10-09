@@ -120,10 +120,9 @@ export async function writeVersionSidecar(
   // the re-fetchable binary it sits beside — meaningless without that binary (itself
   // excluded as a re-fetchable binary) and rewritten by the next install, so it rides
   // along into exclusion rather than being recorded orphaned (data-backup conventions).
-  await writeJsonFile(target, payload, {
-    record: false,
-    validateCurrent: () => admitVersionSidecar(binDir, name),
-  });
+  // The install admitted the existing sidecar before publishing the binary, so it
+  // is not re-read here.
+  await writeJsonFile(target, payload, { record: false });
 }
 
 // The installed version of `name`, or null when it cannot be read — the binary will

@@ -3,9 +3,9 @@ import { basename, extname, join } from "node:path";
 
 import type { MumblerCard } from "@shared/app-shell";
 
-import { formatError, isMissingFileError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
+import { isMissingFileError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 import { FORMAT_VERSIONS } from "./format-versions";
-import { assertReadableFormat, assertResettableJson, CorruptStateError } from "./json-store";
+import { assertReadableFormat, assertResettableJson, CorruptStateError, loadFailure, UnreadableStoreError } from "./json-store";
 
 /** A card's two long text bodies, kept in the card's own file rather than in queue.json. */
 export interface CardTranscript {
@@ -62,7 +62,9 @@ function parse(path: string, raw: unknown, cardId: string): CardTranscript {
 //
 // Writes are ordered through one queue. A save computes what to write from the
 // cards as they are when it is called, and compares against what the last write
-// left on disk, so repeated saves of unchanged text write nothing.
+// left on disk, so repeated saves of unchanged text write nothing. Each file's
+// format is checked once, when open() reads it; writes and removals touch only
+// files this session read or wrote, so they do not re-read them.
 export class TranscriptStore {
   // What each card's file holds on disk, as serialized text; absent means no file.
   private readonly onDisk = new Map<string, string>();
@@ -90,8 +92,8 @@ export class TranscriptStore {
    * Reads the transcript of every card in `cardIds`. A file no card refers to is
    * left in place: it may hold the text of a queue that was lost, which is never
    * deleted for that (a removed card's file is deleted when it is removed). A
-   * file that cannot be read halts like a corrupt queue.json, and one in a newer
-   * format halts like a newer queue.json: either is left in place.
+   * damaged file, one that cannot be read and one in a newer format each halt
+   * like the same problem in queue.json, and are left in place.
    */
   async open(cardIds: readonly string[]): Promise<Map<string, CardTranscript>> {
     const wanted = new Set(cardIds);
@@ -101,7 +103,7 @@ export class TranscriptStore {
       names = await readdir(this.directory);
     } catch (error: unknown) {
       if (isMissingFileError(error)) return transcripts;
-      throw error;
+      throw new UnreadableStoreError(this.directory, { cause: error });
     }
 
     for (const name of names) {
@@ -112,7 +114,7 @@ export class TranscriptStore {
       try {
         raw = await readJsonFile<unknown>(path);
       } catch (error: unknown) {
-        throw new CorruptStateError(path, formatError(error), { cause: error });
+        throw loadFailure(path, error);
       }
       if (raw === undefined) continue;
       const transcript = parse(path, raw, cardId);
@@ -132,13 +134,7 @@ export class TranscriptStore {
         const value = serialize(cardId, transcript);
         const text = JSON.stringify(value);
         if (this.onDisk.get(cardId) === text) continue;
-        const path = this.pathFor(cardId);
-        await writeJsonFile(path, value, {
-          validateCurrent: async () => {
-            const current = await readJsonFile<unknown>(path);
-            if (current !== undefined) parse(path, current, cardId);
-          },
-        });
+        await writeJsonFile(this.pathFor(cardId), value);
         this.onDisk.set(cardId, text);
         written += 1;
       }
@@ -154,10 +150,7 @@ export class TranscriptStore {
         if (keep.has(cardId)) continue;
         // not recorded: a deletion writes no bytes; the file's last version is
         // already in the backup history.
-        const path = this.pathFor(cardId);
-        const current = await readJsonFile<unknown>(path);
-        if (current !== undefined) parse(path, current, cardId);
-        await rm(path, { force: true });
+        await rm(this.pathFor(cardId), { force: true });
         this.onDisk.delete(cardId);
       }
     });

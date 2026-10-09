@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { MumblerCard } from "@shared/app-shell";
 import { NewerFormatError } from "@main/core/format-versions";
-import { CorruptStateError } from "@main/core/json-store";
+import { CorruptStateError, UnreadableStoreError } from "@main/core/json-store";
 import { TranscriptStore } from "@main/core/transcript-store";
 
 let dir: string;
@@ -189,7 +189,7 @@ describe("TranscriptStore", () => {
     expect(await files()).toEqual(["notes.txt"]);
   });
 
-  it("refuses text belonging to another card without changing either file", async () => {
+  it("refuses at load text belonging to another card, leaving the file unchanged", async () => {
     const store = new TranscriptStore(dir);
     const take = card("take", "old words");
     await store.writeChanged([take]);
@@ -198,41 +198,30 @@ describe("TranscriptStore", () => {
     const foreign = JSON.stringify({ formatVersion: 1, cardId: "other", transcription: "other words" });
     await writeFile(path, foreign);
     await expect(new TranscriptStore(dir).open(["take"])).rejects.toBeInstanceOf(CorruptStateError);
-    take.transcription.text = "replacement";
-    await expect(store.writeChanged([take])).rejects.toBeInstanceOf(CorruptStateError);
     expect(await readFile(path, "utf8")).toBe(foreign);
   });
 
-  it.each([
-    { formatVersion: 2, cardId: "take", transcription: "future words" },
-    { formatVersion: 1, cardId: "other", transcription: "other words" },
-    { formatVersion: 1, cardId: "take", transcription: ["unreadable words"] },
-  ])("preserves a cached transcript that no longer admits deletion: %j", async (replacement) => {
-    const store = new TranscriptStore(dir);
-    await store.writeChanged([card("take", "old words")]);
-    const [name] = await files();
-    const path = join(dir, name);
-    const text = JSON.stringify(replacement);
-    await writeFile(path, text);
-    await expect(store.removeAbsent([])).rejects.toBeInstanceOf(Error);
-    expect(await readFile(path, "utf8")).toBe(text);
-    // A failed admission does not forget the file or wedge the store's tail.
-    await writeFile(path, JSON.stringify({ formatVersion: 1, cardId: "take", transcription: "old words" }));
-    await store.removeAbsent([]);
-    expect(await files()).toEqual([]);
+  it("reports malformed text as damaged and a file it cannot read as unreadable, both left in place", async () => {
+    await mkdir(dir, { recursive: true });
+    const name = `${Buffer.from("take").toString("hex")}.json`;
+    await writeFile(join(dir, name), "{ not json");
+    const damaged = await new TranscriptStore(dir).open(["take"]).catch((error: unknown) => error);
+    expect(damaged).toBeInstanceOf(CorruptStateError);
+    expect(await readFile(join(dir, name), "utf8")).toBe("{ not json");
+
+    await rm(join(dir, name));
+    await mkdir(join(dir, name));
+    const unreadable = await new TranscriptStore(dir).open(["take"]).catch((error: unknown) => error);
+    expect(unreadable).toBeInstanceOf(UnreadableStoreError);
+    expect(unreadable).toMatchObject({ filePath: join(dir, name) });
+    expect(await files()).toEqual([name]);
   });
-});
 
-
-it("refuses a changed write after the cached transcript becomes newer-format", async () => {
-  const store = new TranscriptStore(dir);
-  const take = card("take", "old words");
-  await store.writeChanged([take]);
-  const [name] = await files();
-  const newer = JSON.stringify({ formatVersion: 2, cardId: "take", transcription: "future" });
-  await writeFile(join(dir, name), newer);
-  take.transcription.text = "replacement";
-  await expect(store.writeChanged([take])).rejects.toBeInstanceOf(NewerFormatError);
-  expect(await readFile(join(dir, name), "utf8")).toBe(newer);
-  expect(await files()).toEqual([name]);
+  it("reports a transcripts folder it cannot list as unreadable", async () => {
+    await writeFile(dir, "not a folder");
+    const error = await new TranscriptStore(dir).open(["take"]).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UnreadableStoreError);
+    expect(error).toMatchObject({ filePath: dir });
+    expect(await readFile(dir, "utf8")).toBe("not a folder");
+  });
 });

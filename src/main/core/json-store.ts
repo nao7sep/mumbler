@@ -1,10 +1,10 @@
 import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 import { NewerFormatError, recordedFormatVersion } from "./format-versions";
 
-// Thrown when a persisted file exists but cannot be safely loaded: malformed
-// JSON, or a document that does not fit its shape. The store never overwrites or
-// deletes the offending file in this case; the caller decides the recovery. A
-// read that failed keeps its error as the cause.
+// Thrown when a persisted file exists but its content cannot be safely loaded:
+// malformed JSON, or a document that does not fit its shape. The store never
+// overwrites or deletes the offending file in this case; the caller decides the
+// recovery.
 export class CorruptStateError extends Error {
   constructor(
     readonly filePath: string,
@@ -14,6 +14,28 @@ export class CorruptStateError extends Error {
     super(`Could not load ${filePath}: ${reason}.`, options);
     this.name = "CorruptStateError";
   }
+}
+
+// Thrown when a persisted file exists but could not be read at all (permissions,
+// a directory in its place, an I/O error). This is not damage: the content may
+// be intact, so it is never set aside or reset (store-recovery-conventions).
+export class UnreadableStoreError extends Error {
+  constructor(
+    readonly filePath: string,
+    options: { cause: unknown },
+  ) {
+    super(`Could not read ${filePath}: ${formatError(options.cause)}.`, options);
+    this.name = "UnreadableStoreError";
+  }
+}
+
+// Classifies a failed readJsonFile: invalid JSON is damage, anything else is
+// failed access.
+export function loadFailure(filePath: string, error: unknown): CorruptStateError | UnreadableStoreError {
+  const cause = error instanceof Error && error.cause !== undefined ? error.cause : error;
+  return cause instanceof SyntaxError
+    ? new CorruptStateError(filePath, formatError(error), { cause })
+    : new UnreadableStoreError(filePath, { cause });
 }
 
 // Checks the format version a JSON document records against the one this build
@@ -73,9 +95,12 @@ export interface LoadResult<T> {
 }
 
 // Owns the full safe lifecycle of ONE canonical JSON file:
-//   - load(): never destructive — missing → defaults, corrupt → throws
-//     CorruptStateError, newer format → throws NewerFormatError (the file is
-//     left untouched either way), valid → returns.
+//   - load(): never destructive — missing → defaults, invalid content → throws
+//     CorruptStateError, failed read → throws UnreadableStoreError, newer format
+//     → throws NewerFormatError (the file is left untouched in every case),
+//     valid → returns. This load is the store's one format check: the
+//     single-instance lock keeps any other Mumbler off the data root, so a
+//     loaded store's format cannot change before the next write.
 //   - save(): serialized (no overlapping writes) + atomic (temp + fsync +
 //     rename + dir fsync, via writeJsonFile).
 //   - flush(): await all queued writes — used by graceful shutdown.
@@ -102,8 +127,8 @@ export class JsonStore<T extends object> {
     try {
       raw = await readJsonFile<unknown>(this.options.path);
     } catch (error) {
-      // Present but unreadable/unparseable. Leave it in place; the caller halts.
-      throw new CorruptStateError(this.options.path, formatError(error), { cause: error });
+      // Present but unreadable or unparseable. Leave it in place; the caller decides.
+      throw loadFailure(this.options.path, error);
     }
 
     if (raw === undefined) {
@@ -149,10 +174,7 @@ export class JsonStore<T extends object> {
       await writeJsonFile(
         this.options.path,
         { formatVersion: this.options.formatVersion, ...wire },
-        {
-          record: this.options.record,
-          validateCurrent: async () => { await this.load(); },
-        },
+        { record: this.options.record },
       );
     } catch (error: unknown) {
       this.failure = { value };

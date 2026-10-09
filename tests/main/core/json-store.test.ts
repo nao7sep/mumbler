@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { NewerFormatError } from "@main/core/format-versions";
-import { CorruptStateError, JsonStore } from "@main/core/json-store";
+import { CorruptStateError, JsonStore, UnreadableStoreError } from "@main/core/json-store";
 
 interface Doc {
   value: string;
@@ -68,12 +68,13 @@ describe("JsonStore.load", () => {
     expect(await readFile(store.path, "utf8")).toBe("null");
   });
 
-  it("keeps the read's own error as the cause of an unreadable file", async () => {
+  it("reports a file that cannot be read as unreadable, not damaged, keeping the read's error", async () => {
     const store = makeStore();
     await mkdir(store.path);
     const error = await store.load().catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(CorruptStateError);
-    expect(error).toMatchObject({ filePath: store.path, cause: { cause: { code: "EISDIR" } } });
+    expect(error).toBeInstanceOf(UnreadableStoreError);
+    expect(error).not.toBeInstanceOf(CorruptStateError);
+    expect(error).toMatchObject({ filePath: store.path, cause: { code: "EISDIR" } });
   });
 
   it("refuses a format version newer than this build as intact, not corrupt, and leaves the file untouched", async () => {
@@ -269,18 +270,4 @@ describe("JsonStore failed writes", () => {
 
     expect(await readFile(join(dir, "doc.json"), "utf8")).toBe("changed by hand");
   });
-});
-
-
-it("save and retry refuse a newer store appearing after load", async () => {
-  const store = makeStore();
-  await store.save({ value: "old" });
-  await store.load();
-  const newer = JSON.stringify({ formatVersion: 2, value: "future" });
-  await writeFile(store.path, newer);
-  await expect(store.save({ value: "replacement" })).rejects.toBeInstanceOf(NewerFormatError);
-  await expect(store.retryFailedWrite()).rejects.toBeInstanceOf(NewerFormatError);
-  await expect(store.flush()).resolves.toBeUndefined();
-  expect(await readFile(store.path, "utf8")).toBe(newer);
-  expect(await readdir(dir)).toEqual(["doc.json"]);
 });

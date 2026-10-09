@@ -30,7 +30,6 @@ vi.mock("node:fs/promises", async (original) => {
   };
 });
 const { finalizeOutputs, OutputPartialFailureError } = await import("@main/core/file-output");
-const { NewerFormatError } = await import("@main/core/format-versions");
 let directory: string;
 let source: string;
 const targets = () => ({ audioPath: join(directory, "out.wav"), jsonPath: join(directory, "out.json"), markdownPath: join(directory, "out.md") });
@@ -49,15 +48,15 @@ afterEach(async () => {
 });
 
 describe("staging and supported output markers", () => {
-  it.each(["json", "markdown"] as const)("refuses newer %s before publishing even audio", async (kind) => {
+  it.each(["json", "markdown"] as const)("overwrite replaces a newer-format %s like any other output", async (kind) => {
     const t = targets();
     const path = kind === "json" ? t.jsonPath : t.markdownPath;
     const future = kind === "json" ? '{"formatVersion":2}' : "---\nformat_version: 2\n---\nFuture body";
     await writeFile(path, future);
     await writeFile(t.audioPath, "OLD AUDIO");
-    await expect(save()).rejects.toBeInstanceOf(NewerFormatError);
-    expect(await readFile(path, "utf8")).toBe(future);
-    expect(await readFile(t.audioPath, "utf8")).toBe("OLD AUDIO");
+    await save();
+    expect(await readFile(path, "utf8")).toBe(kind === "json" ? "NEW JSON" : "NEW MD");
+    expect(await readFile(t.audioPath, "utf8")).toBe("NEW AUDIO");
     expect((await readdir(directory)).filter((name) => name.startsWith(".mumbler-save-"))).toEqual([]);
   });
   it.skipIf(process.platform === "win32")("creates one private directory and complete private stages before publication", async () => {

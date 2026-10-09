@@ -73,7 +73,7 @@ export class ToolManager {
       platform: string;
       arch: string;
       value: DependenciesValue;
-      store: JsonStore<DependenciesValue>;
+      store: Pick<JsonStore<DependenciesValue>, "save">;
       logger: AppLogger;
       notify: () => void;
     },

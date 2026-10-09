@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { link, mkdir, mkdtemp, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { link, mkdir, mkdtemp, open, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { nanoid } from "nanoid";
 
@@ -13,7 +13,7 @@ import {
   sameFileBytes,
   syncDirectory,
 } from "./file-io";
-import { FORMAT_VERSIONS, NewerFormatError, recordedFormatVersion } from "./format-versions";
+import { FORMAT_VERSIONS } from "./format-versions";
 
 // A save that must not overwrite found one of its targets already taken when
 // it came to publish: someone wrote that name after the conflict check.
@@ -93,26 +93,6 @@ async function publishExclusive(source: string, destination: string): Promise<vo
   }
 }
 
-async function admitOutputMarker(path: string, kind: "json" | "markdown"): Promise<void> {
-  let bytes: string;
-  try { bytes = await readFile(path, "utf8"); }
-  catch (error) { if (errorCode(error) === "ENOENT") return; throw error; }
-  let recorded: number | null = null;
-  if (kind === "json") {
-    try {
-      const value: unknown = JSON.parse(bytes);
-      if (typeof value === "object" && value !== null && !Array.isArray(value))
-        recorded = recordedFormatVersion(value as Record<string, unknown>);
-    } catch (error) { if (!(error instanceof SyntaxError)) throw error; }
-  } else {
-    const frontMatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(bytes)?.[1];
-    const marker = frontMatter?.match(/^format_version:[ \t]*(\d+)[ \t]*\r?$/m)?.[1];
-    if (marker !== undefined && Number.isSafeInteger(Number(marker)) && Number(marker) > 0) recorded = Number(marker);
-  }
-  const supported = kind === "json" ? FORMAT_VERSIONS.outputJson : FORMAT_VERSIONS.outputMarkdown;
-  if (recorded !== null && recorded > supported) throw new NewerFormatError(path, recorded, supported);
-}
-
 export interface SaveTargetPaths {
   audioPath: string;
   jsonPath: string;
@@ -163,6 +143,8 @@ export async function finalizeOutputs(params: {
   await mkdir(directory, { recursive: true });
   // All content is complete before any output changes. The three publications
   // are independent: explicit overwrite accepts a mixed trio on later failure.
+  // Choosing Overwrite is the user's confirmation, so it replaces existing
+  // outputs whatever format version they record, including a newer one.
   const staging = await mkdtemp(join(directory, ".mumbler-save-"));
   const members = [
     { path: params.targets.audioPath, stage: join(staging, "audio"), kind: "audio" as const },
@@ -198,7 +180,6 @@ export async function finalizeOutputs(params: {
     try {
       await previous;
       if (params.isSafeLocation !== undefined && !(await params.isSafeLocation())) throw new OutputLocationError();
-      if (params.overwrite) for (const member of members.slice(1)) await admitOutputMarker(member.path, member.kind as "json" | "markdown");
       for (const [index, member] of members.entries()) {
         current = files[index]!;
         if (params.signal?.aborted) throw new CancelledError("Save cancelled.");
@@ -207,7 +188,6 @@ export async function finalizeOutputs(params: {
           continue;
         }
         if (params.overwrite) {
-          if (member.kind !== "audio") await admitOutputMarker(member.path, member.kind);
           await keepReplacedMode(member.path, member.stage);
           if (params.signal?.aborted) throw new CancelledError("Save cancelled.");
           await rename(member.stage, member.path);
@@ -226,9 +206,9 @@ export async function finalizeOutputs(params: {
   await syncDirectory(directory);
   if (primary !== undefined) {
     if (files.some((file) => file.status === "saved") || issues.length > 0 ||
-        (current !== undefined && !isCancelledError(primary) && !(primary instanceof OutputConflictError) && !(primary instanceof NewerFormatError)))
+        (current !== undefined && !isCancelledError(primary) && !(primary instanceof OutputConflictError)))
       throw new OutputPartialFailureError(primary, files, issues);
-    if (isCancelledError(primary) || primary instanceof OutputConflictError || primary instanceof NewerFormatError || primary instanceof OutputLocationError) throw primary;
+    if (isCancelledError(primary) || primary instanceof OutputConflictError || primary instanceof OutputLocationError) throw primary;
     throw new Error(`Failed to finalize output files: ${formatError(primary)}`, { cause: primary });
   }
   return { warnings: issues };

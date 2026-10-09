@@ -144,15 +144,6 @@ describe("probing a binary that will not run", () => {
 
 
 describe("sidecar publication admission and identity", () => {
-  it("refuses to replace a newer sidecar through the writer", async () => {
-    const path = versionSidecarPath(binDir, "ffmpeg");
-    const newer = JSON.stringify({ formatVersion: 2, version: "future" });
-    await writeFile(path, newer);
-    await expect(writeVersionSidecar(binDir, "ffmpeg", "8.2", 0, join(binDir, "ffmpeg.exe"))).rejects.toMatchObject({ name: "NewerFormatError" });
-    expect(await readFile(path, "utf8")).toBe(newer);
-    expect(await readdir(binDir)).toEqual(["ffmpeg.exe", "ffmpeg.json"]);
-  });
-
   it("does not attribute an old sidecar to a replaced binary on a fresh read", async () => {
     const tool = join(binDir, "ffmpeg.exe");
     await writeVersionSidecar(binDir, "ffmpeg", "autobuild-2026-08-19-19-21", 0, tool);
