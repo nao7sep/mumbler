@@ -1,4 +1,4 @@
-import { type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
+import { useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
 
 /**
  * The vertical drag handle between an adjustable pane and the pane beside it:
@@ -10,8 +10,10 @@ import { type PointerEvent as ReactPointerEvent, type ReactElement } from "react
  * it feeds `width` back in as the displayed size, persists on `onCommit`, and
  * re-derives the display against the live window (see usePaneSize).
  *
- * Keyboard resize is not offered: the width persists, so this is a one-time setup
- * gesture, not a frequent interaction.
+ * With `keyboardStep`, the handle also takes focus and resizes by keyboard (the
+ * developer's decision for Records windows): the arrows move it by the step,
+ * Home and End to the bounds, and the width is committed once, when the key is
+ * released or the handle loses focus. The main window's handle stays pointer-only.
  */
 export function PaneSplitter({
   label,
@@ -20,6 +22,7 @@ export function PaneSplitter({
   max,
   onResize,
   onCommit,
+  keyboardStep,
 }: {
   label: string;
   width: number;
@@ -27,7 +30,32 @@ export function PaneSplitter({
   max: number;
   onResize: (width: number) => void;
   onCommit: (width: number) => void;
+  keyboardStep?: number;
 }): ReactElement {
+  // The width the keys moved to and not yet committed.
+  const keyed = useRef<number | null>(null);
+
+  function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (keyboardStep === undefined) return;
+    const from = keyed.current ?? width;
+    const next = event.key === "ArrowLeft" ? from - keyboardStep
+      : event.key === "ArrowRight" ? from + keyboardStep
+        : event.key === "Home" ? min
+          : event.key === "End" ? max
+            : null;
+    if (next === null) return;
+    event.preventDefault();
+    keyed.current = Math.max(min, Math.min(max, next));
+    onResize(keyed.current);
+  }
+
+  function commitKeyed(): void {
+    if (keyed.current === null) return;
+    const committed = keyed.current;
+    keyed.current = null;
+    onCommit(committed);
+  }
+
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
     event.preventDefault();
     const startX = event.clientX;
@@ -60,6 +88,15 @@ export function PaneSplitter({
       aria-orientation="vertical"
       aria-label={label}
       onPointerDown={onPointerDown}
+      tabIndex={keyboardStep === undefined ? undefined : 0}
+      {...(keyboardStep === undefined ? {} : {
+        "aria-valuenow": width,
+        "aria-valuemin": min,
+        "aria-valuemax": max,
+        onKeyDown,
+        onKeyUp: commitKeyed,
+        onBlur: commitKeyed,
+      })}
     >
       <span className="workspace-splitter__grip" aria-hidden="true" />
     </div>

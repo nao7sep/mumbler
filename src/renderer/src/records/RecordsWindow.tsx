@@ -495,6 +495,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
         max={RECORDS_LIST_WIDTH.max}
         onResize={setDragWidth}
         onCommit={commitListWidth}
+        keyboardStep={16}
       />
       <section className="panel records-detail-pane" aria-busy={detail.status === "loading"}>
         {detail.status === "ready" ? (
