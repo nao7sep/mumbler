@@ -12,11 +12,10 @@ import { record } from "./backupStore";
  * `mode` tightens the file's permissions (0o600 for the secrets file), applied to the temp file before the
  * rename so the target is never momentarily more permissive.
  *
- * `record` (default true) is the data-backup hook: after the rename lands, the exact bytes just written are
- * appended to `~/.mumbler/backups.sqlite3`. It is `true` by default because every managed text file the app
- * writes is recorded by default (data-backup conventions), and the one caller that must NOT record — the
- * secrets file (api-keys.json) — sets it `false` explicitly. Gating on `mode` instead would be wrong: on
- * Windows the secrets write passes no mode, so a mode-based gate would silently back up the secret there.
+ * `record` (default false) is the data-backup hook: after the rename lands, the exact bytes just written go
+ * to `~/.mumbler/backups.sqlite3`. Only what the user authors through the app is protected (data-backup
+ * conventions), which in Mumbler is config.json alone, so a store opts in at its own write boundary; transient
+ * work, derived text, state, caches and secrets never reach the history by omission.
  */
 export interface WriteJsonOptions {
   mode?: number;
@@ -47,8 +46,8 @@ export async function readJsonFile<T>(filePath: string): Promise<T | undefined> 
 // the rename would risk a "backup of a save that never happened": if the rename then failed, the history
 // would hold a version that never reached disk. So: rename lands, *then* record the exact bytes just written
 // — the same buffer already in hand, never a re-read of the file. The record is best-effort and silent; it
-// never throws back into this write and never affects the save's success (see backupStore). Every managed
-// text file records by default; the secrets file opts out with `record: false`.
+// never throws back into this write and never affects the save's success (see backupStore). Only writes that
+// pass `record: true` are recorded.
 export async function writeJsonFile(
   filePath: string,
   value: unknown,
@@ -96,8 +95,8 @@ export async function writeJsonFile(
   }
   // After the rename: the file is exactly where it belongs, so record the bytes we just wrote. Best-effort —
   // record() catches, logs once, and swallows every failure, so a backup problem can never break the save
-  // that already succeeded above. Excluded when record === false (the secrets file).
-  if (options.record !== false) {
+  // that already succeeded above.
+  if (options.record === true) {
     record(filePath, bytes);
   }
 }

@@ -57,8 +57,8 @@ function parse(path: string, raw: unknown, cardId: string): CardTranscript {
 
 // Owns the per-card transcript files under transcripts/. Each file holds one
 // card's transcription and structured outline, and is written only when that
-// card's text actually changed, so the queue's frequent status saves record
-// small rows in the backup history instead of every transcript each time.
+// card's text actually changed, so the queue's frequent status saves do not
+// rewrite every transcript each time.
 //
 // Writes are ordered through one queue. A save computes what to write from the
 // cards as they are when it is called, and compares against what the last write
@@ -134,6 +134,8 @@ export class TranscriptStore {
         const value = serialize(cardId, transcript);
         const text = JSON.stringify(value);
         if (this.onDisk.get(cardId) === text) continue;
+        // Not recorded in the backup history: transcripts are derived from the
+        // recording (data-backup-conventions; developer decision).
         await writeJsonFile(this.pathFor(cardId), value);
         this.onDisk.set(cardId, text);
         written += 1;
@@ -148,8 +150,6 @@ export class TranscriptStore {
     return this.enqueue(async () => {
       for (const cardId of [...this.onDisk.keys()]) {
         if (keep.has(cardId)) continue;
-        // not recorded: a deletion writes no bytes; the file's last version is
-        // already in the backup history.
         await rm(this.pathFor(cardId), { force: true });
         this.onDisk.delete(cardId);
       }

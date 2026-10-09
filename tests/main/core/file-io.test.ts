@@ -191,13 +191,13 @@ describe("writeJsonFile — data-backup record hook", () => {
     expect(writeEvents).toEqual([`rename:${secret}`]);
   });
 
-  it("records by default (no options) — a managed text write is captured", async () => {
-    const target = join(dir, "state.json");
+  it("records nothing by default: a store opts in at its own write boundary", async () => {
+    const target = join(dir, "queue.json");
 
     await writeJsonFile(target, { formatVersion: 1 });
 
-    expect(backupRecord).toHaveBeenCalledOnce();
-    expect(backupRecord).toHaveBeenCalledWith(target, await readFile(target));
+    expect(backupRecord).not.toHaveBeenCalled();
+    expect(writeEvents).toEqual([`rename:${target}`]);
   });
 });
 

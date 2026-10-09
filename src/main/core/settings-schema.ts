@@ -581,6 +581,8 @@ export class SettingsStore {
       formatVersion: FORMAT_VERSIONS.config,
       validate: knownSettings,
       createDefault: () => ({}),
+      // Settings are what the user authors, the one store the backup history protects.
+      record: true,
     });
   }
 
@@ -621,6 +623,8 @@ export class QueueStore {
   private readonly store: JsonStore<Record<string, unknown>>;
 
   constructor(path: string) {
+    // Not recorded in the backup history: the queue and its review drafts are
+    // transient work that ends in exports (data-backup-conventions; developer decision).
     this.store = new JsonStore({
       path,
       formatVersion: FORMAT_VERSIONS.queue,

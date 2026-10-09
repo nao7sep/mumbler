@@ -1,9 +1,9 @@
 /**
  * Global test isolation for the write-through backup store (data-backup conventions).
  *
- * Every managed-text save now records the exact bytes it wrote into `backups.sqlite3` under the resolved
- * storage root (`MUMBLER_DATA_DIR` or `~/.mumbler`). Without isolation, a unit test that calls `store.save()` /
- * `writeJsonFile()` would open and write the developer's REAL `~/.mumbler/backups.sqlite3`. Two moves, the
+ * A settings save records the exact bytes it wrote into `backups.sqlite3` under the resolved storage root
+ * (`MUMBLER_DATA_DIR` or `~/.mumbler`). Without isolation, a unit test that saves settings or records directly
+ * would open and write the developer's REAL `~/.mumbler/backups.sqlite3`. Two moves, the
  * reference's test-migration, prevent that:
  *
  *  - Point `MUMBLER_DATA_DIR` at a fresh throwaway directory before each test, so the store opens under a

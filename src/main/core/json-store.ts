@@ -84,7 +84,7 @@ export interface JsonStoreOptions<T> {
    * `formatVersion` itself.
    */
   serialize?: (value: T) => object;
-  /** Whether writes enter backups.sqlite3. Defaults to true for managed text. */
+  /** Whether writes enter backups.sqlite3. Defaults to false: only what the user authors opts in. */
   record?: boolean;
 }
 
