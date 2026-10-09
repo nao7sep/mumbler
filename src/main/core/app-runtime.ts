@@ -1489,6 +1489,7 @@ export class ApplicationRuntime {
     await this.runtime.logger.info("settings.api-key-set", "Stored Gemini API key.", {
       hasGeminiApiKey: this.runtime.hasGeminiApiKey,
     });
+    this.runtime.logger.maskSecret(trimmed);
 
     await this.pipeline.drainQueued();
     return this.getSnapshot();
@@ -1514,7 +1515,10 @@ export class ApplicationRuntime {
   // null when neither is set. Single chokepoint used by the pipeline guards and
   // by spawnCardPipeline; nothing else reads the secret.
   private async resolveGeminiApiKey(): Promise<string | null> {
-    return resolveApiKey(this.runtime.paths!.apiKeysPath, "gemini", this.apiKeyWarn());
+    const key = await resolveApiKey(this.runtime.paths!.apiKeysPath, "gemini", this.apiKeyWarn());
+    // Whatever echoes it later, a provider error or a typed endpoint, records mask it.
+    if (key !== null) this.runtime.logger.maskSecret(key);
+    return key;
   }
 
   private async refreshHasGeminiApiKey(): Promise<void> {

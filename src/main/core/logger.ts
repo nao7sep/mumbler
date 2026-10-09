@@ -53,6 +53,8 @@ export interface SessionLogger extends AppLogger {
   // Called after each entry the database stored; an entry that went to the
   // fallback file is not in the database, so it calls nothing.
   onStored(listener: () => void): void;
+  // Masks this credential value in every entry written from now on.
+  maskSecret(value: string): void;
 }
 
 export interface LoggerOptions {
@@ -94,11 +96,30 @@ export function serializeError(error: unknown, depth = 0): unknown {
   return error;
 }
 
+// Credentials never reach a record (data-lifecycle-conventions, Credentials in
+// records): fields at known credential locations are replaced, an authorization
+// value keeping its scheme, and every known credential value is replaced
+// wherever it appears. Both work on the diagnostic copy, never the live object.
+export const REDACTED = "[REDACTED]";
+const CREDENTIAL_FIELDS: ReadonlySet<string> = new Set(["apikey", "x-goog-api-key", "authorization"]);
+
+function maskCredentialField(key: string, value: unknown): unknown {
+  if (!CREDENTIAL_FIELDS.has(key.toLowerCase()) || typeof value !== "string") return value;
+  const scheme = /^(\w+)\s+\S/.exec(value);
+  return key.toLowerCase() === "authorization" && scheme ? `${scheme[1]} ${REDACTED}` : REDACTED;
+}
+
+function maskValues(text: string, secrets: ReadonlySet<string>): string {
+  let masked = text;
+  for (const secret of secrets) masked = masked.split(secret).join(REDACTED);
+  return masked;
+}
+
 // A value that cannot be serialized (a BigInt, a cycle) is replaced by the
 // reason, so the entry itself is never lost.
 function toJson(value: unknown): string | null {
   try {
-    return JSON.stringify(value) ?? null;
+    return JSON.stringify(value, maskCredentialField) ?? null;
   } catch (failure: unknown) {
     return JSON.stringify({ serializationError: failure instanceof Error ? failure.message : String(failure) });
   }
@@ -131,6 +152,17 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
   let fallbackTail: Promise<void> = Promise.resolve();
   let termination: Promise<void> = Promise.resolve();
   let storedListener: (() => void) | null = null;
+  const secrets = new Set<string>();
+  const mask = (text: string | null): string | null => (text === null || secrets.size === 0 ? text : maskValues(text, secrets));
+  const maskEntry = (entry: RecordEntry): RecordEntry => entry.kind === "log"
+    ? { ...entry, message: mask(entry.message)!, details: mask(entry.details), error: mask(entry.error) }
+    : {
+        ...entry,
+        endpoint: mask(entry.endpoint),
+        request: mask(entry.request)!,
+        response: mask(entry.response),
+        error: mask(entry.error),
+      };
 
   const appendFallback = (entry: RecordEntry): Promise<void> => {
     const line = fallbackLine(entry);
@@ -225,7 +257,9 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
     return created;
   };
 
-  const writeEntry = (entry: RecordEntry): Promise<void> => {
+  const writeEntry = (unmasked: RecordEntry): Promise<void> => {
+    // Every sink, the database, the fallback file and stderr, takes this copy.
+    const entry = maskEntry(unmasked);
     if (workerFailed || closing !== null) {
       return boundedWrite(appendFallback(entry), RECORD_TIMEOUT_MS, () =>
         reportRecordsFailure(new Error("Records fallback timed out; the entry may still be written."), fallbackLine(entry)));
@@ -333,6 +367,10 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
     close,
     onStored: (listener) => {
       storedListener = listener;
+    },
+    maskSecret: (value) => {
+      // Too short a value would mask ordinary text; no supported key is.
+      if (value.trim().length >= 8) secrets.add(value.trim());
     },
   };
 }

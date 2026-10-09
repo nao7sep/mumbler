@@ -77,13 +77,56 @@ describe("createLogger", () => {
     expect(typeof error.stack).toBe("string");
   });
 
-  it("keeps every field as given, secrets included", async () => {
+  it("masks credential fields and keeps the rest of the structure, an authorization keeping its scheme", async () => {
     const logger = open();
-    const details = { apiKey: "AIzaSECRET", Authorization: "Bearer t", nested: { password: "pw" } };
+    const details = { apiKey: "AIzaSECRET", Authorization: "Bearer t0ken", headers: { "x-goog-api-key": "AIzaSECRET" }, model: "gemini-x" };
     await logger.info("auth", "configured the key", details);
     await logger.close();
 
-    expect(JSON.parse(rows("logs")[0].details as string)).toEqual(details);
+    expect(JSON.parse(rows("logs")[0].details as string)).toEqual({
+      apiKey: "[REDACTED]",
+      Authorization: "Bearer [REDACTED]",
+      headers: { "x-goog-api-key": "[REDACTED]" },
+      model: "gemini-x",
+    });
+    expect(details.apiKey, "the live object is not changed").toBe("AIzaSECRET");
+  });
+
+  it("masks a known key wherever it appears, in the database and the fallback file, without changing what was passed", async () => {
+    const key = "AIzaFAKE-key-0123456789";
+    const logger = open();
+    logger.maskSecret(key);
+    const request = { model: "gemini-x", note: `sent with ${key}` };
+    const error = new Error(`proxy said: invalid key ${key}`);
+    await logger.providerCall({
+      provider: "gemini", operation: "models.generateContent", endpoint: `https://proxy.example/${key}/`,
+      model: "gemini-x", cardId: "c1", step: "title", attempt: 1,
+      startedAt: "2026-10-02T00:00:00.000Z", finishedAt: "2026-10-02T00:00:01.000Z",
+      request, response: { echoed: key }, error,
+    });
+    await logger.warn("pipeline", `failed with ${key}`, { detail: key });
+    await logger.close();
+
+    const [call] = rows("provider_calls");
+    const [line] = rows("logs");
+    expect(JSON.stringify([call, line])).not.toContain(key);
+    expect(call.endpoint).toBe("https://proxy.example/[REDACTED]/");
+    expect(JSON.parse(call.request as string)).toEqual({ model: "gemini-x", note: "sent with [REDACTED]" });
+    expect(line.message).toBe("failed with [REDACTED]");
+    expect(request.note).toContain(key);
+    expect(error.message).toContain(key);
+
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      const fallback = open(true, { recordsPath: dir, logsDir });
+      fallback.maskSecret(key);
+      await fallback.info("startup", `kept ${key}`);
+      await fallback.close();
+      expect(JSON.stringify(await fallbackLines())).not.toContain(key);
+      expect(stderr.mock.calls.flat().join("")).not.toContain(key);
+    } finally {
+      stderr.mockRestore();
+    }
   });
 
   it("does not write debug lines when debug is disabled, but does when enabled", async () => {
@@ -297,7 +340,7 @@ describe("readRecords", () => {
       attempt: 1,
       startedAt: new Date(Date.now() + 1000).toISOString(),
       finishedAt: new Date(Date.now() + 2000).toISOString(),
-      request: { contents: "say hello", apiKey: "sk-test" },
+      request: { contents: "say hello", voice: "sk-test" },
       response: null,
       error: new Error("quota"),
     });
@@ -371,7 +414,7 @@ describe("readRecords", () => {
 
     const detail = await later.readRecords({ op: "detail", kind: "provider-call", id: call!.id });
     expect(detail).toMatchObject({ kind: "provider-call", provider: "gemini", step: "title", attempt: 1, response: "null" });
-    expect(JSON.parse((detail as { request: string }).request)).toEqual({ contents: "say hello", apiKey: "sk-test" });
+    expect(JSON.parse((detail as { request: string }).request)).toEqual({ contents: "say hello", voice: "sk-test" });
     expect(JSON.parse((detail as { error: string }).error)).toMatchObject({ message: "quota" });
     expect(await later.readRecords({ op: "detail", kind: "log", id: 999 })).toBeNull();
 
