@@ -1,6 +1,7 @@
 import { link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { dialog, shell } from "electron";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,8 +16,8 @@ import { formatUtcMarker } from "@shared/timestamps";
 vi.mock("electron", () => ({
   app: { getName: () => "Mumbler Test", getVersion: () => "9.9.9-test", getPath: () => "/tmp", isPackaged: false },
   BrowserWindow: Object.assign(class {}, { getAllWindows: () => [] }),
-  dialog: {},
-  shell: {},
+  dialog: { showOpenDialog: vi.fn() },
+  shell: { openPath: vi.fn(async () => "") },
   nativeTheme: { themeSource: "system" },
 }));
 
@@ -279,6 +280,33 @@ afterEach(async () => {
 });
 
 describe("first-run setup and user-owned destinations", () => {
+  it("keeps dismissed setup consumed in later window snapshots without writing skipped choices", async () => {
+    expect(runtime.getSnapshot().firstRun).toBe(true);
+    runtime.dismissFirstRunSetup();
+    expect(runtime.getSnapshot().firstRun).toBe(false);
+    expect(await exists(join(home, "config.json"))).toBe(false);
+    expect(await exists(join(home, "api-keys.json"))).toBe(false);
+  });
+
+  it.each([undefined, "redirected"])("preserves literal picker names through setup, originals selection and reopening (environment: %s)", async (value) => {
+    vi.stubEnv("MUMBLER_TEST_PICKED", value);
+    const output = join(root, "$MUMBLER_TEST_PICKED", "exports ");
+    const originals = join(root, "%MUMBLER_TEST_PICKED%", "originals");
+    const picker = vi.spyOn(runtime, "pickOutputDirectory").mockResolvedValueOnce(output);
+    try {
+      expect((await runtime.chooseOutputDirectory({} as never)).settingsSummary?.outputDirectory).toBe(output);
+      vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: [originals] });
+      await runtime.chooseOriginalsDirectory({} as never);
+      await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), theme: "dark" });
+      await runtime.shutdown();
+      runtime = await ApplicationRuntime.initialize();
+      expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+      expect(runtime.getSnapshot().settingsSummary).toMatchObject({ outputDirectory: output, backupDirectory: originals });
+      await runtime.openOutputDirectory();
+      expect(shell.openPath).toHaveBeenLastCalledWith(output);
+    } finally { picker.mockRestore(); vi.unstubAllEnvs(); }
+  });
+
   it("offers setup for a new root, writes no config on launch, and does not repeat for an existing root", async () => {
     expect(runtime.getSnapshot().firstRun).toBe(true);
     expect(await exists(join(home, "config.json"))).toBe(false);
@@ -326,6 +354,78 @@ describe("first-run setup and user-owned destinations", () => {
 });
 
 describe("the durable queue store", () => {
+  it("restores failed cancellation without losing a concurrent remaining-import draft", async () => {
+    const [cancelled, remaining] = await dropIn("cancel.wav", "keep.wav");
+    const queuePath = join(home, "queue.json");
+    let release!: () => void;
+    let publications = 0;
+    unwritable.refuses = (path) => path === queuePath && ++publications === 1;
+    unwritable.held = { path: queuePath, entered: 0, release: new Promise<void>((resolve) => { release = resolve; }) };
+    const cancellation = runtime.cancelPendingImports([cancelled.id]);
+    const rejected = expect(cancellation).rejects.toThrow("ENOSPC");
+    let edit: Promise<AppSnapshot> | undefined;
+    try {
+      await vi.waitFor(() => expect(unwritable.held!.entered).toBe(1));
+      edit = runtime.updatePendingImportDrafts([review(remaining)]);
+    } finally {
+      release();
+      await rejected;
+      await edit;
+      unwritable.held = null;
+      unwritable.refuses = () => false;
+    }
+    const persisted = (await createQueueStore(queuePath).load()).value.pendingImports;
+    expect(persisted.map((item) => item.id)).toEqual([cancelled.id, remaining.id]);
+    expect(persisted.find((item) => item.id === remaining.id)?.localTimestampText).toBe("2026-03-01 07:30:00");
+    expect(await exists(cancelled.workingFilePath)).toBe(true);
+  });
+
+  it.each(["card", "pending import"] as const)("keeps %s audio when its queue removal cannot be committed", async (kind) => {
+    const [pending] = await dropIn("retain.wav");
+    const card = kind === "card" ? cards((await runtime.confirmPendingImports([review(pending)])).snapshot)[0]! : null;
+    const queuePath = join(home, "queue.json");
+    const before = await readFile(queuePath, "utf8");
+    unwritable.refuses = (path) => path === queuePath;
+    try {
+      const removal = card ? runtime.removeCard(card.id) : runtime.cancelPendingImports([pending.id]);
+      await expect(removal).rejects.toThrow();
+      expect(await readFile(queuePath, "utf8")).toBe(before);
+      expect(await readFile(pending.workingFilePath, "utf8")).toBe("audio for retain.wav");
+      expect(card ? cards(runtime.getSnapshot()).some((entry) => entry.id === card.id)
+        : runtime.getSnapshot().state?.pendingImports.some((entry) => entry.id === pending.id)).toBe(true);
+    } finally { unwritable.refuses = () => false; }
+  });
+
+  it.each(["card", "pending import"] as const)("does not delete %s audio while queue publication is still pending", async (kind) => {
+    const [pending] = await dropIn("retain.wav");
+    const card = kind === "card" ? cards((await runtime.confirmPendingImports([review(pending)])).snapshot)[0]! : null;
+    let release!: () => void;
+    unwritable.held = { path: join(home, "queue.json"), entered: 0, release: new Promise<void>((resolve) => { release = resolve; }) };
+    const removal = card ? runtime.removeCard(card.id) : runtime.cancelPendingImports([pending.id]);
+    try {
+      await vi.waitFor(() => expect(unwritable.held!.entered).toBe(1));
+      expect(await readFile(pending.workingFilePath, "utf8")).toBe("audio for retain.wav");
+    } finally { release(); await removal; unwritable.held = null; }
+    expect(await exists(pending.workingFilePath)).toBe(false);
+  });
+
+  it("restores audio-tool availability and surviving key presence after Reset from failed startup", async () => {
+    await runtime.setGeminiApiKey("retained-test-key");
+    await runtime.shutdown();
+    await writeFile(join(home, "queue.json"), "broken queue");
+    runtime = await ApplicationRuntime.initialize();
+    expect(runtime.getSnapshot().startupDiagnostic?.canReset).toBe(true);
+    expect(runtime.getSnapshot().dependencies).toBeNull();
+
+    const snapshot = await runtime.resetState();
+
+    expect(snapshot.startupDiagnostic).toBeNull();
+    expect(snapshot.dependencies).not.toBeNull();
+    expect(snapshot.settingsSummary?.hasGeminiApiKey).toBe(true);
+    expect(runtime.getSettingsDraft().hasGeminiApiKey).toBe(true);
+    expect((await dropIn("after-reset.wav"))).toHaveLength(1);
+  });
+
   it("reports completed reset moves when a later store becomes newer before its move", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
@@ -1363,6 +1463,24 @@ describe("each card's text in its own file", () => {
     await runtime.removeCard(card.id);
 
     expect(await readdir(join(home, "transcripts"))).toEqual([]);
+  });
+
+  it("restores transcript and queue retry information when audio removal is refused", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+    await withTextOnDisk(card);
+    undeletable.add(card.sourceFilePath);
+
+    await expect(runtime.removeCard(card.id)).rejects.toThrow(/working audio/);
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(cards(runtime.getSnapshot())[0]).toMatchObject({
+      id: card.id,
+      transcription: { text: "every word that was said" },
+      metadata: { structured: "## what it was about" },
+    });
+    expect(await exists(card.sourceFilePath)).toBe(true);
   });
 
   it("keeps a lost queue's text files, at the launch that finds no queue and at every launch after it", async () => {

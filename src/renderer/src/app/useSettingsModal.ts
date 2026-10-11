@@ -84,6 +84,7 @@ export function useSettingsModal({
             : {
                 ...current,
                 outputDirectory: nextPath,
+                literalOutputDirectory: nextPath,
               },
         );
       }
@@ -106,6 +107,7 @@ export function useSettingsModal({
             : {
                 ...current,
                 backupDirectory: nextPath,
+                literalBackupDirectory: nextPath,
               },
         );
       }

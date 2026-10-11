@@ -53,7 +53,7 @@ import {
 import { abandonBackupStore, closeBackupStore, setBackupStoreSession, setBackupStoreWarn } from "./backupStore";
 import { NewerFormatError } from "./format-versions";
 import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-store";
-import { resolvePathFromHome, resolveStorageRoot } from "./storage-root";
+import { resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
 import { formatError, preserveAside } from "./file-io";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState } from "./working-files";
@@ -469,47 +469,7 @@ export class ApplicationRuntime {
 
       runtime.firstRun = firstRun;
 
-      // Managed audio tools (ffmpeg/ffprobe). The store holds their persisted
-      // facts; the manager reconciles on-disk presence, drives the operations, and
-      // notifies the runtime to re-emit the snapshot as state changes. The tool
-      // resolver is wired so audio-tools can find the managed binaries; a missing
-      // tool surfaces through the Audio Tools surface, never a hard startup failure.
-      // dependencies.json is a re-derivable facts cache, so no problem with it
-      // blocks launch and nothing is set aside. A damaged file starts from the
-      // defaults and is replaced by the next facts save. One that could not be
-      // read or is in a newer format is left as it is: this session keeps its
-      // facts in memory only.
-      const dependenciesFile = createDependenciesStore(paths.dependenciesPath);
-      let dependenciesStore: Pick<JsonStore<DependenciesValue>, "save"> = dependenciesFile;
-      let dependenciesValue: DependenciesValue;
-      try {
-        const loaded = await dependenciesFile.load();
-        dependenciesValue = loaded.value;
-        if (loaded.origin === "created") await dependenciesStore.save(dependenciesValue);
-      } catch (error: unknown) {
-        dependenciesValue = createDefaultDependencies();
-        const damaged = error instanceof CorruptStateError;
-        if (!damaged) dependenciesStore = { save: async () => undefined };
-        await logger.warn("dependencies.defaults", damaged
-          ? "dependencies.json was damaged; using defaults until the next facts save replaces it."
-          : "dependencies.json could not be used; keeping tool facts in memory this session.", {
-          path: paths.dependenciesPath,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-      const toolManager = new ToolManager({
-        binDir: paths.binDir,
-        tempDir: paths.tempDir,
-        platform: process.platform,
-        arch: process.arch,
-        value: dependenciesValue,
-        store: dependenciesStore,
-        logger,
-        notify: () => runtime.emitDependenciesChanged(),
-      });
-      await toolManager.reconcile();
-      runtime.attachToolManager(toolManager);
-      configureToolResolver((name) => toolManager.resolveToolPath(name));
+      await runtime.initializeTools();
 
       await runtime.drainQueuedCards();
       // The staleness-gated launch update check runs in the background so it never
@@ -544,8 +504,60 @@ export class ApplicationRuntime {
     }
   }
 
+  private async initializeTools(): Promise<void> {
+    const { paths, logger } = this.runtime;
+    if (paths === null) throw new Error("Audio tools require resolved app paths.");
+    // Managed audio tools (ffmpeg/ffprobe). The store holds their persisted
+    // facts; the manager reconciles on-disk presence, drives the operations, and
+    // notifies the runtime to re-emit the snapshot as state changes. The tool
+    // resolver is wired so audio-tools can find the managed binaries; a missing
+    // tool surfaces through the Audio Tools surface, never a hard startup failure.
+    // dependencies.json is a re-derivable facts cache, so no problem with it
+    // blocks launch and nothing is set aside. A damaged file starts from the
+    // defaults and is replaced by the next facts save. One that could not be
+    // read or is in a newer format is left as it is: this session keeps its
+    // facts in memory only.
+    const dependenciesFile = createDependenciesStore(paths.dependenciesPath);
+    let dependenciesStore: Pick<JsonStore<DependenciesValue>, "save"> = dependenciesFile;
+    let dependenciesValue: DependenciesValue;
+    try {
+      const loaded = await dependenciesFile.load();
+      dependenciesValue = loaded.value;
+      if (loaded.origin === "created") await dependenciesStore.save(dependenciesValue);
+    } catch (error: unknown) {
+      dependenciesValue = createDefaultDependencies();
+      const damaged = error instanceof CorruptStateError;
+      if (!damaged) dependenciesStore = { save: async () => undefined };
+      await logger.warn("dependencies.defaults", damaged
+        ? "dependencies.json was damaged; using defaults until the next facts save replaces it."
+        : "dependencies.json could not be used; keeping tool facts in memory this session.", {
+        path: paths.dependenciesPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    const toolManager = new ToolManager({
+      binDir: paths.binDir,
+      tempDir: paths.tempDir,
+      platform: process.platform,
+      arch: process.arch,
+      value: dependenciesValue,
+      store: dependenciesStore,
+      logger,
+      notify: () => this.emitDependenciesChanged(),
+    });
+    await toolManager.reconcile();
+    this.attachToolManager(toolManager);
+    configureToolResolver((name) => toolManager.resolveToolPath(name));
+  }
+
   onPipelineProgress(callback: () => void): void {
     this.onPipelineProgressCallback = callback;
+  }
+
+  dismissFirstRunSetup(): void {
+    // Owned by the app session, so reopening the Mac window does not repeat
+    // completed/skipped setup. No durable marker or skipped setting is written.
+    this.firstRun = false;
   }
 
   onDependenciesChanged(callback: () => void): void {
@@ -834,11 +846,14 @@ export class ApplicationRuntime {
       this.runtime.transcriptStore = new TranscriptStore(paths.transcriptsDir);
       this.queueBehind = false;
       this.runtime.layoutStore = layoutNewer ? null : layoutStore;
+      this.runtime.hasGeminiApiKey = await hasApiKey(paths.apiKeysPath, "gemini", makeApiKeyWarn(logger));
+      if (this.runtime.toolManager === null) await this.initializeTools();
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
       this.runtime.recoveredInterruptedCards = 0;
       applyThemePreference(settings.theme);
       this.followLanguageChange(previousPreference, previousLanguage);
+      void this.startToolMaintenance();
 
       return this.getSnapshot();
     } catch (error: unknown) {
@@ -1106,8 +1121,25 @@ export class ApplicationRuntime {
     this.ensureReady();
     const state = this.runtime.state!;
     const cancelIds = new Set(ids);
+    const previousPending = state.pendingImports;
     const cancelled = state.pendingImports.filter((item) => cancelIds.has(item.id));
 
+    state.pendingImports = state.pendingImports.filter((item) => !cancelIds.has(item.id));
+    // Keep every recording until the durable queue no longer references it.
+    // New imports and cancellation are serialized, but draft saves for the
+    // remaining imports can still run while this publication is pending.
+    try {
+      await this.persistState();
+    } catch (error: unknown) {
+      const current = new Map(state.pendingImports.map((item) => [item.id, item]));
+      state.pendingImports = previousPending.map((item) => current.get(item.id) ?? item);
+      // A concurrent draft packet may have committed the temporary removal.
+      // Publish the restored list after it, retaining newer surviving drafts.
+      try { await this.persistState(); } catch (restoreError: unknown) {
+        await this.runtime.logger.error("import.cancel-restore", "Cancellation failed and the retained review items could not be saved; working audio remains intact.", restoreError);
+      }
+      throw error;
+    }
     for (const pendingImport of cancelled) {
       try {
         await rm(pendingImport.workingFilePath, { force: true });
@@ -1119,8 +1151,6 @@ export class ApplicationRuntime {
       }
     }
 
-    state.pendingImports = state.pendingImports.filter((item) => !cancelIds.has(item.id));
-    await this.persistState();
     await this.runtime.logger.info("import.cancelled", "Cancelled pending imports.", {
       cancelledCount: cancelled.length,
     });
@@ -1395,9 +1425,8 @@ export class ApplicationRuntime {
   async openOutputDirectory(): Promise<void> {
     this.ensureReady();
 
-    const configured = this.runtime.settings!.outputDirectory?.trim() ?? "";
-    if (configured.length === 0) throw new OperationError("Choose a save folder first.");
-    const targetDir = configured;
+    const targetDir = this.runtime.settings!.outputDirectory;
+    if (targetDir === null) throw new OperationError("Choose a save folder first.");
     await mkdir(targetDir, { recursive: true });
 
     const errorMessage = await shell.openPath(targetDir);
@@ -1715,12 +1744,13 @@ export class ApplicationRuntime {
 
   private async persistSetupDirectory(directory: string): Promise<AppSnapshot> {
     this.ensureReady();
-    if (directory.trim().length === 0) throw new OperationError("Choose a save folder first.");
-    const resolved = resolvePathFromHome(directory.trim(), homedir());
+    // Setup supplies only the native picker result or the suggested absolute
+    // path, never authored expressions. Preserve that literal selection.
+    if (!isAbsolute(directory)) throw new OperationError("Choose a save folder first.");
     const nextSettings = {
       ...this.runtime.settings!,
-      outputDirectory: resolved,
-      backupDirectory: this.runtime.settings!.backupDirectory ?? join(resolved, "Originals"),
+      outputDirectory: directory,
+      backupDirectory: this.runtime.settings!.backupDirectory ?? join(directory, "Originals"),
     };
     // Targeted save preserves unsupported and unknown settings the setup never showed.
     await this.runtime.settingsStore!.save(nextSettings);
@@ -1990,19 +2020,24 @@ export class ApplicationRuntime {
       busy: "Cannot remove a card while it is being processed.",
     });
     // Out of the queue before the first await, so no save or trim can claim the
-    // card while its audio is being deleted.
+    // card while its removal is being committed.
     state.cards = state.cards.filter((entry) => entry.id !== cardId);
 
-    // The card's audio is deleted here and nowhere later: startup never sweeps
-    // a recording, so audio that cannot be deleted keeps its card in the queue.
+    // Commit removal before deleting the recording. A failed queue publication
+    // must leave the working audio intact; a crash after publication may leave
+    // an unreferenced recording, which launch deliberately never sweeps.
     try {
+      await this.persistState();
       await rm(card.sourceFilePath, { force: true });
     } catch (error: unknown) {
       state.cards = [...state.cards, card].sort((left, right) =>
         left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
       );
-      // A save made while the deletion ran left the card out of queue.json.
-      await this.persistState();
+      // Restore retry information, including the transcript removed by the
+      // committed queue change. persistState writes text before the queue.
+      try { await this.persistState(); } catch (restoreError: unknown) {
+        await this.runtime.logger.error("card.remove-restore", "Removal failed and the retained card could not be saved; working audio remains intact.", restoreError, { cardId });
+      }
       throw new Error(`Failed to delete the working audio of card ${cardId}: ${formatError(error)}`, { cause: error });
     }
     await this.runtime.logger.info("card.remove", "Deleted card working audio and removed card.", {
@@ -2010,8 +2045,6 @@ export class ApplicationRuntime {
       sourceFilePath: card.sourceFilePath,
     });
 
-    // The card's text file goes with it, once queue.json no longer refers to it.
-    await this.persistState();
     return this.getSnapshot();
   }
 

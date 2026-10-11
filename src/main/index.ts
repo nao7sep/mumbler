@@ -151,11 +151,10 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
     event.preventDefault();
     if (!quitController?.isRunning()) close.request();
   });
-  // Windows asks before a logout, restart or shutdown and never sends
-  // before-quit. Holding the answer gives the save its bounded time; the
-  // process then exits and Windows goes on (Electron's documented use).
-  window.on("query-session-end", (event) => {
-    event.preventDefault();
+  // Windows does not send before-quit for logout/restart. Start best-effort
+  // saving without vetoing or extending the OS session end; Windows may end
+  // the process before the app's own bounded attempt finishes.
+  window.on("query-session-end", () => {
     quitController?.request("session-end");
   });
   // A session end Windows did not ask about first (a forced or critical one)

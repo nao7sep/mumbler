@@ -11,6 +11,7 @@ let root: Root;
 const setGeminiApiKey = vi.fn();
 const saveSetupDirectory = vi.fn();
 const pickOutputDirectory = vi.fn();
+const dismissFirstRunSetup = vi.fn();
 const close = vi.fn();
 const update = vi.fn();
 const snapshot = { settingsSummary: { defaultOutputDirectory: "/fixtures/Documents/Mumbler", hasGeminiApiKey: false } } as AppSnapshot;
@@ -20,8 +21,9 @@ function button(label: string): HTMLButtonElement {
 async function click(label: string): Promise<void> { await act(async () => button(label).click()); }
 beforeEach(async () => {
   vi.resetAllMocks();
+  dismissFirstRunSetup.mockResolvedValue(undefined);
   Object.defineProperty(window, "mumbler", { configurable: true, value: {
-    setGeminiApiKey, saveSetupDirectory, pickOutputDirectory,
+    setGeminiApiKey, saveSetupDirectory, pickOutputDirectory, dismissFirstRunSetup,
     reportRendererDiagnostic: vi.fn().mockResolvedValue(undefined),
     onUnsavedDrafts: () => () => undefined,
   } satisfies Partial<MumblerShellApi> });
@@ -43,6 +45,7 @@ describe("ordered skippable setup", () => {
     expect(document.body.textContent).toContain("/fixtures/Documents/Mumbler");
     await click("Skip");
     expect(close).toHaveBeenCalledOnce();
+    expect(dismissFirstRunSetup).toHaveBeenCalledOnce();
     expect(setGeminiApiKey).not.toHaveBeenCalled();
     expect(saveSetupDirectory).not.toHaveBeenCalled();
   });

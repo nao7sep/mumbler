@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppPaths, AppSnapshot, MumblerShellApi } from "@shared/app-shell";
 import { App } from "@renderer/app/App";
+import { createDefaultSettings, summarizeSettings } from "@main/core/settings-schema";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -47,6 +48,26 @@ afterEach(async () => {
 });
 
 describe("App startup snapshot gate", () => {
+  it("does not reopen dismissed setup when a new Mac window mounts in the same app session", async () => {
+    let firstRun = true;
+    getSnapshot.mockImplementation(async () => ({
+      ...readySnapshot(), firstRun, dependencies: [],
+      settingsSummary: summarizeSettings(createDefaultSettings(), "/fixtures/Documents/Mumbler", "/fixtures/Documents/Mumbler/Originals", false),
+    }));
+    window.mumbler.dismissFirstRunSetup = vi.fn(async () => { firstRun = false; });
+    await act(async () => root?.render(createElement(App)));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Set Up Mumbler (1/3)"));
+    for (let step = 0; step < 3; step += 1) {
+      await act(async () => button("Skip")!.click());
+    }
+    expect(window.mumbler.dismissFirstRunSetup).toHaveBeenCalledOnce();
+    await act(async () => root?.unmount());
+    root = createRoot(document.querySelector("#root")!);
+    await act(async () => root?.render(createElement(App)));
+    await vi.waitFor(() => expect(document.querySelector(".app-shell")).not.toBeNull());
+    expect(document.body.textContent).not.toContain("Set Up Mumbler");
+  });
+
   it("keeps the ordinary shell unmounted and presents authored recovery for a hostile rejection", async () => {
     getSnapshot.mockRejectedValue(hostile);
 

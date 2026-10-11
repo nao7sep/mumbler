@@ -23,13 +23,24 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
   // Only the key is an editable draft. Folder selection saves immediately; a
   // cancelled picker writes nothing. Quit uses the ordinary settings-draft owner.
   useEffect(() => window.mumbler.onUnsavedDrafts(
-    () => key.length > 0 ? ["settings"] : [], onClose,
+    () => key.length > 0 ? ["settings"] : [], () => { void finish(); },
   ), [key, onClose]);
+
+  async function finish(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      await window.mumbler.dismissFirstRunSetup();
+      onClose();
+    } catch (cause) {
+      setError(presentFailure(cause, message("error.settingsSave"), "setup dismissal failed"));
+    } finally { setBusy(false); }
+  }
 
   function close(): void {
     if (busy) return;
     if (key.length > 0) { setDiscardNext(false); setDiscard(true); }
-    else onClose();
+    else void finish();
   }
   function next(): void {
     setKey("");
@@ -53,7 +64,7 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
       const folder = pick ? await window.mumbler.pickOutputDirectory() : snapshot.settingsSummary!.defaultOutputDirectory;
       if (folder === null) return;
       onSnapshot(await window.mumbler.saveSetupDirectory(folder));
-      onClose();
+      await finish();
     } catch (cause) {
       setError(presentFailure(cause, message("error.chooseOutputFolder"), "setup folder save failed"));
     } finally { setBusy(false); }
@@ -65,7 +76,7 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
     else next();
   }}>{t("setup.skip")}</button>;
   return <>
-    {step === 1 ? <AudioToolsModal {...tools} heading={title} onClose={close} footer={<>
+    {step === 1 ? <AudioToolsModal {...tools} operationError={error ?? tools.operationError} heading={title} onClose={close} footer={<>
       {skip}
       <button type="button" className="button button--primary" onClick={next}>{t("setup.next")}</button>
     </>} /> : <ModalShell key={step} title={title} onRequestClose={close} closeDisabled={busy} footer={<>
@@ -86,6 +97,6 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
         {error !== null && <p className="banner banner--error" role="alert">{text(error)}</p>}
       </div>
     </ModalShell>}
-    {discard && <DiscardSettingsModal onKeepEditing={() => setDiscard(false)} onDiscard={() => { setDiscard(false); if (discardNext) next(); else onClose(); }} />}
+    {discard && <DiscardSettingsModal onKeepEditing={() => setDiscard(false)} onDiscard={() => { setDiscard(false); if (discardNext) next(); else void finish(); }} />}
   </>;
 }

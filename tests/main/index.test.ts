@@ -298,21 +298,25 @@ describe("quit", () => {
     expect(state.questions).toEqual([]);
   });
 
-  it("holds a Windows logout, which never reaches before-quit, saves without asking, and exits", async () => {
+  it("lets Windows logout proceed and saves once without asking across both session-end events", async () => {
+    onPlatform("win32");
     state.saveForQuit = () => Promise.resolve(["settings"]);
+    state.unsavedDrafts = ["settings"];
     await boot();
     const query = { preventDefault: vi.fn() };
 
     mainWindow.handlers.get("query-session-end")!(query);
+    mainWindow.handlers.get("session-end")!({ preventDefault: vi.fn() });
     await vi.waitFor(() => expect(state.exits).toEqual([0]));
 
-    expect(query.preventDefault, "Windows waits for the save").toHaveBeenCalledOnce();
+    expect(query.preventDefault, "saving never vetoes Windows logout").not.toHaveBeenCalled();
     expect(mainWindow.flushRequests).toBe(1);
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
     expect(state.questions).toEqual([]);
   });
 
   it("starts the same save when Windows ends the session without asking first", async () => {
+    onPlatform("win32");
     await boot();
 
     mainWindow.handlers.get("session-end")!({ preventDefault: vi.fn() });
@@ -331,6 +335,49 @@ describe("quit", () => {
 
     expect(close.preventDefault).toHaveBeenCalledOnce();
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+  });
+
+  it.each(["cancel", "discard"] as const)("handles %s for unsaved Settings on Windows window close", async (choice) => {
+    onPlatform("win32");
+    state.unsavedDrafts = ["settings"];
+    state.draftsChoice = choice;
+    await boot();
+    const close = { preventDefault: vi.fn() };
+
+    mainWindow.handlers.get("close")!(close);
+    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    if (choice === "discard") {
+      await vi.waitFor(() => expect(state.exits).toEqual([0]));
+      expect(mainWindow.discards).toBe(1);
+      expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+    } else {
+      expect(state.exits).toEqual([]);
+      expect(mainWindow.discards).toBe(0);
+      expect(runtime.saveForQuit).not.toHaveBeenCalled();
+    }
+    expect(close.preventDefault).toHaveBeenCalledOnce();
+    expect(mainWindow.closes).toBe(0);
+  });
+
+  it.each(["cancel", "retry", "quit-anyway"] as const)("honors %s after a failed save on Windows window close", async (choice) => {
+    onPlatform("win32");
+    let saves = 0;
+    state.saveForQuit = async () => ++saves === 1 ? ["queue"] : [];
+    state.quitChoice = choice;
+    await boot();
+
+    mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
+    if (choice === "cancel") {
+      await vi.waitFor(() => expect(runtime.resumeAfterCancelledQuit).toHaveBeenCalledOnce());
+      expect(state.exits).toEqual([]);
+      expect(runtime.closeForQuit).not.toHaveBeenCalled();
+    } else {
+      await vi.waitFor(() => expect(state.exits).toEqual([0]));
+      expect(runtime.closeForQuit).toHaveBeenCalledOnce();
+      expect(runtime.resumeAfterCancelledQuit).not.toHaveBeenCalled();
+    }
+    expect(state.questions).toHaveLength(1);
+    expect(saves).toBe(choice === "retry" ? 2 : 1);
   });
 
   it("retains the Mac window when its edit save fails", async () => {

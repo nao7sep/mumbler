@@ -6,6 +6,7 @@ import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery
 export const APP_SHELL_CHANNELS = {
   getInterfaceLanguage: "app-shell:get-interface-language",
   getSnapshot: "app-shell:get-snapshot",
+  dismissFirstRunSetup: "app-shell:dismiss-first-run-setup",
   getSettingsDraft: "app-shell:get-settings-draft",
   getDefaultPrompts: "app-shell:get-default-prompts",
   openImportDialog: "app-shell:open-import-dialog",
@@ -354,8 +355,12 @@ export interface SettingsDraft {
   uiFontFamily: string;
   // Files
   outputDirectory: string;
+  // Session-only provenance: unchanged stored/picked paths are literal. Editing
+  // their text makes them authored expressions again; these never enter config.
+  literalOutputDirectory?: string;
   defaultOutputDirectory: string;
   backupDirectory: string;
+  literalBackupDirectory?: string;
   defaultBackupDirectory: string;
   // Import — "system" or an IANA zone, as saved.
   defaultTimezone: string;
@@ -606,6 +611,7 @@ export type SaveCardResult =
 export interface MumblerShellApi {
   getInterfaceLanguage(): Promise<InterfaceLanguage>;
   getSnapshot(): Promise<AppSnapshot>;
+  dismissFirstRunSetup(): Promise<void>;
   getSettingsDraft(): Promise<SettingsDraft>;
   getDefaultPrompts(): Promise<PromptTemplates>;
   openImportDialog(): Promise<ImportOperationResult>;

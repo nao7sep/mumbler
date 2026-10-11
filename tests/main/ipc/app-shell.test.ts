@@ -27,7 +27,7 @@ const { registerAppShellIpc } = await import("@main/ipc/app-shell");
 const { OperationError } = await import("@main/core/operation-error");
 
 const RUNTIME_METHODS = [
-  "getSnapshot", "getSettingsDraft", "getDefaultPrompts",
+  "getSnapshot", "dismissFirstRunSetup", "getSettingsDraft", "getDefaultPrompts",
   "openImportDialog", "importDroppedPaths", "updatePendingImportDrafts", "confirmPendingImports",
   "selectCard", "duplicateCard", "updateCardTrim", "getCardMediaSource", "generateCardStep",
   "cancelCardProcessing", "pickOutputDirectory", "openOutputDirectory", "saveSettingsDraft",
@@ -87,6 +87,7 @@ describe("the app-shell IPC boundary", () => {
   // the renderer sends, which must arrive unchanged.
   it.each([
     ["getSnapshot", "getSnapshot", []],
+    ["dismissFirstRunSetup", "dismissFirstRunSetup", []],
     ["getSettingsDraft", "getSettingsDraft", []],
     ["getDefaultPrompts", "getDefaultPrompts", []],
     ["importDroppedPaths", "importDroppedPaths", [["/tmp/a.flac", "/tmp/b.m4a"]]],

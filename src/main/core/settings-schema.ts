@@ -8,6 +8,7 @@ import type {
 } from "@shared/app-shell";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
+import { isAbsolute } from "node:path";
 import {
   DEFAULT_TIMESTAMP_PATTERN,
   SYSTEM_TIMEZONE,
@@ -217,8 +218,12 @@ function normalizeSettings(
     if (!stored && row) Object.assign(settings, { [key]: row.defaultThinking });
   }
   for (const key of ["outputDirectory", "backupDirectory"] as const) {
-    const path = settings[key]?.trim() ?? "";
-    settings[key] = path.length === 0 ? null : resolvePathFromHome(path, homeDirectory);
+    const path = settings[key] ?? "";
+    // App saves contain resolved absolute references, not expressions. Keep
+    // their literal dollar/percent names and spaces across reopen. Older
+    // hand-authored relative/tilde/env expressions retain their input semantics.
+    settings[key] = path.trim().length === 0 ? null
+      : isAbsolute(path) ? path : resolvePathFromHome(path, homeDirectory);
   }
   return settings;
 }
@@ -754,8 +759,10 @@ export function buildSettingsDraft(
     uiFontFamily: settings.uiFontFamily,
     // Files
     outputDirectory: settings.outputDirectory ?? "",
+    literalOutputDirectory: settings.outputDirectory ?? "",
     defaultOutputDirectory,
     backupDirectory: settings.backupDirectory ?? "",
+    literalBackupDirectory: settings.backupDirectory ?? "",
     defaultBackupDirectory,
     // Import
     defaultTimezone: settings.defaultTimezone,
@@ -790,8 +797,14 @@ export function applySettingsDraft(
   draft: SettingsDraft,
   homeDirectory: string = homedir(),
 ): MumblerSettings {
-  const outputDirectory = draft.outputDirectory.trim();
-  const backupDirectory = draft.backupDirectory.trim();
+  const directory = (value: string, literal: string | undefined): string | null => {
+    if (value.trim().length === 0) return null;
+    // A picker and an unchanged stored reference have already been resolved.
+    // Only newly authored text accepts expressions; trimming a literal filename
+    // would also change which directory the user selected.
+    if (value === literal && isAbsolute(value)) return value;
+    return resolvePathFromHome(value, homeDirectory);
+  };
   const next: MumblerSettings = {
     ...current,
     language: normalizeLanguagePreference(draft.language),
@@ -800,14 +813,8 @@ export function applySettingsDraft(
     // Free text; blank means the built-in default stack.
     uiFontFamily: singleLine(draft.uiFontFamily),
     // Files
-    outputDirectory:
-      outputDirectory.length === 0
-        ? null
-        : resolvePathFromHome(outputDirectory, homeDirectory),
-    backupDirectory:
-      backupDirectory.length === 0
-        ? null
-        : resolvePathFromHome(backupDirectory, homeDirectory),
+    outputDirectory: directory(draft.outputDirectory, draft.literalOutputDirectory),
+    backupDirectory: directory(draft.backupDirectory, draft.literalBackupDirectory),
     // Import
     defaultTimezone: singleLine(draft.defaultTimezone),
     timestampPattern: singleLine(draft.timestampPattern),

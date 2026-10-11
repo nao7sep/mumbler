@@ -44,6 +44,7 @@ const api: MumblerShellApi = {
   getInterfaceLanguage: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getInterfaceLanguage) as Promise<InterfaceLanguage>,
   getSnapshot: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.getSnapshot) as Promise<AppSnapshot>,
+  dismissFirstRunSetup: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.dismissFirstRunSetup) as Promise<void>,
   getSettingsDraft: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getSettingsDraft) as Promise<SettingsDraft>,
   getDefaultPrompts: () =>
