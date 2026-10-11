@@ -12,72 +12,117 @@ import type { CardTrim, MumblerCard } from "@shared/app-shell";
 // under test is the component: the markers it commits, what it refuses, and
 // what it tells the user when a save fails.
 const wave = vi.hoisted(() => {
-  const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
-  const player = {
-    duration: 300,
-    currentTime: 0,
-    played: [] as Array<{ startSec: number; endSec: number }>,
-    seekedTo: [] as number[],
-    playPauseCalls: 0,
-    destroyed: false,
-    on(event: string, callback: (...args: unknown[]) => void) {
-      listeners.set(event, [...(listeners.get(event) ?? []), callback]);
-      return () => listeners.set(event, (listeners.get(event) ?? []).filter((entry) => entry !== callback));
-    },
-    getDuration: () => player.duration,
-    getCurrentTime: () => player.currentTime,
-    setTime: (value: number) => {
-      player.currentTime = value;
-      player.seekedTo.push(value);
-    },
-    play: async (startSec: number, endSec: number) => {
-      player.played.push({ startSec, endSec });
-    },
-    playPause: async () => {
-      player.playPauseCalls += 1;
-    },
-    setOptions: () => undefined,
-    destroy: () => {
-      player.destroyed = true;
-    },
-  };
-  const regions = {
-    added: [] as Array<Record<string, unknown>>,
-    on: (event: string, callback: (...args: unknown[]) => void) => {
-      listeners.set(event, [...(listeners.get(event) ?? []), callback]);
-      return () => undefined;
-    },
-    addRegion: (options: Record<string, unknown>) => {
-      regions.added.push(options);
-      return { ...options, setOptions: () => undefined, remove: () => undefined };
-    },
-  };
+  type Listener = (...args: unknown[]) => void;
+  function subscriptions() {
+    const listeners = new Map<string, Set<Listener>>();
+    return {
+      listeners,
+      on(event: string, callback: Listener) {
+        const callbacks = listeners.get(event) ?? new Set<Listener>();
+        callbacks.add(callback);
+        listeners.set(event, callbacks);
+        return () => {
+          callbacks.delete(callback);
+          if (callbacks.size === 0) listeners.delete(event);
+        };
+      },
+      emit(event: string, ...args: unknown[]): void {
+        for (const callback of listeners.get(event) ?? []) callback(...args);
+      },
+    };
+  }
+
+  function makeRegions() {
+    const regions = {
+      ...subscriptions(),
+      added: [] as Array<Record<string, unknown>>,
+      addRegion: (options: Record<string, unknown>) => {
+        regions.added.push(options);
+        const region = {
+          ...options,
+          setOptions: (next: Record<string, unknown>) => { Object.assign(region, next); },
+          remove: () => regions.emit("region-removed", region),
+        };
+        return region;
+      },
+    };
+    return regions;
+  }
+
+  function makePlayer(url: string, regions: ReturnType<typeof makeRegions>, duration: number) {
+    const player = {
+      ...subscriptions(),
+      url,
+      regions,
+      duration,
+      currentTime: 0,
+      played: [] as Array<{ startSec: number; endSec: number }>,
+      seekedTo: [] as number[],
+      playPauseCalls: 0,
+      destroyCalls: 0,
+      get destroyed(): boolean { return player.destroyCalls > 0; },
+      getDuration: () => player.duration,
+      getCurrentTime: () => player.currentTime,
+      setTime: (value: number) => {
+        player.currentTime = value;
+        player.seekedTo.push(value);
+      },
+      play: async (startSec: number, endSec: number) => {
+        player.played.push({ startSec, endSec });
+      },
+      playPause: async () => {
+        player.playPauseCalls += 1;
+      },
+      setOptions: () => undefined,
+      // Do not erase listeners here: each actual unsubscribe must prove its
+      // own disposal independently of the player's destruction.
+      destroy: () => { player.destroyCalls += 1; },
+    };
+    return player;
+  }
+
+  const players: Array<ReturnType<typeof makePlayer>> = [];
+  const regionInstances: Array<ReturnType<typeof makeRegions>> = [];
+  let nextDuration = 300;
   return {
-    listeners,
-    createdUrls: [] as string[],
-    player,
-    regions,
+    players,
+    regionInstances,
+    get createdUrls(): string[] { return players.map((player) => player.url); },
+    get player() {
+      const player = players.at(-1);
+      if (!player) throw new Error("No player has been created.");
+      return player;
+    },
+    get regions() {
+      const regions = regionInstances.at(-1);
+      if (!regions) throw new Error("No Regions plugin has been created.");
+      return regions;
+    },
+    set nextDuration(value: number) { nextDuration = value; },
+    createPlayer(options: { url: string; plugins: Array<ReturnType<typeof makeRegions>> }) {
+      const player = makePlayer(options.url, options.plugins[0]!, nextDuration);
+      players.push(player);
+      return player;
+    },
+    createRegions() {
+      const regions = makeRegions();
+      regionInstances.push(regions);
+      return regions;
+    },
     emit(event: string, ...args: unknown[]): void {
-      for (const callback of listeners.get(event) ?? []) callback(...args);
+      this.player.emit(event, ...args);
+      this.regions.emit(event, ...args);
     },
     reset(): void {
-      listeners.clear();
-      this.createdUrls = [];
-      regions.added = [];
-      Object.assign(player, {
-        duration: 300,
-        currentTime: 0,
-        played: [],
-        seekedTo: [],
-        playPauseCalls: 0,
-        destroyed: false,
-      });
+      players.length = 0;
+      regionInstances.length = 0;
+      nextDuration = 300;
     },
   };
 });
 
-vi.mock("wavesurfer.js", () => ({ default: { create: (options: { url: string }) => { wave.createdUrls.push(options.url); return wave.player; } } }));
-vi.mock("wavesurfer.js/dist/plugins/regions.esm.js", () => ({ default: { create: () => wave.regions } }));
+vi.mock("wavesurfer.js", () => ({ default: { create: wave.createPlayer } }));
+vi.mock("wavesurfer.js/dist/plugins/regions.esm.js", () => ({ default: { create: wave.createRegions } }));
 
 import type { WaveformEditorHandle } from "@renderer/app/WaveformEditor";
 
@@ -197,7 +242,7 @@ afterEach(async () => {
 
 describe("opening a recording", () => {
   it("asks main for the working audio and reports the length the file turned out to have", async () => {
-    wave.player.duration = 425.5;
+    wave.nextDuration = 425.5;
     await mountEditor();
 
     expect(getCardMediaSource).toHaveBeenCalledExactlyOnceWith("card-1");
@@ -226,6 +271,78 @@ describe("opening a recording", () => {
 
     expect(wave.regions.added).toEqual([expect.objectContaining({ start: 30, end: 200, drag: false, resize: true })]);
     expect(text()).toContain("Keep 0:30.0 to 3:20.0");
+  });
+});
+
+describe("player resource ownership", () => {
+  it("repeatedly reopens with distinct players and disposes every retired player's subscriptions exactly once", async () => {
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      await mountEditor();
+      const player = wave.player;
+      const regions = wave.regions;
+      expect(wave.players).toHaveLength(cycle + 1);
+      expect(wave.regionInstances).toHaveLength(cycle + 1);
+      expect(new Set(wave.players).size).toBe(cycle + 1);
+      expect(new Set(wave.regionInstances).size).toBe(cycle + 1);
+      expect(player.regions).toBe(regions);
+      expect(player.destroyCalls).toBe(0);
+      expect(player.listeners.size).toBeGreaterThan(0);
+      expect(regions.listeners.size).toBeGreaterThan(0);
+      expect(wave.players.slice(0, -1).every((retired) => retired.destroyCalls === 1 && retired.listeners.size === 0)).toBe(true);
+      expect(wave.regionInstances.slice(0, -1).every((retired) => retired.listeners.size === 0)).toBe(true);
+
+      await act(async () => root?.unmount());
+      root = null;
+      expect(player.destroyCalls).toBe(1);
+      expect(player.listeners.size).toBe(0);
+      expect(regions.listeners.size).toBe(0);
+      await act(async () => {
+        player.emit("timeupdate", 88);
+        regions.emit("region-updated", { start: 42, end: 200 });
+      });
+      expect(onTrimCommit).not.toHaveBeenCalled();
+    }
+    expect(wave.players.every((player) => player.destroyCalls === 1)).toBe(true);
+  });
+
+  it("creates no player or Regions plugin when media finishes after the editor was unmounted", async () => {
+    let finishLookup!: (url: string) => void;
+    getCardMediaSource.mockImplementationOnce(() => new Promise<string>((resolve) => { finishLookup = resolve; }));
+    await mountEditor({ ready: false });
+    await act(async () => root?.unmount());
+    root = null;
+    await act(async () => finishLookup("mumbler-asset://media/retired-editor"));
+    expect(wave.players).toHaveLength(0);
+    expect(wave.regionInstances).toHaveLength(0);
+  });
+
+  it("creates no player from a media lookup that finishes after unmount and reopening", async () => {
+    let finishLookup!: (url: string) => void;
+    getCardMediaSource.mockImplementationOnce(() => new Promise<string>((resolve) => { finishLookup = resolve; }));
+    await mountEditor({ ready: false });
+    expect(wave.players).toHaveLength(0);
+    expect(wave.regionInstances).toHaveLength(0);
+    await act(async () => root?.unmount());
+    root = null;
+
+    await mountEditor();
+    const reopened = wave.player;
+    const reopenedRegions = wave.regions;
+    expect(getCardMediaSource).toHaveBeenCalledTimes(2);
+    expect(wave.players).toHaveLength(1);
+    await act(async () => finishLookup("mumbler-asset://media/retired-editor"));
+    expect(wave.players).toHaveLength(1);
+    expect(wave.regionInstances).toHaveLength(1);
+    expect(wave.player).toBe(reopened);
+    expect(wave.regions).toBe(reopenedRegions);
+    expect(reopened.destroyCalls).toBe(0);
+    expect(reopened.url).toBe("mumbler-asset://media/card-1");
+
+    await act(async () => root?.unmount());
+    root = null;
+    expect(reopened.destroyCalls).toBe(1);
+    expect(reopened.listeners.size).toBe(0);
+    expect(reopenedRegions.listeners.size).toBe(0);
   });
 });
 
@@ -484,9 +601,9 @@ describe("text typed but not yet committed", () => {
   it("retires the old player immediately while another card's media is pending or fails", async () => {
     await mountEditor({ trim: { frontMarkerSec: 30, backMarkerSec: 200 } });
     await typeOnly("back", "4:12 unfinished");
-    const staleTime = [...(wave.listeners.get("timeupdate") ?? [])];
-    const staleReady = [...(wave.listeners.get("ready") ?? [])];
-    const staleUpdate = [...(wave.listeners.get("region-updated") ?? [])];
+    const staleTime = [...(wave.player.listeners.get("timeupdate") ?? [])];
+    const staleReady = [...(wave.player.listeners.get("ready") ?? [])];
+    const staleUpdate = [...(wave.regions.listeners.get("region-updated") ?? [])];
     let fail!: (error: Error) => void;
     getCardMediaSource.mockImplementationOnce(() => new Promise<string>((_resolve, reject) => { fail = reject; }));
     const staleHandle = handle.current!;
@@ -518,9 +635,17 @@ describe("text typed but not yet committed", () => {
 
   it("binds a replacement player to its loaded card even when media URLs are equal", async () => {
     await mountEditor();
-    const staleUpdate = [...(wave.listeners.get("region-updated") ?? [])];
+    const retiredPlayer = wave.player;
+    const retiredRegions = wave.regions;
+    const staleUpdate = [...(retiredRegions.listeners.get("region-updated") ?? [])];
     await show({ id: "card-2" });
     expect(wave.createdUrls).toHaveLength(2);
+    expect(wave.player).not.toBe(retiredPlayer);
+    expect(wave.regions).not.toBe(retiredRegions);
+    expect(retiredPlayer.destroyCalls).toBe(1);
+    expect(retiredPlayer.listeners.size).toBe(0);
+    expect(retiredRegions.listeners.size).toBe(0);
+    expect(wave.player.destroyCalls).toBe(0);
     await act(async () => {
       for (const callback of staleUpdate) callback({ start: 99, end: 200 });
     });

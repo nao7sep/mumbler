@@ -295,40 +295,25 @@ export async function prepareAudioForTranscription(params: {
   // current pipeline; the durable decisions and text remain in queue.json.
   const outputPath = join(derivedDir, `${nanoid()}${extension}`);
 
-  if (params.trimDecision?.kind === "stream-copy") {
-    const startSec = params.trimDecision.chosenStartBoundarySec ?? 0;
-    const endSec = params.trimDecision.chosenEndBoundarySec;
+  const streamCopy = params.trimDecision?.kind === "stream-copy" ? params.trimDecision : null;
+  try {
     await runFfmpegTrim({
       sourceFilePath: params.sourceFilePath,
       outputPath,
-      startSec,
-      endSec,
-      mode: "stream-copy",
+      startSec: streamCopy === null ? params.trim.frontMarkerSec ?? 0 : streamCopy.chosenStartBoundarySec ?? 0,
+      endSec: streamCopy === null ? params.trim.backMarkerSec : streamCopy.chosenEndBoundarySec,
+      mode: streamCopy === null ? "reencode" : "stream-copy",
       audioProfile: params.audioProfile,
       logger: params.logger,
       signal: params.signal,
     });
-
-    return {
-      filePath: outputPath,
-      mimeType,
-      wasDerived: true,
-      cleanup: async () => cleanupDerivedFile(outputPath),
-    };
+  } catch (error: unknown) {
+    // runTool rejects only after the child has actually settled. Until a
+    // successful return transfers cleanup to the caller, preparation owns
+    // these partial bytes. Best-effort removal preserves the primary result.
+    await cleanupDerivedFile(outputPath);
+    throw error;
   }
-
-  const startSec = params.trim.frontMarkerSec ?? 0;
-  const endSec = params.trim.backMarkerSec;
-  await runFfmpegTrim({
-    sourceFilePath: params.sourceFilePath,
-    outputPath,
-    startSec,
-    endSec,
-    mode: "reencode",
-    audioProfile: params.audioProfile,
-    logger: params.logger,
-    signal: params.signal,
-  });
 
   return {
     filePath: outputPath,

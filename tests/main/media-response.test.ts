@@ -1,8 +1,31 @@
+import type { ReadStream } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const streams = vi.hoisted(() => ({
+  opened: [] as Array<{ stream: ReadStream; closed: Promise<void> }>,
+  failNext: false,
+}));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...original,
+    createReadStream: (...args: Parameters<typeof original.createReadStream>) => {
+      // Observe real file handles and the real Node-to-Web adapter. The error
+      // case fails the asynchronous open after the response's stat succeeded.
+      const [path, options] = args;
+      const stream = original.createReadStream(streams.failNext ? `${String(path)}.missing` : path, options);
+      streams.failNext = false;
+      const closed = new Promise<void>((resolve) => stream.once("close", resolve));
+      streams.opened.push({ stream, closed });
+      return stream;
+    },
+  };
+});
 
 import { createMediaResponse, parseByteRange } from "@main/media-response";
 
@@ -35,12 +58,18 @@ describe("createMediaResponse", () => {
   const bytes = Buffer.from("0123456789abcdefghij");
 
   beforeEach(async () => {
+    streams.failNext = false;
+    streams.opened = [];
     dir = await mkdtemp(join(tmpdir(), "mumbler-media-"));
     file = join(dir, "take.wav");
     await writeFile(file, bytes);
   });
 
   afterEach(async () => {
+    for (const { stream } of streams.opened) {
+      stream.destroy();
+    }
+    await Promise.all(streams.opened.map(({ closed }) => closed));
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -79,5 +108,40 @@ describe("createMediaResponse", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Length")).toBe("0");
     expect(await response.text()).toBe("");
+    expect(streams.opened).toHaveLength(0);
+  });
+
+  it("closes each recording handle when a partially consumed body is cancelled", async () => {
+    // Larger than the stream buffers, so cancellation happens before EOF.
+    await writeFile(file, Buffer.alloc(1024 * 1024, 1));
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await createMediaResponse(file, null, "audio/wav");
+      const reader = response.body!.getReader();
+      const chunk = await reader.read();
+      const { stream, closed } = streams.opened[attempt];
+
+      expect(chunk.done).toBe(false);
+      expect(chunk.value!.byteLength).toBeGreaterThan(0);
+      expect(stream.pending).toBe(false);
+      expect(stream.closed).toBe(false);
+      await reader.cancel();
+      await closed;
+
+      expect(stream.destroyed).toBe(true);
+      expect(stream.closed).toBe(true);
+    }
+  });
+
+  it("propagates an asynchronous read failure and closes its file stream", async () => {
+    streams.failNext = true;
+    const response = await createMediaResponse(file, null, "audio/wav");
+    const { stream, closed } = streams.opened[0];
+
+    await expect(response.arrayBuffer()).rejects.toMatchObject({ code: "ENOENT" });
+    await closed;
+
+    expect(stream.destroyed).toBe(true);
+    expect(stream.closed).toBe(true);
   });
 });
