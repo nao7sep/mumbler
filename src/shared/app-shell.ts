@@ -25,6 +25,8 @@ export const APP_SHELL_CHANNELS = {
   setGeminiApiKey: "app-shell:set-gemini-api-key",
   clearGeminiApiKey: "app-shell:clear-gemini-api-key",
   chooseOutputDirectory: "app-shell:choose-output-directory",
+  saveSetupDirectory: "app-shell:save-setup-directory",
+  chooseOriginalsDirectory: "app-shell:choose-originals-directory",
   saveCard: "app-shell:save-card",
   removeCard: "app-shell:remove-card",
   reportRendererError: "app-shell:report-renderer-error",
@@ -515,6 +517,7 @@ export interface MumblerLayout {
 }
 
 export interface AppSnapshot {
+  firstRun: boolean;
   // The language the main process and the renderer both speak, resolved from
   // the saved choice and the computer's language.
   interfaceLanguage: InterfaceLanguage;
@@ -625,6 +628,8 @@ export interface MumblerShellApi {
   setGeminiApiKey(apiKey: string): Promise<AppSnapshot>;
   clearGeminiApiKey(): Promise<AppSnapshot>;
   chooseOutputDirectory(): Promise<AppSnapshot>;
+  saveSetupDirectory(directory: string): Promise<AppSnapshot>;
+  chooseOriginalsDirectory(): Promise<AppSnapshot>;
   saveCard(cardId: string, resolution?: SaveConflictResolution): Promise<SaveCardResult>;
   removeCard(cardId: string): Promise<AppSnapshot>;
   reportRendererError(report: RendererErrorReport): Promise<AppSnapshot>;

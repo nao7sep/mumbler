@@ -218,6 +218,7 @@ function readySnapshot(): AppSnapshot {
     platform: "darwin",
     isPackaged: false,
     shellReadyAtUtc: 0,
+    firstRun: false,
     paths: null,
     settingsSummary: null,
     queueSummary: null,

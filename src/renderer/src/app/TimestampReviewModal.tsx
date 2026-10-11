@@ -18,7 +18,7 @@ import { useI18n } from "../i18n/I18nContext";
 export interface TimestampReviewModalProps {
   items: PendingImportReviewItem[];
   defaultTimezone?: string;
-  backupDirectoryLabel: string;
+  backupDirectoryLabel: string | null;
   onChange: (item: PendingImportReviewItem) => void;
   onApplyTimezoneToAll: (timezone: string) => void;
   onSetDeleteOriginalForAll: (value: boolean) => void;
@@ -228,7 +228,9 @@ export function TimestampReviewModal({
             {t("review.copyToBackup")}
           </label>
           <p className="field-hint">
-            {i18n.rich("review.backupHint", { path: <code>{backupDirectoryLabel}</code> })}
+            {backupDirectoryLabel === null
+              ? t("settings.backupDirectoryHint", { option: t("review.copyToBackup") })
+              : i18n.rich("review.backupHint", { path: <code>{backupDirectoryLabel}</code> })}
           </p>
           <label className="modal-checkbox">
             <input

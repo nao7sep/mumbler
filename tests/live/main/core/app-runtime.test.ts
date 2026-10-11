@@ -80,6 +80,7 @@ async function withRuntime<T>(home: string, body: (runtime: Runtime) => Promise<
   const runtime = await ApplicationRuntime.initialize();
   let result: T;
   try {
+    await runtime.saveSetupDirectory(join(home, "output"));
     result = await body(runtime);
   } finally {
     await runtime.shutdown();

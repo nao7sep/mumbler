@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
-import { chmod, mkdir, realpath, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, readdir, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { homedir } from "node:os";
 
@@ -53,7 +53,7 @@ import {
 import { abandonBackupStore, closeBackupStore, setBackupStoreSession, setBackupStoreWarn } from "./backupStore";
 import { NewerFormatError } from "./format-versions";
 import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-store";
-import { resolveStorageRoot } from "./storage-root";
+import { resolvePathFromHome, resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
 import { formatError, preserveAside } from "./file-io";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState } from "./working-files";
@@ -202,6 +202,7 @@ interface AppRuntimeState {
 
 export class ApplicationRuntime {
   private readonly runtime: AppRuntimeState;
+  private firstRun = false;
   // All running-pipeline bookkeeping (concurrency slots, active runs, the
   // queued-card drain) lives in the coordinator; the runtime keeps owning the
   // app state those pipelines mutate and the single persist path they call.
@@ -318,6 +319,12 @@ export class ApplicationRuntime {
     const queueStore = createQueueStore(paths.queuePath);
 
     try {
+      // Detect first launch before ordinary startup creates diagnostic/cache files.
+      // Missing config alone is not enough: defaults-only users need no config.
+      const firstRun = await readdir(paths.homeDir).then((entries) => entries.length === 0, (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return true;
+        throw error;
+      });
       await ensureDirectories(paths, logger);
 
       // Authored settings with damaged content are set aside and the app starts on
@@ -459,6 +466,8 @@ export class ApplicationRuntime {
         toolManager: null,
         hasGeminiApiKey,
       });
+
+      runtime.firstRun = firstRun;
 
       // Managed audio tools (ffmpeg/ffprobe). The store holds their persisted
       // facts; the manager reconciles on-disk presence, drives the operations, and
@@ -652,6 +661,7 @@ export class ApplicationRuntime {
     const { paths, settings, state, layout } = this.runtime;
 
     return {
+      firstRun: this.firstRun,
       interfaceLanguage: this.interfaceLanguage(),
       appName: app.getName(),
       appVersion: __APP_VERSION__,
@@ -923,7 +933,6 @@ export class ApplicationRuntime {
   private async confirmReviewedImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult> {
     this.ensureReady();
     const state = this.runtime.state!;
-    const paths = this.runtime.paths!;
 
     const byId = new Map(items.map((item) => [item.id, item]));
     // Every reviewed import is validated before any file is touched, so a bad
@@ -942,6 +951,10 @@ export class ApplicationRuntime {
         );
         return { pendingImport, merged, timestamps };
       });
+    const backupDir = this.runtime.settings!.backupDirectory;
+    if (reviewed.some(({ merged }) => merged.copyToBackupOnConfirm) && backupDir === null) {
+      throw new OperationError("Choose an originals folder before copying originals.");
+    }
     const cardsToAdd: MumblerCard[] = [];
     // A backup or deletion of the original that did not happen is a warning on
     // the confirmed import, never its failure (error-handling-conventions).
@@ -1008,11 +1021,10 @@ export class ApplicationRuntime {
       });
 
       let backupSucceeded = true;
-      const backupDir = this.runtime.settings!.backupDirectory ?? paths.originalsDir;
       const file = pendingImport.originalSourcePath;
       if (merged.copyToBackupOnConfirm) {
         try {
-          const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir, this.runtime.logger);
+          const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir!, this.runtime.logger);
           await this.runtime.logger.info("import.backup-original", "Copied original to the originals directory.", {
             originalSourcePath: pendingImport.originalSourcePath,
             backupPath,
@@ -1027,7 +1039,7 @@ export class ApplicationRuntime {
           if (!merged.deleteOriginalOnConfirm) {
             originalWarnings.push({
               sourcePath: file,
-              message: message("import.backupFailed", { file, folder: backupDir }),
+              message: message("import.backupFailed", { file, folder: backupDir! }),
             });
           }
         }
@@ -1037,7 +1049,7 @@ export class ApplicationRuntime {
         if (merged.copyToBackupOnConfirm && !backupSucceeded) {
           originalWarnings.push({
             sourcePath: file,
-            message: message("import.backupFailedNotDeleted", { file, folder: backupDir }),
+            message: message("import.backupFailedNotDeleted", { file, folder: backupDir! }),
           });
           await this.runtime.logger.warn(
             "import.delete-original",
@@ -1369,6 +1381,7 @@ export class ApplicationRuntime {
 
     const result = await dialog.showOpenDialog(window, {
       title: this.translator().t("dialog.chooseOutputFolder"),
+      defaultPath: this.runtime.settings!.outputDirectory ?? this.runtime.paths!.outputDir,
       properties: ["openDirectory", "createDirectory"],
     });
 
@@ -1383,7 +1396,8 @@ export class ApplicationRuntime {
     this.ensureReady();
 
     const configured = this.runtime.settings!.outputDirectory?.trim() ?? "";
-    const targetDir = configured.length > 0 ? configured : this.runtime.paths!.outputDir;
+    if (configured.length === 0) throw new OperationError("Choose a save folder first.");
+    const targetDir = configured;
     await mkdir(targetDir, { recursive: true });
 
     const errorMessage = await shell.openPath(targetDir);
@@ -1676,7 +1690,39 @@ export class ApplicationRuntime {
       return this.getSnapshot();
     }
 
-    const nextSettings = { ...this.runtime.settings!, outputDirectory };
+    return this.persistSetupDirectory(outputDirectory);
+  }
+
+  chooseOriginalsDirectory(window: BrowserWindow): Promise<AppSnapshot> {
+    return this.runStateChange(async () => {
+      this.ensureReady();
+      const result = await dialog.showOpenDialog(window, {
+        title: this.translator().t("settings.backupDirectory"),
+        defaultPath: this.runtime.settings!.backupDirectory ?? this.runtime.paths!.originalsDir,
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (result.canceled || result.filePaths.length === 0) return this.getSnapshot();
+      const nextSettings = { ...this.runtime.settings!, backupDirectory: result.filePaths[0]! };
+      await this.runtime.settingsStore!.save(nextSettings);
+      this.runtime.settings = nextSettings;
+      return this.getSnapshot();
+    });
+  }
+
+  saveSetupDirectory(directory: string): Promise<AppSnapshot> {
+    return this.runStateChange(() => this.persistSetupDirectory(directory));
+  }
+
+  private async persistSetupDirectory(directory: string): Promise<AppSnapshot> {
+    this.ensureReady();
+    if (directory.trim().length === 0) throw new OperationError("Choose a save folder first.");
+    const resolved = resolvePathFromHome(directory.trim(), homedir());
+    const nextSettings = {
+      ...this.runtime.settings!,
+      outputDirectory: resolved,
+      backupDirectory: this.runtime.settings!.backupDirectory ?? join(resolved, "Originals"),
+    };
+    // Targeted save preserves unsupported and unknown settings the setup never showed.
     await this.runtime.settingsStore!.save(nextSettings);
     this.runtime.settings = nextSettings;
 
@@ -1701,6 +1747,10 @@ export class ApplicationRuntime {
     }
     if (this.trimRequests.has(cardId)) {
       throw new OperationError("The trim markers are still being applied. Save again in a moment.");
+    }
+
+    if (resolution !== "cancel" && this.runtime.settings!.outputDirectory === null) {
+      throw new OperationError("Choose a save folder before exporting a recording.");
     }
 
     // Claim the card before the first await: "Saving" is busy, so no generation,
@@ -1755,11 +1805,12 @@ export class ApplicationRuntime {
     const settings = this.runtime.settings!;
     const logger = this.runtime.logger;
 
-    const configuredOutputDirectory = settings.outputDirectory?.trim() ?? "";
-    const outputDirectory =
-      configuredOutputDirectory.length > 0
-        ? configuredOutputDirectory
-        : this.runtime.paths!.outputDir;
+    if (resolution === "cancel") {
+      await logger.info("save.cancelled", "Save cancelled by user.", { cardId });
+      return { kind: "cancelled" };
+    }
+    const outputDirectory = settings.outputDirectory;
+    if (outputDirectory === null) throw new OperationError("Choose a save folder before exporting a recording.");
     await mkdir(outputDirectory, { recursive: true });
 
     const finalAudio = await prepareAudioForTranscription({
@@ -1792,11 +1843,6 @@ export class ApplicationRuntime {
           markdownPath: initialTargets.markdownPath,
         });
         return { kind: "conflict", ...initialTargets };
-      }
-
-      if (resolution === "cancel") {
-        await logger.info("save.cancelled", "Save cancelled by user.", { cardId });
-        return { kind: "cancelled" };
       }
 
       const targetPaths: SaveTargetPaths =
@@ -2286,8 +2332,8 @@ export function getAppPaths(): AppPaths {
     recordsPath: join(homeDir, "records.sqlite3"),
     logsDir: join(homeDir, "logs"),
     workingDir: join(homeDir, "working"),
-    outputDir: join(homeDir, "output"),
-    originalsDir: join(homeDir, "originals"),
+    outputDir: join(homedir(), "Documents", "Mumbler"),
+    originalsDir: join(homedir(), "Documents", "Mumbler", "Originals"),
     binDir: join(homeDir, "bin"),
     dependenciesPath: join(homeDir, "dependencies.json"),
     tempDir: join(homeDir, "temp"),

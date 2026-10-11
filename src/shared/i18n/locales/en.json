@@ -354,9 +354,9 @@
   "settings.uiFontHint": "The app interface font. Comma-separated families; the first one your system has is used. Blank uses the built-in default.",
   "settings.files": "Files",
   "settings.outputDirectory": "Output Directory",
-  "settings.outputDirectoryHint": "Where exported files are saved. Leave blank to use the default ({path}). Changing it does not move files already saved.",
+  "settings.outputDirectoryHint": "Where exported files are saved. If blank, Mumbler asks you to choose a folder before saving. Changing it does not move files already saved.",
   "settings.backupDirectory": "Originals Directory",
-  "settings.backupDirectoryHint": "Where copies of the originals go when “{option}” is selected during import. Leave blank to use the default ({path}). Changing it does not move copies already made.",
+  "settings.backupDirectoryHint": "Where copies of the originals go when “{option}” is selected during import. If blank, Mumbler asks you to choose a folder before copying. Changing it does not move copies already made.",
   "settings.import": "Import",
   "settings.defaultTimezone": "Default Time Zone",
   "error.timezoneLink": "The time zone reference could not be opened. Try again.",
@@ -530,5 +530,12 @@
   "records.step": "Step",
   "records.thisLaunch": "{time} (this launch)",
   "records.time": "Time",
-  "records.title": "Records"
+  "records.title": "Records",
+  "setup.title": "Set Up Mumbler ({step}/3)",
+  "setup.skip": "Skip",
+  "setup.next": "Continue",
+  "setup.useFolder": "Use This Folder",
+  "setup.chooseFolder": "Choose Another Folder",
+  "setup.folderBody": "Choose where to save exports. Copies of originals will go in an Originals subfolder. If you already chose a folder for those copies, Mumbler will keep using it.",
+  "setup.later": "You can change these choices later in Settings or Managed tools."
 }

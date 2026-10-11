@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 import type { DependencyState, DependencyStatus, StatusRole, ToolName } from "@shared/app-shell";
 import { identityLabel } from "@shared/dependency-status";
@@ -21,6 +21,8 @@ import { useI18n } from "../i18n/I18nContext";
 // theme owns the concrete colour.
 
 export interface AudioToolsModalProps {
+  heading?: string;
+  footer?: ReactNode;
   dependencies: DependencyStatus[];
   checkUpdatesAtLaunch: boolean;
   isChecking: boolean;
@@ -83,6 +85,8 @@ function lastCheckedHint(i18n: Translator, dependencies: DependencyStatus[], isC
 }
 
 export function AudioToolsModal({
+  heading,
+  footer,
   dependencies,
   checkUpdatesAtLaunch,
   isChecking,
@@ -99,14 +103,14 @@ export function AudioToolsModal({
   const { t, text } = i18n;
   return (
     <ModalShell
-      title={t("tools.title")}
+      title={heading ?? t("tools.title")}
       onRequestClose={onClose}
       describedById="audio-tools-description"
-      footer={
+      footer={footer ?? (
         <button type="button" className="button button--ghost" onClick={onClose}>
           {t("common.close")}
         </button>
-      }
+      )}
     >
       <div className="modal-card__body">
         <p id="audio-tools-description" className="tools-intro">

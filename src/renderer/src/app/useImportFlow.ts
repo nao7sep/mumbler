@@ -210,6 +210,11 @@ export function useImportFlow({
   async function handleConfirmPendingImports(): Promise<void> {
     setIsConfirmingReview(true);
     try {
+      if (pendingReviewDrafts.some((item) => item.copyToBackupOnConfirm) && snapshot?.settingsSummary?.backupDirectory == null) {
+        const selected = await window.mumbler.chooseOriginalsDirectory();
+        onSnapshotUpdate(selected);
+        if (selected.settingsSummary?.backupDirectory == null) return;
+      }
       const result = await window.mumbler.confirmPendingImports(pendingReviewDrafts);
       onSnapshotUpdate(result.snapshot);
       // The recordings are in the queue; an original that was not backed up or

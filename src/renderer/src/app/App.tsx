@@ -46,6 +46,7 @@ import {
   SaveConflictModal,
 } from "./DecisionModals";
 import { AboutModal } from "./AboutModal";
+import { FirstRunSetupModal } from "./FirstRunSetupModal";
 import { AudioToolsModal } from "./AudioToolsModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
@@ -348,6 +349,7 @@ function LoadedShell({
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showAudioTools, setShowAudioTools] = useState(false);
+  const [showSetup, setShowSetup] = useState(initialSnapshot.firstRun);
   const [isCheckingTools, setIsCheckingTools] = useState(false);
   const [toolCheckNotice, setToolCheckNotice] = useState<Message | null>(null);
   const [toolOperationError, setToolOperationError] = useState<Message | null>(null);
@@ -535,7 +537,7 @@ function LoadedShell({
   // available update is NOT a reason to interrupt; it surfaces only via the status
   // chip. Open once, so a refresh can't reopen it against the user who just closed.
   useEffect(() => {
-    if (dependencies === null) {
+    if (dependencies === null || initialSnapshot.firstRun) {
       return;
     }
     const requiredMissing = dependencies.some(
@@ -621,6 +623,7 @@ function LoadedShell({
     showAbout ||
     showShortcutsHelp ||
     showAudioTools ||
+    showSetup ||
     snapshot?.startupDiagnostic != null ||
     snapshot?.appWideError != null;
 
@@ -975,6 +978,11 @@ function LoadedShell({
     resolution?: "overwrite" | "suffix" | "cancel",
   ): Promise<void> {
     try {
+      if (resolution !== "cancel" && snapshot.settingsSummary?.outputDirectory == null) {
+        const selected = await window.mumbler.chooseOutputDirectory();
+        setSnapshot(selected);
+        if (selected.settingsSummary?.outputDirectory == null) return;
+      }
       const result = await window.mumbler.saveCard(cardId, resolution);
       setSnapshot(result.snapshot);
 
@@ -1064,8 +1072,14 @@ function LoadedShell({
               <MenuItem
                 className="app-menu-item"
                 onSelect={() => {
-                  void window.mumbler
-                    .openOutputDirectory()
+                  void (async () => {
+                    if (snapshot.settingsSummary?.outputDirectory == null) {
+                      const selected = await window.mumbler.chooseOutputDirectory();
+                      setSnapshot(selected);
+                      if (selected.settingsSummary?.outputDirectory == null) return;
+                    }
+                    await window.mumbler.openOutputDirectory();
+                  })()
                     .then(() => clearPersistent("output-folder-open"))
                     .catch((error: unknown) =>
                       addPersistent(
@@ -1596,9 +1610,7 @@ function LoadedShell({
                     <div>
                       <dt>{t("output.directory")}</dt>
                       <dd>
-                        {snapshot?.settingsSummary?.outputDirectory ??
-                          snapshot?.settingsSummary?.defaultOutputDirectory ??
-                          ""}
+                        {snapshot?.settingsSummary?.outputDirectory ?? t("dialog.chooseOutputFolder")}
                       </dd>
                     </div>
                     {selectedCard.lastError ? (
@@ -1746,9 +1758,7 @@ function LoadedShell({
             )
           }
           backupDirectoryLabel={
-            snapshot?.settingsSummary?.backupDirectory ??
-            snapshot?.settingsSummary?.defaultBackupDirectory ??
-            "~/.mumbler/originals"
+            snapshot?.settingsSummary?.backupDirectory ?? null
           }
           isSubmitting={importFlow.isConfirmingReview}
         />
@@ -1814,6 +1824,21 @@ function LoadedShell({
 
       {showShortcutsHelp ? (
         <ShortcutsHelpModal onClose={() => setShowShortcutsHelp(false)} />
+      ) : null}
+
+      {showSetup && snapshot.dependencies && !snapshot.startupDiagnostic && !snapshot.appWideError ? (
+        <FirstRunSetupModal snapshot={snapshot} onSnapshot={setSnapshot} onClose={() => setShowSetup(false)} tools={{
+          dependencies: snapshot.dependencies,
+          checkUpdatesAtLaunch: snapshot.settingsSummary?.checkUpdatesAtLaunch ?? true,
+          isChecking: isCheckingTools || snapshot.dependencies.some((dependency) => dependency.transient.kind === "running" && dependency.transient.operation === "check"),
+          checkNotice: toolCheckNotice,
+          operationError: toolOperationError,
+          onProvision: handleProvisionTool,
+          onCancelProvision: handleCancelToolProvision,
+          onCheck: handleCheckTools,
+          onCancelCheck: handleCancelToolCheck,
+          onToggleCheckUpdates: handleToggleCheckUpdates,
+        }} />
       ) : null}
 
       {showAudioTools && snapshot?.dependencies ? (

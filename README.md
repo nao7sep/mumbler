@@ -36,7 +36,7 @@ npm install
 npm run dev
 ```
 
-On first launch, open Settings and enter your Gemini API key. Saved files default to `~/.mumbler/output`.
+On first launch, setup guides you through the audio tools, Gemini API key, and save folder. It suggests `~/Documents/Mumbler`, with copies of originals in an `Originals` subfolder. Every step is skippable; Mumbler asks for a folder before exporting or copying originals if none is chosen. Change these choices later in Settings or Managed tools. Changing folders moves no existing files.
 
 Each model field holds its default until you type another model ID. An ID Mumbler does not support is kept and marked under its field; it gets a plain request, and Gemini reports an invalid or retired model when a job calls it. You can change the endpoint while the request parameters continue to follow the model ID.
 

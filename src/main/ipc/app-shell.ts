@@ -239,6 +239,17 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     return runtime.pickOutputDirectory(window);
   });
 
+  handle(APP_SHELL_CHANNELS.chooseOriginalsDirectory, (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window === null) throw new Error("Choose originals directory requires an active window.");
+    return runtime.chooseOriginalsDirectory(window);
+  });
+
+  handle(APP_SHELL_CHANNELS.saveSetupDirectory, (_event, directory: string) => {
+    assertString(directory, "directory");
+    return runtime.saveSetupDirectory(directory);
+  });
+
   handle(APP_SHELL_CHANNELS.openOutputDirectory, () => runtime.openOutputDirectory());
   handle(APP_SHELL_CHANNELS.openExternal, (_event, url: string) => {
     assertString(url, "url");

@@ -213,7 +213,7 @@ let runtime: Runtime;
 function review(item: PendingImportReviewItem, edits: Partial<PendingImportReviewItem> = {}): PendingImportReviewItem {
   // A dropped file rarely carries a readable time in its name, so the review
   // pane is where one is supplied; every case here starts from a valid one.
-  return { ...item, localTimestampText: "2026-03-01 07:30:00", timezone: "Asia/Tokyo", ...edits };
+  return { ...item, copyToBackupOnConfirm: false, localTimestampText: "2026-03-01 07:30:00", timezone: "Asia/Tokyo", ...edits };
 }
 
 function cards(snapshot: AppSnapshot): MumblerCard[] {
@@ -276,6 +276,53 @@ afterEach(async () => {
   if (previousGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
   else process.env.GEMINI_API_KEY = previousGeminiKey;
   await rm(root, { recursive: true, force: true });
+});
+
+describe("first-run setup and user-owned destinations", () => {
+  it("offers setup for a new root, writes no config on launch, and does not repeat for an existing root", async () => {
+    expect(runtime.getSnapshot().firstRun).toBe(true);
+    expect(await exists(join(home, "config.json"))).toBe(false);
+    expect(runtime.getSnapshot().settingsSummary?.defaultOutputDirectory).toMatch(/Documents[/\\]Mumbler$/);
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+    expect(runtime.getSnapshot().firstRun).toBe(false);
+    expect(await exists(join(home, "config.json"))).toBe(false);
+  });
+
+  it("saves a chosen output folder and its originals child without moving or creating output files", async () => {
+    const destination = join(root, "chosen");
+    const snapshot = await runtime.saveSetupDirectory(destination);
+    expect(snapshot.settingsSummary).toMatchObject({ outputDirectory: destination, backupDirectory: join(destination, "Originals") });
+    expect(await exists(destination)).toBe(false);
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toMatchObject({ outputDirectory: destination, backupDirectory: join(destination, "Originals") });
+  });
+
+  it("keeps existing originals choices and unrelated unsupported settings during setup", async () => {
+    await runtime.shutdown();
+    const originals = join(root, "existing-originals");
+    await writeFile(join(home, "config.json"), JSON.stringify({ formatVersion: 1, backupDirectory: originals, concurrencyLimit: "future", futureChoice: { keep: true } }));
+    runtime = await ApplicationRuntime.initialize();
+    expect(runtime.getSnapshot().firstRun).toBe(false);
+    await runtime.saveSetupDirectory(join(root, "chosen"));
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toMatchObject({ backupDirectory: originals, concurrencyLimit: "future", futureChoice: { keep: true } });
+  });
+
+  it("keeps a reviewed import and its original untouched until an originals folder is chosen", async () => {
+    const [pending] = await dropIn("take.wav");
+    await expect(runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true })])).rejects.toThrow(/Choose an originals folder/);
+    expect(await readFile(pending.originalSourcePath, "utf8")).toBe("audio for take.wav");
+    expect(runtime.getSnapshot().state?.pendingImports).toHaveLength(1);
+    expect(cards(runtime.getSnapshot())).toEqual([]);
+  });
+
+  it("cancelling the folder picker writes no settings", async () => {
+    const picker = vi.spyOn(runtime, "pickOutputDirectory").mockResolvedValueOnce(null);
+    try {
+      const snapshot = await runtime.chooseOutputDirectory({} as never);
+      expect(snapshot.settingsSummary?.outputDirectory).toBeNull();
+      expect(await exists(join(home, "config.json"))).toBe(false);
+    } finally { picker.mockRestore(); }
+  });
 });
 
 describe("the durable queue store", () => {
@@ -480,6 +527,7 @@ describe("confirming what was dropped in", () => {
   });
 
   it("copies the original to the backup folder when the user asked for that", async () => {
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(home, "originals") });
     const [pending] = await dropIn("take.wav");
 
     await runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true })]);
@@ -547,6 +595,7 @@ describe("confirming what was dropped in", () => {
   });
 
   it("returns no warning when the original was backed up and deleted as asked", async () => {
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(home, "originals") });
     const [pending] = await dropIn("take.wav");
 
     const { originalWarnings } = await runtime.confirmPendingImports([
@@ -660,6 +709,7 @@ describe("confirming what was dropped in", () => {
 describe("working with a card", () => {
   /** Gives a saved card the results of a finished run, and reopens the app on it. */
   async function transcribedOnDisk(cardId: string): Promise<void> {
+    await runtime.saveSetupDirectory(join(home, "output"));
     const run = { provider: "gemini" as const, model: "gemini-3.7-flash", generatedAtUtc: Date.now() };
     await runtime.shutdown();
     const store = createQueueStore(join(home, "queue.json"));
@@ -687,6 +737,16 @@ describe("working with a card", () => {
     const { snapshot } = await runtime.confirmPendingImports([review(pending)]);
     return cards(snapshot)[0];
   }
+
+  it("refuses export after a folder is cleared, retaining the ready card and working recording", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), outputDirectory: "" });
+    await expect(runtime.saveCard(card.id)).rejects.toThrow(/Choose a save folder/);
+    expect(cards(runtime.getSnapshot())[0].status).toBe("Ready to Save");
+    expect(await exists(card.sourceFilePath)).toBe(true);
+    expect(await exists(join(home, "output"))).toBe(false);
+  });
 
   it("holds a card that is being saved against every other change until the save ends", async () => {
     const card = await confirmed();
