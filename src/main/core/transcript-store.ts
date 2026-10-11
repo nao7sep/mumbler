@@ -130,7 +130,10 @@ export class TranscriptStore {
     return this.enqueue(async () => {
       let written = 0;
       for (const { cardId, transcript } of wanted) {
-        if (isEmpty(transcript)) continue;
+        // Clearing a retained card is a required publication: optional cleanup
+        // may fail or never run, so old text must already be gone on reopen.
+        // A fresh empty card still needs no file.
+        if (isEmpty(transcript) && !this.onDisk.has(cardId)) continue;
         const value = serialize(cardId, transcript);
         const text = JSON.stringify(value);
         if (this.onDisk.get(cardId) === text) continue;

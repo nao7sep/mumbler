@@ -96,6 +96,7 @@ export function TimestampReviewModal({
             <div className="bulk-timezone-controls">
               <select
                 aria-labelledby="bulk-timezone-label"
+                disabled={isSubmitting}
                 value={bulkTimezone}
                 onChange={(event) => setBulkTimezone(event.target.value)}
               >
@@ -108,7 +109,7 @@ export function TimestampReviewModal({
                 type="button"
                 className="button button--ghost"
                 onClick={() => onApplyTimezoneToAll(bulkTimezone)}
-                disabled={bulkTimezone.trim().length === 0}
+                disabled={isSubmitting || bulkTimezone.trim().length === 0}
               >
                 {t("review.applyToAll")}
               </button>
@@ -135,6 +136,7 @@ export function TimestampReviewModal({
                   <label className="field">
                     <span>{t("review.localTimestamp")}</span>
                     <input
+                      disabled={isSubmitting}
                       value={item.localTimestampText}
                       onChange={(event) => {
                         const nextValue = event.target.value;
@@ -151,6 +153,7 @@ export function TimestampReviewModal({
                   <label className="field">
                     <span>{t("info.timezone")}</span>
                     <select
+                      disabled={isSubmitting}
                       value={item.timezone}
                       onChange={(event) => {
                         const timezone = event.target.value;
@@ -188,6 +191,7 @@ export function TimestampReviewModal({
                   <label className="field">
                     <span>{t("review.utcTimestamp")}</span>
                     <input
+                      disabled={isSubmitting}
                       value={item.utcTimestampText}
                       onChange={(event) => {
                         const nextDisplay = event.target.value;
@@ -222,6 +226,7 @@ export function TimestampReviewModal({
           <label className="modal-checkbox">
             <input
               type="checkbox"
+              disabled={isSubmitting}
               checked={items.length > 0 && items.every((i) => i.copyToBackupOnConfirm)}
               onChange={(e) => onSetCopyToBackupForAll(e.target.checked)}
             />
@@ -235,6 +240,7 @@ export function TimestampReviewModal({
           <label className="modal-checkbox">
             <input
               type="checkbox"
+              disabled={isSubmitting}
               checked={items.length > 0 && items.every((i) => i.deleteOriginalOnConfirm)}
               onChange={(e) => onSetDeleteOriginalForAll(e.target.checked)}
             />

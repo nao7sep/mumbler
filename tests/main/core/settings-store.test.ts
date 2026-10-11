@@ -506,6 +506,24 @@ describe("settings store", () => {
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, theme: "dark", concurrencyLimit: 6, ...future });
   });
 
+  it.each([false, true])("preserves unknown own keys named like object properties during a settings save (%s)", async (replaceUnusable) => {
+    // JSON.parse creates an own __proto__ property, unlike an object literal.
+    const future = JSON.parse('{"__proto__":{"by":"a newer Mumbler"},"constructor":"future constructor","toString":["future text"]}') as Record<string, unknown>;
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, theme: "dark", ...future }));
+    const store = createSettingsStore(settingsPath());
+    const loaded = await store.load();
+    expect(loaded.value).toEqual(settings({ theme: "dark" }));
+    expect(loaded.unusable).toEqual([]);
+
+    await store.save({ ...loaded.value, concurrencyLimit: 5 }, { replaceUnusable });
+    const saved = JSON.parse(await readFile(settingsPath(), "utf8")) as Record<string, unknown>;
+    for (const key of Object.keys(future)) {
+      expect(Object.hasOwn(saved, key), `${key} remains an own set`).toBe(true);
+      expect(saved[key]).toEqual(future[key]);
+    }
+    expect((await createSettingsStore(settingsPath()).load()).value).toEqual(settings({ theme: "dark", concurrencyLimit: 5 }));
+  });
+
   it("builds the file from the settings it is given, not onto the stored bytes, one save after another", async () => {
     const store = createSettingsStore(settingsPath());
     await store.load();

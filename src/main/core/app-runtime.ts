@@ -231,6 +231,9 @@ export class ApplicationRuntime {
   // Card producers must be reached before quit snapshots the store tails: a
   // copy, deletion, trim analysis or key lookup can create its first write after an await.
   private readonly activeStateChanges = new Set<Promise<unknown>>();
+  // Newly confirmed cards are not command targets until the import queue write
+  // succeeds; another operation's snapshot can expose memory during that wait.
+  private readonly confirmingCards = new Set<string>();
   // In-flight saves, so shutdown can cancel each one and await its completed
   // publication attempt before the stores are flushed.
   private readonly activeSaves = new Map<AbortController, Promise<unknown>>();
@@ -974,9 +977,8 @@ export class ApplicationRuntime {
     // A backup or deletion of the original that did not happen is a warning on
     // the confirmed import, never its failure (error-handling-conventions).
     const originalWarnings: ImportOriginalWarning[] = [];
-    const originalsToDelete: string[] = [];
 
-    for (const { pendingImport, merged, timestamps } of reviewed) {
+    for (const { pendingImport, timestamps } of reviewed) {
       let probed: Awaited<ReturnType<typeof probeAudioProfile>>;
       try {
         probed = await probeAudioProfile(pendingImport.workingFilePath);
@@ -1034,7 +1036,37 @@ export class ApplicationRuntime {
         createdAtUtc: Date.now(),
         updatedAtUtc: Date.now(),
       });
+    }
 
+    const confirmedIds = new Set(reviewed.map(({ pendingImport }) => pendingImport.id));
+    const previousPending = state.pendingImports;
+    const addedIds = new Set(cardsToAdd.map((card) => card.id));
+    for (const id of addedIds) this.confirmingCards.add(id);
+    state.pendingImports = state.pendingImports.filter((item) => !confirmedIds.has(item.id));
+    state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
+      left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
+    );
+
+    try {
+      await this.persistState();
+    } catch (error: unknown) {
+      const current = new Map(state.pendingImports.map((item) => [item.id, item]));
+      const submitted = new Map(reviewed.map(({ pendingImport, merged }) => [pendingImport.id, merged]));
+      state.pendingImports = previousPending.map((item) => current.get(item.id) ?? submitted.get(item.id) ?? item);
+      state.cards = state.cards.filter((card) => !addedIds.has(card.id));
+      // A concurrent packet may contain the temporary conversion. Restore behind
+      // it, retaining newer drafts for the imports this confirmation did not own.
+      try { await this.persistState(); }
+      catch (restoreError: unknown) {
+        await this.runtime.logger.error("import.confirm-restore", "Confirmation failed and the retained review could not be saved; recordings and originals remain intact.", restoreError);
+      }
+      throw error;
+    } finally {
+      for (const id of addedIds) this.confirmingCards.delete(id);
+    }
+    // Original copies/deletions are optional consequences of the committed
+    // import. A refused primary save leaves no copy to repeat on Retry.
+    for (const { pendingImport, merged } of reviewed) {
       let backupSucceeded = true;
       const file = pendingImport.originalSourcePath;
       if (merged.copyToBackupOnConfirm) {
@@ -1072,27 +1104,14 @@ export class ApplicationRuntime {
             { originalSourcePath: pendingImport.originalSourcePath },
           );
         } else {
-          originalsToDelete.push(pendingImport.originalSourcePath);
+          try { await deleteImportedSource(file); }
+          catch (error: unknown) {
+            originalWarnings.push({ sourcePath: file, message: message("import.deleteFailed", { file }) });
+            await this.runtime.logger.warn("import.delete-original", "Failed to delete original after confirm.", {
+              originalSourcePath: file, error: serializeError(error),
+            });
+          }
         }
-      }
-    }
-
-    const confirmedIds = new Set(reviewed.map(({ pendingImport }) => pendingImport.id));
-    state.pendingImports = state.pendingImports.filter((item) => !confirmedIds.has(item.id));
-    state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
-      left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
-    );
-
-    await this.persistState();
-    for (const file of originalsToDelete) {
-      try {
-        await deleteImportedSource(file);
-      } catch (error: unknown) {
-        originalWarnings.push({ sourcePath: file, message: message("import.deleteFailed", { file }) });
-        await this.runtime.logger.warn("import.delete-original", "Failed to delete original after confirm.", {
-          originalSourcePath: file,
-          error: serializeError(error),
-        });
       }
     }
     if (cardsToAdd.length > 0) {
@@ -1772,6 +1791,12 @@ export class ApplicationRuntime {
     if (card.status !== "Ready to Save") {
       throw new OperationError("Only cards in Ready to Save state can be finalized.");
     }
+    // A text write may have committed before an interrupted queue update, or
+    // its file may be absent. Status alone cannot certify a complete export.
+    if ([card.transcription.text, card.metadata.structured, card.metadata.title, card.metadata.slug]
+      .some((value) => value === null || value.trim().length === 0)) {
+      throw new OperationError("Generate the missing transcript and metadata before saving this recording.");
+    }
     if (this.closing) {
       throw new OperationError("Mumbler is closing; the recording was not saved.");
     }
@@ -2211,6 +2236,7 @@ export class ApplicationRuntime {
   }
 
   private requireCard(cardId: string, missingMessage: string): MumblerCard {
+    if (this.confirmingCards.has(cardId)) throw new OperationError("This recording's import is still being saved.");
     const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
     if (card === undefined) {
       throw new OperationError(missingMessage);

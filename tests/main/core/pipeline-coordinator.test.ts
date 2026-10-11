@@ -155,6 +155,99 @@ describe("PipelineCoordinator.startOrEnqueue", () => {
     expect(coordinator.hasRun("b")).toBe(true);
   });
 
+  it.each(["success", "failure"] as const)("holds queued admission until its initial publication settles with %s", async (outcome) => {
+    const first = makeCard({ id: "a" });
+    const second = makeCard({ id: "b" });
+    const { coordinator, persistState } = harness([first, second], 1);
+    await coordinator.startOrEnqueue("a", "generate");
+    let release!: () => void;
+    let refuse!: (error: Error) => void;
+    const held = new Promise<void>((resolve, reject) => { release = resolve; refuse = reject; });
+    persistState.mockReturnValueOnce(held);
+    const failure = new Error("queue publication refused");
+    const pending = coordinator.startOrEnqueue("b", "generate");
+    const result = pending.catch((error: unknown) => error);
+    try {
+      await settle("a");
+      expect(coordinator.hasRun("b"), "uncommitted Generate cannot use a freed slot").toBe(false);
+      expect(pipelineDeferreds.has("b")).toBe(false);
+      if (outcome === "success") release();
+      else refuse(failure);
+      expect(await result).toBe(outcome === "failure" ? failure : undefined);
+      expect(coordinator.hasRun("b")).toBe(outcome === "success");
+      if (outcome === "failure") {
+        expect(second).toMatchObject({ status: "Imported", queuedMode: null, queuedAtUtc: null });
+        await coordinator.drainQueued();
+        expect(pipelineDeferreds.has("b")).toBe(false);
+      }
+    } finally {
+      release();
+      await result;
+    }
+  });
+
+  it("does not revive a rejected queued request when capacity later becomes free", async () => {
+    const first = makeCard({ id: "a" });
+    const second = makeCard({ id: "b", status: "Cancelled" });
+    const { coordinator, persistState } = harness([first, second], 1);
+    await coordinator.startOrEnqueue("a", "generate");
+    const failure = new Error("queue publication refused");
+    persistState.mockRejectedValueOnce(failure);
+    await expect(coordinator.startOrEnqueue("b", "generate")).rejects.toBe(failure);
+    await settle("a");
+    expect(second.status).toBe("Cancelled");
+    expect(pipelineDeferreds.has("b")).toBe(false);
+  });
+
+  it("retains a replacement's cancelled state when a queued publication fails", async () => {
+    const first = makeCard({ id: "a" });
+    const second = makeCard({ id: "b" });
+    const { state, coordinator, persistState } = harness([first, second], 1);
+    await coordinator.startOrEnqueue("a", "generate");
+    let refuse!: (error: Error) => void;
+    const held = new Promise<void>((_resolve, reject) => { refuse = reject; });
+    persistState.mockReturnValueOnce(held);
+    const failure = new Error("queue publication refused");
+    const pending = coordinator.startOrEnqueue("b", "generate").catch((error: unknown) => error);
+    const replacement = { ...second, status: "Cancelled" as const, queuedMode: null, queuedAtUtc: null };
+    state.cards[1] = replacement;
+    refuse(failure);
+    expect(await pending).toBe(failure);
+    await settle("a");
+    expect(state.cards[1]).toBe(replacement);
+    expect(pipelineDeferreds.has("b")).toBe(false);
+  });
+
+  it("an old recovery cannot release a newer queued claim on the same card", async () => {
+    const { coordinator, persistState } = harness([makeCard({ id: "a" }), makeCard({ id: "b" })], 1);
+    await coordinator.startOrEnqueue("a", "generate");
+    let recoveryEntered!: () => void;
+    const entered = new Promise<void>((resolve) => { recoveryEntered = resolve; });
+    let releaseRecovery!: () => void;
+    let publishNew!: () => void;
+    const recovery = new Promise<void>((resolve) => { releaseRecovery = resolve; });
+    const newPublication = new Promise<void>((resolve) => { publishNew = resolve; });
+    const failure = new Error("old queue write failed");
+    persistState.mockRejectedValueOnce(failure).mockImplementationOnce(async () => { recoveryEntered(); await recovery; });
+    const old = coordinator.startOrEnqueue("b", "generate").catch((error: unknown) => error);
+    let replacement: Promise<void> | undefined;
+    try {
+      await entered;
+      persistState.mockReturnValueOnce(newPublication);
+      replacement = coordinator.startOrEnqueue("b", "generate");
+      releaseRecovery();
+      expect(await old).toBe(failure);
+      await settle("a");
+      expect(coordinator.hasRun("b"), "the new intent still awaits its own write").toBe(false);
+      publishNew();
+      await replacement;
+      expect(coordinator.hasRun("b")).toBe(true);
+    } finally {
+      releaseRecovery(); publishNew();
+      await Promise.allSettled([old, ...(replacement ? [replacement] : [])]);
+    }
+  });
+
   it("refuses a busy card and a missing card", async () => {
     const busy = makeCard({ id: "a", status: "Queued", queuedMode: "generate", queuedAtUtc: 1 });
     const { coordinator } = harness([busy]);
@@ -267,6 +360,23 @@ describe("PipelineCoordinator.startOrEnqueue", () => {
 });
 
 describe("PipelineCoordinator drain on completion", () => {
+  it("keeps a settled run's capacity until its unfinished provider work settles", async () => {
+    const { coordinator } = harness([makeCard({ id: "a" }), makeCard({ id: "b" })], 1);
+    let release!: () => void;
+    const physical = new Promise<void>((resolve) => { release = resolve; });
+    untrackedWork.set("a", physical);
+    try {
+      await coordinator.startOrEnqueue("a", "generate");
+      await coordinator.startOrEnqueue("b", "generate");
+      await settle("a");
+      expect(coordinator.hasRun("a")).toBe(false);
+      expect(coordinator.hasRun("b")).toBe(false);
+      release();
+      await physical;
+      await vi.waitFor(() => expect(coordinator.hasRun("b")).toBe(true));
+    } finally { release(); untrackedWork.delete("a"); }
+  });
+
   it("admits the earliest queued card when a running pipeline settles", async () => {
     const first = makeCard({ id: "a" });
     const second = makeCard({ id: "b" });

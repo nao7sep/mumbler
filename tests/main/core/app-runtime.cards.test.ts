@@ -586,6 +586,68 @@ describe("the durable queue store", () => {
 });
 
 describe("confirming what was dropped in", () => {
+  it("restores failed confirmation behind a newer surviving draft packet", async () => {
+    const [first, survivor] = await dropIn("first.wav", "survivor.wav");
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(home, "originals") });
+    const submitted = review(first, {
+      localTimestampText: "2026-03-01 07:30:00", timezone: "Asia/Tokyo",
+      copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true,
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const queuePath = join(home, "queue.json");
+    unwritable.held = { path: queuePath, release: gate, entered: 0 };
+    let refused = false;
+    unwritable.refuses = (path) => path === queuePath && !refused && (refused = true);
+    const confirming = runtime.confirmPendingImports([submitted]).catch((error: unknown) => error);
+    let editing: Promise<AppSnapshot> | undefined;
+    try {
+      await vi.waitFor(() => expect(unwritable.held?.entered).toBe(1));
+      const transientCard = cards(runtime.getSnapshot())[0];
+      expect(runtime.getSnapshot().state?.pendingImports.map((item) => item.id)).toEqual([survivor.id]);
+      await expect(runtime.removeCard(transientCard.id)).rejects.toThrow(/import is still being saved/);
+      editing = runtime.updatePendingImportDrafts([review(survivor, { localTimestampText: "2026-03-02 09:00:00" })]);
+      release();
+      expect(await confirming).toBeInstanceOf(Error);
+      await editing;
+      const saved = (await createQueueStore(queuePath).load()).value;
+      expect(saved.cards).toEqual([]);
+      expect(saved.pendingImports.map((item) => item.id)).toEqual([first.id, survivor.id]);
+      expect(saved.pendingImports[0]).toMatchObject({
+        localTimestampText: submitted.localTimestampText, timezone: submitted.timezone,
+        copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true,
+      });
+      expect(saved.pendingImports[1].localTimestampText).toBe("2026-03-02 09:00:00");
+      expect(await exists(first.workingFilePath)).toBe(true);
+    } finally {
+      release();
+      unwritable.held = null;
+      unwritable.refuses = () => false;
+      await Promise.allSettled([confirming, ...(editing ? [editing] : [])]);
+    }
+  });
+
+  it("retains the review and original actions after a refused queue publication", async () => {
+    const [pending] = await dropIn("retry.wav");
+    const originals = join(home, "originals");
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: originals });
+    const edited = review(pending, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true });
+    unwritable.refuses = (path) => path === join(home, "queue.json");
+    try {
+      await expect(runtime.confirmPendingImports([edited])).rejects.toThrow();
+      expect(runtime.getSnapshot().state?.pendingImports.map((item) => item.id)).toEqual([pending.id]);
+      expect(cards(runtime.getSnapshot())).toEqual([]);
+      expect(await readFile(pending.originalSourcePath, "utf8")).toBe("audio for retry.wav");
+      expect(await readdir(originals).catch(() => []), "no output copy precedes the failed primary import").toEqual([]);
+    } finally { unwritable.refuses = () => false; }
+    const result = await runtime.confirmPendingImports([edited]);
+    expect(result.snapshot.state?.pendingImports).toEqual([]);
+    expect(cards(result.snapshot)).toHaveLength(1);
+    expect(result.originalWarnings).toEqual([]);
+    expect(await exists(pending.originalSourcePath)).toBe(false);
+    expect(await readdir(originals)).toEqual(["retry.wav"]);
+  });
+
   it("turns each pending import into a card with the reviewed time, and selects the first", async () => {
     const [pending] = await dropIn("take.wav");
 
@@ -837,6 +899,21 @@ describe("working with a card", () => {
     const { snapshot } = await runtime.confirmPendingImports([review(pending)]);
     return cards(snapshot)[0];
   }
+
+  it.each(["transcription", "structured"] as const)("refuses an incomplete recovered export missing %s", async (missing) => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    await runtime.shutdown();
+    const saved = cards(runtime.getSnapshot())[0];
+    if (missing === "transcription") saved.transcription.text = null;
+    else saved.metadata.structured = null;
+    await new TranscriptStore(join(home, "transcripts")).writeChanged([saved]);
+    runtime = await ApplicationRuntime.initialize();
+    await expect(runtime.saveCard(card.id)).rejects.toThrow();
+    expect(await exists(saved.sourceFilePath)).toBe(true);
+    expect(cards(runtime.getSnapshot())).toHaveLength(1);
+    expect(await readdir(join(home, "output")).catch(() => [])).toEqual([]);
+  });
 
   it("refuses export after a folder is cleared, retaining the ready card and working recording", async () => {
     const card = await confirmed();
@@ -1714,7 +1791,9 @@ describe("settings, secrets and the window's own state", () => {
 
   it("retries failed pending review bytes when the retained draft equals live state", async () => {
     const [pending] = await dropIn("take.wav");
-    const draft = review(pending, { timezone: "Europe/Berlin" });
+    const initial = review(pending, { timezone: "Asia/Tokyo" });
+    await runtime.updatePendingImportDrafts([initial]);
+    const draft = { ...initial, timezone: "Europe/Berlin" };
     const queuePath = join(home, "queue.json");
     unwritable.refuses = (path) => path === queuePath;
     await expect(runtime.updatePendingImportDrafts([draft])).rejects.toThrow();
@@ -2046,14 +2125,14 @@ describe("the save a quit makes", () => {
   it("writes the queue its last save could not write, and reports it while it still cannot", async () => {
     const [pending] = await dropIn("take.wav");
     unwritable.refuses = (path) => path === join(home, "queue.json");
-    await expect(runtime.confirmPendingImports([review(pending)])).rejects.toThrow();
+    await expect(runtime.updatePendingImportDrafts([review(pending)])).rejects.toThrow();
 
     expect(await runtime.saveForQuit()).toEqual(["queue"]);
 
     unwritable.refuses = () => false;
     expect(await runtime.saveForQuit(), "Retry").toEqual([]);
     const saved = await createQueueStore(join(home, "queue.json")).load();
-    expect(saved.value.cards.map((card) => card.originalFilename)).toEqual(["take.wav"]);
+    expect(saved.value.pendingImports).toEqual([expect.objectContaining({ id: pending.id, localTimestampText: "2026-03-01 07:30:00" })]);
   });
 
   it("writes a card's text that is not in its file yet", async () => {
@@ -2149,13 +2228,13 @@ describe("the save a quit makes", () => {
   it("takes work again after a cancelled quit", async () => {
     const [pending] = await dropIn("take.wav");
     unwritable.refuses = (path) => path === join(home, "queue.json");
-    await expect(runtime.confirmPendingImports([review(pending)])).rejects.toThrow();
+    await expect(runtime.updatePendingImportDrafts([review(pending)])).rejects.toThrow();
     expect(await runtime.saveForQuit()).toEqual(["queue"]);
 
     unwritable.refuses = () => false;
     await runtime.resumeAfterCancelledQuit();
-    const [next] = await dropIn("next.wav");
-    await runtime.confirmPendingImports([review(next)]);
+    const remaining = await dropIn("next.wav");
+    await runtime.confirmPendingImports(remaining.map((item) => review(item)));
 
     const saved = await createQueueStore(join(home, "queue.json")).load();
     expect(saved.value.cards.map((card) => card.originalFilename).sort()).toEqual(["next.wav", "take.wav"]);

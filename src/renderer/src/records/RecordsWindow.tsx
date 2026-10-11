@@ -37,7 +37,6 @@ import {
   LEVEL_PILLS,
   cursorAfter,
   durationSeconds,
-  mergeNewestPage,
   prettyJson,
   recordKey,
   stepLabel,
@@ -144,7 +143,10 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   const [detail, setDetail] = useState<DetailState>({ status: "none" });
   const [listWidth, setListWidth] = useState(initialListWidth);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
+  // Filter changes and accepted newest pages invalidate older page cursors.
   const listGeneration = useRef(0);
+  // Only the latest requested newest page may refresh the loaded range.
+  const newestRequest = useRef(0);
   // The busy claim for the next page (PLAYBOOK, Own the work in flight).
   const fetchingMore = useRef(false);
   // The filters the current list was read for, for the live reads below.
@@ -198,17 +200,18 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   useEffect(() => {
     filtersRef.current = filters;
     const generation = ++listGeneration.current;
+    const request = ++newestRequest.current;
     fetchingMore.current = false;
     newestPending.current = false;
     setList({ status: "loading" });
     void window.mumbler.readRecordsPage({ ...filters, after: null }).then(
       (page) => {
-        if (generation !== listGeneration.current) return;
+        if (generation !== listGeneration.current || request !== newestRequest.current) return;
         liveSuspended.current = false;
         setList({ status: "ready", records: page.records, more: page.more, loadingMore: false, moreFailed: false });
       },
       (error: unknown) => {
-        if (generation !== listGeneration.current) return;
+        if (generation !== listGeneration.current || request !== newestRequest.current) return;
         liveSuspended.current = true;
         reportRendererDiagnostic(error, "records read failed");
         setList({ status: "failed" });
@@ -216,26 +219,31 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
     );
   }, [filters]);
 
-  // The newest page read again for new records. It joins the rows already
-  // shown rather than replacing them, so the list never falls back to the
-  // loading note and the pages already read stay. It reads only refs, so one
-  // copy serves the live subscription below.
+  // Restart from the newest page without a loading screen: a provider call
+  // recorded on settlement can sort anywhere in the old range by its start
+  // time. Reusing old pages would skip such a call. Selection and detail are
+  // independent of the loaded range, and earlier page cursors are invalidated.
   const readNewest = useCallback((): void => {
     const generation = listGeneration.current;
+    const request = ++newestRequest.current;
     void window.mumbler.readRecordsPage({ ...filtersRef.current, after: null }).then(
       (page) => {
-        if (generation !== listGeneration.current) return;
+        if (generation !== listGeneration.current || request !== newestRequest.current) return;
+        const scroll = scrollRef.current;
+        if (scroll !== null && !atTop(scroll)) {
+          newestPending.current = true;
+          return;
+        }
+        ++listGeneration.current;
+        fetchingMore.current = false;
         liveSuspended.current = false;
-        setList((current) =>
-          current.status === "ready"
-            ? { ...current, ...mergeNewestPage(current.records, current.more, page) }
-            : { status: "ready", records: page.records, more: page.more, loadingMore: false, moreFailed: false },
-        );
+        setList({ status: "ready", records: page.records, more: page.more, loadingMore: false, moreFailed: false });
       },
       (error: unknown) => {
-        if (generation !== listGeneration.current) return;
+        if (generation !== listGeneration.current || request !== newestRequest.current) return;
         liveSuspended.current = true;
         reportRendererDiagnostic(error, "records read failed");
+        setList((current) => (current.status === "loading" ? { status: "failed" } : current));
       },
     );
   }, []);

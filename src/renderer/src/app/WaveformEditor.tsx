@@ -78,9 +78,13 @@ function renderSymmetricWaveform(
   ctx.fill();
 }
 
+type MarkerSide = "front" | "back";
+interface TypedMarker {
+  text: string;
+}
 interface TypedMarkers {
-  front: string | null;
-  back: string | null;
+  front: TypedMarker | null;
+  back: TypedMarker | null;
 }
 
 interface WaveformEditorProps {
@@ -112,6 +116,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 }, ref): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const waveSurferRef = useRef<WaveSurfer | null>(null);
+  const playerCardIdRef = useRef<string | null>(null);
   const regionsRef = useRef<Regions | null>(null);
   const regionRef = useRef<Region | null>(null);
   // Theme colors for the canvas; the ref lets the create-once effect and the
@@ -121,11 +126,13 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   paletteRef.current = palette;
   const cardIdRef = useRef(card.id);
   const onTrimCommitRef = useRef(onTrimCommit);
+  const disabledRef = useRef(disabled);
 
   cardIdRef.current = card.id;
   onTrimCommitRef.current = onTrimCommit;
+  disabledRef.current = disabled;
 
-  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [mediaSource, setMediaSource] = useState<{ cardId: string; url: string } | null>(null);
   const i18n = useI18n();
   const { t, text } = i18n;
   const [playerError, setPlayerError] = useState<Message | null>(null);
@@ -144,9 +151,9 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const typedRef = useRef<TypedMarkers>({ front: null, back: null });
   const typedByCardRef = useRef(new Map<string, TypedMarkers>());
   const shownCardRef = useRef(card.id);
-  // Trim commits still in flight for the shown card: while any is, a snapshot
-  // from an earlier one does not replace the newer draft.
-  const pendingCommitsRef = useRef(0);
+  // Each card's pending owner retains its latest submitted range so returning
+  // before settlement cannot replace it with an earlier saved snapshot.
+  const pendingCommitsRef = useRef(new Map<string, { count: number; trim: CardTrim }>());
   const cardTrimRef = useRef(card.trim);
   cardTrimRef.current = card.trim;
 
@@ -154,31 +161,49 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const backComposing = useComposing();
 
   // Keep a ref to draftTrim so the WaveSurfer 'ready' handler can access the
-  // current value without going stale inside the [mediaUrl] effect closure.
+  // current value without going stale inside the media-source effect closure.
   const draftTrimRef = useRef(draftTrim);
   draftTrimRef.current = draftTrim;
 
   function showTrim(trim: CardTrim): void {
-    setFrontInput(typedRef.current.front ?? formatMarkerInput(trim.frontMarkerSec));
-    setBackInput(typedRef.current.back ?? formatMarkerInput(trim.backMarkerSec));
+    setFrontInput(typedRef.current.front?.text ?? formatMarkerInput(trim.frontMarkerSec));
+    setBackInput(typedRef.current.back?.text ?? formatMarkerInput(trim.backMarkerSec));
   }
 
-  function typeMarker(side: "front" | "back", value: string): void {
-    typedRef.current = { ...typedRef.current, [side]: value };
+  function keepTypedMarkers(cardId: string, typed: TypedMarkers): void {
+    if (typed.front !== null || typed.back !== null) typedByCardRef.current.set(cardId, typed);
+    else typedByCardRef.current.delete(cardId);
+    if (shownCardRef.current === cardId) typedRef.current = typed;
+  }
+
+  function typeMarker(side: MarkerSide, value: string): void {
+    if (cardIdRef.current !== card.id || shownCardRef.current !== card.id) return;
+    // Object identity is the edit's version, including a later edit that happens
+    // to contain the same text as an earlier submitted version.
+    keepTypedMarkers(card.id, { ...typedRef.current, [side]: { text: value } });
     if (side === "front") setFrontInput(value);
     else setBackInput(value);
   }
 
+  function currentPlayer(): WaveSurfer | null {
+    return cardIdRef.current === card.id && playerCardIdRef.current === card.id
+      ? waveSurferRef.current
+      : null;
+  }
+
   useEffect(() => {
-    if (shownCardRef.current !== card.id) {
-      const left = typedRef.current;
-      if (left.front !== null || left.back !== null) typedByCardRef.current.set(shownCardRef.current, left);
-      else typedByCardRef.current.delete(shownCardRef.current);
+    const returning = shownCardRef.current !== card.id;
+    if (returning) {
       typedRef.current = typedByCardRef.current.get(card.id) ?? { front: null, back: null };
       shownCardRef.current = card.id;
-      pendingCommitsRef.current = 0;
-    } else if (pendingCommitsRef.current > 0) {
-      showTrim(card.trim);
+    }
+    const pending = pendingCommitsRef.current.get(card.id);
+    if (pending) {
+      if (returning) {
+        draftTrimRef.current = pending.trim;
+        setDraftTrim(pending.trim);
+      }
+      showTrim(draftTrimRef.current);
       return;
     }
     setDraftTrim(card.trim);
@@ -191,6 +216,10 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
   useEffect(() => {
     let cancelled = false;
+    setMediaSource(null);
+    setCursorSec(0);
+    setIsPlaying(false);
+    setActiveSnippet(null);
     setIsLoadingMedia(true);
     setPlayerError(null);
 
@@ -201,7 +230,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           return;
         }
 
-        setMediaUrl(nextMediaUrl);
+        setMediaSource({ cardId: card.id, url: nextMediaUrl });
       })
       .catch((error: unknown) => {
         if (cancelled) {
@@ -222,10 +251,12 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   }, [card.id]);
 
   useEffect(() => {
-    if (containerRef.current === null || mediaUrl === null) {
+    if (containerRef.current === null || mediaSource === null || mediaSource.cardId !== card.id) {
       return;
     }
 
+    const loadedCardId = mediaSource.cardId;
+    let active = true;
     const regions = RegionsPlugin.create();
     const waveSurfer = WaveSurfer.create({
       container: containerRef.current,
@@ -237,19 +268,22 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       dragToSeek: true,
       autoScroll: true,
       autoCenter: true,
-      url: mediaUrl,
+      url: mediaSource.url,
       plugins: [regions],
     });
 
     waveSurferRef.current = waveSurfer;
+    playerCardIdRef.current = loadedCardId;
     regionsRef.current = regions;
     regionRef.current = null;
     setCursorSec(0);
     setIsPlaying(false);
     setActiveSnippet(null);
 
+    const isCurrentPlayer = (): boolean => active && cardIdRef.current === loadedCardId && waveSurferRef.current === waveSurfer;
     const subscriptions = [
       waveSurfer.on("ready", (duration) => {
+        if (!isCurrentPlayer()) return;
         setResolvedDurationSec(duration);
         // Sync region immediately after WaveSurfer is ready. Without this,
         // if resolvedDurationSec doesn't change (already matches card.durationSec),
@@ -259,44 +293,55 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         }
       }),
       waveSurfer.on("decode", (duration) => {
+        if (!isCurrentPlayer()) return;
         setResolvedDurationSec(duration);
       }),
       waveSurfer.on("play", () => {
+        if (!isCurrentPlayer()) return;
         setIsPlaying(true);
       }),
       waveSurfer.on("pause", () => {
+        if (!isCurrentPlayer()) return;
         setIsPlaying(false);
         setActiveSnippet(null);
       }),
       waveSurfer.on("finish", () => {
+        if (!isCurrentPlayer()) return;
         setIsPlaying(false);
         setActiveSnippet(null);
       }),
       waveSurfer.on("timeupdate", (currentTime) => {
+        if (!isCurrentPlayer()) return;
         setCursorSec(currentTime);
       }),
       waveSurfer.on("interaction", (nextTime) => {
+        if (!isCurrentPlayer()) return;
         setCursorSec(nextTime);
       }),
       waveSurfer.on("error", (error) => {
+        if (!isCurrentPlayer()) return;
         setPlayerError(presentFailure(error, message("player.playFailed"), "audio playback failed"));
       }),
       // region-update / region-updated fire only from a user drag or resize:
       // WaveSurfer's programmatic setOptions emits "render", not "update", so
       // syncing the region to our own state never echoes back through these.
       regions.on("region-update", (region) => {
+        if (!isCurrentPlayer() || disabledRef.current) return;
         const nextTrim = regionToTrim(region, waveSurfer.getDuration());
         setDraftTrim(nextTrim);
-        setFrontInput(formatMarkerInput(nextTrim.frontMarkerSec));
-        setBackInput(formatMarkerInput(nextTrim.backMarkerSec));
+        typeMarker("front", formatMarkerInput(nextTrim.frontMarkerSec));
+        typeMarker("back", formatMarkerInput(nextTrim.backMarkerSec));
       }),
       regions.on("region-updated", (region) => {
+        if (!isCurrentPlayer() || disabledRef.current) return;
         const nextTrim = regionToTrim(region, waveSurfer.getDuration());
-        void commitTrim(nextTrim).catch((error: unknown) => {
+        void commitTrim(nextTrim, ["front", "back"], loadedCardId, waveSurfer.getDuration()).catch((error: unknown) => {
+          if (!isCurrentPlayer()) return;
           setPlayerError(presentFailure(error, message("player.markersOutOfRange"), "trim region validation failed"));
         });
       }),
       regions.on("region-removed", () => {
+        if (!isCurrentPlayer() || disabledRef.current) return;
         // A removal we initiated clears regionRef *before* calling remove(), so a
         // null ref here means this is the synchronous echo of our own sync —
         // ignore it. No user gesture removes the region, so the body below only
@@ -312,19 +357,21 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     ];
 
     return () => {
+      active = false;
       for (const unsubscribe of subscriptions) {
         unsubscribe();
       }
 
       regionRef.current = null;
       regionsRef.current = null;
-      waveSurferRef.current?.destroy();
       waveSurferRef.current = null;
+      playerCardIdRef.current = null;
+      waveSurfer.destroy();
     };
-  }, [mediaUrl]);
+  }, [mediaSource, card.id]);
 
   useEffect(() => {
-    const waveSurfer = waveSurferRef.current;
+    const waveSurfer = currentPlayer();
     const regions = regionsRef.current;
     const durationSec = resolvedDurationSec ?? waveSurfer?.getDuration() ?? null;
 
@@ -345,36 +392,59 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     regionRef.current?.setOptions({ color: palette.region });
   }, [palette]);
 
-  // `sides` are the markers this commit sets, whose typed text it consumes;
-  // text typed on the other side stays. Its outcome touches the view only while
-  // the card it was submitted for is still shown; success leaves the draft to the
-  // snapshot that follows, and a failure reverts to the latest saved trim only
-  // once no newer commit is in flight.
-  async function commitTrim(nextTrim: CardTrim, sides: readonly ("front" | "back")[] = ["front", "back"]): Promise<void> {
-    const normalizedTrim = normalizeTrimDraft(nextTrim, resolvedDurationSec);
-    const submittedFor = cardIdRef.current;
-    for (const side of sides) typedRef.current = { ...typedRef.current, [side]: null };
+  // `sides` are the markers this commit sets. Their typed text stays until the
+  // submitted version succeeds; a failure and later edits retain their drafts.
+  // Draft ownership remains with the card even after its player is retired.
+  // Settlement touches the view only while that card is shown. A failure restores
+  // its saved range when no newer commit is pending, preserving all typed text.
+  async function commitTrim(
+    nextTrim: CardTrim,
+    sides: readonly MarkerSide[] = ["front", "back"],
+    submittedFor = card.id,
+    durationSec = resolvedDurationSec,
+  ): Promise<void> {
+    if (disabledRef.current || cardIdRef.current !== submittedFor) return;
+    const normalizedTrim = normalizeTrimDraft(nextTrim, durationSec);
+    const submittedTyped = typedByCardRef.current.get(submittedFor) ?? { front: null, back: null };
+    draftTrimRef.current = normalizedTrim;
     setDraftTrim(normalizedTrim);
     showTrim(normalizedTrim);
     setPlayerError(null);
-    pendingCommitsRef.current += 1;
+    pendingCommitsRef.current.set(submittedFor, {
+      count: (pendingCommitsRef.current.get(submittedFor)?.count ?? 0) + 1,
+      trim: normalizedTrim,
+    });
     let failure: unknown = null;
     try {
       await onTrimCommitRef.current(submittedFor, normalizedTrim);
     } catch (error: unknown) {
       failure = error;
     }
-    if (shownCardRef.current !== submittedFor) return;
-    pendingCommitsRef.current = Math.max(0, pendingCommitsRef.current - 1);
-    if (failure === null) return;
+    const pending = pendingCommitsRef.current.get(submittedFor)!;
+    const remaining = pending.count - 1;
+    if (remaining === 0) pendingCommitsRef.current.delete(submittedFor);
+    else pendingCommitsRef.current.set(submittedFor, { ...pending, count: remaining });
+    if (failure === null) {
+      let typed = typedByCardRef.current.get(submittedFor) ?? { front: null, back: null };
+      for (const side of sides) {
+        if (typed[side] === submittedTyped[side]) typed = { ...typed, [side]: null };
+      }
+      keepTypedMarkers(submittedFor, typed);
+    }
+    if (shownCardRef.current !== submittedFor || cardIdRef.current !== submittedFor) return;
+    if (failure === null) {
+      showTrim(draftTrimRef.current);
+      return;
+    }
     setPlayerError(presentFailure(failure, message("player.markersSaveFailed"), "trim marker save failed"));
-    if (pendingCommitsRef.current === 0) {
+    if (remaining === 0) {
       setDraftTrim(cardTrimRef.current);
       showTrim(cardTrimRef.current);
     }
   }
 
   async function setMarkerAtCursor(side: "front" | "back"): Promise<void> {
+    if (disabledRef.current || currentPlayer() === null) return;
     try {
       const currentTime = cursorSec;
       const nextTrim =
@@ -395,6 +465,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   }
 
   async function nudgeMarker(side: "front" | "back", deltaSec: number): Promise<void> {
+    if (disabledRef.current || cardIdRef.current !== card.id) return;
     try {
       const currentValue =
         side === "front" ? draftTrim.frontMarkerSec ?? 0 : draftTrim.backMarkerSec ?? 0;
@@ -417,6 +488,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   }
 
   async function handleMarkerInputCommit(side: "front" | "back"): Promise<void> {
+    if (disabledRef.current || cardIdRef.current !== card.id) return;
     const rawValue = side === "front" ? frontInput : backInput;
 
     try {
@@ -441,7 +513,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   }
 
   async function playSnippet(side: "first" | "last"): Promise<void> {
-    const waveSurfer = waveSurferRef.current;
+    const waveSurfer = currentPlayer();
     const durationSec = resolvedDurationSec ?? waveSurfer?.getDuration() ?? null;
 
     if (waveSurfer === null || durationSec === null) {
@@ -463,7 +535,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   }
 
   async function playPause(): Promise<void> {
-    const waveSurfer = waveSurferRef.current;
+    const waveSurfer = currentPlayer();
     if (waveSurfer === null) {
       return;
     }
@@ -473,7 +545,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   }
 
   function skipSeconds(seconds: number): void {
-    const waveSurfer = waveSurferRef.current;
+    const waveSurfer = currentPlayer();
     if (waveSurfer === null) {
       return;
     }
@@ -518,9 +590,10 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       playFirstSnippet: () => playSnippet("first"),
       playLastSnippet: () => playSnippet("last"),
     }),
-    [cursorSec, draftTrim.backMarkerSec, draftTrim.frontMarkerSec, previewSnippetSeconds, skipIntervalSec, resolvedDurationSec],
+    [card.id, disabled, cursorSec, draftTrim.backMarkerSec, draftTrim.frontMarkerSec, previewSnippetSeconds, skipIntervalSec, resolvedDurationSec],
   );
 
+  const hasCurrentMedia = mediaSource?.cardId === card.id;
   const durationLabel = resolvedDurationSec === null ? t("common.unknown") : formatMarkerInput(resolvedDurationSec);
   const trimSummary = text(describeTrim(draftTrim));
 
@@ -540,14 +613,14 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       {playerError ? <InlineError>{text(playerError)}</InlineError> : null}
 
       <div className="control-row control-row--five">
-        <button type="button" className="button button--ghost" onClick={() => void playPause()}>
+        <button type="button" className="button button--ghost" onClick={() => void playPause()} disabled={!hasCurrentMedia}>
           {isPlaying ? t("player.pause") : t("player.play")}
         </button>
         <button
           type="button"
           className="button button--ghost"
           onClick={() => void setMarkerAtCursor("front")}
-          disabled={disabled}
+          disabled={disabled || !hasCurrentMedia}
         >
           {t("player.setFrontAtCursor")}
         </button>
@@ -555,7 +628,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           type="button"
           className="button button--ghost"
           onClick={() => void setMarkerAtCursor("back")}
-          disabled={disabled}
+          disabled={disabled || !hasCurrentMedia}
         >
           {t("player.setBackAtCursor")}
         </button>
@@ -583,6 +656,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           className={`button ${activeSnippet === "first" && isPlaying ? "button--primary" : "button--ghost"}`}
           aria-pressed={activeSnippet === "first" && isPlaying}
           onClick={() => void playSnippet("first")}
+          disabled={!hasCurrentMedia}
         >
           {t("player.playFirst", { count: previewSnippetSeconds })}
         </button>
@@ -591,6 +665,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           className={`button ${activeSnippet === "last" && isPlaying ? "button--primary" : "button--ghost"}`}
           aria-pressed={activeSnippet === "last" && isPlaying}
           onClick={() => void playSnippet("last")}
+          disabled={!hasCurrentMedia}
         >
           {t("player.playLast", { count: previewSnippetSeconds })}
         </button>

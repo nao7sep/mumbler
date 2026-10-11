@@ -54,6 +54,7 @@ const wave = vi.hoisted(() => {
   };
   return {
     listeners,
+    createdUrls: [] as string[],
     player,
     regions,
     emit(event: string, ...args: unknown[]): void {
@@ -61,6 +62,7 @@ const wave = vi.hoisted(() => {
     },
     reset(): void {
       listeners.clear();
+      this.createdUrls = [];
       regions.added = [];
       Object.assign(player, {
         duration: 300,
@@ -74,7 +76,7 @@ const wave = vi.hoisted(() => {
   };
 });
 
-vi.mock("wavesurfer.js", () => ({ default: { create: () => wave.player } }));
+vi.mock("wavesurfer.js", () => ({ default: { create: (options: { url: string }) => { wave.createdUrls.push(options.url); return wave.player; } } }));
 vi.mock("wavesurfer.js/dist/plugins/regions.esm.js", () => ({ default: { create: () => wave.regions } }));
 
 import type { WaveformEditorHandle } from "@renderer/app/WaveformEditor";
@@ -286,14 +288,15 @@ describe("setting the markers", () => {
     expect(button("Clear Markers").disabled).toBe(true);
   });
 
-  it("puts the markers back and says so when the save is refused", async () => {
+  it("keeps the submitted text and says the previous markers remain in effect when saving fails", async () => {
     onTrimCommit.mockRejectedValue(new Error("Front trim cannot exceed audio duration."));
     await mountEditor({ trim: { frontMarkerSec: 30, backMarkerSec: 200 } });
 
     await typeMarker("front", "1:00.0");
 
     expect(text()).toContain("The trim markers could not be saved. The previous markers remain in effect");
-    expect(markerInput("front").value, "the markers in effect are shown again").toBe("0:30.0");
+    expect(markerInput("front").value, "the failed input remains available for correction or retry").toBe("1:00.0");
+    expect(text()).toContain("Keep 0:30.0 to 3:20.0");
   });
 
   it("offers no marker editing while the card is busy", async () => {
@@ -434,6 +437,123 @@ describe("text typed but not yet committed", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
   }
+
+  it("retains a pending front marker after leaving and returning before submitting the back marker", async () => {
+    let settleFront!: () => void;
+    let settleBack!: () => void;
+    onTrimCommit
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { settleFront = resolve; }))
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { settleBack = resolve; }));
+    await mountEditor();
+    await typeMarker("front", "30");
+    await show({ id: "card-2" });
+    await typeOnly("back", "another card's unfinished marker");
+    await show({ id: "card-1" });
+    await typeMarker("back", "200");
+    try {
+      expect(onTrimCommit).toHaveBeenNthCalledWith(2, "card-1", { frontMarkerSec: 30, backMarkerSec: 200 });
+      await act(async () => settleFront());
+      await show({ trim: { frontMarkerSec: 30, backMarkerSec: null } });
+      expect(text()).toContain("Keep 0:30.0 to 3:20.0");
+      expect(markerInput("back").value).toBe("200");
+      await act(async () => settleBack());
+      await show({ trim: { frontMarkerSec: 30, backMarkerSec: 200 } });
+      expect(markerInput("front").value).toBe("0:30.0");
+      expect(markerInput("back").value).toBe("3:20.0");
+      await show({ id: "card-2" });
+      expect(markerInput("back").value).toBe("another card's unfinished marker");
+    } finally {
+      await act(async () => { settleFront(); settleBack(); });
+    }
+  });
+
+  it("keeps submitted raw text until success, and clears only that submitted version", async () => {
+    let succeed!: () => void;
+    onTrimCommit.mockImplementationOnce(() => new Promise<void>((resolve) => { succeed = resolve; }));
+    await mountEditor();
+    await typeMarker("front", "060");
+    expect(markerInput("front").value).toBe("060");
+    // A new edit can have the same characters; it still owns its own settlement.
+    await typeOnly("front", "061");
+    await typeOnly("front", "060");
+    await act(async () => succeed());
+    await show({ trim: { frontMarkerSec: 60, backMarkerSec: null } });
+    expect(markerInput("front").value).toBe("060");
+  });
+
+  it("retires the old player immediately while another card's media is pending or fails", async () => {
+    await mountEditor({ trim: { frontMarkerSec: 30, backMarkerSec: 200 } });
+    await typeOnly("back", "4:12 unfinished");
+    const staleTime = [...(wave.listeners.get("timeupdate") ?? [])];
+    const staleReady = [...(wave.listeners.get("ready") ?? [])];
+    const staleUpdate = [...(wave.listeners.get("region-updated") ?? [])];
+    let fail!: (error: Error) => void;
+    getCardMediaSource.mockImplementationOnce(() => new Promise<string>((_resolve, reject) => { fail = reject; }));
+    const staleHandle = handle.current!;
+    await show({ id: "card-2", durationSec: 100 });
+    expect(wave.player.destroyed).toBe(true);
+    await act(async () => {
+      for (const callback of staleTime) callback(88);
+      for (const callback of staleReady) callback(999);
+      for (const callback of staleUpdate) callback({ start: 45, end: 180 });
+      await handle.current?.playPause();
+      handle.current?.skipForward();
+      await handle.current?.setFrontMarkerAtCursor();
+      await handle.current?.playFirstSnippet();
+      await staleHandle.setBackMarkerAtCursor();
+    });
+    expect(onTrimCommit).not.toHaveBeenCalled();
+    expect(wave.player.playPauseCalls).toBe(0);
+    expect(wave.player.seekedTo).toEqual([]);
+    expect(wave.player.played).toEqual([]);
+    expect(text()).toContain("Cursor: 0:00.0");
+    expect(text()).toContain("Duration: 1:40.0");
+    await act(async () => fail(new Error("cannot load card-2")));
+    await act(async () => handle.current?.setBackMarkerAtCursor());
+    expect(onTrimCommit).not.toHaveBeenCalled();
+    expect(wave.createdUrls).toHaveLength(1);
+    await show({ id: "card-1", trim: { frontMarkerSec: 30, backMarkerSec: 200 } });
+    expect(markerInput("back").value).toBe("4:12 unfinished");
+  });
+
+  it("binds a replacement player to its loaded card even when media URLs are equal", async () => {
+    await mountEditor();
+    const staleUpdate = [...(wave.listeners.get("region-updated") ?? [])];
+    await show({ id: "card-2" });
+    expect(wave.createdUrls).toHaveLength(2);
+    await act(async () => {
+      for (const callback of staleUpdate) callback({ start: 99, end: 200 });
+    });
+    expect(onTrimCommit).not.toHaveBeenCalled();
+    await act(async () => wave.emit("region-updated", { start: 42, end: 200 }));
+    expect(onTrimCommit).toHaveBeenCalledExactlyOnceWith("card-2", { frontMarkerSec: 42, backMarkerSec: 200 });
+  });
+
+  it("settles only the submitted card's text after navigating away", async () => {
+    let succeed!: () => void;
+    onTrimCommit.mockImplementationOnce(() => new Promise<void>((resolve) => { succeed = resolve; }));
+    await mountEditor();
+    await typeMarker("front", "060");
+    await show({ id: "card-2" });
+    await typeOnly("front", "another unfinished marker");
+    await act(async () => succeed());
+    expect(markerInput("front").value).toBe("another unfinished marker");
+    await show({ id: "card-1", trim: { frontMarkerSec: 60, backMarkerSec: null } });
+    expect(markerInput("front").value).toBe("1:00.0");
+  });
+
+  it("retains a failed card's submitted draft when its save settles while another card is shown", async () => {
+    let fail!: (error: Error) => void;
+    onTrimCommit.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { fail = reject; }));
+    await mountEditor({ trim: { frontMarkerSec: 30, backMarkerSec: null } });
+    await typeMarker("front", "060");
+    await show({ id: "card-2", trim: { frontMarkerSec: 10, backMarkerSec: null } });
+    await act(async () => fail(new Error("save refused")));
+    expect(markerInput("front").value).toBe("0:10.0");
+    await show({ id: "card-1", trim: { frontMarkerSec: 30, backMarkerSec: null } });
+    expect(markerInput("front").value).toBe("060");
+    expect(text()).toContain("Keep 0:30.0 to the end");
+  });
 
   it("survives the saved trim arriving for a commit of the other marker", async () => {
     await mountEditor();

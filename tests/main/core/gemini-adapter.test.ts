@@ -74,6 +74,7 @@ describe("the Gemini SDK transport", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
   afterEach(async () => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     await rm(root, { recursive: true, force: true });
   });
@@ -122,6 +123,63 @@ describe("the Gemini SDK transport", () => {
     expect(String(startUrl)).toBe(`${endpoint}/upload/v1beta/files`);
     expect(new Headers(startInit?.headers).get("x-goog-upload-protocol")).toBe("resumable");
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => init?.method === "DELETE" && String(url) === `${endpoint}/v1beta/files/one`)).toBe(true));
+  });
+
+  it("bounds the whole resumable upload while retaining its physical work and deleting a late file", async () => {
+    const filePath = join(root, "long.m4a");
+    await writeFile(filePath, "");
+    await truncate(filePath, INLINE_AUDIO_LIMIT_BYTES + 1);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let firstEntered!: () => void;
+    let secondEntered!: () => void;
+    const first = new Promise<void>((resolve) => { firstEntered = resolve; });
+    const second = new Promise<void>((resolve) => { secondEntered = resolve; });
+    let releaseLast!: () => void;
+    const last = new Promise<void>((resolve) => { releaseLast = resolve; });
+    let deleted!: () => void;
+    const deletion = new Promise<void>((resolve) => { deleted = resolve; });
+    let chunks = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === `${endpoint}/upload/v1beta/files`) return json({}, 200, { "x-goog-upload-url": "https://proxy.example/upload-session" });
+      if (url === "https://proxy.example/upload-session") {
+        if (++chunks === 1) {
+          firstEntered();
+          await new Promise<void>((resolve) => setTimeout(resolve, 600));
+          return json({}, 200, { "x-goog-upload-status": "active" });
+        }
+        secondEntered();
+        await last;
+        return json({ file: { name: "files/late", uri: `${endpoint}/v1beta/files/late`, mimeType: "audio/mp4" } }, 200, { "x-goog-upload-status": "final" });
+      }
+      if (init?.method === "DELETE") { deleted(); return json({}); }
+      return answer("should not generate");
+    });
+    let physical: Promise<unknown> | undefined;
+    let physicallySettled = false;
+    let outcome: unknown;
+    const run = transcribeWithGemini({
+      apiKey: "fixture-key", endpoint, filePath, mimeType: "audio/mp4", model: "custom", timeoutMs: 1000,
+      trackWork: (work) => { physical = work; void work.then(() => { physicallySettled = true; }, () => { physicallySettled = true; }); },
+    }).catch((error: unknown) => { outcome = error; return error; });
+    try {
+      await first;
+      await vi.advanceTimersByTimeAsync(600);
+      await second;
+      await vi.advanceTimersByTimeAsync(400);
+      expect(outcome).toBeInstanceOf(GeminiTimeoutError);
+      expect(physicallySettled).toBe(false);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("models/"))).toBe(false);
+      releaseLast();
+      await physical;
+      await run;
+      await deletion;
+      expect(physicallySettled).toBe(true);
+      expect(fetchMock.mock.calls.some(([url, init]) => init?.method === "DELETE" && String(url) === `${endpoint}/v1beta/files/late`)).toBe(true);
+    } finally {
+      releaseLast();
+      await Promise.allSettled([run, ...(physical ? [physical] : [])]);
+    }
   });
 });
 

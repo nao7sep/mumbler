@@ -60,6 +60,9 @@ export class PipelineCoordinator {
   // In-flight pipeline promises, so shutdown can await them after aborting.
   private readonly activePipelines = new Set<Promise<void>>();
   private readonly pendingStarts = new Set<Promise<void>>();
+  // A queued status is not admission until its initial write succeeds. Each
+  // acquisition has its own handle, even when a retry reuses the same card.
+  private readonly pendingClaims = new Set<{ cardId: string }>();
   private shuttingDown = false;
   private shutdownRequest = 0;
 
@@ -133,78 +136,73 @@ export class PipelineCoordinator {
     const needsTranscriptionSlot = startStep === "transcription";
     const slotAvailable = this.transcriptionSlots.inUse < settings.concurrencyLimit;
 
-    if (!needsTranscriptionSlot || slotAvailable) {
-      const previous = {
-        status: card.status,
-        activeStep: card.activeStep,
-        queuedMode: card.queuedMode,
-        queuedAtUtc: card.queuedAtUtc,
-      };
-      const slot = needsTranscriptionSlot ? this.transcriptionSlots.acquire() : null;
-      card.status = startStep === "transcription" ? "Transcribing" : "Generating Metadata";
-      card.activeStep = startStep;
-      card.queuedMode = null;
-      card.queuedAtUtc = null;
-      const ownsClaim = (): boolean => state.cards.includes(card)
-        && card.status === (startStep === "transcription" ? "Transcribing" : "Generating Metadata")
-        && card.activeStep === startStep
-        && card.queuedMode === null
-        && card.queuedAtUtc === null;
+    const queued = needsTranscriptionSlot && !slotAvailable;
+    const previous = {
+      status: card.status,
+      activeStep: card.activeStep,
+      queuedMode: card.queuedMode,
+      queuedAtUtc: card.queuedAtUtc,
+    };
+    const slot = needsTranscriptionSlot && !queued ? this.transcriptionSlots.acquire() : null;
+    card.status = queued ? "Queued" : startStep === "transcription" ? "Transcribing" : "Generating Metadata";
+    card.activeStep = queued ? null : startStep;
+    card.queuedMode = queued ? mode : null;
+    card.queuedAtUtc = queued ? Date.now() : null;
+    const claim = { status: card.status, activeStep: card.activeStep, queuedMode: card.queuedMode, queuedAtUtc: card.queuedAtUtc };
+    const ownsClaim = (): boolean => state.cards.includes(card)
+      && card.status === claim.status && card.activeStep === claim.activeStep
+      && card.queuedMode === claim.queuedMode && card.queuedAtUtc === claim.queuedAtUtc;
+    const pendingClaim = { cardId };
+    this.pendingClaims.add(pendingClaim);
+    try {
+      await this.hooks.persistState();
+    } catch (error: unknown) {
+      const restored = ownsClaim();
+      if (restored) Object.assign(card, previous);
+      this.pendingClaims.delete(pendingClaim);
+      await this.releaseSlotAndDrain(slot);
+      if (restored) {
+        // Publish behind any concurrent packet that captured the pending claim.
+        try { await this.hooks.persistState(); }
+        catch (recoveryError: unknown) {
+          await this.runtime.logger.error(
+            "pipeline.prestart-recovery-failed",
+            "Failed to save the settled card after prestart failed.",
+            recoveryError,
+            { cardId, startStep },
+          );
+        }
+      }
+      await this.drainQueued();
+      throw error;
+    } finally {
+      this.pendingClaims.delete(pendingClaim);
+    }
+    if (this.shuttingDown || shutdownRequest !== this.shutdownRequest || !ownsClaim()) {
       try {
-        await this.hooks.persistState();
-      } catch (error: unknown) {
-        let restored = false;
         if (ownsClaim()) {
-          Object.assign(card, previous);
-          restored = true;
+          card.status = "Cancelled";
+          card.activeStep = null;
+          card.queuedMode = null;
+          card.queuedAtUtc = null;
+          card.lastError = null;
+          await this.hooks.persistState();
         }
+      } finally {
         await this.releaseSlotAndDrain(slot);
-        if (restored) {
-          try {
-            await this.hooks.persistState();
-          } catch (recoveryError: unknown) {
-            await this.runtime.logger.error(
-              "pipeline.prestart-recovery-failed",
-              "Failed to save the settled card after prestart failed.",
-              recoveryError,
-              { cardId, startStep },
-            );
-          }
-        }
-        throw error;
       }
-      if (this.shuttingDown || shutdownRequest !== this.shutdownRequest || !ownsClaim()) {
-        try {
-          if (ownsClaim()) {
-            card.status = "Cancelled";
-            card.activeStep = null;
-            card.lastError = null;
-            await this.hooks.persistState();
-          }
-        } finally {
-          await this.releaseSlotAndDrain(slot);
-        }
-        return;
-      }
+      return;
+    }
+    if (!queued) {
       this.spawnCardPipeline(cardId, startStep, mode, slot);
       return;
     }
-
-    card.status = "Queued";
-    card.queuedMode = mode;
-    card.queuedAtUtc = Date.now();
-    card.activeStep = null;
-    await this.hooks.persistState();
     await this.runtime.logger.info(
-      "pipeline.queued",
-      "Queued card; awaiting transcription slot.",
-      {
-        cardId,
-        mode,
-        activeSlots: this.transcriptionSlots.inUse,
-        concurrencyLimit: settings.concurrencyLimit,
-      },
+      "pipeline.queued", "Queued card; awaiting transcription slot.",
+      { cardId, mode, activeSlots: this.transcriptionSlots.inUse, concurrencyLimit: settings.concurrencyLimit },
     );
+    // Capacity may have become free while this claim was being published.
+    await this.drainQueued();
   }
 
   private spawnCardPipeline(
@@ -330,7 +328,7 @@ export class PipelineCoordinator {
     // for several cards would re-select — and double-spawn — the card it just
     // started. We seed the set from active runs and extend it in lockstep as we
     // spawn, rather than rebuilding it from activeRuns on every iteration.
-    const excludedCardIds = new Set(this.activeRuns.keys());
+    const excludedCardIds = new Set([...this.activeRuns.keys(), ...[...this.pendingClaims].map((claim) => claim.cardId)]);
     while (this.transcriptionSlots.inUse < settings.concurrencyLimit) {
       const next = selectNextQueuedCard(state.cards, excludedCardIds);
 

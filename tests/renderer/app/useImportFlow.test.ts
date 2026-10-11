@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AppSnapshot, PendingImportReviewItem } from "@shared/app-shell";
+
 import { useImportFlow } from "@renderer/app/useImportFlow";
 import { createTranslator, message, type Message } from "@shared/i18n/translate";
 
@@ -588,5 +590,104 @@ describe("useImportFlow confirming a review", () => {
   it("shows nothing when every original was handled as asked", async () => {
     const container = await confirmWith([]);
     expect(container.querySelector("[data-result]")).toBeNull();
+  });
+});
+
+
+describe("useImportFlow review ownership", () => {
+  const pending: PendingImportReviewItem = {
+    id: "pending-1",
+    originalFilename: "take.wav",
+    importSource: "file-picker",
+    originalSourcePath: "/sources/take.wav",
+    workingFilePath: "/working/take.wav",
+    fileSizeBytes: 1,
+    localTimestampText: "2026-03-01 07:30:00",
+    timezone: "Asia/Tokyo",
+    utcTimestampText: "2026-02-28 22:30:00",
+    parseStatus: "parsed",
+    copyToBackupOnConfirm: true,
+    deleteOriginalOnConfirm: false,
+    createdAtUtc: 1,
+    updatedAtUtc: 1,
+  };
+  let flow: ReturnType<typeof useImportFlow>;
+  const sent = vi.fn();
+  const chooseOriginalsDirectory = vi.fn();
+  const snapshotUpdate = vi.fn();
+  let flushPendingEdits: () => Promise<void>;
+
+  function ReviewHarness({ snapshot }: { snapshot: AppSnapshot }): ReactElement {
+    flow = useImportFlow({ snapshot, onSnapshotUpdate: snapshotUpdate, onError: vi.fn() });
+    return React.createElement("div", { "data-submitting": String(flow.isConfirmingReview) });
+  }
+
+  async function show(items: PendingImportReviewItem[], backupDirectory: string | null = null): Promise<void> {
+    const snapshot = { state: { pendingImports: items }, settingsSummary: { backupDirectory } } as unknown as AppSnapshot;
+    await act(async () => root?.render(React.createElement(ReviewHarness, { snapshot })));
+  }
+
+  async function mount(): Promise<void> {
+    vi.useFakeTimers();
+    sent.mockReset().mockResolvedValue({});
+    chooseOriginalsDirectory.mockReset();
+    snapshotUpdate.mockReset();
+    Object.defineProperty(window, "mumbler", {
+      configurable: true,
+      value: {
+        updatePendingImportDrafts: sent,
+        chooseOriginalsDirectory,
+        confirmPendingImports,
+        onFlushPendingEdits: (flush: () => Promise<void>) => {
+          flushPendingEdits = flush;
+          return () => undefined;
+        },
+      },
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await show([pending]);
+  }
+
+  it("claims confirmation once before the originals picker and freezes the submitted edits", async () => {
+    await mount();
+    let select!: (snapshot: AppSnapshot) => void;
+    chooseOriginalsDirectory.mockImplementation(() => new Promise<AppSnapshot>((resolve) => { select = resolve; }));
+    confirmPendingImports.mockResolvedValue({ snapshot: {}, originalWarnings: [] });
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    await act(async () => {
+      first = flow.handleConfirmPendingImports();
+      second = flow.handleConfirmPendingImports();
+    });
+    expect(chooseOriginalsDirectory).toHaveBeenCalledOnce();
+    expect(flow.isConfirmingReview).toBe(true);
+    await act(async () => flow.setPendingReviewDrafts((drafts) => drafts.map((draft) => ({
+      ...draft, localTimestampText: "edited during picker", deleteOriginalOnConfirm: true,
+    }))));
+    expect(flow.pendingReviewDrafts[0]?.localTimestampText).toBe(pending.localTimestampText);
+    await show([pending, { ...pending, id: "pending-2" }]);
+    await act(async () => {
+      select({ settingsSummary: { backupDirectory: "/chosen" } } as unknown as AppSnapshot);
+      await Promise.all([first, second]);
+    });
+    expect(confirmPendingImports).toHaveBeenCalledExactlyOnceWith([pending]);
+    expect(flow.isConfirmingReview).toBe(false);
+  });
+
+  it("keeps a newer debounced sender when an earlier save acknowledges late", async () => {
+    await mount();
+    let acknowledge!: () => void;
+    sent.mockImplementationOnce(() => new Promise<void>((resolve) => { acknowledge = resolve; }));
+    await act(async () => vi.advanceTimersByTime(250));
+    await act(async () => flow.setPendingReviewDrafts((drafts) => drafts.map((draft) => ({ ...draft, timezone: "Europe/Berlin" }))));
+    await act(async () => acknowledge());
+    // The old acknowledgment must not erase the new sender from quit's owner.
+    await act(async () => flushPendingEdits());
+    expect(sent).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTime(250));
+    expect(sent).toHaveBeenCalledTimes(2);
+    expect(sent.mock.calls[1]![0]).toEqual([expect.objectContaining({ timezone: "Europe/Berlin" })]);
   });
 });

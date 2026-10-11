@@ -168,12 +168,12 @@ export async function transcribeWithGemini(
       transport = "files-api";
       throwIfExternallyCancelled(params.signal);
       const upload = { file: params.filePath, config: { mimeType: params.mimeType } };
-      // The upload ignores an abort signal, so the caller stops waiting for it on
-      // Cancel instead (a quit is not held for its length); the upload goes on,
-      // and a file it finishes after that is deleted again.
+      // The upload ignores an abort signal, so the caller stops waiting at the
+      // operation deadline or on Cancel. SDK chunk deadlines are per request;
+      // physical upload work retains capacity and any late file is deleted.
       const uploading = ai.files.upload(upload);
       params.trackWork?.(uploading);
-      const uploadedFile = await record("files.upload", null, upload, () => untilCancelled(uploading, params.signal, (late) => {
+      const uploadedFile = await record("files.upload", null, upload, () => untilAborted(uploading, abortState.signal, (late) => {
         if (late.name) void deleteUploadedFile(ai, late.name, record, params.logger);
       }));
       uploadedFileName = uploadedFile.name ?? null;
@@ -416,12 +416,12 @@ function createGeminiAbortState(
   let didExternalCancel = false;
   const timeoutId = setTimeout(() => {
     didTimeOut = true;
-    controller.abort();
+    controller.abort(new GeminiTimeoutError(timeoutMs));
   }, timeoutMs);
 
   const onExternalAbort = (): void => {
     didExternalCancel = true;
-    controller.abort();
+    controller.abort(new CancelledError());
   };
 
   if (externalSignal?.aborted) {
@@ -441,15 +441,14 @@ function createGeminiAbortState(
   };
 }
 
-// Settles with `work`, or rejects with CancelledError as soon as `signal`
-// aborts; a value `work` delivers after that goes to `late` instead.
-function untilCancelled<T>(work: Promise<T>, signal: AbortSignal | undefined, late: (value: T) => void): Promise<T> {
-  if (signal === undefined) return work;
+// The operation owns this signal's reason: timeout and user cancellation remain
+// distinct, while a value physical work delivers afterwards goes to cleanup.
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal, late: (value: T) => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let cancelled = false;
     const onAbort = (): void => {
       cancelled = true;
-      reject(new CancelledError());
+      reject(signal.reason);
     };
     if (signal.aborted) onAbort();
     else signal.addEventListener("abort", onAbort, { once: true });

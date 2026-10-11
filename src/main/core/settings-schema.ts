@@ -155,7 +155,8 @@ interface UnusableSets {
 }
 
 function unusableSets(raw: Record<string, unknown>): UnusableSets {
-  const unknown: Record<string, unknown> = {};
+  // Set names are data, including __proto__, constructor and toString.
+  const unknown: Record<string, unknown> = Object.create(null);
   const invalid: Partial<Record<keyof MumblerSettings, unknown>> = {};
   for (const key of Object.keys(raw)) {
     if (key === "formatVersion") continue;

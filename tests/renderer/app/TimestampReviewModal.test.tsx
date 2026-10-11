@@ -250,6 +250,19 @@ describe("what blocks the import", () => {
     expect(button("Cancel").disabled).toBe(true);
   });
 
+  it("freezes every editable review control while submitting, including original-file choices", async () => {
+    await mountModal([makeItem()], { isSubmitting: true });
+
+    expect([...document.querySelectorAll("input, select")].every((field) => (field as HTMLInputElement).disabled)).toBe(true);
+    expect(button("Apply to All").disabled).toBe(true);
+    await act(async () => button("Apply to All").click());
+    await act(async () => checkbox("Keep a copy of the originals").click());
+    await act(async () => checkbox("Permanently delete originals after import").click());
+    expect(onApplyTimezoneToAll).not.toHaveBeenCalled();
+    expect(onSetCopyToBackupForAll).not.toHaveBeenCalled();
+    expect(onSetDeleteOriginalForAll).not.toHaveBeenCalled();
+  });
+
   it("cancels the whole review", async () => {
     await mountModal([makeItem()]);
 

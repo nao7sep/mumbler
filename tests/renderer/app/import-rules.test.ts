@@ -9,7 +9,23 @@ import {
 } from "@renderer/app/import-rules";
 import { message } from "@shared/i18n/translate";
 
-const item = (id: string): PendingImportReviewItem => ({ id }) as unknown as PendingImportReviewItem;
+const item = (id: string, overrides: Partial<PendingImportReviewItem> = {}): PendingImportReviewItem => ({
+  id,
+  originalFilename: `${id}.wav`,
+  importSource: "file-picker",
+  originalSourcePath: `/sources/${id}.wav`,
+  workingFilePath: `/working/${id}.wav`,
+  fileSizeBytes: 1,
+  localTimestampText: "2026-03-01 07:30:00",
+  timezone: "Asia/Tokyo",
+  utcTimestampText: "2026-02-28 22:30:00",
+  parseStatus: "parsed",
+  deleteOriginalOnConfirm: false,
+  copyToBackupOnConfirm: false,
+  createdAtUtc: 1,
+  updatedAtUtc: 1,
+  ...overrides,
+});
 
 describe("parseDroppedPaths", () => {
   it("preserves duplicate paths and accounts for inaccessible entries", () => {
@@ -119,36 +135,47 @@ describe("inspectFileDragOffer", () => {
 });
 
 describe("reconcilePendingReviewDrafts", () => {
-  it("keeps the local drafts when the id set is unchanged (preserves in-progress edits)", () => {
-    const current = [item("a"), item("b")];
-    const snapshot = [item("a"), item("b")];
-    expect(reconcilePendingReviewDrafts(current, snapshot)).toBe(current);
+  const edits = {
+    localTimestampText: "unfinished local time",
+    timezone: "Europe/Berlin",
+    utcTimestampText: "unfinished UTC time",
+    copyToBackupOnConfirm: true,
+    deleteOriginalOnConfirm: true,
+  };
+
+  it("keeps surviving editable drafts through additions, removals and reorderings", () => {
+    const current = [item("a", edits), item("b", edits), item("removed", edits)];
+    const added = item("new");
+    const result = reconcilePendingReviewDrafts(current, [item("b"), added, item("a")]);
+    expect(result.map((draft) => draft.id)).toEqual(["b", "new", "a"]);
+    expect(result[0]).toMatchObject(edits);
+    expect(result[1]).toBe(added);
+    expect(result[2]).toMatchObject(edits);
   });
 
-  it("adopts the snapshot when the id set differs", () => {
-    const current = [item("a")];
-    const snapshot = [item("a"), item("b")];
-    expect(reconcilePendingReviewDrafts(current, snapshot)).toBe(snapshot);
+  it("accepts authoritative identity, paths and metadata while retaining only editable fields", () => {
+    const current = [item("a", { ...edits, workingFilePath: "/stale/working.wav", originalSourcePath: "/stale/source.wav" })];
+    const authoritative = item("a", {
+      originalFilename: "renamed.wav",
+      importSource: "drag-and-drop",
+      workingFilePath: "/fresh/working.wav",
+      originalSourcePath: "/fresh/source.wav",
+      fileSizeBytes: 2,
+      parseStatus: "manual-required",
+      createdAtUtc: 2,
+      updatedAtUtc: 3,
+    });
+    expect(reconcilePendingReviewDrafts(current, [authoritative])).toEqual([{ ...authoritative, ...edits }]);
   });
 
-  it("adopts the snapshot when current is empty", () => {
+  it("returns the current array when neither authoritative fields nor local edits change", () => {
+    const current = [item("a", edits), item("b")];
+    expect(reconcilePendingReviewDrafts(current, [item("a"), item("b")])).toBe(current);
+  });
+
+  it("adopts new items and removes drafts absent from the authoritative snapshot", () => {
     const snapshot = [item("a")];
     expect(reconcilePendingReviewDrafts([], snapshot)).toBe(snapshot);
-  });
-
-  it("is order-sensitive: a reordered id list is treated as a different set", () => {
-    // Documented limitation: the identity check joins ids in order, so the same
-    // items in a different order adopt the snapshot rather than keeping edits.
-    const current = [item("a"), item("b")];
-    const snapshot = [item("b"), item("a")];
-    expect(reconcilePendingReviewDrafts(current, snapshot)).toBe(snapshot);
-  });
-
-  it("keeps current even when a same-id snapshot item's content changed", () => {
-    // Documented limitation/intent: with the id set unchanged, local edits win —
-    // a backend content change to the same ids does not clobber an in-flight edit.
-    const current = [item("a")];
-    const snapshot = [{ id: "a", changed: true } as unknown as PendingImportReviewItem];
-    expect(reconcilePendingReviewDrafts(current, snapshot)).toBe(current);
+    expect(reconcilePendingReviewDrafts([item("a", edits)], [])).toEqual([]);
   });
 });

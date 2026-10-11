@@ -77,6 +77,29 @@ describe("TranscriptStore", () => {
     expect(await files()).toEqual([]);
   });
 
+  it.each([false, true])("publishes cleared text before optional cleanup, including after reopening (%s)", async (reopen) => {
+    let store = new TranscriptStore(dir);
+    const take = card("take", "old words", "old outline");
+    await store.writeChanged([take]);
+    if (reopen) {
+      store = new TranscriptStore(dir);
+      await store.open([take.id]);
+    }
+    take.transcription.text = null;
+    take.metadata.structured = null;
+
+    const written = await store.writeChanged([take]);
+    // Quit or failed cleanup may leave the transcript file in place. Its
+    // primary write must already say that the retained card has no text.
+    expect((await new TranscriptStore(dir).open([take.id])).get(take.id)).toEqual({ transcription: null, structured: null });
+    expect(written).toBe(1);
+    expect(await store.writeChanged([take])).toBe(0);
+
+    await store.removeAbsent([take]);
+    expect(await files()).toEqual([]);
+    expect((await new TranscriptStore(dir).open([take.id])).size).toBe(0);
+  });
+
   it("deletes the file of a card that is gone or has lost its text", async () => {
     const store = new TranscriptStore(dir);
     const kept = card("kept", "kept words");

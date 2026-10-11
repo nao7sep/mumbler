@@ -62,9 +62,15 @@ export function useImportFlow({
 }: UseImportFlowOptions): UseImportFlowResult {
   const [isImporting, setIsImporting] = useState(false);
   const [isConfirmingReview, setIsConfirmingReview] = useState(false);
-  const [pendingReviewDrafts, setPendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
+  const [pendingReviewDrafts, updatePendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const [importResult, setImportResult] = useState<ImportResultNotice | null>(null);
+  // Claim submission synchronously: React's busy render follows the event, but
+  // the native picker and the exact submitted intent already have one owner.
+  const confirmingReviewRef = useRef(false);
+  const setPendingReviewDrafts: Dispatch<SetStateAction<PendingImportReviewItem[]>> = (action) => {
+    if (!confirmingReviewRef.current) updatePendingReviewDrafts(action);
+  };
   // The review edits still waiting out the debounce, and what sends them.
   const unsentDrafts = useRef<{ timer: number; send: () => Promise<void> } | null>(null);
 
@@ -84,7 +90,7 @@ export function useImportFlow({
 
   useEffect(() => {
     const snapshotImports = snapshot?.state?.pendingImports ?? [];
-    setPendingReviewDrafts((current) => reconcilePendingReviewDrafts(current, snapshotImports));
+    updatePendingReviewDrafts((current) => reconcilePendingReviewDrafts(current, snapshotImports));
   }, [snapshot?.state?.pendingImports]);
 
   useEffect(() => {
@@ -208,14 +214,17 @@ export function useImportFlow({
   }
 
   async function handleConfirmPendingImports(): Promise<void> {
+    if (confirmingReviewRef.current) return;
+    confirmingReviewRef.current = true;
+    const submittedDrafts = pendingReviewDrafts.map((item) => ({ ...item }));
     setIsConfirmingReview(true);
     try {
-      if (pendingReviewDrafts.some((item) => item.copyToBackupOnConfirm) && snapshot?.settingsSummary?.backupDirectory == null) {
+      if (submittedDrafts.some((item) => item.copyToBackupOnConfirm) && snapshot?.settingsSummary?.backupDirectory == null) {
         const selected = await window.mumbler.chooseOriginalsDirectory();
         onSnapshotUpdate(selected);
         if (selected.settingsSummary?.backupDirectory == null) return;
       }
-      const result = await window.mumbler.confirmPendingImports(pendingReviewDrafts);
+      const result = await window.mumbler.confirmPendingImports(submittedDrafts);
       onSnapshotUpdate(result.snapshot);
       // The recordings are in the queue; an original that was not backed up or
       // deleted as asked is a warning on that success, kept until dismissed.
@@ -232,6 +241,7 @@ export function useImportFlow({
         presentFailure(error, message("error.reviewConfirm"), "import timestamp confirmation failed"),
       );
     } finally {
+      confirmingReviewRef.current = false;
       setIsConfirmingReview(false);
     }
   }

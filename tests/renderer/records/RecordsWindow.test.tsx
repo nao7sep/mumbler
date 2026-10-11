@@ -245,6 +245,32 @@ describe("RecordsWindow", () => {
     expect(document.body.textContent).not.toContain("Loading records…");
   });
 
+  it.each([false, true])("shows a failed live read after it supersedes a still-loading initial read (%s)", async (initialFails) => {
+    const first = deferred<RecordsPage>();
+    const newest = deferred<RecordsPage>();
+    readRecordsPage.mockReturnValueOnce(first.promise).mockReturnValueOnce(newest.promise);
+    await mount();
+    vi.useFakeTimers();
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(readRecordsPage).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      if (initialFails) first.reject(new Error("superseded initial read"));
+      else first.resolve({ records: [call, line], more: false });
+    });
+    expect(document.body.textContent).toContain("Loading records…");
+    expect(options()).toHaveLength(0);
+    expect(reportRendererDiagnostic).not.toHaveBeenCalled();
+
+    await act(async () => newest.reject(new Error("SQLITE_BUSY /internal/records.sqlite3 live-read-sentinel")));
+    expect(document.body.textContent).toContain("The records could not be read.");
+    expect(document.body.textContent).not.toContain("Loading records…");
+    expect(document.body.textContent).not.toContain("live-read-sentinel");
+    expect(scrollBox().getAttribute("aria-busy")).toBe("false");
+    expect(reportRendererDiagnostic).toHaveBeenCalledOnce();
+  });
+
   it("offers Warnings and errors first among the levels, with every filter off", async () => {
     await mount();
     const level = document.querySelectorAll("select")[3]!;
@@ -325,7 +351,7 @@ describe("RecordsWindow", () => {
     expect(document.body.textContent).not.toContain("The records could not be read.");
   });
 
-  it("re-reads the newest page once for a burst of new records while at the top, keeping the rows shown", async () => {
+  it("re-reads the newest page once for a burst of new records while at the top, without a loading screen", async () => {
     await mount();
     vi.useFakeTimers();
     const next = deferred<RecordsPage>();
@@ -360,6 +386,170 @@ describe("RecordsWindow", () => {
     await scrollTo(0);
     expect(readRecordsPage).toHaveBeenCalledTimes(2);
     expect(titles()).toEqual(["app.later", "gemini models.generateContent", "pipeline.step"]);
+  });
+
+  it("reads every row across a gap larger than one page, keeping the selected detail", async () => {
+    const rows = (count: number): RecordSummary[] => Array.from({ length: count }, (_, index) => ({
+      kind: "log", id: count - index, session: SESSION, time: SESSION, level: "info",
+      title: `record ${count - index}`, text: null, cardId: null,
+    }));
+    let stored = rows(100);
+    readRecordsPage.mockImplementation(async (query) => {
+      const after = query.after?.id;
+      const following = after === undefined ? stored : stored.filter((record) => record.id < after);
+      // A loaded page grows the scroll box, as the real list does.
+      if (after !== undefined) box.scrollHeight += 1000;
+      return { records: following.slice(0, 100), more: following.length > 100 };
+    });
+    readRecordDetail.mockResolvedValue({
+      kind: "log", id: 75, session: SESSION, time: SESSION, op: "selected", message: "selected detail",
+      level: "info", cardId: null, details: null, error: null,
+    });
+    await mount();
+    await act(async () => options()[25]!.click());
+    await scrollTo(300);
+    vi.useFakeTimers();
+    stored = rows(350);
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(options()).toHaveLength(100);
+
+    await scrollTo(0);
+    expect(options().map((option) => option.dataset.recordKey)).toEqual(stored.slice(0, 100).map((record) => `log:${record.id}`));
+    expect(document.querySelector(".records-detail__title")?.textContent).toBe("selected detail");
+    expect(readRecordDetail).toHaveBeenCalledOnce();
+    for (let page = 0; page < 3; page++) await scrollTo(box.scrollHeight - 300);
+
+    expect(options().map((option) => option.dataset.recordKey)).toEqual(stored.map((record) => `log:${record.id}`));
+    expect(document.querySelector('[data-record-key="log:75"]')?.getAttribute("aria-selected")).toBe("true");
+    expect(readRecordDetail).toHaveBeenCalledOnce();
+  });
+
+  it("finds a provider call that settles late inside an already-loaded older range", async () => {
+    const time = (seconds: number) => new Date(Date.parse(SESSION) + seconds * 1000).toISOString();
+    const stored: RecordSummary[] = Array.from({ length: 300 }, (_, index) => ({
+      kind: "log", id: 300 - index, session: SESSION, time: time(300 - index), level: "info",
+      title: `record ${300 - index}`, text: null, cardId: null,
+    }));
+    const key = (record: Pick<RecordSummary, "kind" | "id">) => `${record.kind}:${record.id}`;
+    readRecordsPage.mockImplementation(async (query) => {
+      const start = query.after === null ? 0 : stored.findIndex((record) => key(record) === key(query.after!)) + 1;
+      const following = stored.slice(start);
+      if (query.after !== null) box.scrollHeight += 1000;
+      return { records: following.slice(0, 100), more: following.length > 100 };
+    });
+    readRecordDetail.mockResolvedValue({
+      kind: "log", id: 150, session: SESSION, time: time(150), op: "selected", message: "selected older detail",
+      level: "info", cardId: null, details: null, error: null,
+    });
+    await mount();
+    await scrollTo(700);
+    expect(options()).toHaveLength(200);
+    await act(async () => document.querySelector<HTMLElement>('[data-record-key="log:150"]')!.click());
+    await scrollTo(0);
+    vi.useFakeTimers();
+    // Calls are inserted when they finish, but sort by when they started.
+    // This newly settled call belongs below the fresh first 100 rows and
+    // above the older tail already loaded by the reader.
+    stored.splice(150, 0, { ...call, time: time(150.5), title: "late provider call" });
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(document.body.textContent).not.toContain("Loading records…");
+    expect(document.querySelector(".records-detail__title")?.textContent).toBe("selected older detail");
+    for (let page = 0; page < 3; page++) await scrollTo(box.scrollHeight - 300);
+
+    expect(options().map((option) => option.dataset.recordKey)).toEqual(stored.map(key));
+    expect(document.querySelector('[data-record-key="log:150"]')?.getAttribute("aria-selected")).toBe("true");
+    expect(readRecordDetail).toHaveBeenCalledOnce();
+  });
+
+  it("holds a pending newest page if the reader scrolls away before it arrives", async () => {
+    const newest = deferred<RecordsPage>();
+    const more = deferred<RecordsPage>();
+    readRecordsPage.mockResolvedValueOnce({ records: [call], more: true });
+    readRecordsPage.mockReturnValueOnce(newest.promise).mockReturnValueOnce(more.promise);
+    await mount();
+    vi.useFakeTimers();
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    await scrollTo(700);
+    expect(lastQuery().after).toEqual(cursorOf(call));
+
+    await act(async () => newest.resolve({ records: [newer, call], more: true }));
+    expect(titles()).toEqual(["gemini models.generateContent"]);
+    expect(document.body.textContent).toContain("Loading records…");
+    await act(async () => more.resolve({ records: [line], more: false }));
+    expect(titles()).toEqual(["gemini models.generateContent", "pipeline.step"]);
+    expect(document.body.textContent).not.toContain("Loading records…");
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(readRecordsPage).toHaveBeenCalledTimes(3);
+
+    readRecordsPage.mockResolvedValueOnce({ records: [newer, call, line], more: false });
+    await scrollTo(0);
+    expect(readRecordsPage).toHaveBeenCalledTimes(4);
+    expect(lastQuery().after).toBeNull();
+    expect(titles()).toEqual(["app.later", "gemini models.generateContent", "pipeline.step"]);
+  });
+
+  it.each([false, true])("uses the latest requested newest page whichever read settles first (%s)", async (olderFirst) => {
+    readRecordsPage.mockResolvedValueOnce({ records: [line], more: false });
+    await mount();
+    vi.useFakeTimers();
+    const earlier = deferred<RecordsPage>();
+    const later = deferred<RecordsPage>();
+    readRecordsPage.mockReturnValueOnce(earlier.promise).mockReturnValueOnce(later.promise);
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+
+    if (olderFirst) {
+      await act(async () => earlier.resolve({ records: [call], more: true }));
+      await act(async () => later.resolve({ records: [newer], more: false }));
+    } else {
+      await act(async () => later.resolve({ records: [newer], more: false }));
+      await act(async () => earlier.resolve({ records: [call], more: true }));
+    }
+    expect(titles()).toEqual(["app.later"]);
+  });
+
+  it("discards a page still loading from a range replaced by a disconnected newest page", async () => {
+    readRecordsPage.mockResolvedValueOnce({ records: [call], more: true });
+    const oldMore = deferred<RecordsPage>();
+    readRecordsPage.mockReturnValueOnce(oldMore.promise);
+    await mount();
+    await scrollTo(700);
+    await scrollTo(0);
+    vi.useFakeTimers();
+    readRecordsPage.mockResolvedValueOnce({ records: [newer], more: true });
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    await act(async () => oldMore.resolve({ records: [line], more: false }));
+    expect(titles()).toEqual(["app.later"]);
+    expect(document.body.textContent).not.toContain("Loading records…");
+
+    readRecordsPage.mockResolvedValueOnce({ records: [call, line], more: false });
+    await scrollTo(700);
+    expect(lastQuery().after).toEqual(cursorOf(newer));
+    expect(titles()).toEqual(["app.later", "gemini models.generateContent", "pipeline.step"]);
+  });
+
+  it("ignores an earlier pagination result after restarting from an overlapping newest page", async () => {
+    readRecordsPage.mockResolvedValueOnce({ records: [call], more: true });
+    const more = deferred<RecordsPage>();
+    readRecordsPage.mockReturnValueOnce(more.promise);
+    await mount();
+    await scrollTo(700);
+    await scrollTo(0);
+    vi.useFakeTimers();
+    readRecordsPage.mockResolvedValueOnce({ records: [newer, call, line], more: false });
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    await act(async () => more.resolve({ records: [line], more: false }));
+
+    expect(titles()).toEqual(["app.later", "gemini models.generateContent", "pipeline.step"]);
+    expect(document.body.textContent).not.toContain("Loading records…");
   });
 
   it("keeps the selected record selected through an update", async () => {
