@@ -86,6 +86,7 @@ export async function executeCardPipeline(
   const sourceFilePath = started.sourceFilePath;
   const durationSec = started.durationSec;
   const audioProfile = started.audioProfile;
+  const apiKey = ctx.apiKey;
 
   await logger.info("pipeline.start", "Starting card pipeline.", {
     cardId,
@@ -99,7 +100,6 @@ export async function executeCardPipeline(
 
   try {
     throwIfCancelled(ctx.signal);
-    const apiKey = ctx.apiKey;
     if (apiKey.length === 0) {
       throw new Error("Gemini API key is not configured.");
     }
@@ -383,7 +383,7 @@ export async function executeCardPipeline(
       card.activeStep = null;
       card.queuedMode = null;
       card.queuedAtUtc = null;
-      const providerReason = geminiProviderReason(error);
+      const providerReason = geminiProviderReason(error, apiKey);
       card.lastError = wasCancelled ? null : {
         message: cardFailureMessage(activeStep),
         ...(providerReason ? { providerReason } : {}),

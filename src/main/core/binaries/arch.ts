@@ -1,7 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
+import { runTool } from "../audio-tools";
 
 // A downloaded macOS binary must carry a native arm64 slice — the fleet is
 // Apple-Silicon-only and macOS 28 drops Rosetta, so an x86_64-only build is a hard
@@ -17,9 +14,9 @@ export function hasArm64Slice(lipoArchsOutput: string): boolean {
 }
 
 export async function assertArm64Slice(filePath: string, signal?: AbortSignal): Promise<void> {
-  const { stdout } = await execFileAsync("lipo", ["-archs", filePath], {
+  const { stdout } = await runTool("lipo", ["-archs", filePath], {
     signal,
-    timeout: 30_000,
+    timeoutMs: 30_000,
   });
   if (!hasArm64Slice(stdout)) {
     throw new Error(

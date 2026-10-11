@@ -2,7 +2,27 @@ import { mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const settingsWrite = vi.hoisted(() => ({
+  held: null as { path: string; release: Promise<void>; entered: number } | null,
+  refused: false,
+}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      const held = settingsWrite.held;
+      if (held !== null && held.path === String(args[1])) {
+        held.entered += 1;
+        await held.release;
+        if (settingsWrite.refused) throw new Error("settings publication refused");
+      }
+      return actual.rename(...args);
+    },
+  };
+});
 
 import type { MumblerCard, MumblerQueue, MumblerSettings } from "@shared/app-shell";
 import { NewerFormatError } from "@main/core/format-versions";
@@ -19,6 +39,8 @@ import {
 let dir: string;
 
 beforeEach(async () => {
+  settingsWrite.held = null;
+  settingsWrite.refused = false;
   dir = await mkdtemp(join(tmpdir(), "mumbler-store-"));
 });
 
@@ -563,6 +585,72 @@ describe("settings store", () => {
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
     await store.save({ ...loaded, concurrencyLimit: 6 });
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 6 });
+  });
+
+  it("keeps unusable-set replacement authoritative for a targeted save queued during its primary write", async () => {
+    const future = JSON.parse('{"__proto__":{"keep":"future own key"}}') as Record<string, unknown>;
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, prompts: { structured: "custom" }, ...future }));
+    const store = createSettingsStore(settingsPath(), dir, () => undefined);
+    const { value } = await store.load();
+    let release!: () => void;
+    settingsWrite.held = { path: settingsPath(), release: new Promise((resolve) => { release = resolve; }), entered: 0 };
+    const replacement = store.save({ ...value, theme: "dark" }, { replaceUnusable: true });
+    let targeted: Promise<void> | undefined;
+    try {
+      await vi.waitFor(() => expect(settingsWrite.held?.entered).toBe(1));
+      targeted = store.save({ ...value, theme: "dark", checkUpdatesAtLaunch: false });
+      release();
+      await Promise.all([replacement, targeted]);
+      expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({
+        formatVersion: 1, theme: "dark", checkUpdatesAtLaunch: false, ...future,
+      });
+      expect((await store.load()).unusable).toEqual([]);
+    } finally {
+      release();
+      await Promise.allSettled([replacement, ...(targeted ? [targeted] : [])]);
+      settingsWrite.held = null;
+    }
+  });
+
+  it("publishes replacement metadata when failed settings bytes are retried before a targeted save", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, prompts: { structured: "custom" } }));
+    const store = createSettingsStore(settingsPath(), dir, () => undefined);
+    const { value } = await store.load();
+    let release!: () => void;
+    settingsWrite.held = { path: settingsPath(), release: new Promise((resolve) => { release = resolve; }), entered: 0 };
+    settingsWrite.refused = true;
+    const replacement = store.save({ ...value, theme: "dark" }, { replaceUnusable: true }).then(() => "saved", () => "failed");
+    try {
+      await vi.waitFor(() => expect(settingsWrite.held?.entered).toBe(1));
+      release();
+      expect(await replacement).toBe("failed");
+      expect(store.failedWrite).not.toBeNull();
+      settingsWrite.refused = false;
+      await store.retryFailedWrite();
+      expect(store.failedWrite).toBeNull();
+      await store.save({ ...value, theme: "dark", checkUpdatesAtLaunch: false });
+      expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, theme: "dark", checkUpdatesAtLaunch: false });
+    } finally {
+      release();
+      await replacement;
+      settingsWrite.held = null;
+    }
+  });
+
+  it("commits acknowledged built-ins instead of leaving a rejected first save eligible for retry", async () => {
+    const store = createSettingsStore(settingsPath(), dir);
+    await store.load();
+    settingsWrite.held = { path: settingsPath(), release: Promise.resolve(), entered: 0 };
+    settingsWrite.refused = true;
+    await expect(store.save(settings({ theme: "dark" }))).rejects.toThrow("settings publication refused");
+    expect(store.failedWrite).not.toBeNull();
+    settingsWrite.refused = false;
+
+    await store.save(settings());
+
+    expect(store.failedWrite).toBeNull();
+    await store.retryFailedWrite();
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1 });
   });
 
   it.each([

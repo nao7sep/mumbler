@@ -581,10 +581,11 @@ export function createDefaultSettings(): MumblerSettings {
   };
 }
 
-// Settings keep the user map separate from effective built-ins. Saves run inside
-// the JsonStore write queue; the app holds a single-instance lock.
+// Settings keep the user map separate from effective built-ins. Their owner
+// orders that metadata with each primary write; the app holds a single-instance lock.
 export class SettingsStore {
   private readonly store: JsonStore<Record<string, unknown>>;
+  private writeTail: Promise<void> = Promise.resolve();
   // What the file held that this build cannot use, carried into every save.
   private unusable: UnusableSets = { unknown: {}, invalid: {} };
   // Whether config.json exists; first run writes nothing until a set differs.
@@ -627,22 +628,45 @@ export class SettingsStore {
   // built-in in its place (`replaceUnusable`); unknown keys always stay. Each save
   // writes from memory: the single-instance lock makes this process the file's only
   // writer, and a write of unchanged bytes is skipped.
-  async save(settings: MumblerSettings, options: { replaceUnusable?: boolean } = {}): Promise<void> {
-    const invalid = options.replaceUnusable ? {} : this.unusable.invalid;
-    const sets: Record<string, unknown> = { ...storedSets(settings) };
-    for (const [key, value] of Object.entries(invalid)) {
-      if (equalsBuiltIn(key as keyof MumblerSettings, settings, createDefaultSettings())) sets[key] = value;
-    }
-    const next = { ...sets, ...this.unusable.unknown };
-    if (!this.exists && Object.keys(next).length === 0) return;
-    await this.store.save(next);
-    this.exists = true;
-    this.unusable = { unknown: this.unusable.unknown, invalid };
+  save(settings: MumblerSettings, options: { replaceUnusable?: boolean } = {}): Promise<void> {
+    const submitted = structuredClone(settings);
+    const replaceUnusable = options.replaceUnusable;
+    return this.enqueueWrite(async () => {
+      const invalid = replaceUnusable ? {} : this.unusable.invalid;
+      const sets: Record<string, unknown> = { ...storedSets(submitted) };
+      const defaults = createDefaultSettings();
+      for (const [key, value] of Object.entries(invalid)) {
+        if (equalsBuiltIn(key as keyof MumblerSettings, submitted, defaults)) sets[key] = value;
+      }
+      const next = { ...sets, ...this.unusable.unknown };
+      if (!this.exists && Object.keys(next).length === 0 && this.store.failedWrite === null) return;
+      await this.store.save(next);
+      this.exists = true;
+      this.unusable = unusableSets(next);
+    });
+  }
+
+  private enqueueWrite(work: () => Promise<void>): Promise<void> {
+    const operation = this.writeTail.then(work, work);
+    this.writeTail = operation.then(() => undefined, () => undefined);
+    return operation;
   }
 
   get failedWrite(): object | null { return this.store.failedWrite; }
-  retryFailedWrite(): Promise<void> { return this.store.retryFailedWrite(); }
-  flush(): Promise<void> { return this.store.flush(); }
+  retryFailedWrite(): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const failed = this.store.failedWrite;
+      await this.store.retryFailedWrite();
+      if (failed !== null) {
+        this.exists = true;
+        this.unusable = unusableSets(failed.value);
+      }
+    });
+  }
+  async flush(): Promise<void> {
+    await this.writeTail;
+    await this.store.flush();
+  }
   admitReset(): Promise<void> { return this.store.admitReset(); }
   preserveExistingFiles(): Promise<string[]> { return this.store.preserveExistingFiles(); }
 }

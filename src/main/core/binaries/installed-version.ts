@@ -1,18 +1,15 @@
-import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import type { ToolName } from "@shared/app-shell";
 import { FFMPEG_BUILD_TAG } from "@shared/dependency-status";
 import { formatUtcIsoCompact } from "@shared/timestamps";
 
+import { runTool } from "../audio-tools";
 import { writeJsonFile } from "../file-io";
 import { FORMAT_VERSIONS, recordedFormatVersion } from "../format-versions";
 import { normalizeToolVersion } from "./registry";
 import { sha256OfFile } from "./integrity";
-
-const execFileAsync = promisify(execFile);
 
 // The installed version of a managed tool, read FROM THE ARTIFACT
 // (managed-runtime-dependencies-conventions).
@@ -123,7 +120,7 @@ export async function readInstalledVersion(
     return readSidecar(binDir, name, toolPath);
   }
   try {
-    const { stdout } = await execFileAsync(toolPath, [...source.args], { timeout: PROBE_TIMEOUT_MS });
+    const { stdout } = await runTool(toolPath, [...source.args], { timeoutMs: PROBE_TIMEOUT_MS });
     return parseVersionBanner(name, stdout);
   } catch {
     return null;

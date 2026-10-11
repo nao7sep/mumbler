@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -42,6 +40,12 @@ vi.mock("@main/core/binaries/archive", () => ({
 vi.mock("@main/core/binaries/arch", () => ({
   assertArm64Slice: vi.fn(),
 }));
+// Native permission behavior is verified in tests/live/main/core/binaries/manager.test.ts.
+// Ordinary manager fixtures stub the outbound command, just like architecture.
+vi.mock("@main/core/audio-tools", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@main/core/audio-tools")>(),
+  runTool: vi.fn(),
+}));
 vi.mock("@main/core/binaries/integrity", async (importOriginal) => ({
   ...await importOriginal<typeof import("@main/core/binaries/integrity")>(),
   parseSha256Sidecar: vi.fn(() => "a".repeat(64)),
@@ -72,6 +76,7 @@ vi.mock("@main/core/binaries/installed-version", async (importOriginal) => {
   };
 });
 
+import { runTool } from "@main/core/audio-tools";
 import { assertArm64Slice } from "@main/core/binaries/arch";
 import { extractFileFromZip } from "@main/core/binaries/archive";
 import { downloadToFile, fetchText } from "@main/core/binaries/http";
@@ -81,8 +86,6 @@ import { TOOL_INSTALL_WHOLE_TIMEOUT_MS, ToolManager } from "@main/core/binaries/
 import { TOOL_EXTRACTED_MAX_BYTES, resolveLatest } from "@main/core/binaries/registry";
 import { createDependenciesStore } from "@main/core/binaries/store";
 import { JsonStore } from "@main/core/json-store";
-
-const execFileAsync = promisify(execFile);
 
 const RESOLVED = {
   version: "8.2",
@@ -133,6 +136,7 @@ beforeEach(async () => {
   tempDir = join(dir, "temp");
   notify.mockClear();
   durabilityEvents.length = 0;
+  vi.mocked(runTool).mockResolvedValue({ stdout: "" });
   vi.mocked(fetchText).mockResolvedValue("a".repeat(64) + "  ffmpeg.zip\n");
   // downloadToFile lands the archive in temp/ and reports progress; the extractor
   // writes the executable to its staging path so the manager can publish it.
@@ -436,22 +440,21 @@ describe("installTool", () => {
     expect(durabilityEvents[1]).toEqual({ kind: "directory", path: binDir });
   });
 
-  // The real xattr on a real file: the other darwin cases only pass the platform
-  // in, on files that never carried the flag.
-  it("strips the quarantine flag from the binary it publishes on macOS", async (ctx) => {
-    ctx.skip(process.platform !== "darwin", "macOS only: the quarantine flag and xattr exist only there");
-    vi.mocked(extractFileFromZip).mockImplementation(async (_zip, inner, dest) => {
-      await writeFile(dest, banner(inner, RESOLVED.version));
-      await execFileAsync("xattr", ["-w", "com.apple.quarantine", "0081;00000000;Mumbler;", dest]);
-      const { stdout } = await execFileAsync("xattr", [dest]);
-      expect(stdout.split("\n")).toContain("com.apple.quarantine");
+  it("requests quarantine removal on the staged Mac binary before publication", async () => {
+    vi.mocked(runTool).mockImplementationOnce(async (tool, args, options) => {
+      expect(tool).toBe("xattr");
+      expect(args).toEqual(["-d", "com.apple.quarantine", expect.any(String)]);
+      expect(dirname(args[2]!)).toBe(tempDir);
+      expect(options).toEqual({ signal: expect.any(AbortSignal), timeoutMs: 30_000 });
+      expect(await readdir(binDir)).toEqual([]);
+      return { stdout: "" };
     });
     const manager = await makeManager();
 
     await manager.installTool("ffmpeg");
 
-    const { stdout } = await execFileAsync("xattr", [manager.resolveToolPath("ffmpeg")]);
-    expect(stdout.split("\n")).not.toContain("com.apple.quarantine");
+    expect(runTool).toHaveBeenCalledTimes(1);
+    expect(manager.listStatuses()[0]).toMatchObject({ installedVersion: "8.2", transient: { kind: "idle" } });
   });
 });
 

@@ -22,6 +22,14 @@ function assertHttps(url: string): void {
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
+// Headers can settle the requested result without consuming a body. Retain the
+// transfer's deadline until disposal settles, and never replace that result
+// with a secondary cancellation failure.
+async function discardResponseBody(response: Response | undefined): Promise<void> {
+  try { await response?.body?.cancel(); }
+  catch { /* Preserve the accepted Location or primary transfer failure. */ }
+}
+
 async function fetchFollowingHttpsRedirects(
   url: string,
   init: Omit<RequestInit, "redirect" | "signal">,
@@ -32,12 +40,13 @@ async function fetchFollowingHttpsRedirects(
     assertHttps(currentUrl);
     const response = await fetch(currentUrl, { ...init, redirect: "manual", signal });
     if (!REDIRECT_STATUSES.has(response.status)) {
-      assertHttps(response.url || currentUrl);
+      try { assertHttps(response.url || currentUrl); }
+      catch (error) { await discardResponseBody(response); throw error; }
       return response;
     }
 
     const location = response.headers.get("location");
-    await response.body?.cancel().catch(() => undefined);
+    await discardResponseBody(response);
     if (location === null) {
       throw new Error(`redirect from ${currentUrl} omitted Location`);
     }
@@ -62,20 +71,21 @@ export async function resolveRedirectLocation(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`timed out resolving ${url}`)), idleTimeoutMs);
   const combinedSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
-  let res: Response;
+  let res: Response | undefined;
   try {
     res = await fetch(url, { method: "GET", redirect: "manual", signal: combinedSignal });
+    const location = res.headers.get("location");
+    if (res.status < 300 || res.status >= 400 || !location) {
+      throw new Error(`expected a redirect from ${url}, got HTTP ${res.status}`);
+    }
+    // Resolve a relative Location against the request URL.
+    const resolved = new URL(location, url).toString();
+    assertHttps(resolved);
+    return resolved;
   } finally {
+    await discardResponseBody(res);
     clearTimeout(timer);
   }
-  const location = res.headers.get("location");
-  if (res.status < 300 || res.status >= 400 || !location) {
-    throw new Error(`expected a redirect from ${url}, got HTTP ${res.status}`);
-  }
-  // Resolve a relative Location against the request URL.
-  const resolved = new URL(location, url).toString();
-  assertHttps(resolved);
-  return resolved;
 }
 
 export async function fetchText(
@@ -89,8 +99,10 @@ export async function fetchText(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`timed out fetching ${url}`)), timeoutMs);
   const combinedSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
+  let res: Response | undefined;
+  let readerOwnsBody = false;
   try {
-    const res = await fetchFollowingHttpsRedirects(url, { headers }, combinedSignal);
+    res = await fetchFollowingHttpsRedirects(url, { headers }, combinedSignal);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} ${res.statusText} from ${url}`);
     }
@@ -107,6 +119,7 @@ export async function fetchText(
 
     if (res.body === null) return "";
     const reader = res.body.getReader();
+    readerOwnsBody = true;
     const chunks: Uint8Array[] = [];
     let received = 0;
     try {
@@ -126,6 +139,7 @@ export async function fetchText(
     }
     return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
   } finally {
+    if (!readerOwnsBody) await discardResponseBody(res);
     clearTimeout(timer);
   }
 }
@@ -159,8 +173,10 @@ export async function downloadToFile(opts: DownloadOptions): Promise<void> {
   };
 
   kick();
+  let res: Response | undefined;
+  let pipelineOwnsBody = false;
   try {
-    const res = await fetchFollowingHttpsRedirects(opts.url, {}, combinedSignal);
+    res = await fetchFollowingHttpsRedirects(opts.url, {}, combinedSignal);
     if (!res.ok || !res.body) {
       throw new Error(`HTTP ${res.status} ${res.statusText} from ${opts.url}`);
     }
@@ -172,6 +188,7 @@ export async function downloadToFile(opts: DownloadOptions): Promise<void> {
 
     let received = 0;
     const source = Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>);
+    pipelineOwnsBody = true;
     source.on("data", (chunk: Buffer) => {
       received += chunk.length;
       kick();
@@ -185,6 +202,7 @@ export async function downloadToFile(opts: DownloadOptions): Promise<void> {
     const out: Writable = createWriteStream(opts.destPath);
     await pipeline(source, out, { signal: combinedSignal });
   } finally {
+    if (!pipelineOwnsBody) await discardResponseBody(res);
     if (idle) clearTimeout(idle);
   }
 }

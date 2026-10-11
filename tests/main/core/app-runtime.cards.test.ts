@@ -1,4 +1,4 @@
-import { link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { access, link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { dialog, shell } from "electron";
@@ -524,6 +524,64 @@ describe("the durable queue store", () => {
     });
     expect((await stat(join(home, "queue.json"))).isDirectory()).toBe(true);
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
+  });
+
+  it.each(["working audio", "derived folder"] as const)("preserves saved work and names unreadable %s when its real filesystem read fails", async (kind) => {
+    const [pending] = await dropIn("retained.wav");
+    await runtime.shutdown();
+    const queuePath = join(home, "queue.json");
+    const path = kind === "working audio"
+      ? join(pending.workingFilePath, "blocked-child.wav")
+      : join(home, "working", "derived");
+    if (kind === "working audio") {
+      const queued = JSON.parse(await readFile(queuePath, "utf8"));
+      queued.pendingImports[0].workingFilePath = path;
+      await writeFile(queuePath, JSON.stringify(queued));
+    } else {
+      // readdir on a file returns the real Node ENOTDIR/scandir error.
+      await writeFile(path, "retained derived bytes");
+    }
+    const before = await readFile(queuePath, "utf8");
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual({
+      title: { key: "diagnostic.unreadableTitle" },
+      message: { key: "diagnostic.unreadableBody", values: { path } },
+      canReset: false,
+    });
+    expect(runtime.getSnapshot().state).toBeNull();
+    expect(await readFile(queuePath, "utf8")).toBe(before);
+    expect(await readFile(pending.workingFilePath, "utf8")).toBe("audio for retained.wav");
+    if (kind === "derived folder") expect(await readFile(path, "utf8")).toBe("retained derived bytes");
+    expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
+  });
+
+  it("does not classify a reconciliation logger failure carrying a path as an unreadable saved file", async () => {
+    const [pending] = await dropIn("missing.wav");
+    await runtime.shutdown();
+    await rm(pending.workingFilePath);
+    const before = await readFile(join(home, "queue.json"), "utf8");
+    const workingFiles = await import("@main/core/working-files");
+    const reconcile = workingFiles.reconcileWorkingState;
+    const loggerFailure = await access(join(home, "records.sqlite3", "blocked-log"))
+      .then(() => { throw new Error("The logger fixture unexpectedly became a directory."); }, (error: unknown) => error);
+    expect(loggerFailure).toMatchObject({ syscall: "access", path: join(home, "records.sqlite3", "blocked-log") });
+    let restoreWarn = (): void => undefined;
+    const failingLogger = vi.spyOn(workingFiles, "reconcileWorkingState").mockImplementationOnce(async (...args) => {
+      const warn = vi.spyOn(args[2], "warn").mockRejectedValueOnce(loggerFailure);
+      restoreWarn = () => warn.mockRestore();
+      return reconcile(...args);
+    });
+    try {
+      runtime = await ApplicationRuntime.initialize();
+      expect(runtime.getSnapshot().startupDiagnostic).toEqual({
+        title: { key: "diagnostic.startupTitle" },
+        message: { key: "diagnostic.startupBody" },
+        canReset: false,
+      });
+      expect(await readFile(join(home, "queue.json"), "utf8")).toBe(before);
+    } finally { restoreWarn(); failingLogger.mockRestore(); }
   });
 
   it("offers no Reset for a startup failure that is not a damaged work file", () => {
@@ -1822,6 +1880,67 @@ describe("settings, secrets and the window's own state", () => {
     expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
   });
 
+  it.each(["draft", "setup", "originals"] as const)("keeps a pending tool toggle through the next %s settings intent", async (intent) => {
+    const configPath = join(home, "config.json");
+    const destination = join(root, "chosen");
+    let release!: () => void;
+    unwritable.held = { path: configPath, release: new Promise((resolve) => { release = resolve; }), entered: 0 };
+    const first = runtime.saveToolSettings(false);
+    let second: Promise<AppSnapshot> | undefined;
+    try {
+      await vi.waitFor(() => expect(unwritable.held?.entered).toBe(1));
+      expect(runtime.getSnapshot().settingsSummary?.checkUpdatesAtLaunch).toBe(true);
+      if (intent === "draft") second = runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), theme: "dark" });
+      else if (intent === "setup") second = runtime.saveSetupDirectory(destination);
+      else {
+        vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: [destination] });
+        second = runtime.chooseOriginalsDirectory({} as never);
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      release();
+      await Promise.all([first, second]);
+      const stored = JSON.parse(await readFile(configPath, "utf8"));
+      expect(stored.checkUpdatesAtLaunch).toBe(false);
+      expect(runtime.getSnapshot().settingsSummary?.checkUpdatesAtLaunch).toBe(false);
+      if (intent === "draft") {
+        expect(stored.theme).toBe("dark");
+        expect(runtime.themePreference()).toBe("dark");
+      } else if (intent === "setup") {
+        expect(stored.outputDirectory).toBe(destination);
+        expect(runtime.getSnapshot().settingsSummary?.outputDirectory).toBe(destination);
+      } else {
+        expect(stored.backupDirectory).toBe(destination);
+        expect(runtime.getSnapshot().settingsSummary?.backupDirectory).toBe(destination);
+      }
+    } finally {
+      release();
+      await Promise.allSettled([first, ...(second ? [second] : [])]);
+      unwritable.held = null;
+    }
+  });
+
+  it("prepares a catalogue outside settings ownership and derives the draft after a tool toggle commits", async () => {
+    let release!: () => void;
+    catalogueGate.held = new Promise((resolve) => { release = resolve; });
+    const saving = runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), theme: "dark" });
+    try {
+      await vi.waitFor(() => expect(catalogueGate.entered).toBe(1));
+      await runtime.saveToolSettings(false);
+      expect(runtime.getSnapshot().settingsSummary?.checkUpdatesAtLaunch).toBe(false);
+      release();
+      await saving;
+      expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({
+        formatVersion: 1, theme: "dark", checkUpdatesAtLaunch: false,
+      });
+      expect(runtime.getSnapshot().settingsSummary?.checkUpdatesAtLaunch).toBe(false);
+      expect(runtime.themePreference()).toBe("dark");
+    } finally {
+      release();
+      await Promise.allSettled([saving]);
+      catalogueGate.held = null;
+    }
+  });
+
   it("removes model and prompt copies when Save holds their built-ins, as after a reset", async () => {
     const defaults = runtime.getSettingsDraft();
     await runtime.saveSettingsDraft({
@@ -2180,6 +2299,59 @@ describe("the save a quit makes", () => {
     unwritable.refuses = () => false;
     expect(await runtime.saveForQuit(), "Retry").toEqual([]);
     expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({ defaultTimezone: "Europe/Berlin" });
+    expect(runtime.getSettingsDraft().defaultTimezone).toBe("Europe/Berlin");
+  });
+
+  it.each(["targeted", "full"] as const)("keeps a retried %s settings commit authoritative after cancelling a failed quit", async (intent) => {
+    const [pending] = await dropIn("take.wav");
+    const queuePath = join(home, "queue.json");
+    const configPath = join(home, "config.json");
+    let settingsWrites = 0;
+    unwritable.refuses = (path) => path === queuePath || (path === configPath && ++settingsWrites === 1);
+    await expect(runtime.updatePendingImportDrafts([review(pending)])).rejects.toThrow();
+
+    let release!: () => void;
+    unwritable.held = { path: configPath, release: new Promise((resolve) => { release = resolve; }), entered: 0 };
+    const changedLanguage = vi.fn();
+    runtime.onLanguageChanged(changedLanguage);
+    const saving = (intent === "targeted"
+      ? runtime.saveToolSettings(false)
+      : runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), theme: "dark", language: "ja" }))
+      .then(() => "saved", () => "failed");
+    let quit: Promise<unknown> | undefined;
+    try {
+      await vi.waitFor(() => expect(unwritable.held?.entered).toBe(1));
+      quit = runtime.saveForQuit();
+      release();
+      expect(await saving).toBe("failed");
+      expect(await quit).toEqual(["queue"]);
+      expect(settingsWrites).toBe(2);
+      const stored = JSON.parse(await readFile(configPath, "utf8"));
+      if (intent === "targeted") {
+        expect(stored.checkUpdatesAtLaunch).toBe(false);
+        expect(runtime.getSnapshot().settingsSummary?.checkUpdatesAtLaunch).toBe(false);
+        expect(changedLanguage).not.toHaveBeenCalled();
+      } else {
+        expect(stored).toMatchObject({ theme: "dark", language: "ja" });
+        expect(runtime.themePreference()).toBe("dark");
+        expect(runtime.languagePreference()).toBe("ja");
+        const { nativeTheme } = await import("electron");
+        expect(nativeTheme.themeSource).toBe("dark");
+        expect(changedLanguage).toHaveBeenCalledOnce();
+      }
+
+      unwritable.held = null;
+      unwritable.refuses = () => false;
+      await runtime.resumeAfterCancelledQuit();
+      await runtime.saveSetupDirectory(join(root, "after-cancel"));
+      expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject(stored);
+      expect(changedLanguage).toHaveBeenCalledTimes(intent === "full" ? 1 : 0);
+    } finally {
+      release();
+      await Promise.allSettled([saving, ...(quit ? [quit] : [])]);
+      unwritable.held = null;
+      unwritable.refuses = () => false;
+    }
   });
 
   it("retries settings before a held optional transcript cleanup", async () => {

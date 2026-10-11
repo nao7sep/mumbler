@@ -93,9 +93,13 @@ export class GeminiResultError extends Error {
   constructor(message: string, readonly providerMessage: string | null = null, readonly refused = false) { super(message); }
 }
 
-export function geminiProviderReason(error: unknown): string | null {
-  if (error instanceof ApiError) return apiErrorProviderMessage(error);
-  return error instanceof GeminiResultError ? error.providerMessage : null;
+export function geminiProviderReason(error: unknown, apiKey: string): string | null {
+  const reason = error instanceof ApiError
+    ? apiErrorProviderMessage(error)
+    : error instanceof GeminiResultError ? error.providerMessage : null;
+  // Documented provider copy can still echo its request's credential. Mask that
+  // known value before it becomes card state, preserving the useful explanation.
+  return reason !== null && apiKey.length > 0 ? reason.replaceAll(apiKey, "[REDACTED]") : reason;
 }
 
 // The SDK's ApiError message is the response body as JSON. Gemini's error body is a
@@ -173,9 +177,13 @@ export async function transcribeWithGemini(
       // physical upload work retains capacity and any late file is deleted.
       const uploading = ai.files.upload(upload);
       params.trackWork?.(uploading);
-      const uploadedFile = await record("files.upload", null, upload, () => untilAborted(uploading, abortState.signal, (late) => {
+      // Record the physical SDK outcome even if the caller stops waiting. The
+      // race also leaves optional record I/O behind on Cancel; capacity follows
+      // the raw upload above, rather than waiting for its diagnostic record.
+      const recordedUpload = record("files.upload", null, upload, () => uploading);
+      const uploadedFile = await untilAborted(recordedUpload, abortState.signal, (late) => {
         if (late.name) void deleteUploadedFile(ai, late.name, record, params.logger);
-      }));
+      });
       uploadedFileName = uploadedFile.name ?? null;
 
       const request = {

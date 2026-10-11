@@ -1,14 +1,13 @@
 import { message } from "@shared/i18n/translate";
-import { execFile } from "node:child_process";
 import { access, chmod, constants, mkdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { nanoid } from "nanoid";
 
 import type { DependencyStatus, ToolFacts, ToolName, ToolTransient } from "@shared/app-shell";
 import { deriveStatus } from "@shared/dependency-status";
 
+import { runTool, ToolTimeoutError } from "../audio-tools";
 import { syncDirectory, syncFile } from "../file-io";
 import { serializeError, type AppLogger } from "../logger";
 import type { JsonStore } from "../json-store";
@@ -31,8 +30,6 @@ import {
   toolFileName,
 } from "./registry";
 import { launchCheckDue, type DependenciesValue } from "./store";
-
-const execFileAsync = promisify(execFile);
 
 // Both audio tools are required for mumbler to function (ffprobe at import/probe
 // and trim analysis, ffmpeg at trim/save).
@@ -241,15 +238,16 @@ export class ToolManager {
         if (this.deps.platform !== "win32") {
           await chmod(stagedExe, 0o755);
           if (this.deps.platform === "darwin") {
-            await execFileAsync("xattr", ["-d", "com.apple.quarantine", stagedExe], {
+            await runTool("xattr", ["-d", "com.apple.quarantine", stagedExe], {
               signal,
-              timeout: 30_000,
+              timeoutMs: 30_000,
             }).catch((error: unknown) => {
               signal.throwIfAborted();
               if (
-                error instanceof Error &&
-                "killed" in error &&
-                (error as Error & { killed?: boolean }).killed
+                error instanceof ToolTimeoutError ||
+                (error instanceof Error &&
+                  "killed" in error &&
+                  (error as Error & { killed?: boolean }).killed)
               ) {
                 throw error;
               }

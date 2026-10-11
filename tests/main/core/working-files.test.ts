@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppLogger } from "@main/core/logger";
 import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
+import { createQueueStore } from "@main/core/settings-schema";
 
 // The filesystem is real throughout — these functions are about what actually
 // lands on disk. The single exception is a removal the OS refuses: `rm` fails
@@ -429,6 +430,67 @@ describe("reconciling saved state with the working directory", () => {
     expect(result.state, "the same state is handed back, not a rewritten copy").toBe(state);
     expect(logger.warn).not.toHaveBeenCalled();
   });
+
+  // POSIX directory search permissions are the subject; Windows uses ACLs.
+  it.skipIf(process.platform === "win32").each(["pending import", "card"] as const)(
+    "preserves saved review and card facts when a %s cannot be accessed",
+    async (inaccessible) => {
+      const working = join(dir, "working");
+      const blocked = join(working, "blocked");
+      await mkdir(blocked, { recursive: true });
+      await mkdir(join(working, "derived"));
+      const derived = join(working, "derived", "leftover.wav");
+      await writeFile(derived, "derived audio");
+      const pendingFile = join(inaccessible === "pending import" ? blocked : working, "pending.m4a");
+      const cardFile = join(inaccessible === "card" ? blocked : working, "card.m4a");
+      await writeFile(pendingFile, "pending audio");
+      await writeFile(cardFile, "card audio");
+      const state = makeState({
+        pendingImports: [makePendingImport({
+          workingFilePath: pendingFile,
+          localTimestampText: "2026-04-22 10:15:00",
+          deleteOriginalOnConfirm: true,
+          copyToBackupOnConfirm: true,
+        })],
+        cards: [makeCard({
+          sourceFilePath: cardFile,
+          status: "Queued",
+          queuedMode: "generate",
+          queuedAtUtc: 42,
+          trim: { frontMarkerSec: 2, backMarkerSec: 50 },
+        })],
+      });
+      const before = structuredClone(state);
+      const pending = state.pendingImports[0];
+      const card = state.cards[0];
+      const queuePath = join(dir, "queue.json");
+      await createQueueStore(queuePath).save(state);
+      const savedBytes = await readFile(queuePath);
+      const logger = makeLogger();
+
+      await chmod(blocked, 0o000);
+      try {
+        const inaccessibleFile = inaccessible === "pending import" ? pendingFile : cardFile;
+        const failure = await access(inaccessibleFile).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(Error);
+        expect(failure).toMatchObject({ code: "EACCES", path: inaccessibleFile });
+
+        await expect(reconcileWorkingState(makePaths(working), state, logger)).rejects.toEqual(failure);
+
+        expect(state).toEqual(before);
+        expect(state.pendingImports[0]).toBe(pending);
+        expect(state.cards[0]).toBe(card);
+        expect(await readFile(queuePath)).toEqual(savedBytes);
+        expect(await readFile(derived, "utf8")).toBe("derived audio");
+        expect(logger.warn).not.toHaveBeenCalled();
+        expect(logger.debug).not.toHaveBeenCalled();
+      } finally {
+        await chmod(blocked, 0o700);
+      }
+      expect(await readFile(pendingFile, "utf8")).toBe("pending audio");
+      expect(await readFile(cardFile, "utf8")).toBe("card audio");
+    },
+  );
 
   it("drops a pending import whose audio is gone, errors a card whose audio is gone, and keeps every recording", async () => {
     const working = join(dir, "working");

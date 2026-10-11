@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -52,7 +52,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-const { preserveAside, sameFileBytes, uniquePathInDirectory, writeJsonFile } = await import("@main/core/file-io");
+const { fileExists, preserveAside, sameFileBytes, uniquePathInDirectory, writeJsonFile } = await import("@main/core/file-io");
+const { buildUniqueSuffixedTargets, pathsConflict } = await import("@main/core/file-output");
 
 let dir: string;
 
@@ -68,6 +69,74 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+describe("file presence and its name-selection consumers", () => {
+  it("distinguishes an existing entry from a missing file or directory", async () => {
+    const existing = join(dir, "clip.wav");
+    await writeFile(existing, "audio");
+
+    expect(await fileExists(existing)).toBe(true);
+    expect(await fileExists(join(dir, "gone.wav"))).toBe(false);
+    expect(await fileExists(join(dir, "gone", "clip.wav"))).toBe(false);
+  });
+
+  it("propagates a malformed-path error from the real access adapter", async () => {
+    const invalid = join(dir, "clip\u0000.wav");
+    const failure = await access(invalid).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(TypeError);
+    expect(failure).toMatchObject({ code: "ERR_INVALID_ARG_VALUE" });
+
+    await expect(fileExists(invalid)).rejects.toEqual(failure);
+  });
+
+  it("keeps conflict and unique-target selection working for missing output files", async () => {
+    const targets = {
+      audioPath: join(dir, "clip.wav"),
+      jsonPath: join(dir, "clip.json"),
+      markdownPath: join(dir, "clip.md"),
+    };
+    expect(await pathsConflict(targets)).toBe(false);
+    await writeFile(targets.markdownPath, "existing transcript");
+    expect(await pathsConflict(targets)).toBe(true);
+
+    const unique = await buildUniqueSuffixedTargets(dir, "clip", ".wav");
+    expect(await pathsConflict(unique)).toBe(false);
+    expect(basename(unique.audioPath)).toMatch(/^clip-[^.]+\.wav$/);
+    expect(basename(unique.jsonPath)).toBe(basename(unique.audioPath, ".wav") + ".json");
+    expect(basename(unique.markdownPath)).toBe(basename(unique.audioPath, ".wav") + ".md");
+  });
+
+  // POSIX directory search/read permissions are the subject; Windows uses ACLs.
+  const presenceConsumers: Array<[string, (directory: string, target: string) => Promise<unknown>]> = [
+    ["file presence", (_directory, target) => fileExists(target)],
+    ["preserving an existing file", (_directory, target) => preserveAside(target)],
+    ["output conflicts", (directory, target) => pathsConflict({
+      audioPath: target,
+      jsonPath: join(directory, "clip.json"),
+      markdownPath: join(directory, "clip.md"),
+    })],
+    ["unique output targets", (directory) => buildUniqueSuffixedTargets(directory, "clip", ".wav")],
+    ["unique directory names", (directory) => uniquePathInDirectory(directory, "clip.wav")],
+  ];
+  it.skipIf(process.platform === "win32").each(presenceConsumers)("refuses inaccessible %s", async (_name, select) => {
+    const blocked = join(dir, "blocked");
+    await mkdir(blocked);
+    const target = join(blocked, "clip.wav");
+    await writeFile(target, "existing audio");
+    await chmod(blocked, 0o000);
+    try {
+      const failure = await access(target).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).toMatchObject({ code: "EACCES", path: target });
+      await expect(select(blocked, target)).rejects.toMatchObject({ code: "EACCES" });
+      expect(capturedRenames).toEqual([]);
+    } finally {
+      await chmod(blocked, 0o700);
+    }
+    expect(await readdir(blocked)).toEqual(["clip.wav"]);
+    expect(await readFile(target, "utf8")).toBe("existing audio");
+  });
 });
 
 describe("uniquePathInDirectory", () => {
@@ -86,6 +155,11 @@ describe("uniquePathInDirectory", () => {
 
     expect(basename(path).toLowerCase()).not.toBe("clip.wav");
     expect(basename(path)).toMatch(/^clip-[^.]+\.wav$/);
+  });
+
+  it("returns the requested name when the destination directory is missing", async () => {
+    const missing = join(dir, "new");
+    expect(await uniquePathInDirectory(missing, "clip.wav")).toBe(join(missing, "clip.wav"));
   });
 });
 

@@ -38,6 +38,12 @@ interface RunToolOptions {
   killEscalationMs?: number;
 }
 
+// Managed-tool preparation tolerates ordinary optional-command failures, but a
+// deadline must still fail the operation after the child has settled.
+export class ToolTimeoutError extends Error {
+  override name = "ToolTimeoutError";
+}
+
 /**
  * The one place this module spawns anything. Applies the bound and the caller's
  * cancellation signal, and translates an abort into the pipeline's own
@@ -88,21 +94,27 @@ export async function runTool(
 
   const onAbort = (): void => stop();
   options.signal?.addEventListener("abort", onAbort, { once: true });
-  try {
-    const { stdout } = await promise;
-    return { stdout };
-  } catch (error: unknown) {
-    if (isAborted() || isNodeAbortError(error)) {
-      throw new CancelledError();
-    }
+  const stoppedError = (cause?: unknown): Error | null => {
+    if (isAborted() || isNodeAbortError(cause)) return new CancelledError();
     // Say the bound was hit. "ffmpeg exited with signal SIGKILL" reads as a
     // broken input file, which sends the user looking in the wrong place.
     if (timedOut) {
-      throw new Error(
+      return new ToolTimeoutError(
         `${basename(toolPath)} did not finish within ${Math.round(options.timeoutMs / 1000)} seconds and was stopped.`,
+        cause === undefined ? undefined : { cause },
       );
     }
-    throw error;
+    return null;
+  };
+  try {
+    const { stdout } = await promise.catch((error: unknown) => {
+      throw stoppedError(error) ?? error;
+    });
+    // A tool can handle SIGTERM and exit zero. Its output still belongs to the
+    // stopped operation; classify that only after the child has actually exited.
+    const error = stoppedError();
+    if (error) throw error;
+    return { stdout };
   } finally {
     clearTimeout(deadline);
     if (escalation !== null) clearTimeout(escalation);

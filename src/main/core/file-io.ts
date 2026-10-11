@@ -183,8 +183,11 @@ export async function fileExists(filePath: string): Promise<boolean> {
   try {
     await access(filePath, fsConstants.F_OK);
     return true;
-  } catch {
-    return false;
+  } catch (error: unknown) {
+    // Failed access is not proof of absence: callers may discard saved work or
+    // select an output name from this result.
+    if (isMissingFileError(error)) return false;
+    throw error;
   }
 }
 

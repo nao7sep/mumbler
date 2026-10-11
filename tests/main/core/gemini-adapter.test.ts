@@ -89,7 +89,7 @@ describe("the Gemini SDK transport", () => {
   it("presents the provider's documented message and leaves a 503 to the pipeline's retry", async () => {
     fetchMock.mockResolvedValue(json({ error: { code: 503, message: "The model is overloaded.", status: "UNAVAILABLE" } }, 503));
     const error = await generate().catch((failure: unknown) => failure);
-    expect(geminiProviderReason(error)).toBe("The model is overloaded.");
+    expect(geminiProviderReason(error, "fixture-key")).toBe("The model is overloaded.");
     expect(isRetryableGeminiError(error)).toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
   });
@@ -98,7 +98,7 @@ describe("the Gemini SDK transport", () => {
     fetchMock.mockResolvedValue(new Response("TypeError EACCES /private/tmp/RAW-SENTINEL", { status: 500, statusText: "Internal Server Error" }));
     const error = await generate().catch((failure: unknown) => failure);
     expect(error).toBeInstanceOf(ApiError);
-    expect(geminiProviderReason(error)).toBeNull();
+    expect(geminiProviderReason(error, "fixture-key")).toBeNull();
     expect(isRetryableGeminiError(error)).toBe(false);
   });
 

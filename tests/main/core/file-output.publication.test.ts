@@ -48,7 +48,7 @@ describe("independent output publication", () => {
     expect(await readFile(t.markdownPath, "utf8")).toBe("OLD MD");
     expect((await readdir(directory)).sort()).toEqual(["out.json", "out.md", "out.wav", "source.wav"]);
   });
-  it("serializes publication across cards after parallel staging, and releases a failed turn", async () => {
+  it("serializes publication to the same targets after parallel staging, and releases a failed turn", async () => {
     const secondSource = join(directory, "second.wav");
     await writeFile(secondSource, "SECOND AUDIO");
     let entered!: () => void;

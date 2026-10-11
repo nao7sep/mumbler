@@ -83,7 +83,7 @@ import { type AppLogger, createLogger, serializeError, type SessionLogger } from
 import { OperationError } from "./operation-error";
 import { applyThemePreference } from "./theme";
 import { alignAppKit, loadInterfaceCatalogue, mainTranslator, resolveInterfaceLanguage } from "../i18n";
-import type { InterfaceLanguage, LanguagePreference } from "@shared/i18n/languages";
+import { normalizeLanguagePreference, type InterfaceLanguage, type LanguagePreference } from "@shared/i18n/languages";
 import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery } from "@shared/records";
 import { createTranslator, message, type Message, type Translator } from "@shared/i18n/translate";
 import type { MessageKey } from "@shared/i18n/catalogues";
@@ -200,6 +200,12 @@ interface AppRuntimeState {
   hasGeminiApiKey: boolean;
 }
 
+interface SettingsCommit {
+  previous: MumblerSettings;
+  previousLanguage: string;
+  next: MumblerSettings;
+}
+
 export class ApplicationRuntime {
   private readonly runtime: AppRuntimeState;
   private firstRun = false;
@@ -228,6 +234,12 @@ export class ApplicationRuntime {
   // imports. Keep copy -> pending state -> persistence, and settling a review,
   // ordered here; renderer disabling is presentation and cannot own data safety.
   private importTail: Promise<void> = Promise.resolve();
+  // Derive each settings intent from the last committed settings, and publish
+  // its authority before another intent derives its replacement.
+  private settingsTail: Promise<void> = Promise.resolve();
+  // A quit can retry a rejected write. Its exact failure identity owns the
+  // settings to publish if those bytes later commit and the user keeps running.
+  private failedSettingsMutation: { failure: object; next: MumblerSettings } | null = null;
   // Card producers must be reached before quit snapshots the store tails: a
   // copy, deletion, trim analysis or key lookup can create its first write after an await.
   private readonly activeStateChanges = new Set<Promise<unknown>>();
@@ -374,7 +386,23 @@ export class ApplicationRuntime {
 
       const stateLoad = await queueStore.load();
       const recovered = recoverInterruptedCards(stateLoad.value);
-      const reconciliation = await reconcileWorkingState(paths, recovered.state, logger);
+      const reconciliation = await reconcileWorkingState(paths, recovered.state, logger).catch((error: unknown) => {
+        // Failed presence/directory reads say nothing about whether saved work
+        // is missing. Name that path without treating it as damaged/resettable.
+        if (error instanceof Error) {
+          const failure = error as NodeJS.ErrnoException;
+          if (typeof failure.path === "string" && failure.path.length > 0 &&
+            typeof failure.code === "string" && failure.code.length > 0) {
+            const checkedAudio = failure.syscall === "access" && (
+              recovered.state.pendingImports.some((item) => item.workingFilePath === failure.path) ||
+              recovered.state.cards.some((card) => card.sourceFilePath === failure.path)
+            );
+            const scannedDerived = failure.syscall === "scandir" && failure.path === join(paths.workingDir, "derived");
+            if (checkedAudio || scannedDerived) throw new UnreadableStoreError(failure.path, { cause: error });
+          }
+        }
+        throw error;
+      });
 
       // Each card's text lives in its own file.
       const transcriptStore = new TranscriptStore(paths.transcriptsDir);
@@ -637,9 +665,7 @@ export class ApplicationRuntime {
 
   private async persistToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot> {
     this.ensureReady();
-    const nextSettings = { ...this.runtime.settings!, checkUpdatesAtLaunch };
-    await this.runtime.settingsStore!.save(nextSettings);
-    this.runtime.settings = nextSettings;
+    await this.mutateSettings((current) => ({ ...current, checkUpdatesAtLaunch }));
     await this.runtime.logger.info("settings.tool-gates", "Updated audio tool settings.", {
       checkUpdatesAtLaunch,
     });
@@ -1503,22 +1529,78 @@ export class ApplicationRuntime {
   }
 
   saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.persistSettingsDraft(draft));
+    return this.runStateChange(() => this.persistSettingsDraft({ ...draft }));
+  }
+
+  private mutateSettings(
+    update: (current: MumblerSettings) => MumblerSettings,
+    options: { replaceUnusable?: boolean } = {},
+  ): Promise<SettingsCommit> {
+    return this.enqueueSettings(async () => {
+      const previous = this.runtime.settings!;
+      const previousLanguage = this.interfaceLanguage().language;
+      const next = update(previous);
+      const store = this.runtime.settingsStore!;
+      const previousFailure = store.failedWrite;
+      try {
+        await store.save(next, options);
+      } catch (error: unknown) {
+        const failure = store.failedWrite;
+        if (failure !== null && failure !== previousFailure) this.failedSettingsMutation = { failure, next };
+        throw error;
+      }
+      this.runtime.settings = next;
+      this.failedSettingsMutation = null;
+      return { previous, previousLanguage, next };
+    });
+  }
+
+  private enqueueSettings<T>(work: () => Promise<T>): Promise<T> {
+    const operation = this.settingsTail.then(work, work);
+    this.settingsTail = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private retryFailedSettings(failure: object): Promise<SettingsCommit | null> {
+    return this.enqueueSettings(async () => {
+      const store = this.runtime.settingsStore!;
+      // A resumed app may have committed a newer intent before this queued retry.
+      if (store.failedWrite !== failure) return null;
+      const mutation = this.failedSettingsMutation;
+      const previous = this.runtime.settings!;
+      const previousLanguage = this.interfaceLanguage().language;
+      try {
+        await store.retryFailedWrite();
+      } catch (error: unknown) {
+        const retryFailure = store.failedWrite;
+        if (mutation?.failure === failure && retryFailure !== null) {
+          this.failedSettingsMutation = { failure: retryFailure, next: mutation.next };
+        }
+        throw error;
+      }
+      if (mutation?.failure !== failure) return null;
+      this.runtime.settings = mutation.next;
+      this.failedSettingsMutation = null;
+      return { previous, previousLanguage, next: mutation.next };
+    });
+  }
+
+  private followSettingsCommit(commit: SettingsCommit): void {
+    applyThemePreference(this.themePreference());
+    this.followLanguageChange(commit.previous.language, commit.previousLanguage);
   }
 
   private async persistSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
     this.ensureReady();
 
-    const previousPreference = this.languagePreference();
-    const previousLanguage = this.interfaceLanguage().language;
-    const nextSettings = applySettingsDraft(this.runtime.settings!, draft);
-    await loadInterfaceCatalogue(nextSettings.language);
+    await loadInterfaceCatalogue(normalizeLanguagePreference(draft.language));
     // The Settings window showed the built-in in place of any saved value this
     // build could not use, so saving it replaces those values.
-    await this.runtime.settingsStore!.save(nextSettings, { replaceUnusable: true });
-    this.runtime.settings = nextSettings;
-    applyThemePreference(nextSettings.theme);
-    this.followLanguageChange(previousPreference, previousLanguage);
+    const commit = await this.mutateSettings(
+      (current) => applySettingsDraft(current, draft), { replaceUnusable: true },
+    );
+    const nextSettings = commit.next;
+    this.followSettingsCommit(commit);
     await this.runtime.logger.info("settings.save", "Updated application settings.", {
       outputDirectory: nextSettings.outputDirectory,
       backupDirectory: nextSettings.backupDirectory,
@@ -1657,7 +1739,10 @@ export class ApplicationRuntime {
       if (attemptId !== this.quitAttempt) return;
       const settingsFailure = settingsStore?.failedWrite ?? null;
       if (settingsStore && settingsFailure !== null && settingsFailure !== this.settingsFailureBeforeQuit) {
-        await attempt("settings", () => settingsStore.retryFailedWrite());
+        await attempt("settings", async () => {
+          const commit = await this.retryFailedSettings(settingsFailure);
+          if (commit !== null) this.followSettingsCommit(commit);
+        });
       }
     };
     const state = this.runtime.state;
@@ -1750,9 +1835,7 @@ export class ApplicationRuntime {
         properties: ["openDirectory", "createDirectory"],
       });
       if (result.canceled || result.filePaths.length === 0) return this.getSnapshot();
-      const nextSettings = { ...this.runtime.settings!, backupDirectory: result.filePaths[0]! };
-      await this.runtime.settingsStore!.save(nextSettings);
-      this.runtime.settings = nextSettings;
+      await this.mutateSettings((current) => ({ ...current, backupDirectory: result.filePaths[0]! }));
       return this.getSnapshot();
     });
   }
@@ -1766,17 +1849,15 @@ export class ApplicationRuntime {
     // Setup supplies only the native picker result or the suggested absolute
     // path, never authored expressions. Preserve that literal selection.
     if (!isAbsolute(directory)) throw new OperationError("Choose a save folder first.");
-    const nextSettings = {
-      ...this.runtime.settings!,
-      outputDirectory: directory,
-      backupDirectory: this.runtime.settings!.backupDirectory ?? join(directory, "Originals"),
-    };
     // Targeted save preserves unsupported and unknown settings the setup never showed.
-    await this.runtime.settingsStore!.save(nextSettings);
-    this.runtime.settings = nextSettings;
+    const { next: nextSettings } = await this.mutateSettings((current) => ({
+      ...current,
+      outputDirectory: directory,
+      backupDirectory: current.backupDirectory ?? join(directory, "Originals"),
+    }));
 
     await this.runtime.logger.info("settings.output-directory", "Updated output directory.", {
-      outputDirectory: this.runtime.settings!.outputDirectory,
+      outputDirectory: nextSettings.outputDirectory,
     });
     return this.getSnapshot();
   }

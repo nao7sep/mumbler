@@ -38,10 +38,10 @@ describe("a refused or truncated Gemini response reports the provider's reason",
   it("presents only the provider's documented refusal message and never retries it", async () => {
     generateContent.mockResolvedValue({ candidates: [{ finishReason: "SAFETY", finishMessage: "Please use different audio." }], text: "" });
     const error = await call().catch((failure) => failure);
-    expect(geminiProviderReason(error)).toBe("Please use different audio.");
+    expect(geminiProviderReason(error, "k")).toBe("Please use different audio.");
     expect(isRetryableGeminiError(error)).toBe(false);
     generateContent.mockResolvedValue({ candidates: [{ finishReason: "SAFETY" }], text: "" });
-    expect(geminiProviderReason(await call().catch((failure) => failure))).toBeNull();
+    expect(geminiProviderReason(await call().catch((failure) => failure), "k")).toBeNull();
   });
 
   it("marks a refusal as refused, and a truncation as not", async () => {
