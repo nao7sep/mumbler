@@ -53,9 +53,9 @@
   "allowScripts": {
     "electron-winstaller@5.4.0": true,
     "esbuild@0.25.12": true,
-    "esbuild@0.28.1": true,
+    "esbuild@0.28.2": true,
     "fsevents@2.3.3": false,
-    "protobufjs@7.6.5": false,
+    "protobufjs@7.6.6": false,
     "@google/genai@2.28.0": false
   },
   "repository": {
