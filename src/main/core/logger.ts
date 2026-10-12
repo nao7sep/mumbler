@@ -69,27 +69,31 @@ export interface LoggerPaths {
   logsDir: string;
 }
 
-const MAX_ERROR_CAUSE_DEPTH = 8;
 const CLOSE_TIMEOUT_MS = 5_000;
 const RECORD_TIMEOUT_MS = 5_000;
 
-// Captures the full exception — type, message, stack — and follows the `cause`
-// chain for wrapped errors, so a log line carries enough to reconstruct the
-// failure. Depth-bounded so a pathological self-referential cause can't loop.
-export function serializeError(error: unknown, depth = 0): unknown {
+// Captures the full exception — type, message, stack — and follows the whole
+// `cause` chain for wrapped errors, so a log line carries enough to reconstruct
+// the failure; a record keeps every level (text-cleanup-conventions: truncation
+// is display-only). Only a cause that leads back to one of its own wrappers
+// stops, as a marker naming it, so a self-referential chain cannot loop.
+export function serializeError(error: unknown, ancestors: Set<Error> = new Set()): unknown {
   if (error instanceof Error) {
+    if (ancestors.has(error)) return { name: error.name, message: error.message, circular: true };
+    ancestors.add(error);
     const serialized: Record<string, unknown> = {
       ...error,
       name: error.name,
       message: error.message,
       stack: error.stack,
     };
-    if (error.cause !== undefined && depth < MAX_ERROR_CAUSE_DEPTH) {
-      serialized.cause = serializeError(error.cause, depth + 1);
+    if (error.cause !== undefined) {
+      serialized.cause = serializeError(error.cause, ancestors);
     }
-    if (error instanceof AggregateError && depth < MAX_ERROR_CAUSE_DEPTH) {
-      serialized.errors = error.errors.map((entry: unknown) => serializeError(entry, depth + 1));
+    if (error instanceof AggregateError) {
+      serialized.errors = error.errors.map((entry: unknown) => serializeError(entry, ancestors));
     }
+    ancestors.delete(error);
     return serialized;
   }
 

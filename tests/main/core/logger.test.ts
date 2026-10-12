@@ -317,6 +317,26 @@ describe("serializeError", () => {
     expect(typeof serialized.stack).toBe("string");
     expect(serialized.cause).toMatchObject({ name: "Error", message: "inner" });
   });
+
+  it("keeps every level of a long cause chain and marks only a cycle", () => {
+    let error = new Error("level 0");
+    for (let level = 1; level <= 20; level++) error = new Error(`level ${level}`, { cause: error });
+    let serialized = JSON.parse(JSON.stringify(serializeError(error)));
+    for (let level = 20; level > 0; level--) {
+      expect(serialized.message).toBe(`level ${level}`);
+      serialized = serialized.cause;
+    }
+    expect(serialized).toMatchObject({ message: "level 0" });
+    expect(serialized.cause).toBeUndefined();
+
+    const outer = new Error("outer");
+    const inner = new Error("inner", { cause: outer });
+    outer.cause = inner;
+    expect(JSON.parse(JSON.stringify(serializeError(outer)))).toMatchObject({
+      message: "outer",
+      cause: { message: "inner", cause: { message: "outer", circular: true } },
+    });
+  });
 });
 
 describe("readRecords", () => {

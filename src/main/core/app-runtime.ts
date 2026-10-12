@@ -97,19 +97,21 @@ import { PipelineCoordinator } from "./pipeline-coordinator";
 const DEBUG_LOGGING_ENABLED = !app.isPackaged || process.env.MUMBLER_DEBUG === "1";
 
 function rendererReportError(report: RendererErrorReport): Error {
+  // The whole chain is rebuilt, since its record keeps every level; only a
+  // cause leading back to one already rebuilt stops, so a cycle cannot loop.
   const seen = new WeakSet<object>();
-  const build = (diagnostic: { name?: unknown; message?: unknown; stack?: unknown; cause?: unknown }, depth: number): Error => {
-    if (seen.has(diagnostic) || depth >= 8) return new Error("Renderer cause chain was truncated.");
+  const build = (diagnostic: { name?: unknown; message?: unknown; stack?: unknown; cause?: unknown }): Error => {
+    if (seen.has(diagnostic)) return new Error("Renderer cause chain is circular.");
     seen.add(diagnostic);
     const cause = diagnostic.cause && typeof diagnostic.cause === "object"
-      ? build(diagnostic.cause as { name?: unknown; message?: unknown; stack?: unknown; cause?: unknown }, depth + 1)
+      ? build(diagnostic.cause as { name?: unknown; message?: unknown; stack?: unknown; cause?: unknown })
       : undefined;
     const error = new Error(String(diagnostic.message ?? "Unknown renderer error."), cause === undefined ? undefined : { cause });
     error.name = typeof diagnostic.name === "string" ? diagnostic.name : "Error";
     if (typeof diagnostic.stack === "string") error.stack = diagnostic.stack;
     return error;
   };
-  return build(report, 0);
+  return build(report);
 }
 
 // How long a user's quit waits for queued backup-history writes.

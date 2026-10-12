@@ -160,6 +160,11 @@ describe("sanitizeSlug", () => {
     expect(sanitizeSlug("  --Trim Me--  ")).toBe("trim-me");
   });
 
+  it("bounds a slug at 80 characters without leaving a trailing separator", () => {
+    const slug = sanitizeSlug(`${"a".repeat(79)} tail`);
+    expect(slug).toBe("a".repeat(79));
+  });
+
   it("returns an empty string when nothing survives sanitization", () => {
     expect(sanitizeSlug("!!! ???")).toBe("");
   });

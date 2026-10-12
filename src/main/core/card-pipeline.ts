@@ -585,14 +585,18 @@ export function sanitizeTitle(value: string): string {
     .trim();
 }
 
+// The 80-character bound is part of a slug's format, like its alphabet: the slug
+// names exported files and URLs, and the generated response it was cut from is
+// kept whole in its provider-call record. Edge hyphens are trimmed after the
+// cut so it never ends a slug.
 export function sanitizeSlug(value: string): string {
   return value
     .toLowerCase()
     .replaceAll(/[`"'""'']/g, "")
     .replaceAll(/[^a-z0-9]+/g, "-")
     .replaceAll(/-+/g, "-")
-    .replaceAll(/^-|-$/g, "")
-    .slice(0, 80);
+    .slice(0, 80)
+    .replaceAll(/^-|-$/g, "");
 }
 
 function cardFailureMessage(step: CardProcessingStep): string {
