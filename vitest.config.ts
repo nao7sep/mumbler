@@ -35,6 +35,11 @@ export default defineConfig({
     // rendered-keys: every spec that mounts the interface fails if a catalogue
     // key reaches the screen untranslated (localization-conventions).
     setupFiles: ["tests/setup/backup-store-isolation.ts", "tests/setup/rendered-keys.ts"],
+    // No unit test runs the Electron binary, but the electron package downloads
+    // a missing one (about 100 MB) the first time anything imports it, so after
+    // a fresh install parallel test files would race to fetch it. Pointing it at
+    // a placeholder resolves a path without downloading.
+    env: { ELECTRON_OVERRIDE_DIST_PATH: "electron-binary-not-used-by-unit-tests" },
     coverage: {
       // V8's native coverage; `include` spans all source so the report flags
       // logic no test reaches, not just a score for what is reached.

@@ -141,6 +141,22 @@ describe("catalogues", () => {
     }
   });
 
+  // A button swaps its command for running status text while it works, so the
+  // two must read differently or the press would look ignored.
+  const COMMAND_STATUS_PAIRS = [
+    ["queue.import", "queue.importing"],
+    ["common.save", "common.saving"],
+    ["settings.saveKey", "common.saving"],
+    ["review.confirm", "review.confirming"],
+    ["queue.resetState", "queue.resetting"],
+    ["common.retry", "startup.retrying"],
+  ] as const;
+  it.each(LANGUAGES)("%s tells each command from its running status", (language) => {
+    for (const [command, status] of COMMAND_STATUS_PAIRS) {
+      expect(catalogues[language][command], `${command} / ${status}`).not.toBe(catalogues[language][status]);
+    }
+  });
+
   it("names every language differently, in its own words", () => {
     const names = LANGUAGES.map((language) => LANGUAGE_NAMES[language]);
     expect(new Set(names).size).toBe(LANGUAGES.length);

@@ -150,6 +150,34 @@ describe("Menu", () => {
     expect(menu()).toBeNull();
   });
 
+  // Hover is a pointer cue, never the keyboard target (composite-control-conventions):
+  // after arrowing down, resting the pointer on an earlier item must not move where
+  // the next arrow or Enter acts.
+  it("keeps the keyboard target when the pointer hovers an earlier item", async () => {
+    const onSelect = { a: vi.fn(), b: vi.fn(), c: vi.fn() };
+    await mountMenu(onSelect);
+    await click(trigger());
+    await flushOpenFocus();
+    await key(items()[0], "ArrowDown");
+    await key(items()[1], "ArrowDown");
+    expect(document.activeElement).toBe(items()[2]);
+    const hover = async (el: HTMLElement) => {
+      await act(async () => {
+        for (const type of ["pointerover", "pointerenter", "mouseover", "mouseenter", "pointermove", "mousemove"]) {
+          el.dispatchEvent(new MouseEvent(type, { bubbles: true }));
+        }
+      });
+    };
+    await hover(items()[0]);
+    expect(document.activeElement).toBe(items()[2]);
+    await key(document.activeElement as HTMLElement, "ArrowUp");
+    expect(document.activeElement).toBe(items()[1]);
+    await hover(items()[0]);
+    await key(document.activeElement as HTMLElement, "Enter");
+    expect(onSelect.b).toHaveBeenCalledOnce();
+    expect(onSelect.a).not.toHaveBeenCalled();
+  });
+
   it("type-ahead jumps to the next item whose label starts with the key", async () => {
     await mountMenu({ a: vi.fn(), b: vi.fn(), c: vi.fn() });
     await click(trigger());
