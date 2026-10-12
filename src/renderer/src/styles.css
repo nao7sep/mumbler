@@ -1917,19 +1917,6 @@ select:not([multiple]) {
   border-top: 1px solid var(--line-section);
 }
 
-/* A label stays on one line whenever it fits a row: buttons keep their width
-   and the footer moves one to a new row instead. Only a label wider than the
-   whole row wraps, inside a button that grows taller rather than running past
-   the dialog's edge (modal-dialog-conventions). */
-.modal-actions > .button {
-  flex-shrink: 0;
-  max-width: 100%;
-  height: auto;
-  min-height: var(--control-md);
-  padding-block: 6px;
-  overflow-wrap: anywhere;
-}
-
 .modal-toolbar {
   margin-top: 0;
   padding-top: 14px;

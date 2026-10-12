@@ -119,10 +119,9 @@ function escapeHtml(text: string): string {
 }
 
 // The page is drawn in the interface language, and declares it so Chinese,
-// Japanese and Korean text takes its own glyphs. Buttons never shrink, so the
-// footer moves one that does not fit onto its own row before any label wraps;
-// only a label longer than the whole row wraps inside its button, which grows
-// to fit, so no label is ever cut.
+// Japanese and Korean text takes its own glyphs. The footer wraps a button that
+// does not fit onto its own row, and a label longer than the row wraps inside
+// its button, so no label is ever cut.
 export function renderPlainDialogHtml<C extends string>(dialog: PlainDialog<C>): string {
   const buttons = dialog.actions.map((action) => {
     const tone = action.tone === undefined ? "" : ` ${action.tone}`;
@@ -135,7 +134,7 @@ export function renderPlainDialogHtml<C extends string>(dialog: PlainDialog<C>):
     body{margin:0;height:100vh;overflow:hidden}.dialog{height:100vh;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
     .header{padding:24px 24px 12px}.body{min-height:0;overflow:auto;padding:0 24px;display:flex;flex-direction:column;gap:12px}[role="region"]:focus-visible{outline:none}
     h1{font-size:18px;line-height:1.3;margin:0}p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.detail{color:#526356}
-    .actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:12px 24px 24px}.button{flex-shrink:0;max-width:100%;overflow-wrap:anywhere;color:#1f2a21;border:1px solid #9baa9e;border-radius:6px;padding:7px 14px;background:#f7faf7;font:inherit}
+    .actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:12px 24px 24px}.button{max-width:100%;overflow-wrap:anywhere;color:#1f2a21;border:1px solid #9baa9e;border-radius:6px;padding:7px 14px;background:#f7faf7;font:inherit}
     .button:hover,.button:focus{outline:2px solid #477552;outline-offset:2px}.primary{color:white;background:#376d45;border-color:#2f5e3b}.primary:hover,.primary:focus{background:#2f5e3b}.danger{color:white;background:#a44335;border-color:#8e392d}.danger:hover,.danger:focus{background:#8e392d}
     [data-window-inactive] .button{color:#69756b;border-color:#c0c9c1;background:#f2f5f2}[data-window-inactive] .button:focus{outline-color:#9aaba0}
     [data-window-inactive] .primary{color:#eef3ef;background:#789580;border-color:#6e8a76}[data-window-inactive] .primary:hover,[data-window-inactive] .primary:focus{background:#708c78}
