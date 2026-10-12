@@ -72,7 +72,7 @@ describe("ordered skippable setup", () => {
   it("keeps a cancelled picker on the folder step and saves only an accepted folder", async () => {
     await click("Skip"); await click("Skip");
     pickOutputDirectory.mockResolvedValueOnce(null);
-    await click("Choose Another Folder…");
+    await click("Choose Another Folder");
     expect(saveSetupDirectory).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
     saveSetupDirectory.mockResolvedValueOnce(snapshot);
