@@ -124,6 +124,23 @@ describe("catalogues", () => {
     expect(literal).toEqual([]);
   });
 
+  // An ellipsis carries meaning, so a translation has one exactly when English
+  // does; it is always the one character, attached directly except where the
+  // language spaces it (German, with a no-break space) (localization-conventions).
+  it.each(LANGUAGES)("%s uses the ellipsis exactly as English does", (language) => {
+    const spaced = language === "de";
+    for (const [key, entry] of Object.entries(catalogues[language])) {
+      const expected = forms(english[key] ?? "").some((text) => text.includes("…"));
+      for (const text of forms(entry)) {
+        expect(text, key).not.toContain("...");
+        expect(text.includes("…"), `${key}: ${text}`).toBe(expected);
+        for (const match of text.matchAll(/(\s?)…/gu)) {
+          expect(match[1], `${key}: ${text}`).toBe(spaced ? " " : "");
+        }
+      }
+    }
+  });
+
   it("names every language differently, in its own words", () => {
     const names = LANGUAGES.map((language) => LANGUAGE_NAMES[language]);
     expect(new Set(names).size).toBe(LANGUAGES.length);

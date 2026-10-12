@@ -164,7 +164,9 @@ export function AudioToolsModal({
                       ? identityLabel(status.installedVersion)
                       : status.state === "not-installed" ? "—" : t("tools.versionUnreadable")}
                   </td>
-                  <td>{status.desiredVersion !== null ? identityLabel(status.desiredVersion) : isChecking ? "…" : t("common.unknown")}</td>
+                  {/* Empty while a check runs: its "Checking…" status already says so, and an
+                      ellipsis is no stand-in for a value not yet known (localization-conventions). */}
+                  <td>{status.desiredVersion !== null ? identityLabel(status.desiredVersion) : isChecking ? null : t("common.unknown")}</td>
                   <td className="tools-table__action">
                     {running ? (
                       <span className="tools-table__actions">

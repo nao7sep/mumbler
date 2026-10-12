@@ -986,9 +986,10 @@ textarea:focus-visible,
   /* After `font: inherit`, which would otherwise restore the page's 1.5. */
   line-height: normal;
   color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* A label too long for a narrow window wraps rather than being cut: the menu
+     offers no other way to read a command (responsive-interface-conventions). */
+  padding-block: 6px;
+  overflow-wrap: anywhere;
 }
 
 .app-menu-item:hover:not(:disabled) {
@@ -2425,6 +2426,10 @@ html.records-page body {
   overflow-wrap: anywhere;
 }
 
+/* The one truncation site: a long message would crowd the list beside its
+   detail pane, so the row clamps to two lines and the clamp draws the single
+   ellipsis. Selecting the row, by pointer, touch or keyboard, shows the whole
+   message in the detail pane. */
 .records-row__text {
   font-size: 0.8125rem;
   color: var(--text-secondary);
