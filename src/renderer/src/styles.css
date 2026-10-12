@@ -1917,6 +1917,13 @@ select:not([multiple]) {
   border-top: 1px solid var(--line-section);
 }
 
+/* A label never wraps inside its fixed-height button: buttons keep their width
+   and the footer moves one to a new row instead (modal-dialog-conventions). */
+.modal-actions > .button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .modal-toolbar {
   margin-top: 0;
   padding-top: 14px;
