@@ -329,6 +329,12 @@ textarea {
   font: inherit;
 }
 
+/* A choice too long for its select shows one marker where it is cut; opening the
+   select, by pointer, touch or keyboard, lists every option in full. */
+select {
+  text-overflow: ellipsis;
+}
+
 /* Every button shows the hand (the webview clickable idiom); disabled resets to
    the arrow below. */
 button {
@@ -604,6 +610,8 @@ textarea:focus-visible,
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  /* A pane clips its overflow, so a header too wide for it wraps instead. */
+  flex-wrap: wrap;
 }
 
 .panel__header h2 {
@@ -1953,6 +1961,10 @@ select:not([multiple]) {
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.review-row__title {
+  overflow-wrap: anywhere;
 }
 
 .review-row__fields {
