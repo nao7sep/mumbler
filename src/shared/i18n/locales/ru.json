@@ -259,7 +259,7 @@
   "menu.about": "О программе Mumbler",
   "queue.title": "Очередь",
   "queue.importing": "Импорт…",
-  "queue.import": "Импортировать",
+  "queue.import": "Импорт",
   "import.closeResult": "Закрыть результат импорта",
   "queue.resetting": "Сброс…",
   "queue.resetState": "Сбросить состояние",
