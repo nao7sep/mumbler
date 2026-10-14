@@ -10,7 +10,7 @@ import { ShortenedValue } from "../app/ShortenedValue";
 // The renderer's translator: the shared one, plus `rich`, which fills markup
 // (a <code> path, say) into a placeholder so a sentence is never glued together
 // from fragments, and `node`, which renders a message for a compact surface:
-// the names and paths in it are shortened, each revealable whole.
+// the names and paths in it are shortened.
 export type RendererTranslator = Translator & {
   rich: (key: MessageKey, values: Readonly<Record<string, ReactNode>>) => ReactNode;
   node: (message: Message) => ReactNode;

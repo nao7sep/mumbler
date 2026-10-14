@@ -1,12 +1,11 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import type { ReactElement } from "react";
 
 // A name or path that identifies an item, shown on one line in the space its
-// container gives it (interface-styling-conventions, Labels). A name keeps its
-// beginning; a path keeps its final segment and loses its middle, because its
-// beginning is usually shared. Only a value that is actually cut becomes a
-// control: clicking, tapping, Enter or Space shows it whole, wrapped, and
-// again shortens it. The whole value is always the element's text, so an
-// accessible name and a copy of the selection carry it complete.
+// container gives it (interface-styling-conventions, Identifying text). A name
+// keeps its beginning; a path keeps its final segment and loses its middle,
+// because its beginning is usually shared. The element's text is always the
+// whole value, so an accessible name and a copied selection carry it complete,
+// and the tooltip shows it to a pointer.
 
 /** Splits a path after its last separator: the folders, then the final segment. */
 export function splitPath(value: string): { head: string; tail: string } {
@@ -19,65 +18,16 @@ export function splitPath(value: string): { head: string; tail: string } {
   return { head: value.slice(0, cut + 1), tail: value.slice(cut + 1) };
 }
 
-export function ShortenedValue({
-  kind,
-  value,
-  className,
-}: {
-  kind: "name" | "path";
-  value: string;
-  className?: string;
-}): ReactElement {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [whole, setWhole] = useState(false);
-  const [cut, setCut] = useState(false);
-
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (element === null || whole) return;
-    const measure = (): void => {
-      setCut([...element.querySelectorAll<HTMLElement>("[data-fit]")].some((part) => part.scrollWidth > part.clientWidth));
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [value, whole, kind]);
-
-  const toggle = (): void => setWhole((current) => !current);
-  const interactive = cut || whole;
+export function ShortenedValue({ kind, value }: { kind: "name" | "path"; value: string }): ReactElement {
   const { head, tail } = kind === "path" ? splitPath(value) : { head: "", tail: value };
-
   return (
-    <span
-      ref={ref}
-      className={`shortened${whole ? " shortened--whole" : ""}${className ? ` ${className}` : ""}`}
-      {...(interactive
-        ? {
-          role: "button",
-          tabIndex: 0,
-          "aria-expanded": whole,
-          // Inside a toast, which a click dismisses, revealing the value is not a dismissal.
-          onClick: (event: { stopPropagation: () => void }) => {
-            event.stopPropagation();
-            toggle();
-          },
-          onKeyDown: (event: KeyboardEvent<HTMLSpanElement>) => {
-            if (event.key !== "Enter" && event.key !== " ") return;
-            event.preventDefault();
-            event.stopPropagation();
-            toggle();
-          },
-        }
-        : {})}
-    >
-      {whole || head === "" ? (
-        <span data-fit className="shortened__text">{value}</span>
+    <span className="shortened" title={value}>
+      {head === "" ? (
+        <span className="shortened__text">{value}</span>
       ) : (
         <>
-          <span data-fit className="shortened__head">{head}</span>
-          <span data-fit className="shortened__tail">{tail}</span>
+          <span className="shortened__head">{head}</span>
+          <span className="shortened__tail">{tail}</span>
         </>
       )}
     </span>

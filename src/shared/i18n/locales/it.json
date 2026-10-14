@@ -122,8 +122,6 @@
     "many": "{names} e altri {count}",
     "other": "{names} e altri {count}"
   },
-  "common.showDetails": "Mostra dettagli",
-  "common.hideDetails": "Nascondi dettagli",
   "settingsIssue.skipIntervalSec": "L’intervallo di salto deve essere un numero intero positivo.",
   "settingsIssue.previewSnippetSeconds": "La durata dell’anteprima deve essere un numero intero positivo.",
   "settingsIssue.concurrencyLimit": "Il numero di trascrizioni simultanee deve essere un numero intero positivo.",
@@ -331,12 +329,6 @@
     "other": "Impossibile importare {count} elementi."
   },
   "import.failureItem": "{file}: {reason}",
-  "import.notImported": "Non importati: {files}.",
-  "import.originalsIncomplete": {
-    "one": "{count} originale non è stato copiato o eliminato come richiesto: {files}.",
-    "many": "{count} originali non sono stati copiati o eliminati come richiesto: {files}.",
-    "other": "{count} originali non sono stati copiati o eliminati come richiesto: {files}."
-  },
   "import.unnamedItem": "Elemento trascinato senza nome",
   "import.noLocalPath": "Non era disponibile alcun percorso di file locale utilizzabile.",
   "import.pathUnreadable": "Impossibile leggere il percorso del file locale.",

@@ -30,10 +30,7 @@ interface UseImportFlowOptions {
 }
 
 export interface ImportResultNotice {
-  /** What the strip shows: counts, with a few files named. */
   message: Message;
-  /** Every failure or warning in full, revealed beneath the summary. */
-  details?: Message[];
   severity: "information" | "warning" | "error";
   issueKeys: string[];
 }
@@ -172,31 +169,21 @@ export function useImportFlow({
     const fileName = (sourcePath: string) => sourcePath === "" ? message("import.unnamedItem") : pathValue(sourcePath);
     // Each part is its own sentence, joined through one catalogue entry, so
     // every count keeps its own plural form and each language sets the spacing.
-    // The strip names a few files and counts the rest (interface-styling-
-    // conventions, Labels); the details list every one whole, with its reason.
+    // Repeated files are named a few and counted (interface-styling-
+    // conventions, Labels); each failure is read with its reason, the strip
+    // scrolling once they pass a few lines.
     const parts: Message[] = [];
-    const details: Message[] = [];
     if (imported > 0) parts.push(message("import.imported", { count: imported }));
     if (result.duplicateImports.length > 0) {
       parts.push(message("import.repeated", { files: fewNames(result.duplicateImports.map(pathValue)) }));
-      if (result.duplicateImports.length > 1) details.push(message("import.repeated", { files: result.duplicateImports }));
     }
-    if (failures.length === 1) {
-      // One failure reads whole: its file, shortened, and why.
-      parts.push(message("import.failedCount", { count: 1 }));
-      parts.push(message("import.failureItem", { file: fileName(failures[0]!.sourcePath), reason: failures[0]!.message }));
-    } else if (failures.length > 1) {
+    if (failures.length > 0) {
       parts.push(message("import.failedCount", { count: failures.length }));
-      parts.push(message("import.notImported", { files: fewNames(failures.map((failure) => fileName(failure.sourcePath))) }));
       for (const failure of failures) {
-        details.push(message("import.failureItem", {
-          file: failure.sourcePath === "" ? message("import.unnamedItem") : failure.sourcePath,
-          reason: failure.message,
-        }));
+        parts.push(message("import.failureItem", { file: fileName(failure.sourcePath), reason: failure.message }));
       }
     }
     setImportResult({
-      details,
       severity: failures.some((failure) => failure.kind === "failure")
         ? "error"
         : failures.length > 0
@@ -243,17 +230,9 @@ export function useImportFlow({
       // The recordings are in the queue; an original that was not backed up or
       // deleted as asked is a warning on that success, kept until dismissed.
       if (result.originalWarnings.length > 0) {
-        const warnings = result.originalWarnings;
         setImportResult({
           severity: "warning",
-          // One warning reads whole; several are counted, a few named, and listed in full beneath.
-          message: warnings.length === 1
-            ? warnings[0]!.message
-            : message("import.originalsIncomplete", {
-              count: warnings.length,
-              files: fewNames(warnings.map((warning) => pathValue(warning.sourcePath))),
-            }),
-          details: warnings.length === 1 ? [] : warnings.map((warning) => warning.message),
+          message: joinSentences(result.originalWarnings.map((warning) => warning.message)),
           issueKeys: result.originalWarnings.map((warning) => resultKey(warning.sourcePath)),
         });
       }

@@ -1,8 +1,8 @@
 // @vitest-environment node
 //
-// A shortened value shows exactly one marker and keeps a keyboard and touch path
-// to its whole text (interface-styling-conventions, Labels; responsive-
-// interface-conventions). Each place styles.css shortens text is listed here with that
+// A shortened value shows exactly one marker (interface-styling-conventions,
+// Identifying text), and each site records why its visible part is enough or
+// where the whole value already appears. Each place styles.css shortens text is listed here with that
 // path, and a clip without a marker fails: a rule that holds text to one line
 // and hides the overflow must draw an ellipsis.
 
@@ -21,7 +21,7 @@ const ELLIPSIS_SITES: Record<string, string> = {
   ".queue-row__filename": "selecting the row shows the whole name in the Info tab",
   ".records-row__title": "selecting the row shows its operation in the detail pane",
   ".queue-row__error": "selecting the row shows the whole error and the provider's reason in the detail pane",
-  ".shortened__text, .shortened__head, .shortened__tail": "a cut value is a control: click, tap, Enter or Space shows it whole",
+  ".shortened__text, .shortened__head, .shortened__tail": "the visible part tells items apart; the tooltip and the element's text carry the whole value",
 };
 const LINE_CLAMP_SITES: Record<string, string> = {
   ".records-row__text": "selecting the row shows the whole message in the detail pane",

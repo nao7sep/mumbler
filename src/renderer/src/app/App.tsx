@@ -51,7 +51,6 @@ import { AudioToolsModal } from "./AudioToolsModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
 import { useSettingsModal } from "./useSettingsModal";
-import { ImportResultBody } from "./ImportResult";
 import { formatCardStatusMessage, formatStepName, hasStaleResults, isCardBusy, staleResultsNote } from "./card-status";
 import { useTablist } from "./useTablist";
 import { CloseIcon } from "./Icon";
@@ -1175,7 +1174,7 @@ function LoadedShell({
               className={`queue-import-result queue-import-result--${importFlow.importResult.severity}`}
               role={importFlow.importResult.severity === "error" ? "alert" : "status"}
             >
-              <ImportResultBody result={importFlow.importResult} />
+              <span>{i18n.node(importFlow.importResult.message)}</span>
               <button
                 type="button"
                 className="result-close"

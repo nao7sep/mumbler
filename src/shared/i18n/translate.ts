@@ -10,7 +10,7 @@ export type MessageValue = string | number | Identifier | Message | readonly Mes
 // A file name or path that identifies an item inside a message. Plain text (a
 // log, an accessible name) always carries it whole; a compact surface shows it
 // shortened, a name keeping its beginning and a path its final segment
-// (interface-styling-conventions, Labels), with the whole value revealable.
+// (interface-styling-conventions, Identifying text).
 export interface Identifier {
   readonly identifier: "name" | "path";
   readonly value: string;

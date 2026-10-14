@@ -120,8 +120,6 @@
   "common.namesAndMore": {
     "other": "{names} 외 {count}개"
   },
-  "common.showDetails": "세부 정보 보기",
-  "common.hideDetails": "세부 정보 숨기기",
   "settingsIssue.skipIntervalSec": "건너뛰기 간격은 양의 정수여야 합니다.",
   "settingsIssue.previewSnippetSeconds": "미리 듣기 길이는 양의 정수여야 합니다.",
   "settingsIssue.concurrencyLimit": "동시 전사 수는 양의 정수여야 합니다.",
@@ -323,10 +321,6 @@
     "other": "항목 {count}개를 가져올 수 없습니다."
   },
   "import.failureItem": "{file}: {reason}",
-  "import.notImported": "가져오지 못한 파일: {files}.",
-  "import.originalsIncomplete": {
-    "other": "원본 파일 {count}개를 요청대로 복사하거나 삭제하지 못했습니다: {files}."
-  },
   "import.unnamedItem": "이름 없는 끌어다 놓은 항목",
   "import.noLocalPath": "사용할 수 있는 로컬 파일 경로가 없었습니다.",
   "import.pathUnreadable": "로컬 파일 경로를 읽을 수 없습니다.",

@@ -739,23 +739,14 @@ textarea:focus-visible,
   font-size: 0.8125rem;
 }
 
-.queue-import-result__body {
+/* Every failure and warning in full, in an area that scrolls rather than
+   growing the strip past a few lines. */
+.queue-import-result > span {
   min-width: 0;
   flex: 1 1 auto;
   overflow-wrap: anywhere;
-}
-
-/* Every failure and warning in full, in an area that scrolls rather than
-   growing the strip past a few lines. */
-.queue-import-result__details {
-  max-height: 8lh;
+  max-height: 6lh;
   overflow-y: auto;
-  margin: 6px 0 0;
-  padding-left: 1.25em;
-}
-
-.queue-import-result__toggle {
-  margin-top: 4px;
 }
 
 .queue-import-result--information {
@@ -2611,8 +2602,7 @@ html.records-page body {
 
 /* A name or path inside a sentence or row (ShortenedValue): one line in the
    space it is given, a name keeping its beginning and a path its final
-   segment, the folders before it giving way first. Activating a cut value
-   shows it whole, wrapped. */
+   segment, the folders before it giving way first. */
 .shortened {
   display: inline-flex;
   max-width: 100%;
@@ -2636,21 +2626,4 @@ html.records-page body {
 .shortened__tail {
   flex: 0 0 auto;
   max-width: 100%;
-}
-
-.shortened[role="button"] {
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  text-decoration: underline dotted;
-  text-underline-offset: 2px;
-}
-
-.shortened--whole {
-  display: inline;
-}
-
-.shortened--whole .shortened__text {
-  white-space: normal;
-  overflow: visible;
-  overflow-wrap: anywhere;
 }

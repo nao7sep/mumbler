@@ -123,8 +123,6 @@
     "many": "{names} и ещё {count}",
     "other": "{names} и ещё {count}"
   },
-  "common.showDetails": "Показать подробности",
-  "common.hideDetails": "Скрыть подробности",
   "settingsIssue.skipIntervalSec": "Шаг перехода должен быть целым положительным числом.",
   "settingsIssue.previewSnippetSeconds": "Длительность фрагмента должна быть целым положительным числом.",
   "settingsIssue.concurrencyLimit": "Число одновременных расшифровок должно быть целым положительным числом.",
@@ -335,13 +333,6 @@
     "other": "Не удалось импортировать {count} элемента."
   },
   "import.failureItem": "{file}: {reason}",
-  "import.notImported": "Не импортированы: {files}.",
-  "import.originalsIncomplete": {
-    "one": "{count} исходный файл не был скопирован или удалён, как требовалось: {files}.",
-    "few": "{count} исходных файла не были скопированы или удалены, как требовалось: {files}.",
-    "many": "{count} исходных файлов не были скопированы или удалены, как требовалось: {files}.",
-    "other": "{count} исходного файла не были скопированы или удалены, как требовалось: {files}."
-  },
   "import.unnamedItem": "Перетащенный элемент без имени",
   "import.noLocalPath": "Не нашлось пригодного пути к локальному файлу.",
   "import.pathUnreadable": "Не удалось прочитать путь к локальному файлу.",
