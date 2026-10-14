@@ -51,6 +51,7 @@ import { AudioToolsModal } from "./AudioToolsModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
 import { useSettingsModal } from "./useSettingsModal";
+import { ImportResultBody } from "./ImportResult";
 import { formatCardStatusMessage, formatStepName, hasStaleResults, isCardBusy, staleResultsNote } from "./card-status";
 import { useTablist } from "./useTablist";
 import { CloseIcon } from "./Icon";
@@ -58,8 +59,8 @@ import { presentFailure, reportRendererDiagnostic } from "./presentFailure";
 import { I18nProvider, useI18n } from "../i18n/I18nContext";
 import { isLanguage, type InterfaceLanguage } from "@shared/i18n/languages";
 import { loadCatalogue, type MessageKey } from "@shared/i18n/catalogues";
-import { message, type Message } from "@shared/i18n/translate";
-import { CardActionResults, type CardActionError } from "./CardActionResults";
+import { message, pathValue, type Message } from "@shared/i18n/translate";
+import { CardActionResults, CardErrorDetail, type CardActionError } from "./CardActionResults";
 import { ConfiguredModels } from "./ConfiguredModels";
 import {
   PersistentNotifications,
@@ -805,7 +806,7 @@ function LoadedShell({
       // button is. A finished one says where the previous queue and recordings
       // went, so it stays until dismissed.
       if (nextSnapshot.startupDiagnostic === null) {
-        addPersistent("state-reset", message("notice.reset", { folder: nextSnapshot.paths!.homeDir }));
+        addPersistent("state-reset", message("notice.reset", { folder: pathValue(nextSnapshot.paths!.homeDir) }));
       }
     } catch (error: unknown) {
       // The call itself failed, before the reset could move anything.
@@ -1006,7 +1007,7 @@ function LoadedShell({
       setPendingSaveConflict(null);
       setSaveConflictError(null);
       clearCardActionErrors(cardId);
-      addToast(message("notice.saved", { path: result.audioPath }));
+      addToast(message("notice.saved", { path: pathValue(result.audioPath) }));
       for (const [index, warning] of (result.warnings ?? []).entries()) {
         addPersistent(`save-cleanup-${cardId}-${index}`, warning, "warning");
       }
@@ -1174,7 +1175,7 @@ function LoadedShell({
               className={`queue-import-result queue-import-result--${importFlow.importResult.severity}`}
               role={importFlow.importResult.severity === "error" ? "alert" : "status"}
             >
-              <span>{text(importFlow.importResult.message)}</span>
+              <ImportResultBody result={importFlow.importResult} />
               <button
                 type="button"
                 className="result-close"
@@ -1267,6 +1268,7 @@ function LoadedShell({
                 results={cardActionErrors}
                 onDismiss={(operation) => clearCardActionError(selectedCard.id, operation)}
               />
+              <CardErrorDetail card={selectedCard} />
               {canRetryCard(selectedCard) ? (
                 <button type="button" className="button button--ghost" disabled={selectedCardIsBusy} onClick={() => handleRequestGenerate(selectedCard, selectedCard.lastError!.failedStep as GenerateTarget)}>{t("common.retry")}</button>
               ) : null}

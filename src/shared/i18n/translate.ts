@@ -2,10 +2,46 @@ import { ENGLISH, loadedCatalogue, type Catalogue, type MessageKey } from "./cat
 import type { Language } from "./languages";
 
 // A value filled into a placeholder: a number (formatted for the locale), a
-// literal string (a path, a file name, a model id), another message rendered in
-// the same language, or a list of any of these, joined by the platform's list
-// formatting.
-export type MessageValue = string | number | Message | readonly MessageValue[];
+// literal string (a model id, say), a name or path that a compact surface may
+// shorten (an `Identifier`), another message rendered in the same language, or
+// a list of any of these, joined by the platform's list formatting.
+export type MessageValue = string | number | Identifier | Message | readonly MessageValue[];
+
+// A file name or path that identifies an item inside a message. Plain text (a
+// log, an accessible name) always carries it whole; a compact surface shows it
+// shortened, a name keeping its beginning and a path its final segment
+// (interface-styling-conventions, Labels), with the whole value revealable.
+export interface Identifier {
+  readonly identifier: "name" | "path";
+  readonly value: string;
+}
+
+export function nameValue(value: string): Identifier {
+  return { identifier: "name", value };
+}
+
+export function pathValue(value: string): Identifier {
+  return { identifier: "path", value };
+}
+
+export function isIdentifier(value: unknown): value is Identifier {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    && ((value as Identifier).identifier === "name" || (value as Identifier).identifier === "path")
+    && typeof (value as Identifier).value === "string";
+}
+
+// How many names a message about several items shows before counting the rest.
+export const NAMED_ITEMS_SHOWN = 3;
+
+// A message about several items names a few and counts the rest ("a, b, c and
+// 4 more"); the caller keeps the complete list reachable.
+export function fewNames(names: readonly MessageValue[]): MessageValue {
+  if (names.length <= NAMED_ITEMS_SHOWN) return names;
+  return message("common.namesAndMore", {
+    names: names.slice(0, NAMED_ITEMS_SHOWN),
+    count: names.length - NAMED_ITEMS_SHOWN,
+  });
+}
 
 export type MessageValues = Readonly<Record<string, MessageValue>>;
 
@@ -34,8 +70,10 @@ export type Translator = {
   t: (key: MessageKey, values?: MessageValues) => string;
   text: (message: Message) => string;
   // The template split at its placeholders: even indexes are literal text, odd
-  // indexes are placeholder names. The renderer fills markup into them.
-  parts: (key: MessageKey) => string[];
+  // indexes are placeholder names. The renderer fills markup into them; the
+  // values choose a plural entry's form.
+  parts: (key: MessageKey, values?: MessageValues) => string[];
+  listParts: (items: readonly string[]) => ReturnType<Intl.ListFormat["formatToParts"]>;
   value: (value: MessageValue) => string;
   number: (value: number, options?: Intl.NumberFormatOptions) => string;
   percent: (ratio: number) => string;
@@ -75,6 +113,7 @@ export function createTranslator(language: Language, locale: string = language):
   function value(item: MessageValue): string {
     if (typeof item === "number") return numberFormat.format(item);
     if (typeof item === "string") return item;
+    if (isIdentifier(item)) return item.value;
     if (Array.isArray(item)) return listFormat.format((item as readonly MessageValue[]).map(value));
     return text(item as Message);
   }
@@ -126,7 +165,8 @@ export function createTranslator(language: Language, locale: string = language):
     locale,
     t,
     text,
-    parts: (key) => template(key, undefined).split(PLACEHOLDER),
+    parts: (key, values) => template(key, values).split(PLACEHOLDER),
+    listParts: (items) => listFormat.formatToParts(items),
     value,
     number: (amount, options) => (options === undefined ? numberFormat : new Intl.NumberFormat(locale, options)).format(amount),
     percent: (ratio) => percentFormat.format(ratio),

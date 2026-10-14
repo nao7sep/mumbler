@@ -85,7 +85,7 @@ import { applyThemePreference } from "./theme";
 import { alignAppKit, loadInterfaceCatalogue, mainTranslator, resolveInterfaceLanguage } from "../i18n";
 import { normalizeLanguagePreference, type InterfaceLanguage, type LanguagePreference } from "@shared/i18n/languages";
 import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery } from "@shared/records";
-import { createTranslator, message, type Message, type Translator } from "@shared/i18n/translate";
+import { createTranslator, message, pathValue, type Message, type Translator } from "@shared/i18n/translate";
 import type { MessageKey } from "@shared/i18n/catalogues";
 import { clearCardResultsFromStep, resolveGenerateStartStep } from "./card-pipeline";
 import { PipelineCoordinator } from "./pipeline-coordinator";
@@ -1114,7 +1114,7 @@ export class ApplicationRuntime {
           if (!merged.deleteOriginalOnConfirm) {
             originalWarnings.push({
               sourcePath: file,
-              message: message("import.backupFailed", { file, folder: backupDir! }),
+              message: message("import.backupFailed", { file: pathValue(file), folder: pathValue(backupDir!) }),
             });
           }
         }
@@ -1124,7 +1124,7 @@ export class ApplicationRuntime {
         if (merged.copyToBackupOnConfirm && !backupSucceeded) {
           originalWarnings.push({
             sourcePath: file,
-            message: message("import.backupFailedNotDeleted", { file, folder: backupDir! }),
+            message: message("import.backupFailedNotDeleted", { file: pathValue(file), folder: pathValue(backupDir!) }),
           });
           await this.runtime.logger.warn(
             "import.delete-original",
@@ -1134,7 +1134,7 @@ export class ApplicationRuntime {
         } else {
           try { await deleteImportedSource(file); }
           catch (error: unknown) {
-            originalWarnings.push({ sourcePath: file, message: message("import.deleteFailed", { file }) });
+            originalWarnings.push({ sourcePath: file, message: message("import.deleteFailed", { file: pathValue(file) }) });
             await this.runtime.logger.warn("import.delete-original", "Failed to delete original after confirm.", {
               originalSourcePath: file, error: serializeError(error),
             });
@@ -2027,7 +2027,7 @@ export class ApplicationRuntime {
           await logger.warn("save.cleanup-failed", "Outputs committed but staging cleanup failed.", {
             cardId, issues: result.warnings.map((issue) => ({ ...issue, error: serializeError(issue.error) })),
           });
-          warnings = [message("notice.saveCleanupFailed", { folder: outputDirectory })];
+          warnings = [message("notice.saveCleanupFailed", { folder: pathValue(outputDirectory) })];
         }
       } catch (error: unknown) {
         if (error instanceof OutputLocationError) return { kind: "failed", message: message("error.saveOutputLocationUnsafe") };
@@ -2067,7 +2067,7 @@ export class ApplicationRuntime {
         await logger.warn("save.prepared-audio-cleanup-failed", "Could not clean up prepared save audio.", {
           cardId, error: serializeError(error),
         });
-        committed?.warnings?.push(message("notice.saveCleanupFailed", { folder: this.runtime.paths!.workingDir }));
+        committed?.warnings?.push(message("notice.saveCleanupFailed", { folder: pathValue(this.runtime.paths!.workingDir) }));
       }
     }
   }

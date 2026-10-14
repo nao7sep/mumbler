@@ -117,6 +117,12 @@
   "common.retry": "Erneut versuchen",
   "common.unknown": "Unbekannt",
   "common.sentences": "{first} {rest}",
+  "common.namesAndMore": {
+    "one": "{names} und {count} weitere",
+    "other": "{names} und {count} weitere"
+  },
+  "common.showDetails": "Details anzeigen",
+  "common.hideDetails": "Details ausblenden",
   "settingsIssue.skipIntervalSec": "Das Sprungintervall muss eine positive ganze Zahl sein.",
   "settingsIssue.previewSnippetSeconds": "Die Vorschaudauer muss eine positive ganze Zahl sein.",
   "settingsIssue.concurrencyLimit": "Die Anzahl gleichzeitiger Transkriptionen muss eine positive ganze Zahl sein.",
@@ -321,6 +327,11 @@
     "other": "{count} Elemente konnten nicht importiert werden."
   },
   "import.failureItem": "{file}: {reason}",
+  "import.notImported": "Nicht importiert: {files}.",
+  "import.originalsIncomplete": {
+    "one": "{count} Originaldatei wurde nicht wie gewünscht kopiert oder gelöscht: {files}.",
+    "other": "{count} Originaldateien wurden nicht wie gewünscht kopiert oder gelöscht: {files}."
+  },
   "import.unnamedItem": "Unbenanntes abgelegtes Element",
   "import.noLocalPath": "Es war kein verwendbarer lokaler Dateipfad verfügbar.",
   "import.pathUnreadable": "Der lokale Dateipfad konnte nicht gelesen werden.",

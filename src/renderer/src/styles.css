@@ -739,10 +739,23 @@ textarea:focus-visible,
   font-size: 0.8125rem;
 }
 
-.queue-import-result > span {
+.queue-import-result__body {
   min-width: 0;
   flex: 1 1 auto;
   overflow-wrap: anywhere;
+}
+
+/* Every failure and warning in full, in an area that scrolls rather than
+   growing the strip past a few lines. */
+.queue-import-result__details {
+  max-height: 8lh;
+  overflow-y: auto;
+  margin: 6px 0 0;
+  padding-left: 1.25em;
+}
+
+.queue-import-result__toggle {
+  margin-top: 4px;
 }
 
 .queue-import-result--information {
@@ -825,12 +838,16 @@ textarea:focus-visible,
   flex-wrap: wrap;
 }
 
+/* The name identifies the row: one line, keeping its beginning; the Info tab
+   shows it whole once the row is selected. */
 .queue-row__filename {
+  display: block;
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--text);
-  overflow-wrap: anywhere;
-  white-space: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   min-width: 0;
 }
 
@@ -857,6 +874,25 @@ textarea:focus-visible,
   color: var(--danger);
   font-size: 0.75rem;
   overflow-wrap: anywhere;
+}
+
+/* A row shows only the start of its error; selecting it shows the whole error
+   and the provider's reason in the detail pane. */
+.queue-row__error {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The selected card's whole error, in an area that scrolls rather than growing
+   past a few lines. */
+.card-error .inline-result__message {
+  max-height: 8lh;
+  overflow-y: auto;
+}
+
+.card-error__reason {
+  margin-top: 4px;
 }
 
 .status-text {
@@ -968,7 +1004,9 @@ textarea:focus-visible,
   top: calc(100% + 4px);
   z-index: 100;
   min-width: 180px;
-  max-width: calc(100vw - 16px);
+  /* As wide as its longest command, up to a cap every command fits within in
+     every interface language (composite-control-conventions, Menu). */
+  max-width: min(320px, calc(100vw - 16px));
   background: var(--surface-raised);
   border: 1px solid var(--line-section-popover);
   border-radius: var(--radius-md);
@@ -980,8 +1018,7 @@ textarea:focus-visible,
 }
 
 .app-menu-item {
-  display: flex;
-  align-items: center;
+  display: block;
   min-height: 32px;
   width: 100%;
   padding: 0 10px;
@@ -991,13 +1028,15 @@ textarea:focus-visible,
   border-radius: var(--radius-sm);
   font: inherit;
   font-size: 0.8125rem;
-  /* After `font: inherit`, which would otherwise restore the page's 1.5. */
-  line-height: normal;
+  /* After `font: inherit`, which would otherwise restore the page's 1.5; with
+     the padding it fills the 32px row, its one line centred. */
+  line-height: 20px;
   color: var(--text);
-  /* A label too long for a narrow window wraps rather than being cut: the menu
-     offers no other way to read a command (responsive-interface-conventions). */
   padding-block: 6px;
-  overflow-wrap: anywhere;
+  /* An item never wraps; past the cap it would end in an ellipsis. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-menu-item:hover:not(:disabled) {
@@ -1336,6 +1375,13 @@ textarea:focus-visible,
   font-size: 0.8125rem;
   color: var(--text);
   overflow-wrap: anywhere;
+}
+
+/* The selected card's values in full: a long file name or folder wraps, and
+   past three lines scrolls instead of making the card tall. */
+.detail-card .meta-list dd {
+  max-height: 3lh;
+  overflow-y: auto;
 }
 
 .field-stack,
@@ -1964,7 +2010,13 @@ select:not([multiple]) {
 }
 
 .review-row__title {
-  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.review-row__title strong {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .review-row__fields {
@@ -2085,6 +2137,8 @@ select:not([multiple]) {
   min-width: 0;
   flex: 1 1 auto;
   overflow-wrap: anywhere;
+  max-height: 6lh;
+  overflow-y: auto;
 }
 
 /* Toast container. Sits above base content and the app menu but below the
@@ -2431,16 +2485,19 @@ html.records-page body {
   color: var(--text-tertiary);
 }
 
+/* The operation identifies the row: one line; selecting the row shows it
+   whole in the detail pane. */
 .records-row__title {
   font-family: var(--font-mono);
   font-size: 0.8125rem;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* The one truncation site: a long message would crowd the list beside its
-   detail pane, so the row clamps to two lines and the clamp draws the single
-   ellipsis. Selecting the row, by pointer, touch or keyboard, shows the whole
+/* A long message would crowd the list beside its detail pane, so the row
+   clamps to two lines and the clamp draws the single ellipsis. Selecting the row, by pointer, touch or keyboard, shows the whole
    message in the detail pane. */
 .records-row__text {
   font-size: 0.8125rem;
@@ -2470,11 +2527,15 @@ html.records-page body {
   gap: 12px;
 }
 
+/* The record's whole message: past four lines it scrolls rather than
+   growing the header. */
 .records-detail__title {
   margin: 0;
   font-size: 0.9375rem;
   font-weight: 600;
   overflow-wrap: anywhere;
+  max-height: 4lh;
+  overflow-y: auto;
 }
 
 .records-detail__pills {
@@ -2545,5 +2606,51 @@ html.records-page body {
 }
 
 .setup-folder {
+  overflow-wrap: anywhere;
+}
+
+/* A name or path inside a sentence or row (ShortenedValue): one line in the
+   space it is given, a name keeping its beginning and a path its final
+   segment, the folders before it giving way first. Activating a cut value
+   shows it whole, wrapped. */
+.shortened {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  vertical-align: bottom;
+}
+
+.shortened__text,
+.shortened__head,
+.shortened__tail {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shortened__head {
+  flex: 0 1 auto;
+}
+
+.shortened__tail {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.shortened[role="button"] {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.shortened--whole {
+  display: inline;
+}
+
+.shortened--whole .shortened__text {
+  white-space: normal;
+  overflow: visible;
   overflow-wrap: anywhere;
 }

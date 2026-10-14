@@ -117,6 +117,11 @@
   "common.retry": "重试",
   "common.unknown": "未知",
   "common.sentences": "{first}{rest}",
+  "common.namesAndMore": {
+    "other": "{names} 等另外 {count} 个"
+  },
+  "common.showDetails": "显示详细信息",
+  "common.hideDetails": "隐藏详细信息",
   "settingsIssue.skipIntervalSec": "跳转间隔必须是正整数。",
   "settingsIssue.previewSnippetSeconds": "预览时长必须是正整数。",
   "settingsIssue.concurrencyLimit": "同时转写数必须是正整数。",
@@ -318,6 +323,10 @@
     "other": "有 {count} 个项目无法导入。"
   },
   "import.failureItem": "{file}：{reason}",
+  "import.notImported": "未导入：{files}。",
+  "import.originalsIncomplete": {
+    "other": "有 {count} 个原始文件未按要求复制或删除：{files}。"
+  },
   "import.unnamedItem": "未命名的拖入项目",
   "import.noLocalPath": "没有可用的本地文件路径。",
   "import.pathUnreadable": "无法读取本地文件路径。",

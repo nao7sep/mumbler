@@ -4,6 +4,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CardErrorDetail } from "@renderer/app/CardActionResults";
 import { QueueList } from "@renderer/app/QueueList";
 import type { MumblerCard } from "@shared/app-shell";
 
@@ -58,7 +59,7 @@ describe("QueueList card results", () => {
     expect(document.body.textContent).toContain("AI work cancelled by user.");
   });
 
-  it("shows a documented provider reason beneath the app's failure copy", async () => {
+  it("shows only the app's failure copy in the row, leaving the provider's reason to the selected card's detail", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -67,9 +68,15 @@ describe("QueueList card results", () => {
     failed.lastError!.providerReason = "This model is unavailable.";
     await act(async () => root?.render(React.createElement(QueueList, { cards: [failed], selectedCardId: failed.id, onSelect: vi.fn() })));
     const alert = document.querySelector('[role="alert"]')!;
-    expect(alert.textContent).toContain("The recording could not be transcribed.");
-    expect(alert.textContent).toContain("This model is unavailable.");
-    expect(alert.textContent).not.toContain("RAW-SENTINEL");
+    expect(alert.textContent).toBe("The recording could not be transcribed. Check Managed tools and Gemini settings, then try again.");
+    expect(document.body.textContent).not.toContain("RAW-SENTINEL");
+
+    await act(async () => root?.render(React.createElement(CardErrorDetail, { card: failed })));
+    const detail = document.querySelector(".card-error")!;
+    expect(detail.textContent).toContain("The recording could not be transcribed.");
+    expect(detail.textContent).toContain("This model is unavailable.");
+    expect(detail.textContent).not.toContain("RAW-SENTINEL");
+    expect(document.querySelector('[role="alert"]'), "the row already announced it").toBeNull();
   });
 
   it("owns conventional listbox navigation and remains reachable when empty", async () => {

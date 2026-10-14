@@ -110,6 +110,12 @@
   "common.retry": "Retry",
   "common.unknown": "Unknown",
   "common.sentences": "{first} {rest}",
+  "common.namesAndMore": {
+    "one": "{names} and {count} more",
+    "other": "{names} and {count} more"
+  },
+  "common.showDetails": "Show details",
+  "common.hideDetails": "Hide details",
   "settingsIssue.skipIntervalSec": "Skip interval must be a positive integer.",
   "settingsIssue.previewSnippetSeconds": "Preview duration must be a positive integer.",
   "settingsIssue.concurrencyLimit": "Concurrent transcriptions must be a positive integer.",
@@ -314,6 +320,11 @@
     "other": "{count} items could not be imported."
   },
   "import.failureItem": "{file}: {reason}",
+  "import.notImported": "Not imported: {files}.",
+  "import.originalsIncomplete": {
+    "one": "{count} original was not copied or deleted as asked: {files}.",
+    "other": "{count} originals were not copied or deleted as asked: {files}."
+  },
   "import.unnamedItem": "Unnamed dropped item",
   "import.noLocalPath": "No usable local file path was available.",
   "import.pathUnreadable": "The local file path could not be read.",

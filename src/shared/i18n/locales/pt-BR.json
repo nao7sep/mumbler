@@ -117,6 +117,13 @@
   "common.retry": "Tentar novamente",
   "common.unknown": "Desconhecido",
   "common.sentences": "{first} {rest}",
+  "common.namesAndMore": {
+    "one": "{names} e mais {count}",
+    "many": "{names} e mais {count}",
+    "other": "{names} e mais {count}"
+  },
+  "common.showDetails": "Mostrar detalhes",
+  "common.hideDetails": "Ocultar detalhes",
   "settingsIssue.skipIntervalSec": "O intervalo de salto deve ser um número inteiro positivo.",
   "settingsIssue.previewSnippetSeconds": "A duração da prévia deve ser um número inteiro positivo.",
   "settingsIssue.concurrencyLimit": "O número de transcrições simultâneas deve ser um número inteiro positivo.",
@@ -324,6 +331,12 @@
     "other": "Não foi possível importar {count} itens."
   },
   "import.failureItem": "{file}: {reason}",
+  "import.notImported": "Não importados: {files}.",
+  "import.originalsIncomplete": {
+    "one": "{count} original não foi copiado nem excluído como solicitado: {files}.",
+    "many": "{count} originais não foram copiados nem excluídos como solicitado: {files}.",
+    "other": "{count} originais não foram copiados nem excluídos como solicitado: {files}."
+  },
   "import.unnamedItem": "Item solto sem nome",
   "import.noLocalPath": "Nenhum caminho de arquivo local utilizável estava disponível.",
   "import.pathUnreadable": "Não foi possível ler o caminho do arquivo local.",

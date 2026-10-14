@@ -13,6 +13,7 @@ import {
 } from "@shared/timestamps";
 
 import { ModalShell } from "./modal/ModalShell";
+import { ShortenedValue } from "./ShortenedValue";
 import { useI18n } from "../i18n/I18nContext";
 
 export interface TimestampReviewModalProps {
@@ -130,7 +131,7 @@ export function TimestampReviewModal({
             return (
               <div key={item.id} className="review-row">
                 <div className="review-row__title">
-                  <strong>{item.originalFilename}</strong>
+                  <strong><ShortenedValue kind="name" value={item.originalFilename} /></strong>
                 </div>
                 <div className="review-row__fields">
                   <label className="field">

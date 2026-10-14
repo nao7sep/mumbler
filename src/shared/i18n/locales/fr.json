@@ -117,6 +117,13 @@
   "common.retry": "Réessayer",
   "common.unknown": "Inconnu",
   "common.sentences": "{first} {rest}",
+  "common.namesAndMore": {
+    "one": "{names} et {count} autre",
+    "many": "{names} et {count} autres",
+    "other": "{names} et {count} autres"
+  },
+  "common.showDetails": "Afficher les détails",
+  "common.hideDetails": "Masquer les détails",
   "settingsIssue.skipIntervalSec": "L’intervalle de saut doit être un entier positif.",
   "settingsIssue.previewSnippetSeconds": "La durée d’aperçu doit être un entier positif.",
   "settingsIssue.concurrencyLimit": "Le nombre de transcriptions simultanées doit être un entier positif.",
@@ -324,6 +331,12 @@
     "other": "{count} éléments n’ont pas pu être importés."
   },
   "import.failureItem": "{file}\u00a0: {reason}",
+  "import.notImported": "Non importés\u00a0: {files}.",
+  "import.originalsIncomplete": {
+    "one": "{count} original n’a pas été copié ou supprimé comme demandé\u00a0: {files}.",
+    "many": "{count} originaux n’ont pas été copiés ou supprimés comme demandé\u00a0: {files}.",
+    "other": "{count} originaux n’ont pas été copiés ou supprimés comme demandé\u00a0: {files}."
+  },
   "import.unnamedItem": "Élément déposé sans nom",
   "import.noLocalPath": "Aucun chemin de fichier local utilisable n’était disponible.",
   "import.pathUnreadable": "Le chemin du fichier local n’a pas pu être lu.",

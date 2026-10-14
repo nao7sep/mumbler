@@ -58,6 +58,12 @@ function Harness({ onError }: { onError: (owner: string, message: Message) => vo
           children: english.text(flow.importResult.message),
         })
       : null,
+    flow.importResult?.details?.length
+      ? React.createElement("ul", {
+          "data-details": "",
+          children: flow.importResult.details.map((detail, index) => React.createElement("li", { key: index }, english.text(detail))),
+        })
+      : null,
   );
 }
 
@@ -363,6 +369,32 @@ describe("useImportFlow drag acceptance", () => {
     expect(importDroppedPaths).not.toHaveBeenCalled();
   });
 
+  it("names a few failed files, counts the rest, and lists every failure whole beneath", async () => {
+    const paths = ["a", "b", "c", "d", "e"].map((name) => `/fixtures/${name}.txt`);
+    openImportDialog.mockResolvedValue({
+      snapshot: {},
+      attemptedPaths: paths,
+      importedCount: 0,
+      failedImports: paths.map((sourcePath) => ({ sourcePath, message: message("import.unsupportedType"), kind: "invalid" })),
+      duplicateImports: [],
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(React.createElement(Harness, { onError: vi.fn() })));
+
+    await act(async () => {
+      (container.querySelector("button") as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-result="warning"]')?.textContent).toBe(
+      "5 items could not be imported. Not imported: /fixtures/a.txt, /fixtures/b.txt, /fixtures/c.txt and 2 more.",
+    );
+    const details = [...container.querySelectorAll("[data-details] li")].map((item) => item.textContent);
+    expect(details).toEqual(paths.map((path) => `${path}: Unsupported audio file type.`));
+  });
+
   it("presents an operational import failure as an error", async () => {
     importDroppedPaths.mockResolvedValue({
       snapshot: {},
@@ -581,10 +613,20 @@ describe("useImportFlow confirming a review", () => {
 
     const result = container.querySelector("[data-result]");
     expect(result?.getAttribute("data-result")).toBe("warning");
-    expect(result?.textContent).toContain(
+    expect(result?.textContent).toBe("2 originals were not copied or deleted as asked: /rec/a.wav, /rec/b.wav.");
+    const details = container.querySelector("[data-details]");
+    expect(details?.textContent).toContain(
       "/rec/a.wav was added to the queue, but it could not be copied to the originals folder /backups, so it was not deleted.",
     );
-    expect(result?.textContent).toContain("/rec/b.wav was added to the queue, but it could not be deleted.");
+    expect(details?.textContent).toContain("/rec/b.wav was added to the queue, but it could not be deleted.");
+  });
+
+  it("reads one original's warning whole, with nothing more to reveal", async () => {
+    const container = await confirmWith([
+      { sourcePath: "/rec/b.wav", message: message("import.deleteFailed", { file: "/rec/b.wav" }) },
+    ]);
+    expect(container.querySelector("[data-result]")?.textContent).toBe("/rec/b.wav was added to the queue, but it could not be deleted.");
+    expect(container.querySelector("[data-details]")).toBeNull();
   });
 
   it("shows nothing when every original was handled as asked", async () => {

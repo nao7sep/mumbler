@@ -1,4 +1,4 @@
-import { createTranslator } from "@shared/i18n/translate";
+import { createTranslator, pathValue } from "@shared/i18n/translate";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
@@ -542,7 +542,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
 
       expect(result.originalWarnings).toEqual([{
         sourcePath: item.originalSourcePath,
-        message: { key: "import.deleteFailed", values: { file: item.originalSourcePath } },
+        message: { key: "import.deleteFailed", values: { file: pathValue(item.originalSourcePath) } },
       }]);
       expect(result.snapshot.state!.cards).toHaveLength(1);
       const persisted = (await createQueueStore(queuePath).load()).value;

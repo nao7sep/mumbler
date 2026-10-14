@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import type { MumblerCard } from "@shared/app-shell";
 
-import { message, type Message } from "@shared/i18n/translate";
+import { message, nameValue, type Message } from "@shared/i18n/translate";
 
 import { CloseIcon } from "./Icon";
 import { useI18n } from "../i18n/I18nContext";
@@ -44,7 +44,7 @@ export function pipelineCompletionNotification(
   card: MumblerCard,
 ): PipelineCompletionNotification | null {
   if (card.status === "Ready to Save" && previous.status !== "Saving") {
-    return { message: message("notice.readyToSave", { file: card.originalFilename }), kind: "toast" };
+    return { message: message("notice.readyToSave", { file: nameValue(card.originalFilename) }), kind: "toast" };
   }
   return null;
 }
@@ -74,7 +74,7 @@ export function PersistentNotifications({
           aria-atomic="true"
           className={`persistent-notice persistent-notice--${notification.variant}`}
         >
-          <span className="persistent-notice__message">{i18n.text(notification.message)}</span>
+          <span className="persistent-notice__message">{i18n.node(notification.message)}</span>
           <button
             type="button"
             className="result-close"
@@ -110,7 +110,7 @@ export function ToastNotifications({
           className="toast toast--info"
           onClick={() => onDismiss(notification.id)}
         >
-          {i18n.text(notification.message)}
+          {i18n.node(notification.message)}
         </div>
       ))}
     </div>

@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { dialog, shell } from "electron";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pathValue } from "@shared/i18n/translate";
 
 import type { AppSnapshot, MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
 import { hasStaleResults } from "@shared/card-status";
@@ -781,7 +782,7 @@ describe("confirming what was dropped in", () => {
       sourcePath: pending.originalSourcePath,
       message: {
         key: "import.backupFailedNotDeleted",
-        values: { file: pending.originalSourcePath, folder: join(root, "blocked") },
+        values: { file: pathValue(pending.originalSourcePath), folder: pathValue(join(root, "blocked")) },
       },
     }]);
   });
@@ -795,7 +796,7 @@ describe("confirming what was dropped in", () => {
 
     expect(originalWarnings).toEqual([{
       sourcePath: pending.originalSourcePath,
-      message: { key: "import.backupFailed", values: { file: pending.originalSourcePath, folder: join(root, "blocked") } },
+      message: { key: "import.backupFailed", values: { file: pathValue(pending.originalSourcePath), folder: pathValue(join(root, "blocked")) } },
     }]);
   });
 
@@ -810,7 +811,7 @@ describe("confirming what was dropped in", () => {
     expect(cards(snapshot)).toHaveLength(1);
     expect(originalWarnings).toEqual([{
       sourcePath: pending.originalSourcePath,
-      message: { key: "import.deleteFailed", values: { file: pending.originalSourcePath } },
+      message: { key: "import.deleteFailed", values: { file: pathValue(pending.originalSourcePath) } },
     }]);
   });
 
@@ -1267,7 +1268,7 @@ describe("working with a card", () => {
     expect(result.kind).toBe("saved");
     if (result.kind === "saved") {
       expect(result.warnings?.map((warning) => warning.key)).toEqual(["notice.saveCleanupFailed", "notice.saveCleanupFailed"]);
-      expect(result.warnings?.map((warning) => warning.values?.folder)).toEqual([join(home, "output"), join(home, "working")]);
+      expect(result.warnings?.map((warning) => warning.values?.folder)).toEqual([pathValue(join(home, "output")), pathValue(join(home, "working"))]);
     }
     expect(cards(result.snapshot)).toEqual([]);
     expect(await exists(card.sourceFilePath)).toBe(false);

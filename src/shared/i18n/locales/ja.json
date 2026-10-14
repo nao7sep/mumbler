@@ -117,6 +117,11 @@
   "common.retry": "再試行",
   "common.unknown": "不明",
   "common.sentences": "{first}{rest}",
+  "common.namesAndMore": {
+    "other": "{names} ほか {count} 件"
+  },
+  "common.showDetails": "詳細を表示",
+  "common.hideDetails": "詳細を隠す",
   "settingsIssue.skipIntervalSec": "スキップ間隔には正の整数を指定してください。",
   "settingsIssue.previewSnippetSeconds": "プレビューの長さには正の整数を指定してください。",
   "settingsIssue.concurrencyLimit": "同時文字起こし数には正の整数を指定してください。",
@@ -318,6 +323,10 @@
     "other": "{count}件の項目を読み込めませんでした。"
   },
   "import.failureItem": "{file}：{reason}",
+  "import.notImported": "取り込めなかったファイル：{files}。",
+  "import.originalsIncomplete": {
+    "other": "{count} 件の元のファイルを指定どおりにコピーまたは削除できませんでした：{files}。"
+  },
   "import.unnamedItem": "名前のないドロップ項目",
   "import.noLocalPath": "使用できるローカルファイルのパスがありませんでした。",
   "import.pathUnreadable": "ローカルファイルのパスを読み取れませんでした。",
