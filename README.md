@@ -8,7 +8,8 @@ Transcribe voice recordings with AI, structure the transcript, and generate titl
 - **AI pipeline** — transcription → structured transcription → title → slug, each a dependent step that regenerates downstream outputs when changed
 - **Separate model choices** — choose a Gemini model for transcription, another for the structured transcription, and one for titles and slugs. The defaults use a balanced model for longer work and a fast model for short metadata.
 - **Queue** — import many files and process them concurrently, with a configurable limit
-- **Timestamp parsing** — pull the recording datetime from filenames via configurable regex, prompting when none matches
+- **Recording times** — pull the recording datetime from filenames via configurable regex, or pick it in the import review from the time stored inside the file or the file's own dates, listening to each recording first
+- **Recordings folder** — move imported originals into one folder, renamed by their recording time, and keep them there untouched
 - **Save outputs** — stages audio + JSON + Markdown together, then publishes each file independently. Overwrite replaces files without backups or rollback: a later failure can leave a mix of new and previous outputs, and replaced files cannot be recovered by Mumbler. An incomplete save names completed outputs and retains the working recording and transcript in the queue for another attempt. Successful saves report temporary-file cleanup that still needs attention. Working recordings and the app’s disposable audio directory cannot be used as output targets
 - **IME-safe** — Japanese/Chinese/Korean input works in every text field
 - **Light and dark themes** — follows the system by default; pick Light or Dark in Settings

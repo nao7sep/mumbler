@@ -12,9 +12,19 @@ import {
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 
+import type { MessageKey } from "@shared/i18n/catalogues";
+
+import { candidateLocalText, chooseRecordingTime } from "./import-rules";
 import { ModalShell } from "./modal/ModalShell";
 import { ShortenedValue } from "./ShortenedValue";
 import { useI18n } from "../i18n/I18nContext";
+
+const TIME_SOURCE_LABELS: Record<PendingImportReviewItem["timeCandidates"][number]["source"], MessageKey> = {
+  "file-name": "review.timeFileName",
+  embedded: "review.timeEmbedded",
+  "file-created": "review.timeFileCreated",
+  "file-modified": "review.timeFileModified",
+};
 
 export interface TimestampReviewModalProps {
   items: PendingImportReviewItem[];
@@ -133,6 +143,35 @@ export function TimestampReviewModal({
                 <div className="review-row__title">
                   <strong><ShortenedValue kind="name" value={item.originalFilename} /></strong>
                 </div>
+                {/* Listening settles a time the file does not state. */}
+                <audio
+                  className="review-row__player"
+                  controls
+                  preload="none"
+                  src={`mumbler-asset://media/${encodeURIComponent(item.id)}`}
+                  aria-label={t("review.listen", { file: item.originalFilename })}
+                />
+                {item.timeCandidates.length > 0 ? (
+                  <div className="review-row__times" role="group" aria-label={t("review.timesFound")}>
+                    <span className="field-hint">{t("review.timesFound")}</span>
+                    {item.timeCandidates.map((candidate, index) => {
+                      const localText = candidateLocalText(item, candidate);
+                      if (localText === null) return null;
+                      return (
+                        <button
+                          key={index}
+                          type="button"
+                          className="button button--ghost button--compact"
+                          disabled={isSubmitting}
+                          aria-pressed={item.localTimestampText === localText}
+                          onClick={() => onChange(chooseRecordingTime(item, candidate))}
+                        >
+                          {t("review.timeChoice", { source: t(TIME_SOURCE_LABELS[candidate.source]), time: localText })}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
                 <div className="review-row__fields">
                   <label className="field">
                     <span>{t("review.localTimestamp")}</span>

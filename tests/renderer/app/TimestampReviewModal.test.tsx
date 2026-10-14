@@ -26,6 +26,7 @@ function makeItem(overrides: Partial<PendingImportReviewItem> = {}): PendingImpo
     timezone: "Asia/Tokyo",
     utcTimestampText: "2026-02-28 22:30:00",
     parseStatus: "parsed",
+    timeCandidates: [],
     deleteOriginalOnConfirm: false,
     copyToBackupOnConfirm: false,
     createdAtUtc: 1,
@@ -310,5 +311,46 @@ describe("what happens to the user's own files", () => {
     await mountModal([makeItem({ copyToBackupOnConfirm: true }), makeItem({ id: "pending-2", copyToBackupOnConfirm: true })]);
 
     expect(checkbox("Add to Recordings").checked).toBe(true);
+  });
+});
+
+describe("settling a recording's time", () => {
+  it("lets the recording be heard from its working copy", async () => {
+    await mountModal([makeItem({ id: "pending/1" })]);
+    const player = document.querySelector<HTMLAudioElement>(".review-row audio")!;
+    expect(player.getAttribute("src")).toBe("mumbler-asset://media/pending%2F1");
+    expect(player.getAttribute("preload"), "nothing loads until played").toBe("none");
+    expect(player.getAttribute("aria-label")).toContain("Listen to");
+  });
+
+  it("offers every time found, in the item's zone, and chooses one", async () => {
+    await mountModal([makeItem({
+      localTimestampText: "2026-10-14 15:30:12",
+      timezone: "Asia/Tokyo",
+      timeCandidates: [
+        { source: "file-name", utcMs: null, localText: "2026-10-14 15:30:12" },
+        { source: "embedded", utcMs: Date.UTC(2026, 9, 14, 6, 31, 0), localText: null },
+        { source: "file-modified", utcMs: Date.UTC(2026, 9, 15, 1, 0, 0), localText: null },
+      ],
+    })]);
+
+    const choices = [...document.querySelectorAll<HTMLButtonElement>(".review-row__times button")];
+    expect(choices.map((choice) => choice.textContent)).toEqual([
+      "File name: 2026-10-14 15:30:12",
+      "Inside the file: 2026-10-14 15:31:00",
+      "File modified: 2026-10-15 10:00:00",
+    ]);
+    expect(choices.map((choice) => choice.getAttribute("aria-pressed"))).toEqual(["true", "false", "false"]);
+
+    await act(async () => choices[1]!.click());
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      localTimestampText: "2026-10-14 15:31:00",
+      utcTimestampText: "2026-10-14 06:31:00",
+    }));
+  });
+
+  it("offers no choices for a recording with no time found", async () => {
+    await mountModal([makeItem({ timeCandidates: [] })]);
+    expect(document.querySelector(".review-row__times")).toBeNull();
   });
 });

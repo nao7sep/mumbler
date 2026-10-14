@@ -760,6 +760,14 @@ describe("confirming what was dropped in", () => {
     expect(cards(snapshot).map((card) => card.originalFilename)).toEqual(["earlier.wav", "later.wav"]);
   });
 
+  it("offers the file's own times for review and plays a pending import from its working copy", async () => {
+    const [pending] = await dropIn("Shibuya Station.wav");
+    const modified = Math.floor((await stat(pending.originalSourcePath)).mtimeMs / 1000) * 1000;
+    expect(pending.timeCandidates).toContainEqual({ source: "file-modified", utcMs: modified, localText: null });
+    expect(pending.timeCandidates.every((candidate) => candidate.source !== "file-name"), "this name holds no time").toBe(true);
+    expect(runtime.resolveCardSourcePath(pending.id)).toBe(pending.workingFilePath);
+  });
+
   it("moves an original into Recordings by default, named by its settled UTC time, and never touches it again", async () => {
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(home, "Recordings") });
     const [pending] = await dropIn("Shibuya Station.wav");

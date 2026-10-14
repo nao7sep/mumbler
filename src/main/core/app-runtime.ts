@@ -20,6 +20,7 @@ import {
   type MumblerSettings,
   type MumblerQueue,
   type PendingImportReviewItem,
+  type RecordingTimeCandidate,
   type RendererErrorReport,
   type SaveCardResult,
   type SaveOutputFile,
@@ -38,7 +39,9 @@ import {
   configureToolResolver,
   prepareAudioForTranscription,
   probeAudioProfile,
+  probeContainerTags,
 } from "./audio-tools";
+import { recordingTimesFromTags } from "./recording-times";
 import { ToolManager } from "./binaries/manager";
 import { createDefaultDependencies, createDependenciesStore, type DependenciesValue } from "./binaries/store";
 import {
@@ -1358,12 +1361,14 @@ export class ApplicationRuntime {
     return `mumbler-asset://media/${encodeURIComponent(cardId)}`;
   }
 
+  // A card's working recording, or a pending import's, which the review plays.
   resolveCardSourcePath(cardId: string): string | null {
     if (this.runtime.state === null) {
       return null;
     }
     const card = this.runtime.state.cards.find((entry) => entry.id === cardId);
-    return card?.sourceFilePath ?? null;
+    if (card !== undefined) return card.sourceFilePath;
+    return this.runtime.state.pendingImports.find((entry) => entry.id === cardId)?.workingFilePath ?? null;
   }
 
   generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
@@ -2303,9 +2308,26 @@ export class ApplicationRuntime {
     const filenameStem = basename(originalFilename, extname(originalFilename));
     const parsed = parseTimestampFromFilename(filenameStem, settings.timestampPattern);
     // The zone the filename's local time is read in. Each card keeps its own zone
-    // from here on, so a later change of the setting (or of the computer's zone,
-    // under System) never re-dates a recording already imported.
+    // from here on, so a later change of the setting never re-dates a recording
+    // already imported.
     const importZone = importTimezone(settings);
+    // Every time the recording offers, for the review to choose from: its file
+    // name, its container's tags and the file's own times, to the second.
+    const timeCandidates: RecordingTimeCandidate[] = [];
+    if (parsed.localTimestampText.length > 0) {
+      timeCandidates.push({ source: "file-name", utcMs: null, localText: parsed.localTimestampText });
+    }
+    try {
+      timeCandidates.push(...recordingTimesFromTags(await probeContainerTags(workingFilePath)));
+    } catch (error: unknown) {
+      // Missing tools or an unreadable container leave the other times.
+      await this.runtime.logger.debug("import.tags", "Could not read the recording's embedded times.", {
+        originalFilename, error: serializeError(error),
+      });
+    }
+    const second = (ms: number) => Math.floor(ms / 1000) * 1000;
+    if (sourceStats.birthtimeMs > 0) timeCandidates.push({ source: "file-created", utcMs: second(sourceStats.birthtimeMs), localText: null });
+    timeCandidates.push({ source: "file-modified", utcMs: second(sourceStats.mtimeMs), localText: null });
     const utcResult =
       parsed.localTimestampText.length > 0
         ? recomputeUtcFromLocal(parsed.localTimestampText, importZone)
@@ -2322,6 +2344,7 @@ export class ApplicationRuntime {
       timezone: importZone,
       utcTimestampText: utcResult.error === null && utcResult.utcMs !== null ? formatUtcForDisplay(utcResult.utcMs) : "",
       parseStatus: parsed.parseStatus,
+      timeCandidates,
       // An imported original is moved into Recordings by default: copied, then
       // deleted once the copy is complete.
       deleteOriginalOnConfirm: true,

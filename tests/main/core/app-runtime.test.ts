@@ -96,6 +96,7 @@ function authoritativeItem(): PendingImportReviewItem {
     timezone: "Asia/Tokyo",
     utcTimestampText: "",
     parseStatus: "manual-required",
+    timeCandidates: [],
     deleteOriginalOnConfirm: false,
     copyToBackupOnConfirm: true,
     createdAtUtc: 1_700_000_000_000,
@@ -116,6 +117,7 @@ describe("applyPendingImportDraft", () => {
       originalFilename: "evil.m4a",
       importSource: "file-picker",
       parseStatus: "parsed",
+      timeCandidates: [],
       createdAtUtc: 0,
       // Legitimate edits the review screen is allowed to make:
       localTimestampText: "2026-04-22 09:44:00",

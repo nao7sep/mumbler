@@ -238,6 +238,15 @@ export interface AiRunInfo {
   generatedAtUtc: number;
 }
 
+// A time the review offers for a recording: from its file name, from inside the
+// file, or from the file's own created or modified time. An exact one carries
+// its UTC instant; a local one (no zone) is read in the item's zone.
+export interface RecordingTimeCandidate {
+  source: "file-name" | "embedded" | "file-created" | "file-modified";
+  utcMs: number | null;
+  localText: string | null;
+}
+
 export interface PendingImportReviewItem {
   id: string;
   originalFilename: string;
@@ -249,6 +258,8 @@ export interface PendingImportReviewItem {
   timezone: string;
   utcTimestampText: string;
   parseStatus: TimestampParseStatus;
+  // Found when the recording was staged; facts of the file, never edited.
+  timeCandidates: RecordingTimeCandidate[];
   deleteOriginalOnConfirm: boolean;
   copyToBackupOnConfirm: boolean;
   createdAtUtc: number;

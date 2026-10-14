@@ -1,6 +1,30 @@
-import type { PendingImportReviewItem } from "@shared/app-shell";
+import type { PendingImportReviewItem, RecordingTimeCandidate } from "@shared/app-shell";
 import { isSupportedAudioImportName } from "@shared/audio-import";
 import { message, type Message } from "@shared/i18n/translate";
+import { formatUtcForDisplay, recomputeLocalFromUtc, recomputeUtcFromLocal } from "@shared/timestamps";
+
+/** A found time as the item's zone shows it, or null when it cannot be shown there. */
+export function candidateLocalText(item: Pick<PendingImportReviewItem, "timezone">, candidate: RecordingTimeCandidate): string | null {
+  if (candidate.utcMs === null) return candidate.localText;
+  const local = recomputeLocalFromUtc(candidate.utcMs, item.timezone);
+  return local.error === null ? local.localTimestampText : null;
+}
+
+/** The review item with a found time chosen: an exact time keeps its instant
+ * and shows it in the item's zone; a local one is read in that zone. */
+export function chooseRecordingTime(item: PendingImportReviewItem, candidate: RecordingTimeCandidate): PendingImportReviewItem {
+  const localText = candidateLocalText(item, candidate);
+  if (localText === null) return item;
+  if (candidate.utcMs !== null) {
+    return { ...item, localTimestampText: localText, utcTimestampText: formatUtcForDisplay(candidate.utcMs) };
+  }
+  const utc = recomputeUtcFromLocal(localText, item.timezone);
+  return {
+    ...item,
+    localTimestampText: localText,
+    utcTimestampText: utc.error === null && utc.utcMs !== null ? formatUtcForDisplay(utc.utcMs) : item.utcTimestampText,
+  };
+}
 
 // The pure decisions behind useImportFlow, lifted out of the hook so they are
 // testable without a DOM drag event or a React effect.
@@ -95,8 +119,12 @@ export function reconcilePendingReviewDrafts(
       copyToBackupOnConfirm: draft.copyToBackupOnConfirm,
       deleteOriginalOnConfirm: draft.deleteOriginalOnConfirm,
     };
+    // The found times arrive as a new array with every snapshot; they are
+    // facts of the file, so equal contents are the same.
     return (Object.keys(reconciled) as (keyof PendingImportReviewItem)[]).every(
-      (field) => reconciled[field] === draft[field],
+      (field) => field === "timeCandidates"
+        ? JSON.stringify(reconciled.timeCandidates) === JSON.stringify(draft.timeCandidates)
+        : reconciled[field] === draft[field],
     ) ? draft : reconciled;
   });
   return next.length === current.length && next.every((item, index) => item === current[index])

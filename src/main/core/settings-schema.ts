@@ -3,6 +3,7 @@ import type {
   MumblerSettings,
   MumblerQueue,
   PendingImportReviewItem,
+  RecordingTimeCandidate,
   SettingsDraft,
   SettingsSummary,
 } from "@shared/app-shell";
@@ -365,9 +366,20 @@ function normalizePendingImportRecord(
 
   return {
     ...item,
+    // A review staged before times were collected offers none.
+    timeCandidates: Array.isArray(item.timeCandidates) ? item.timeCandidates.filter(isTimeCandidate) : [],
     createdAtUtc: parseUtcMs(item.createdAtUtc) ?? fallback,
     updatedAtUtc: parseUtcMs(item.updatedAtUtc) ?? fallback,
   };
+}
+
+const TIME_SOURCES: readonly RecordingTimeCandidate["source"][] = ["file-name", "embedded", "file-created", "file-modified"];
+
+function isTimeCandidate(value: unknown): value is RecordingTimeCandidate {
+  const record = asRecord(value);
+  return record !== null && TIME_SOURCES.includes(record.source as RecordingTimeCandidate["source"])
+    && ((typeof record.utcMs === "number" && Number.isFinite(record.utcMs) && record.localText === null)
+      || (record.utcMs === null && typeof record.localText === "string"));
 }
 
 function normalizeTrimDecisionRecord(

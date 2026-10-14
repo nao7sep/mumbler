@@ -6,6 +6,7 @@ import {
   inspectFileDragOffer,
   parseDroppedPaths,
   reconcilePendingReviewDrafts,
+  chooseRecordingTime,
 } from "@renderer/app/import-rules";
 import { message } from "@shared/i18n/translate";
 
@@ -20,6 +21,7 @@ const item = (id: string, overrides: Partial<PendingImportReviewItem> = {}): Pen
   timezone: "Asia/Tokyo",
   utcTimestampText: "2026-02-28 22:30:00",
   parseStatus: "parsed",
+  timeCandidates: [],
   deleteOriginalOnConfirm: false,
   copyToBackupOnConfirm: false,
   createdAtUtc: 1,
@@ -162,6 +164,7 @@ describe("reconcilePendingReviewDrafts", () => {
       originalSourcePath: "/fresh/source.wav",
       fileSizeBytes: 2,
       parseStatus: "manual-required",
+      timeCandidates: [],
       createdAtUtc: 2,
       updatedAtUtc: 3,
     });
@@ -177,5 +180,19 @@ describe("reconcilePendingReviewDrafts", () => {
     const snapshot = [item("a")];
     expect(reconcilePendingReviewDrafts([], snapshot)).toBe(snapshot);
     expect(reconcilePendingReviewDrafts([item("a", edits)], [])).toEqual([]);
+  });
+});
+
+describe("choosing a found recording time", () => {
+  const pending = item("pending", { timezone: "Asia/Tokyo", localTimestampText: "", utcTimestampText: "" });
+
+  it("keeps an exact time's instant and shows it in the item's zone", () => {
+    const chosen = chooseRecordingTime(pending, { source: "file-modified", utcMs: Date.UTC(2026, 9, 14, 6, 30, 12), localText: null });
+    expect(chosen).toMatchObject({ localTimestampText: "2026-10-14 15:30:12", utcTimestampText: "2026-10-14 06:30:12" });
+  });
+
+  it("reads a local time in the item's zone", () => {
+    const chosen = chooseRecordingTime(pending, { source: "file-name", utcMs: null, localText: "2026-10-14 15:30:12" });
+    expect(chosen).toMatchObject({ localTimestampText: "2026-10-14 15:30:12", utcTimestampText: "2026-10-14 06:30:12" });
   });
 });

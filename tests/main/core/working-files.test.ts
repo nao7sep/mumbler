@@ -99,6 +99,7 @@ function makePendingImport(overrides: Partial<PendingImportReviewItem> = {}): Pe
     timezone: "Asia/Tokyo",
     utcTimestampText: "2026-04-22T00:44:00Z",
     parseStatus: "parsed",
+    timeCandidates: [],
     deleteOriginalOnConfirm: false,
     copyToBackupOnConfirm: false,
     createdAtUtc: 1,

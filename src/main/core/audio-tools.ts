@@ -165,6 +165,25 @@ export interface PreparedAudioInput {
   cleanup: () => Promise<void>;
 }
 
+// The container's own tags, as ffprobe reports them; recording-times.ts reads
+// the recording times among them.
+export async function probeContainerTags(
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const { stdout } = await runTool(resolveFfprobePath(), [
+    "-v",
+    "error",
+    "-show_entries",
+    "format_tags",
+    "-of",
+    "json",
+    filePath,
+  ], { timeoutMs: PROBE_TIMEOUT_MS, signal });
+  const tags = (JSON.parse(stdout) as { format?: { tags?: unknown } }).format?.tags;
+  return typeof tags === "object" && tags !== null ? (tags as Record<string, unknown>) : {};
+}
+
 export async function probeAudioProfile(
   filePath: string,
   signal?: AbortSignal,
