@@ -336,6 +336,20 @@ describe("getAppPaths standard layout", () => {
     }
   }
 
+  it("suggests the OS's own Documents folder, following a Windows or OneDrive redirection, with the originals inside", async () => {
+    const { app } = await import("electron");
+    const documents = join(parse(process.cwd()).root, "Users", "me", "OneDrive", "Documents");
+    const getPath = vi.spyOn(app, "getPath").mockImplementation((name) => (name === "documents" ? documents : "/tmp"));
+    try {
+      const paths = withRoot(() => getAppPaths());
+      expect(getPath).toHaveBeenCalledWith("documents");
+      expect(paths.outputDir).toBe(join(documents, "Mumbler"));
+      expect(paths.originalsDir).toBe(join(paths.outputDir, "Originals"));
+    } finally {
+      getPath.mockRestore();
+    }
+  });
+
   it("resolves durable settings to config.json under the storage root", () => {
     const paths = withRoot(() => getAppPaths());
     expect(paths.homeDir).toBe(ROOT);

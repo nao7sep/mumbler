@@ -311,7 +311,8 @@ describe("first-run setup and user-owned destinations", () => {
   it("offers setup for a new root, writes no config on launch, and does not repeat for an existing root", async () => {
     expect(runtime.getSnapshot().firstRun).toBe(true);
     expect(await exists(join(home, "config.json"))).toBe(false);
-    expect(runtime.getSnapshot().settingsSummary?.defaultOutputDirectory).toMatch(/Documents[/\\]Mumbler$/);
+    // The electron stand-in reports /tmp as the Documents folder.
+    expect(runtime.getSnapshot().settingsSummary?.defaultOutputDirectory).toBe(join("/tmp", "Mumbler"));
     await runtime.shutdown();
     runtime = await ApplicationRuntime.initialize();
     expect(runtime.getSnapshot().firstRun).toBe(false);

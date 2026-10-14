@@ -2463,6 +2463,9 @@ export { resolveStorageRoot };
 
 export function getAppPaths(): AppPaths {
   const homeDir = resolveStorageRoot(process.env.MUMBLER_DATA_DIR, homedir());
+  // The OS's own Documents folder, which follows a Windows or OneDrive
+  // redirection that `~/Documents` would miss; the originals sit inside it.
+  const outputDir = join(app.getPath("documents"), "Mumbler");
 
   return {
     homeDir,
@@ -2474,8 +2477,8 @@ export function getAppPaths(): AppPaths {
     recordsPath: join(homeDir, "records.sqlite3"),
     logsDir: join(homeDir, "logs"),
     workingDir: join(homeDir, "working"),
-    outputDir: join(homedir(), "Documents", "Mumbler"),
-    originalsDir: join(homedir(), "Documents", "Mumbler", "Originals"),
+    outputDir,
+    originalsDir: join(outputDir, "Originals"),
     binDir: join(homeDir, "bin"),
     dependenciesPath: join(homeDir, "dependencies.json"),
     tempDir: join(homeDir, "temp"),
