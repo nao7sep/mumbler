@@ -16,6 +16,9 @@ const state = vi.hoisted(() => ({
   flushSucceeded: true,
   unsavedDrafts: [] as string[],
   draftsChoice: "cancel" as "discard" | "cancel",
+  // Set to hold the window's drafts answer until the test chooses to send it.
+  holdDraftsReply: false,
+  heldDraftsReplies: [] as (() => void)[],
   ipcListeners: new Map<string, (event: { sender: unknown }, request: unknown, reply: unknown) => void>(),
   powerListeners: new Map<string, () => void>(),
 }));
@@ -38,7 +41,9 @@ const mainWindow = vi.hoisted(() => {
       removeListener: vi.fn(),
       send: (channel: string, request: unknown) => {
         if (channel.endsWith("query-unsaved-drafts")) {
-          queueMicrotask(() => state.ipcListeners.get(`${channel}:reply`)?.({ sender: window.webContents }, request, state.unsavedDrafts));
+          const reply = () => state.ipcListeners.get(`${channel}:reply`)?.({ sender: window.webContents }, request, state.unsavedDrafts);
+          if (state.holdDraftsReply) state.heldDraftsReplies.push(reply);
+          else queueMicrotask(reply);
           return;
         }
         if (channel.endsWith("discard-unsaved-drafts")) {
@@ -138,6 +143,8 @@ beforeEach(() => {
   state.flushSucceeded = true;
   state.unsavedDrafts = [];
   state.draftsChoice = "cancel";
+  state.holdDraftsReply = false;
+  state.heldDraftsReplies.length = 0;
   state.ipcListeners.clear();
   state.powerListeners.clear();
   mainWindow.handlers.clear();
@@ -296,6 +303,43 @@ describe("quit", () => {
     await vi.waitFor(() => expect(state.exits).toEqual([0]));
 
     expect(state.questions).toEqual([]);
+  });
+
+  it("opens no unsaved-changes question when a session end arrives while the window is still being asked", async () => {
+    state.unsavedDrafts = ["settings"];
+    state.holdDraftsReply = true;
+    const beforeQuit = await boot();
+
+    beforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.heldDraftsReplies).toHaveLength(1));
+    state.powerListeners.get("shutdown")!();
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    // The window's late answer changes nothing.
+    state.heldDraftsReplies[0]!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(state.questions).toEqual([]);
+    expect(mainWindow.discards).toBe(0);
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+    expect(state.exits).toEqual([0]);
+  });
+
+  it("opens no question for a Mac window close that a session end overtakes", async () => {
+    onPlatform("darwin");
+    state.unsavedDrafts = ["settings"];
+    state.holdDraftsReply = true;
+    await boot();
+
+    mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.heldDraftsReplies).toHaveLength(1));
+    state.powerListeners.get("shutdown")!();
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    state.heldDraftsReplies[0]!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(state.questions).toEqual([]);
+    expect(mainWindow.closes).toBe(0);
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
   });
 
   it("lets Windows logout proceed and saves once without asking across both session-end events", async () => {

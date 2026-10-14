@@ -2,8 +2,9 @@ import { QUIT_BUDGETS, within } from "./quit";
 
 /** macOS closes its workspace without quitting the application. */
 export function createWindowCloseController(steps: {
-  /** Asks before discarding session-only drafts; false keeps the window open. */
-  confirm(): Promise<boolean>;
+  /** Asks before discarding session-only drafts; false keeps the window open.
+   * `signal` aborts when the attempt is cancelled, as a quit or session end does. */
+  confirm(signal: AbortSignal): Promise<boolean>;
   flush(signal: AbortSignal): Promise<void>;
   close(): void;
   failed(): Promise<void>;
@@ -16,7 +17,7 @@ export function createWindowCloseController(steps: {
       const current = new AbortController();
       attempt = current;
       void (async () => {
-        if (!(await steps.confirm()) || attempt !== current) return;
+        if (!(await steps.confirm(current.signal)) || attempt !== current) return;
         const flushed = await within(Promise.resolve().then(() => steps.flush(current.signal)), QUIT_BUDGETS.user.flush);
         if (attempt !== current) return;
         current.abort();
