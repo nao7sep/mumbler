@@ -25,20 +25,19 @@ describe("getSystemTimezone", () => {
 });
 
 describe("time zone and language defaults", () => {
-  it("follows the computer's zone and language instead of recording them", () => {
+  it("follows the computer's language, and starts the unchosen import zone at the computer's", () => {
     const defaults = createDefaultSettings();
-    expect(defaults.defaultTimezone).toBe("system");
+    expect(defaults.defaultTimezone, "no zone is chosen yet").toBeNull();
     expect(defaults.language).toBe("system");
     expect(summarizeSettings(defaults, OUT, BACKUP, false).defaultTimezone).toBe(getSystemTimezone());
-    expect(freshDraft()).toMatchObject({ defaultTimezone: "system", language: "system" });
+    expect(freshDraft()).toMatchObject({ defaultTimezone: "", language: "system" });
   });
 
-  it("keeps a chosen zone and language, and System, through Save", () => {
+  it("keeps a chosen zone through Save, and an unchanged Save leaves it unchosen", () => {
     const chosen = applySettingsDraft(createDefaultSettings(), { ...freshDraft(), defaultTimezone: "Europe/Berlin", language: "ja" });
     expect(chosen).toMatchObject({ defaultTimezone: "Europe/Berlin", language: "ja" });
     expect(summarizeSettings(chosen, OUT, BACKUP, false).defaultTimezone).toBe("Europe/Berlin");
-    const system = applySettingsDraft(chosen, { ...freshDraft(), defaultTimezone: "system", language: "system" });
-    expect(system).toMatchObject({ defaultTimezone: "system", language: "system" });
+    expect(applySettingsDraft(createDefaultSettings(), freshDraft()).defaultTimezone).toBeNull();
   });
 
   it("treats an unknown saved language as System", () => {

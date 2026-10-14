@@ -92,6 +92,10 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.clearGeminiApiKey) as Promise<AppSnapshot>,
   saveSetupDirectory: (directory: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.saveSetupDirectory, directory) as Promise<AppSnapshot>,
+  saveSetupRecordingsDirectory: (directory: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.saveSetupRecordingsDirectory, directory) as Promise<AppSnapshot>,
+  saveSetupTimezone: (timezone: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.saveSetupTimezone, timezone) as Promise<AppSnapshot>,
   chooseOriginalsDirectory: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.chooseOriginalsDirectory) as Promise<AppSnapshot>,
   chooseOutputDirectory: () =>

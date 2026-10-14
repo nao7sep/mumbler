@@ -27,6 +27,8 @@ export const APP_SHELL_CHANNELS = {
   clearGeminiApiKey: "app-shell:clear-gemini-api-key",
   chooseOutputDirectory: "app-shell:choose-output-directory",
   saveSetupDirectory: "app-shell:save-setup-directory",
+  saveSetupRecordingsDirectory: "app-shell:save-setup-recordings-directory",
+  saveSetupTimezone: "app-shell:save-setup-timezone",
   chooseOriginalsDirectory: "app-shell:choose-originals-directory",
   saveCard: "app-shell:save-card",
   removeCard: "app-shell:remove-card",
@@ -144,9 +146,10 @@ export interface MumblerSettings {
   // Files
   outputDirectory: string | null;
   backupDirectory: string | null;
-  // Import — the zone a filename's local time is read in at import: "system"
-  // (SYSTEM_TIMEZONE) follows the computer's zone, or an IANA zone the user chose.
-  defaultTimezone: string;
+  // Import — the IANA zone a recording time carrying none is read in at
+  // import, or null until the user first chooses one. It interprets imported
+  // data, so once chosen it never follows the computer (timestamp-conventions).
+  defaultTimezone: string | null;
   timestampPattern: string;
   // Player
   skipIntervalSec: number;
@@ -332,7 +335,8 @@ export interface SettingsSummary {
   defaultOutputDirectory: string;
   backupDirectory: string | null;
   defaultBackupDirectory: string;
-  // Import — the resolved IANA zone (System already resolved to the computer's).
+  // Import — the zone imports read times in: the chosen one, or the computer's
+  // until one is chosen.
   defaultTimezone: string;
   // Player
   skipIntervalSec: number;
@@ -362,7 +366,7 @@ export interface SettingsDraft {
   backupDirectory: string;
   literalBackupDirectory?: string;
   defaultBackupDirectory: string;
-  // Import — "system" or an IANA zone, as saved.
+  // Import — the chosen zone, or blank until one is chosen.
   defaultTimezone: string;
   timestampPattern: string;
   // Player
@@ -635,6 +639,8 @@ export interface MumblerShellApi {
   clearGeminiApiKey(): Promise<AppSnapshot>;
   chooseOutputDirectory(): Promise<AppSnapshot>;
   saveSetupDirectory(directory: string): Promise<AppSnapshot>;
+  saveSetupRecordingsDirectory(directory: string): Promise<AppSnapshot>;
+  saveSetupTimezone(timezone: string): Promise<AppSnapshot>;
   chooseOriginalsDirectory(): Promise<AppSnapshot>;
   saveCard(cardId: string, resolution?: SaveConflictResolution): Promise<SaveCardResult>;
   removeCard(cardId: string): Promise<AppSnapshot>;

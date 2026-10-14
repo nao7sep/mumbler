@@ -6,7 +6,7 @@ import {
   getSettingsNumberIssues,
   type NumericSettingField,
 } from "@shared/settings-validation";
-import { DEFAULT_TIMESTAMP_PATTERN, SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
+import { DEFAULT_TIMESTAMP_PATTERN, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
 import { LANGUAGE_NAMES, LANGUAGES, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { useI18n } from "../i18n/I18nContext";
 import type { MessageKey } from "@shared/i18n/catalogues";
@@ -306,15 +306,16 @@ export function SettingsModal({
                 <label className="field">
                   <span>{t("settings.defaultTimezone")}</span>
                   <select
-                    value={draft.defaultTimezone}
+                    // Until a zone is chosen, the computer's is where the choice starts.
+                    value={draft.defaultTimezone || systemTimezone}
                     onChange={(event) => onChange({ ...draft, defaultTimezone: event.target.value })}
                   >
-                    <option value={SYSTEM_TIMEZONE}>{t("settings.timezoneSystem", { zone: systemTimezone })}</option>
                     {timezoneOptions.map((tz) => (
                       <option key={tz} value={tz}>{tz}</option>
                     ))}
                   </select>
                 </label>
+                <p className="field-hint">{t("settings.defaultTimezoneHint")}</p>
                 <p className="field-hint">
                   <a
                     href={TIMEZONE_REFERENCE_URL}

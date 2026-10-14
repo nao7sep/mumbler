@@ -1,6 +1,6 @@
 import { access, copyFile, link, mkdir, mkdtemp, open, readdir, rm, stat, unlink } from "node:fs/promises";
 import { constants as fsConstants, createReadStream } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
 import { fileExists, formatError, isMissingFileError, keepSourceTimesAndMode, syncDirectory, uniquePathInDirectory } from "./file-io";
@@ -76,13 +76,14 @@ async function copyBackupFile(source: string, destination: string): Promise<void
 export async function copyOriginalToBackup(
   sourcePath: string,
   backupDir: string,
+  targetName: string,
   logger?: Pick<AppLogger, "warn">,
 ): Promise<string> {
   let stageDir: string | undefined;
   let targetPath: string | undefined;
   try {
     await mkdir(backupDir, { recursive: true });
-    targetPath = await uniquePathInDirectory(backupDir, basename(sourcePath));
+    targetPath = await uniquePathInDirectory(backupDir, targetName);
     stageDir = await mkdtemp(join(backupDir, ".mumbler-backup-"));
     const stagePath = join(stageDir, "audio");
     // not recorded: this is a user-requested copy of the original audio binary,
@@ -96,7 +97,7 @@ export async function copyOriginalToBackup(
     await syncDirectory(backupDir);
     return targetPath;
   } catch (error: unknown) {
-    throw new Error(`Failed to copy ${sourcePath} to the originals directory ${backupDir}${targetPath === undefined ? "" : ` (target ${targetPath})`}: ${formatError(error)}`, { cause: error });
+    throw new Error(`Failed to copy ${sourcePath} into the Recordings folder ${backupDir}${targetPath === undefined ? "" : ` (target ${targetPath})`}: ${formatError(error)}`, { cause: error });
   } finally {
     if (stageDir !== undefined) {
       try { await rm(stageDir, { recursive: true, force: true }); }

@@ -48,7 +48,6 @@ import {
   parseTimestampFromFilename,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
-  resolveTimezone,
 } from "@shared/timestamps";
 import { abandonBackupStore, closeBackupStore, setBackupStoreSession, setBackupStoreWarn } from "./backupStore";
 import { NewerFormatError } from "./format-versions";
@@ -70,7 +69,7 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
-import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type QueueStore, type SettingsStore } from "./settings-schema";
+import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, importTimezone, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type QueueStore, type SettingsStore } from "./settings-schema";
 import {
   clampQueueWidth,
   clampRecordsListWidth,
@@ -999,7 +998,7 @@ export class ApplicationRuntime {
       });
     const backupDir = this.runtime.settings!.backupDirectory;
     if (reviewed.some(({ merged }) => merged.copyToBackupOnConfirm) && backupDir === null) {
-      throw new OperationError("Choose an originals folder before copying originals.");
+      throw new OperationError("Choose a Recordings folder before adding recordings to it.");
     }
     const cardsToAdd: MumblerCard[] = [];
     // A backup or deletion of the original that did not happen is a warning on
@@ -1094,19 +1093,22 @@ export class ApplicationRuntime {
     }
     // Original copies/deletions are optional consequences of the committed
     // import. A refused primary save leaves no copy to repeat on Retry.
-    for (const { pendingImport, merged } of reviewed) {
+    for (const { pendingImport, merged, timestamps } of reviewed) {
       let backupSucceeded = true;
       const file = pendingImport.originalSourcePath;
       if (merged.copyToBackupOnConfirm) {
         try {
-          const backupPath = await copyOriginalToBackup(pendingImport.originalSourcePath, backupDir!, this.runtime.logger);
-          await this.runtime.logger.info("import.backup-original", "Copied original to the originals directory.", {
+          // Named by its settled recording time alone (timestamp-conventions,
+          // Filenames); the card keeps the original name.
+          const archivedName = `${formatUtcMarker(new Date(timestamps.confirmedUtc))}${extname(file).toLowerCase()}`;
+          const backupPath = await copyOriginalToBackup(file, backupDir!, archivedName, this.runtime.logger);
+          await this.runtime.logger.info("import.backup-original", "Copied the original into the Recordings folder.", {
             originalSourcePath: pendingImport.originalSourcePath,
             backupPath,
           });
         } catch (error: unknown) {
           backupSucceeded = false;
-          await this.runtime.logger.warn("import.backup-original", "Failed to copy original to the originals directory.", {
+          await this.runtime.logger.warn("import.backup-original", "Failed to copy the original into the Recordings folder.", {
             originalSourcePath: pendingImport.originalSourcePath,
             backupDir,
             error: error instanceof Error ? error.message : String(error),
@@ -1852,16 +1854,33 @@ export class ApplicationRuntime {
     // path, never authored expressions. Preserve that literal selection.
     if (!isAbsolute(directory)) throw new OperationError("Choose a save folder first.");
     // Targeted save preserves unsupported and unknown settings the setup never showed.
-    const { next: nextSettings } = await this.mutateSettings((current) => ({
-      ...current,
-      outputDirectory: directory,
-      backupDirectory: current.backupDirectory ?? join(directory, "Originals"),
-    }));
+    const { next: nextSettings } = await this.mutateSettings((current) => ({ ...current, outputDirectory: directory }));
 
     await this.runtime.logger.info("settings.output-directory", "Updated output directory.", {
       outputDirectory: nextSettings.outputDirectory,
     });
     return this.getSnapshot();
+  }
+
+  // Setup's Recordings folder: the suggested absolute path or a picker result,
+  // kept literal like the output folder.
+  saveSetupRecordingsDirectory(directory: string): Promise<AppSnapshot> {
+    return this.runStateChange(async () => {
+      this.ensureReady();
+      if (!isAbsolute(directory)) throw new OperationError("Choose a Recordings folder first.");
+      await this.mutateSettings((current) => ({ ...current, backupDirectory: directory }));
+      return this.getSnapshot();
+    });
+  }
+
+  // Setup's confirmation of the zone recording times without one are read in.
+  saveSetupTimezone(timezone: string): Promise<AppSnapshot> {
+    return this.runStateChange(async () => {
+      this.ensureReady();
+      if (!isValidTimezone(timezone)) throw new OperationError("Choose a valid time zone.");
+      await this.mutateSettings((current) => ({ ...current, defaultTimezone: timezone }));
+      return this.getSnapshot();
+    });
   }
 
   async saveCard(
@@ -2286,10 +2305,10 @@ export class ApplicationRuntime {
     // The zone the filename's local time is read in. Each card keeps its own zone
     // from here on, so a later change of the setting (or of the computer's zone,
     // under System) never re-dates a recording already imported.
-    const importTimezone = resolveTimezone(settings.defaultTimezone);
+    const importZone = importTimezone(settings);
     const utcResult =
       parsed.localTimestampText.length > 0
-        ? recomputeUtcFromLocal(parsed.localTimestampText, importTimezone)
+        ? recomputeUtcFromLocal(parsed.localTimestampText, importZone)
         : { utcMs: null, error: null };
 
     const pendingImport: PendingImportReviewItem = {
@@ -2300,10 +2319,12 @@ export class ApplicationRuntime {
       workingFilePath,
       fileSizeBytes: sourceStats.size,
       localTimestampText: parsed.localTimestampText,
-      timezone: importTimezone,
+      timezone: importZone,
       utcTimestampText: utcResult.error === null && utcResult.utcMs !== null ? formatUtcForDisplay(utcResult.utcMs) : "",
       parseStatus: parsed.parseStatus,
-      deleteOriginalOnConfirm: false,
+      // An imported original is moved into Recordings by default: copied, then
+      // deleted once the copy is complete.
+      deleteOriginalOnConfirm: true,
       copyToBackupOnConfirm: true,
       createdAtUtc: Date.now(),
       updatedAtUtc: Date.now(),
@@ -2464,8 +2485,10 @@ export { resolveStorageRoot };
 export function getAppPaths(): AppPaths {
   const homeDir = resolveStorageRoot(process.env.MUMBLER_DATA_DIR, homedir());
   // The OS's own Documents folder, which follows a Windows or OneDrive
-  // redirection that `~/Documents` would miss; the originals sit inside it.
-  const outputDir = join(app.getPath("documents"), "Mumbler");
+  // redirection that `~/Documents` would miss. The output folder is an inbox
+  // the user empties, so the recordings kept for good sit beside it, never
+  // inside it.
+  const documents = app.getPath("documents");
 
   return {
     homeDir,
@@ -2477,8 +2500,8 @@ export function getAppPaths(): AppPaths {
     recordsPath: join(homeDir, "records.sqlite3"),
     logsDir: join(homeDir, "logs"),
     workingDir: join(homeDir, "working"),
-    outputDir,
-    originalsDir: join(outputDir, "Originals"),
+    outputDir: join(documents, "Mumbler"),
+    originalsDir: join(documents, "Recordings"),
     binDir: join(homeDir, "bin"),
     dependenciesPath: join(homeDir, "dependencies.json"),
     tempDir: join(homeDir, "temp"),

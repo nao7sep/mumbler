@@ -336,7 +336,7 @@ describe("getAppPaths standard layout", () => {
     }
   }
 
-  it("suggests the OS's own Documents folder, following a Windows or OneDrive redirection, with the originals inside", async () => {
+  it("suggests folders in the OS Documents folder, following a Windows or OneDrive redirection, with Recordings beside the output folder", async () => {
     const { app } = await import("electron");
     const documents = join(parse(process.cwd()).root, "Users", "me", "OneDrive", "Documents");
     const getPath = vi.spyOn(app, "getPath").mockImplementation((name) => (name === "documents" ? documents : "/tmp"));
@@ -344,7 +344,7 @@ describe("getAppPaths standard layout", () => {
       const paths = withRoot(() => getAppPaths());
       expect(getPath).toHaveBeenCalledWith("documents");
       expect(paths.outputDir).toBe(join(documents, "Mumbler"));
-      expect(paths.originalsDir).toBe(join(paths.outputDir, "Originals"));
+      expect(paths.originalsDir).toBe(join(documents, "Recordings"));
     } finally {
       getPath.mockRestore();
     }

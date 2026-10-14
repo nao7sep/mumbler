@@ -11,11 +11,10 @@ import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import {
   DEFAULT_TIMESTAMP_PATTERN,
-  SYSTEM_TIMEZONE,
   formatUtcIsoCompact,
+  getSystemTimezone,
   isValidTimezone,
   parseUtcMs,
-  resolveTimezone,
 } from "@shared/timestamps";
 import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
 import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
@@ -126,8 +125,8 @@ const SETTINGS_SETS = {
   theme: (value) => (THEME_PREFERENCES.some(({ value: theme }) => theme === value) ? null : "Theme must be System, Light, or Dark."),
   uiFontFamily: text("UI font"),
   outputDirectory: path("Output directory"),
-  backupDirectory: path("Originals directory"),
-  defaultTimezone: (value) => (isText(value) && (value === SYSTEM_TIMEZONE || isValidTimezone(value)) ? null : "Default timezone must be a valid IANA timezone."),
+  backupDirectory: path("Recordings directory"),
+  defaultTimezone: (value) => (value === null || (isText(value) && isValidTimezone(value)) ? null : "Default timezone must be a valid IANA timezone."),
   timestampPattern: timestampPatternIssue,
   skipIntervalSec: positive("Skip interval"),
   previewSnippetSeconds: positive("Preview snippet seconds"),
@@ -188,6 +187,11 @@ function equalsBuiltIn(key: keyof MumblerSettings, settings: MumblerSettings, bu
 }
 
 // What the file holds for these settings: every set that differs from its built-in.
+/** The zone an import reads recording times in: the chosen one, or the computer's until one is chosen. */
+export function importTimezone(settings: Pick<MumblerSettings, "defaultTimezone">): string {
+  return settings.defaultTimezone ?? getSystemTimezone();
+}
+
 function storedSets(settings: MumblerSettings): Partial<MumblerSettings> {
   const builtIn = createDefaultSettings();
   return Object.fromEntries(
@@ -542,8 +546,9 @@ export function createDefaultSettings(): MumblerSettings {
     outputDirectory: null,
     backupDirectory: null,
     // Import
-    // Follows the computer's zone; a zone the user picks is kept instead.
-    defaultTimezone: SYSTEM_TIMEZONE,
+    // Not chosen yet: imports read times in the computer's zone, which the
+    // Settings window and setup preselect; a chosen zone is always stored.
+    defaultTimezone: null,
     timestampPattern: DEFAULT_TIMESTAMP_PATTERN,
     // Player
     skipIntervalSec: 10,
@@ -751,7 +756,7 @@ export function summarizeSettings(
     backupDirectory: settings.backupDirectory,
     defaultBackupDirectory,
     // Import
-    defaultTimezone: resolveTimezone(settings.defaultTimezone),
+    defaultTimezone: importTimezone(settings),
     // Player
     skipIntervalSec: settings.skipIntervalSec,
     previewSnippetSeconds: settings.previewSnippetSeconds,
@@ -789,8 +794,9 @@ export function buildSettingsDraft(
     backupDirectory: settings.backupDirectory ?? "",
     literalBackupDirectory: settings.backupDirectory ?? "",
     defaultBackupDirectory,
-    // Import
-    defaultTimezone: settings.defaultTimezone,
+    // Import — blank until a zone is chosen; the window shows the computer's
+    // zone in its place, and an unchanged Save leaves it unchosen.
+    defaultTimezone: settings.defaultTimezone ?? "",
     timestampPattern: settings.timestampPattern,
     // Player
     skipIntervalSec: settings.skipIntervalSec,
@@ -841,7 +847,7 @@ export function applySettingsDraft(
     outputDirectory: directory(draft.outputDirectory, draft.literalOutputDirectory),
     backupDirectory: directory(draft.backupDirectory, draft.literalBackupDirectory),
     // Import
-    defaultTimezone: singleLine(draft.defaultTimezone),
+    defaultTimezone: singleLine(draft.defaultTimezone) === "" ? null : singleLine(draft.defaultTimezone),
     timestampPattern: singleLine(draft.timestampPattern),
     // Player
     skipIntervalSec: draft.skipIntervalSec,

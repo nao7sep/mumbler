@@ -1,7 +1,11 @@
 import { access, chmod, mkdir, open, readdir, readFile, rename, rm, stat, utimes } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import { nanoid } from "nanoid";
+import { customAlphabet, nanoid } from "nanoid";
+
+// A name's collision suffix: lowercase letters and digits only, as file names
+// carry (timestamp-conventions, Filenames).
+const lowercaseId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 8);
 
 import { formatUtcMarkerMs } from "@shared/timestamps";
 import { record } from "./backupStore";
@@ -222,7 +226,7 @@ export async function uniquePathInDirectory(directory: string, filename: string)
 
   let name = filename;
   while (existing.has(name.toLowerCase())) {
-    name = `${stem}-${nanoid(8)}${extension}`;
+    name = `${stem}-${lowercaseId()}${extension}`;
   }
 
   return join(directory, name);

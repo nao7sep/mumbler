@@ -319,12 +319,24 @@ describe("first-run setup and user-owned destinations", () => {
     expect(await exists(join(home, "config.json"))).toBe(false);
   });
 
-  it("saves a chosen output folder and its originals child without moving or creating output files", async () => {
+  it("saves a chosen output folder alone, without moving or creating output files", async () => {
     const destination = join(root, "chosen");
     const snapshot = await runtime.saveSetupDirectory(destination);
-    expect(snapshot.settingsSummary).toMatchObject({ outputDirectory: destination, backupDirectory: join(destination, "Originals") });
+    expect(snapshot.settingsSummary).toMatchObject({ outputDirectory: destination, backupDirectory: null });
     expect(await exists(destination)).toBe(false);
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toMatchObject({ outputDirectory: destination, backupDirectory: join(destination, "Originals") });
+    const saved = JSON.parse(await readFile(join(home, "config.json"), "utf8"));
+    expect(saved).toMatchObject({ outputDirectory: destination });
+    expect(saved, "the output folder is an inbox; Recordings is never put inside it").not.toHaveProperty("backupDirectory");
+  });
+
+  it("saves setup's Recordings folder and confirmed time zone, refusing what it cannot use", async () => {
+    const recordings = join(root, "Recordings");
+    expect((await runtime.saveSetupRecordingsDirectory(recordings)).settingsSummary?.backupDirectory).toBe(recordings);
+    expect((await runtime.saveSetupTimezone("Asia/Tokyo")).settingsSummary?.defaultTimezone).toBe("Asia/Tokyo");
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toMatchObject({ backupDirectory: recordings, defaultTimezone: "Asia/Tokyo" });
+    await expect(runtime.saveSetupRecordingsDirectory("relative")).rejects.toThrow(/Recordings folder/);
+    await expect(runtime.saveSetupTimezone("system")).rejects.toThrow(/time zone/);
+    expect(await exists(recordings), "nothing is created until a recording is added").toBe(false);
   });
 
   it("keeps existing originals choices and unrelated unsupported settings during setup", async () => {
@@ -339,7 +351,7 @@ describe("first-run setup and user-owned destinations", () => {
 
   it("keeps a reviewed import and its original untouched until an originals folder is chosen", async () => {
     const [pending] = await dropIn("take.wav");
-    await expect(runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true })])).rejects.toThrow(/Choose an originals folder/);
+    await expect(runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true })])).rejects.toThrow(/Choose a Recordings folder/);
     expect(await readFile(pending.originalSourcePath, "utf8")).toBe("audio for take.wav");
     expect(runtime.getSnapshot().state?.pendingImports).toHaveLength(1);
     expect(cards(runtime.getSnapshot())).toEqual([]);
@@ -705,7 +717,7 @@ describe("confirming what was dropped in", () => {
     expect(cards(result.snapshot)).toHaveLength(1);
     expect(result.originalWarnings).toEqual([]);
     expect(await exists(pending.originalSourcePath)).toBe(false);
-    expect(await readdir(originals)).toEqual(["retry.wav"]);
+    expect(await readdir(originals), "filed under its settled UTC time alone").toEqual(["20260228-223000-utc.wav"]);
   });
 
   it("turns each pending import into a card with the reviewed time, and selects the first", async () => {
@@ -748,13 +760,33 @@ describe("confirming what was dropped in", () => {
     expect(cards(snapshot).map((card) => card.originalFilename)).toEqual(["earlier.wav", "later.wav"]);
   });
 
+  it("moves an original into Recordings by default, named by its settled UTC time, and never touches it again", async () => {
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(home, "Recordings") });
+    const [pending] = await dropIn("Shibuya Station.wav");
+    expect(pending, "move is the default").toMatchObject({ copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true });
+
+    const { snapshot, originalWarnings } = await runtime.confirmPendingImports([
+      { ...pending, localTimestampText: "2026-10-14 15:30:12", timezone: "Asia/Tokyo" },
+    ]);
+
+    expect(originalWarnings).toEqual([]);
+    expect(await exists(pending.originalSourcePath), "the original left its folder").toBe(false);
+    const archived = join(home, "Recordings", "20261014-063012-utc.wav");
+    expect(await readFile(archived, "utf8")).toBe("audio for Shibuya Station.wav");
+    const [card] = cards(snapshot);
+    expect(card!.originalFilename, "the card keeps the original name").toBe("Shibuya Station.wav");
+
+    await runtime.removeCard(card!.id);
+    expect(await readFile(archived, "utf8"), "removing the card leaves Recordings alone").toBe("audio for Shibuya Station.wav");
+  });
+
   it("copies the original to the backup folder when the user asked for that", async () => {
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(home, "originals") });
     const [pending] = await dropIn("take.wav");
 
-    await runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true })]);
+    await runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: false })]);
 
-    expect(await readFile(join(home, "originals", "take.wav"), "utf8")).toBe("audio for take.wav");
+    expect(await readFile(join(home, "originals", "20260228-223000-utc.wav"), "utf8")).toBe("audio for take.wav");
     expect(await exists(pending.originalSourcePath), "the original is left where it was").toBe(true);
   });
 
@@ -793,7 +825,7 @@ describe("confirming what was dropped in", () => {
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(root, "blocked") });
     await writeFile(join(root, "blocked"), "not a directory");
 
-    const { originalWarnings } = await runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true })]);
+    const { originalWarnings } = await runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: false })]);
 
     expect(originalWarnings).toEqual([{
       sourcePath: pending.originalSourcePath,
@@ -2069,7 +2101,7 @@ describe("settings, secrets and the window's own state", () => {
 
   it("starts over on request, keeping the files the user made", async () => {
     const [pending] = await dropIn("take.wav");
-    await runtime.confirmPendingImports([review(pending)]);
+    await runtime.confirmPendingImports([review(pending, { deleteOriginalOnConfirm: false })]);
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
 
     const snapshot = await runtime.resetState();

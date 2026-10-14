@@ -256,8 +256,8 @@ describe("what blocks the import", () => {
     expect([...document.querySelectorAll("input, select")].every((field) => (field as HTMLInputElement).disabled)).toBe(true);
     expect(button("Apply to All").disabled).toBe(true);
     await act(async () => button("Apply to All").click());
-    await act(async () => checkbox("Keep a copy of the originals").click());
-    await act(async () => checkbox("Permanently delete originals after import").click());
+    await act(async () => checkbox("Add to Recordings").click());
+    await act(async () => checkbox("Delete the originals once they are in Recordings").click());
     expect(onApplyTimezoneToAll).not.toHaveBeenCalled();
     expect(onSetCopyToBackupForAll).not.toHaveBeenCalled();
     expect(onSetDeleteOriginalForAll).not.toHaveBeenCalled();
@@ -273,22 +273,22 @@ describe("what blocks the import", () => {
 });
 
 describe("what happens to the user's own files", () => {
-  it("offers a copy and deletion for the batch, unticked, and names where copies go", async () => {
+  it("offers adding to Recordings and deleting the originals for the batch, and names where recordings go", async () => {
     await mountModal([makeItem(), makeItem({ id: "pending-2" })], { backupDirectoryLabel: "/Volumes/Archive" });
 
-    expect(checkbox("Keep a copy of the originals").checked).toBe(false);
-    expect(checkbox("Permanently delete originals after import").checked).toBe(false);
+    expect(checkbox("Add to Recordings").checked).toBe(false);
+    expect(checkbox("Delete the originals once they are in Recordings").checked).toBe(false);
     expect(document.body.textContent).toContain("/Volumes/Archive");
     expect(document.body.textContent, "the order of the two is stated").toContain(
-      "A failed copy cancels the deletion for that file.",
+      "If the copy fails, the original is kept.",
     );
   });
 
   it("turns each option on for every recording at once", async () => {
     await mountModal([makeItem(), makeItem({ id: "pending-2" })]);
 
-    await toggle(checkbox("Keep a copy of the originals"), true);
-    await toggle(checkbox("Permanently delete originals after import"), true);
+    await toggle(checkbox("Add to Recordings"), true);
+    await toggle(checkbox("Delete the originals once they are in Recordings"), true);
 
     expect(onSetCopyToBackupForAll).toHaveBeenCalledExactlyOnceWith(true);
     expect(onSetDeleteOriginalForAll).toHaveBeenCalledExactlyOnceWith(true);
@@ -300,7 +300,7 @@ describe("what happens to the user's own files", () => {
       makeItem({ id: "pending-2", copyToBackupOnConfirm: false }),
     ]);
 
-    expect(checkbox("Keep a copy of the originals").checked, "one of two is not the batch").toBe(false);
+    expect(checkbox("Add to Recordings").checked, "one of two is not the batch").toBe(false);
 
     await act(async () => root?.unmount());
     root = null;
@@ -309,6 +309,6 @@ describe("what happens to the user's own files", () => {
     document.body.append(container);
     await mountModal([makeItem({ copyToBackupOnConfirm: true }), makeItem({ id: "pending-2", copyToBackupOnConfirm: true })]);
 
-    expect(checkbox("Keep a copy of the originals").checked).toBe(true);
+    expect(checkbox("Add to Recordings").checked).toBe(true);
   });
 });

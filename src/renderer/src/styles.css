@@ -2600,6 +2600,22 @@ html.records-page body {
   overflow-wrap: anywhere;
 }
 
+/* The two folders on setup's folder step, each a short section of its own. */
+.setup-section h3 {
+  margin: 0 0 4px;
+  font-size: 0.9375rem;
+}
+
+.setup-section p {
+  margin: 0 0 8px;
+}
+
+.setup-section + .setup-section {
+  border-top: 1px solid var(--line-section);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
 /* A name or path inside a sentence or row (ShortenedValue): one line in the
    space it is given, a name keeping its beginning and a path its final
    segment, the folders before it giving way first. */

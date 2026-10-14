@@ -52,12 +52,12 @@ describe("App startup snapshot gate", () => {
     let firstRun = true;
     getSnapshot.mockImplementation(async () => ({
       ...readySnapshot(), firstRun, dependencies: [],
-      settingsSummary: summarizeSettings(createDefaultSettings(), "/fixtures/Documents/Mumbler", "/fixtures/Documents/Mumbler/Originals", false),
+      settingsSummary: summarizeSettings(createDefaultSettings(), "/fixtures/Documents/Mumbler", "/fixtures/Documents/Recordings", false),
     }));
     window.mumbler.dismissFirstRunSetup = vi.fn(async () => { firstRun = false; });
     await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Set Up Mumbler (1/3)"));
-    for (let step = 0; step < 3; step += 1) {
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Set Up Mumbler (1/4)"));
+    for (let step = 0; step < 4; step += 1) {
       await act(async () => button("Skip")!.click());
     }
     expect(window.mumbler.dismissFirstRunSetup).toHaveBeenCalledOnce();

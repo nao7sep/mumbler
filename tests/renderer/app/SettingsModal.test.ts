@@ -269,13 +269,14 @@ describe("SettingsModal language and time zone", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ language: "ja" }));
   });
 
-  it("starts the zone list with System, naming the computer's zone", async () => {
-    await renderWith(vi.fn(), { defaultTimezone: "system" });
+  // timestamp-conventions: the import zone interprets imported data, so it
+  // has no System entry; until one is chosen the computer's zone is shown.
+  it("offers no System entry and shows the computer's zone until one is chosen", async () => {
+    await renderWith(vi.fn(), { defaultTimezone: "" });
     const select = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
       .find((candidate) => Array.from(candidate.options).some((option) => option.value === "UTC"))!;
-    expect(select.options[0]?.value).toBe("system");
-    expect(select.options[0]?.textContent).toBe(`System (${Intl.DateTimeFormat().resolvedOptions().timeZone})`);
-    expect(select.value).toBe("system");
+    expect(Array.from(select.options).map((option) => option.value)).not.toContain("system");
+    expect(select.value).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
   });
 });
 

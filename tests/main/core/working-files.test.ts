@@ -207,12 +207,25 @@ describe("working audio copies", () => {
     );
   });
 
+  it("files an original under the name it is given, with a lowercase suffix when that name is taken", async () => {
+    const source = join(dir, "Shibuya Station.m4a");
+    const backup = join(dir, "backup");
+    await writeFile(source, "audio", "utf8");
+
+    const first = await copyOriginalToBackup(source, backup, "20261014-063012-utc.m4a");
+    const second = await copyOriginalToBackup(source, backup, "20261014-063012-utc.m4a");
+
+    expect(first).toBe(join(backup, "20261014-063012-utc.m4a"));
+    expect(second).toMatch(/[/\\]20261014-063012-utc-[0-9a-z]{8}\.m4a$/);
+    expect(await readFile(source, "utf8"), "the source stays for its caller to delete").toBe("audio");
+  });
+
   it("copies an original into the chosen backup directory", async () => {
     const source = join(dir, "source.m4a");
     const backup = join(dir, "backup");
     await writeFile(source, "audio", "utf8");
 
-    const copied = await copyOriginalToBackup(source, backup);
+    const copied = await copyOriginalToBackup(source, backup, "source.m4a");
 
     expect(copied).toBe(join(backup, "source.m4a"));
     expect(await readFile(copied, "utf8")).toBe("audio");
@@ -226,7 +239,7 @@ describe("working audio copies", () => {
       expect(await readFile(stage, "utf8")).toBe("complete audio");
       await writeFile(target, "user file");
     };
-    await expect(copyOriginalToBackup(source, backup)).rejects.toMatchObject({ cause: { code: "EEXIST" } });
+    await expect(copyOriginalToBackup(source, backup, "source.m4a")).rejects.toMatchObject({ cause: { code: "EEXIST" } });
     expect(await readFile(join(backup, "source.m4a"), "utf8")).toBe("user file");
     expect(await readFile(source, "utf8")).toBe("complete audio");
     expect(await readdir(backup)).toEqual(["source.m4a"]);
@@ -240,7 +253,7 @@ describe("working audio copies", () => {
     await utimes(source, recorded, recorded);
     await chmod(source, 0o444);
     backupFaults.unsupported = code;
-    const copied = await copyOriginalToBackup(source, backup);
+    const copied = await copyOriginalToBackup(source, backup, "source.m4a");
     expect(await readFile(copied, "utf8")).toBe("complete audio");
     expect((await stat(copied)).mtime.getTime()).toBe(recorded.getTime());
     if (process.platform !== "win32") expect((await stat(copied)).mode & 0o777).toBe(0o444);
@@ -253,7 +266,7 @@ describe("working audio copies", () => {
     await writeFile(source, "complete audio");
     backupFaults.unsupported = "ENOTSUP";
     backupFaults.beforeLink = async (_stage, target) => { await writeFile(target, "user file"); };
-    await expect(copyOriginalToBackup(source, backup)).rejects.toMatchObject({ cause: { code: "EEXIST" } });
+    await expect(copyOriginalToBackup(source, backup, "source.m4a")).rejects.toMatchObject({ cause: { code: "EEXIST" } });
     expect(await readFile(join(backup, "source.m4a"), "utf8")).toBe("user file");
     expect(await readdir(backup)).toEqual(["source.m4a"]);
   });
@@ -265,7 +278,7 @@ describe("working audio copies", () => {
     backupFaults.refuseStageCleanup = true;
     const logger = makeLogger();
     vi.mocked(logger.warn).mockRejectedValueOnce(new Error("optional logger failed"));
-    const copied = await copyOriginalToBackup(source, backup, logger);
+    const copied = await copyOriginalToBackup(source, backup, "source.m4a", logger);
     expect(await readFile(copied, "utf8")).toBe("complete audio");
     expect(logger.warn).toHaveBeenCalledWith("import.backup-cleanup", expect.any(String), expect.objectContaining({ targetPath: copied, error: expect.objectContaining({ message: "EACCES: permission denied" }) }));
     expect((await readdir(backup)).some((name) => name.startsWith(".mumbler-backup-"))).toBe(true);
@@ -277,7 +290,7 @@ describe("working audio copies", () => {
     await writeFile(source, "complete audio");
     const primary = new Error("stream refused");
     backupFaults.stageFailure = primary;
-    await expect(copyOriginalToBackup(source, backup)).rejects.toMatchObject({ cause: primary });
+    await expect(copyOriginalToBackup(source, backup, "source.m4a")).rejects.toMatchObject({ cause: primary });
     expect(await readdir(backup)).toEqual([]);
     expect(await readFile(source, "utf8")).toBe("complete audio");
   });
@@ -289,7 +302,7 @@ describe("working audio copies", () => {
     backupFaults.unsupported = "ENOTSUP";
     const primary = new Error("stream refused");
     backupFaults.publicFailure = primary;
-    const error = await copyOriginalToBackup(source, backup).catch((caught: unknown) => caught);
+    const error = await copyOriginalToBackup(source, backup, "source.m4a").catch((caught: unknown) => caught);
     expect(error).toMatchObject({ cause: primary, message: expect.stringContaining(join(backup, "source.m4a")) });
     expect(await readFile(source, "utf8")).toBe("complete audio");
     expect(await readFile(join(backup, "source.m4a"), "utf8")).toBe("partial");
@@ -301,7 +314,7 @@ describe("working audio copies", () => {
 
   it.each([
     ["a working copy", (source: string) => copyIntoWorking(source, join(dir, "working"), "clip.wav")],
-    ["a backup of the original", (source: string) => copyOriginalToBackup(source, join(dir, "backup"))],
+    ["a backup of the original", (source: string) => copyOriginalToBackup(source, join(dir, "backup"), "source.m4a")],
   ])("keeps the recording's modified time on %s", async (_name, copy) => {
     const source = join(dir, "clip.wav");
     await writeFile(source, "audio", "utf8");
@@ -318,7 +331,7 @@ describe("working audio copies", () => {
     await chmod(source, 0o640);
 
     const working = await copyIntoWorking(source, join(dir, "working"), "clip.wav");
-    const backup = await copyOriginalToBackup(source, join(dir, "backup"));
+    const backup = await copyOriginalToBackup(source, join(dir, "backup"), "source.m4a");
 
     expect((await stat(working)).mode & 0o777).toBe(0o640);
     expect((await stat(backup)).mode & 0o777).toBe(0o640);
@@ -327,10 +340,10 @@ describe("working audio copies", () => {
   it("names the original that could not be backed up, keeping the filesystem's error as the cause", async () => {
     const source = join(dir, "gone.m4a");
 
-    await expect(copyOriginalToBackup(source, join(dir, "backup"))).rejects.toThrow(
-      new RegExp(`Failed to copy ${source} to the originals directory`),
+    await expect(copyOriginalToBackup(source, join(dir, "backup"), "source.m4a")).rejects.toThrow(
+      new RegExp(`Failed to copy ${source} into the Recordings folder`),
     );
-    await expect(copyOriginalToBackup(source, join(dir, "backup"))).rejects.toMatchObject({
+    await expect(copyOriginalToBackup(source, join(dir, "backup"), "source.m4a")).rejects.toMatchObject({
       cause: { code: "ENOENT" },
     });
   });

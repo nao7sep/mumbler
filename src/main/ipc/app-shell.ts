@@ -242,13 +242,23 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
 
   handle(APP_SHELL_CHANNELS.chooseOriginalsDirectory, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
-    if (window === null) throw new Error("Choose originals directory requires an active window.");
+    if (window === null) throw new Error("Choose Recordings directory requires an active window.");
     return runtime.chooseOriginalsDirectory(window);
   });
 
   handle(APP_SHELL_CHANNELS.saveSetupDirectory, (_event, directory: string) => {
     assertString(directory, "directory");
     return runtime.saveSetupDirectory(directory);
+  });
+
+  handle(APP_SHELL_CHANNELS.saveSetupRecordingsDirectory, (_event, directory: string) => {
+    assertString(directory, "directory");
+    return runtime.saveSetupRecordingsDirectory(directory);
+  });
+
+  handle(APP_SHELL_CHANNELS.saveSetupTimezone, (_event, timezone: string) => {
+    assertString(timezone, "timezone");
+    return runtime.saveSetupTimezone(timezone);
   });
 
   handle(APP_SHELL_CHANNELS.openOutputDirectory, () => runtime.openOutputDirectory());
