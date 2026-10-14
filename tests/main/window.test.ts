@@ -107,14 +107,20 @@ describe("withContentSecurityPolicy", () => {
   });
 });
 
+// Electron restores the windows' display mode (maximized or full screen) on
+// Windows only; both platforms keep their bounds.
+const PLATFORMS = [["darwin", false], ["win32", true]] as const;
+
 describe("buildWindowOptions", () => {
-  it("uses Electron-owned bounds persistence for the stable main window", () => {
-    const options = buildWindowOptions();
-    expect(options.name).toBe("main");
-    expect(options.windowStatePersistence).toEqual({
-      bounds: true,
-      displayMode: process.platform === "win32",
-    });
+  it.each(PLATFORMS)("uses Electron-owned bounds persistence for the stable main window on %s", (platform, displayMode) => {
+    const spy = vi.spyOn(process, "platform", "get").mockReturnValue(platform);
+    try {
+      const options = buildWindowOptions();
+      expect(options.name).toBe("main");
+      expect(options.windowStatePersistence).toEqual({ bounds: true, displayMode });
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("derives the window minimums from the shared layout (no magic constants)", () => {
@@ -133,12 +139,21 @@ describe("buildWindowOptions", () => {
 });
 
 describe("buildRecordsWindowOptions", () => {
+  it.each(PLATFORMS)("persists its bounds, and its display mode on Windows only, on %s", async (platform, displayMode) => {
+    const { buildRecordsWindowOptions } = await import("@main/records-window");
+    const spy = vi.spyOn(process, "platform", "get").mockReturnValue(platform);
+    try {
+      expect(buildRecordsWindowOptions("Records").windowStatePersistence).toEqual({ bounds: true, displayMode });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("is a durable window of its own, sized from the shared layout", async () => {
     const { buildRecordsWindowOptions } = await import("@main/records-window");
     const options = buildRecordsWindowOptions("Records");
     expect(options.name).toBe("records");
     expect(options.title).toBe("Records");
-    expect(options.windowStatePersistence).toEqual({ bounds: true, displayMode: process.platform === "win32" });
     expect(options.minWidth).toBe(RECORDS_WINDOW_MIN_WIDTH);
     expect(options.minHeight).toBe(RECORDS_WINDOW_MIN_HEIGHT);
     expect(options.width).toBeGreaterThanOrEqual(RECORDS_WINDOW_MIN_WIDTH);

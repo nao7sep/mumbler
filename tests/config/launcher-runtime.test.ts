@@ -3,7 +3,32 @@ import { describe, expect, it } from "vitest";
 
 // The launcher helper is plain ESM because both shell families execute it directly.
 // @ts-expect-error The directly executed .mjs helper intentionally has no declaration file.
-import { claimRuntime, isRuntimeOwner, ownsProcess, releaseRuntime, REPO_ROOT } from "../../scripts/launcher-runtime.mjs";
+import { claimRuntime, isRuntimeOwner, ownsProcess, parsePosixProcesses, parseWindowsProcesses, releaseRuntime, REPO_ROOT } from "../../scripts/launcher-runtime.mjs";
+
+// The process listings each platform's tool prints, read on every host; the
+// native ps, PowerShell and taskkill calls run in the Windows live lane.
+describe("launcher process listings", () => {
+  it("reads ps output, skipping lines it cannot parse", () => {
+    expect(parsePosixProcesses("  10     1 /Applications/Mumbler.app/Contents/MacOS/Mumbler --flag\n\nnot a row\n 11 10 ffmpeg -i in.m4a\n")).toEqual([
+      { pid: 10, parentPid: 1, executablePath: "", commandLine: "/Applications/Mumbler.app/Contents/MacOS/Mumbler --flag" },
+      { pid: 11, parentPid: 10, executablePath: "", commandLine: "ffmpeg -i in.m4a" },
+    ]);
+  });
+
+  it("reads PowerShell's process list, a lone process and processes it cannot inspect", () => {
+    expect(parseWindowsProcesses(JSON.stringify([
+      { ProcessId: 20, ParentProcessId: 4, ExecutablePath: "C:\\Mumbler\\Mumbler.exe", CommandLine: "\"C:\\Mumbler\\Mumbler.exe\"" },
+      { ProcessId: 4, ParentProcessId: 0, ExecutablePath: null, CommandLine: null },
+    ]))).toEqual([
+      { pid: 20, parentPid: 4, executablePath: "C:\\Mumbler\\Mumbler.exe", commandLine: "\"C:\\Mumbler\\Mumbler.exe\"" },
+      { pid: 4, parentPid: 0, executablePath: "", commandLine: "" },
+    ]);
+    expect(parseWindowsProcesses(`${JSON.stringify({ ProcessId: 30, ParentProcessId: 20, ExecutablePath: "C:\\ffmpeg.exe", CommandLine: "ffmpeg" })}\r\n`)).toEqual([
+      { pid: 30, parentPid: 20, executablePath: "C:\\ffmpeg.exe", commandLine: "ffmpeg" },
+    ]);
+    expect(parseWindowsProcesses("")).toEqual([]);
+  });
+});
 
 describe("launcher process identity", () => {
   const identity = { kind: "electron", label: "Mumbler", executable: "Mumbler" };

@@ -1197,6 +1197,30 @@ describe("ApplicationRuntime confirmed import commit", () => {
       }
     });
 
+    it("leaves the storage root's mode alone when the platform is Windows", async () => {
+      const root = await mkdtemp(join(tmpdir(), "mumbler-runtime-root-"));
+      const homeDir = join(root, "profile");
+      await mkdir(homeDir, { recursive: true, mode: 0o755 });
+      await chmod(homeDir, 0o755);
+
+      const previousRoot = process.env.MUMBLER_DATA_DIR;
+      process.env.MUMBLER_DATA_DIR = homeDir;
+
+      let runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>> | null = null;
+      const platform = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+      try {
+        runtime = await ApplicationRuntime.initialize();
+        platform.mockRestore();
+        expect((await stat(homeDir)).mode & 0o777).toBe(0o755);
+      } finally {
+        platform.mockRestore();
+        await runtime?.shutdown();
+        if (previousRoot === undefined) delete process.env.MUMBLER_DATA_DIR;
+        else process.env.MUMBLER_DATA_DIR = previousRoot;
+        await rm(root, { force: true, recursive: true });
+      }
+    });
+
     it("tightens an existing broader storage root to 0700 on launch", async () => {
       const root = await mkdtemp(join(tmpdir(), "mumbler-runtime-root-"));
       const homeDir = join(root, "profile");

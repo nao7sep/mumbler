@@ -70,7 +70,7 @@ export function ownsProcess(processInfo, identity) {
   throw new Error(`Unknown runtime identity: ${identity.kind}`);
 }
 
-function parsePosixProcesses(stdout) {
+export function parsePosixProcesses(stdout) {
   return stdout.trim().split("\n").filter(Boolean).map((line) => {
     const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
     if (!match) return undefined;
@@ -105,7 +105,13 @@ async function listProcesses() {
     timeout: 10000,
     maxBuffer: 16 * 1024 * 1024,
   });
-  const decoded = JSON.parse(stdout || "[]");
+  return parseWindowsProcesses(stdout);
+}
+
+// ConvertTo-Json writes one process as a bare object rather than an array, and
+// a process the user cannot inspect has a null path and command line.
+export function parseWindowsProcesses(stdout) {
+  const decoded = JSON.parse(stdout.trim() || "[]");
   const rows = Array.isArray(decoded) ? decoded : [decoded];
   return rows.map((row) => ({
     pid: Number(row.ProcessId),

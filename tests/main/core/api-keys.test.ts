@@ -42,10 +42,8 @@ afterEach(async () => {
 describe("API key secrets store", () => {
   // First, so the once-per-process insecure-mode warning is observable before any
   // other test reads a group/world-readable file.
-  it("warns once and tightens an insecure (group/world-readable) key file on read", async () => {
-    if (process.platform === "win32") {
-      return; // POSIX-only permission model.
-    }
+  // POSIX-only permission model; the Windows decision is tested below on every host.
+  it.skipIf(process.platform === "win32")("warns once and tightens an insecure (group/world-readable) key file on read", async () => {
     await writeApiKey(apiKeysPath, "gemini", "stored-key");
     await chmod(apiKeysPath, 0o644);
 
@@ -57,10 +55,7 @@ describe("API key secrets store", () => {
     expect(fileStat.mode & 0o777).toBe(0o600);
   });
 
-  it("re-tightens a key file that is widened again on a second access in the same session", async () => {
-    if (process.platform === "win32") {
-      return; // POSIX-only permission model.
-    }
+  it.skipIf(process.platform === "win32")("re-tightens a key file that is widened again on a second access in the same session", async () => {
     await writeApiKey(apiKeysPath, "gemini", "stored-key");
     const warn = vi.fn();
 
@@ -317,5 +312,30 @@ describe("API key secrets store", () => {
     expect(await readFile(apiKeysPath, "utf8")).toBe(newer);
     if (process.platform !== "win32") expect((await stat(apiKeysPath)).mode & 0o777).toBe(0o644);
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
+  });
+});
+
+// Windows has its own permission model, so the file mode is never checked or
+// tightened there. The decision is made at module load from the platform, so
+// the module is loaded fresh with Windows as the platform; the POSIX file mode
+// stays observable on a POSIX host.
+describe.skipIf(process.platform === "win32")("API key file mode on Windows", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it("neither warns about nor tightens a key file readable beyond the owner", async () => {
+    await writeApiKey(apiKeysPath, "gemini", "stored-key");
+    await chmod(apiKeysPath, 0o644);
+    vi.resetModules();
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    const windows = await import("@main/core/api-keys");
+    const warn = vi.fn();
+
+    expect(await windows.resolveApiKey(apiKeysPath, "gemini", warn)).toBe("stored-key");
+
+    expect(warn).not.toHaveBeenCalled();
+    expect((await stat(apiKeysPath)).mode & 0o777).toBe(0o644);
   });
 });
