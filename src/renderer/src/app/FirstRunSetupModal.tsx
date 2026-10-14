@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import type { AppSnapshot } from "@shared/app-shell";
 import { message, type Message } from "@shared/i18n/translate";
-import { getSupportedTimezones } from "@shared/timestamps";
+import { SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
 import { useI18n } from "../i18n/I18nContext";
 import { AudioToolsModal, type AudioToolsModalProps } from "./AudioToolsModal";
 import { DiscardSettingsModal } from "./DecisionModals";
@@ -18,8 +18,9 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [key, setKey] = useState("");
   const summary = snapshot.settingsSummary!;
-  // The computer's zone is only where the choice starts; once saved it stays
-  // when the computer's zone changes (timestamp-conventions).
+  // The interpretation zone, the only zone setup shows (timestamp-conventions):
+  // first launch saved the computer's, which stays when the computer's changes
+  // unless the user chooses System.
   const [timezone, setTimezone] = useState(summary.defaultTimezone);
   const timezones = useMemo(() => getSupportedTimezones(), []);
   const [busy, setBusy] = useState(false);
@@ -133,6 +134,7 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
           <label className="field">
             <span>{t("settings.defaultTimezone")}</span>
             <select value={timezone} disabled={busy} onChange={(event) => setTimezone(event.target.value)}>
+              <option value={SYSTEM_TIMEZONE}>{t("settings.timezoneSystem", { zone: getSystemTimezone() })}</option>
               {timezones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
             </select>
           </label>

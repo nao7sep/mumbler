@@ -8,7 +8,7 @@ import { pathValue } from "@shared/i18n/translate";
 
 import type { AppSnapshot, MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
 import { hasStaleResults } from "@shared/card-status";
-import { formatUtcMarker } from "@shared/timestamps";
+import { formatUtcMarker, getSystemTimezone } from "@shared/timestamps";
 
 // The card list as the user builds it: confirm what was dropped in, duplicate a
 // card to trim it twice, move the markers, remove one, start over. This drives
@@ -218,6 +218,15 @@ function review(item: PendingImportReviewItem, edits: Partial<PendingImportRevie
   return { ...item, copyToBackupOnConfirm: false, localTimestampText: "2026-03-01 07:30:00", timezone: "Asia/Tokyo", ...edits };
 }
 
+// First launch saves the computer's zone as the import zone, as a concrete zone
+// (timestamp-conventions, Time zones); nothing else is written until the user
+// changes a setting.
+const FIRST_LAUNCH = { formatVersion: 1, defaultTimezone: getSystemTimezone() };
+
+async function savedSettings(): Promise<unknown> {
+  return JSON.parse(await readFile(join(home, "config.json"), "utf8"));
+}
+
 function cards(snapshot: AppSnapshot): MumblerCard[] {
   return snapshot.state?.cards ?? [];
 }
@@ -285,7 +294,7 @@ describe("first-run setup and user-owned destinations", () => {
     expect(runtime.getSnapshot().firstRun).toBe(true);
     runtime.dismissFirstRunSetup();
     expect(runtime.getSnapshot().firstRun).toBe(false);
-    expect(await exists(join(home, "config.json"))).toBe(false);
+    expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
     expect(await exists(join(home, "api-keys.json"))).toBe(false);
   });
 
@@ -310,13 +319,13 @@ describe("first-run setup and user-owned destinations", () => {
 
   it("offers setup for a new root, writes no config on launch, and does not repeat for an existing root", async () => {
     expect(runtime.getSnapshot().firstRun).toBe(true);
-    expect(await exists(join(home, "config.json"))).toBe(false);
+    expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
     // The electron stand-in reports /tmp as the Documents folder.
     expect(runtime.getSnapshot().settingsSummary?.defaultOutputDirectory).toBe(join("/tmp", "Mumbler"));
     await runtime.shutdown();
     runtime = await ApplicationRuntime.initialize();
     expect(runtime.getSnapshot().firstRun).toBe(false);
-    expect(await exists(join(home, "config.json"))).toBe(false);
+    expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
   });
 
   it("saves a chosen output folder alone, without moving or creating output files", async () => {
@@ -335,7 +344,8 @@ describe("first-run setup and user-owned destinations", () => {
     expect((await runtime.saveSetupTimezone("Asia/Tokyo")).settingsSummary?.defaultTimezone).toBe("Asia/Tokyo");
     expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toMatchObject({ backupDirectory: recordings, defaultTimezone: "Asia/Tokyo" });
     await expect(runtime.saveSetupRecordingsDirectory("relative")).rejects.toThrow(/Recordings folder/);
-    await expect(runtime.saveSetupTimezone("system")).rejects.toThrow(/time zone/);
+    await expect(runtime.saveSetupTimezone("Mars/Olympus")).rejects.toThrow(/time zone/);
+    expect((await runtime.saveSetupTimezone("system")).settingsSummary?.defaultTimezone, "System is offered").toBe("system");
     expect(await exists(recordings), "nothing is created until a recording is added").toBe(false);
   });
 
@@ -362,7 +372,7 @@ describe("first-run setup and user-owned destinations", () => {
     try {
       const snapshot = await runtime.chooseOutputDirectory({} as never);
       expect(snapshot.settingsSummary?.outputDirectory).toBeNull();
-      expect(await exists(join(home, "config.json"))).toBe(false);
+      expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
     } finally { picker.mockRestore(); }
   });
 });
@@ -1815,7 +1825,7 @@ describe("settings, secrets and the window's own state", () => {
     const quarantined = (await readdir(home)).find((name) => /^config-.*\.invalid$/.test(name));
     expect(quarantined).toBeDefined();
     expect(await readFile(join(home, quarantined!), "utf8")).toBe(bytes);
-    expect(await exists(join(home, "config.json")), "nothing is written until the user changes a setting").toBe(false);
+    expect(await savedSettings(), "only the first-launch zone is saved until the user changes a setting").toEqual(FIRST_LAUNCH);
     expect(snapshot.startupDiagnostic).toBeNull();
     expect(snapshot.appWideError).toEqual({
       title: { key: "diagnostic.settingsResetTitle" },
@@ -1838,15 +1848,15 @@ describe("settings, secrets and the window's own state", () => {
       message: { key: "diagnostic.settingsUnusableBody", values: { items: ["prompts"] } },
     });
     expect(runtime.getSettingsDraft().structuredPrompt).toBe(createDefaultSettings().prompts.structured);
-    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ formatVersion: 1, prompts: unusable, addedLater: "kept" });
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...FIRST_LAUNCH, prompts: unusable, addedLater: "kept" });
 
     await runtime.saveToolSettings(false);
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
-      formatVersion: 1, checkUpdatesAtLaunch: false, prompts: unusable, addedLater: "kept",
+      ...FIRST_LAUNCH, checkUpdatesAtLaunch: false, prompts: unusable, addedLater: "kept",
     });
 
     await runtime.saveSettingsDraft(runtime.getSettingsDraft());
-    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ formatVersion: 1, checkUpdatesAtLaunch: false, addedLater: "kept" });
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...FIRST_LAUNCH, checkUpdatesAtLaunch: false, addedLater: "kept" });
   });
 
   it("halts on a config.json it cannot read, moving nothing and offering no Reset", async () => {
@@ -1905,21 +1915,21 @@ describe("settings, secrets and the window's own state", () => {
 
   it("does not materialize sets when an unchanged draft is saved", async () => {
     await runtime.saveSettingsDraft(runtime.getSettingsDraft());
-    expect(await exists(join(home, "config.json"))).toBe(false);
+    expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
   });
 
   it("launches without a config file and writes only the edited set", async () => {
-    expect(await exists(join(home, "config.json"))).toBe(false);
+    expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), concurrencyLimit: 5 });
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ ...FIRST_LAUNCH, concurrencyLimit: 5 });
   });
 
   it("writes the Audio Tools update toggle with the other sets the app holds", async () => {
     await runtime.saveToolSettings(false);
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ formatVersion: 1, checkUpdatesAtLaunch: false });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ ...FIRST_LAUNCH, checkUpdatesAtLaunch: false });
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), concurrencyLimit: 5 });
     await runtime.saveToolSettings(true);
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ ...FIRST_LAUNCH, concurrencyLimit: 5 });
   });
 
   it.each(["draft", "setup", "originals"] as const)("keeps a pending tool toggle through the next %s settings intent", async (intent) => {
@@ -1972,7 +1982,7 @@ describe("settings, secrets and the window's own state", () => {
       release();
       await saving;
       expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({
-        formatVersion: 1, theme: "dark", checkUpdatesAtLaunch: false,
+        ...FIRST_LAUNCH, theme: "dark", checkUpdatesAtLaunch: false,
       });
       expect(runtime.getSnapshot().settingsSummary?.checkUpdatesAtLaunch).toBe(false);
       expect(runtime.themePreference()).toBe("dark");
@@ -1995,13 +2005,13 @@ describe("settings, secrets and the window's own state", () => {
       transcriptionModel: defaults.transcriptionModel, metadataModel: defaults.metadataModel,
       structuredPrompt: prompts.structured, titlePrompt: prompts.title, slugPrompt: prompts.slug,
     });
-    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toEqual({ ...FIRST_LAUNCH, concurrencyLimit: 5 });
   });
 
   it("does not store a prompt that differs from its built-in only by line endings and trailing spaces", async () => {
     const { structured } = runtime.getDefaultPrompts();
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), structuredPrompt: `${structured.replaceAll("\n", "  \r\n")}\r\n` });
-    expect(await exists(join(home, "config.json"))).toBe(false);
+    expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
   });
 
   it("keeps the queue pane width the user dragged to, within what the window allows", async () => {
@@ -2040,7 +2050,7 @@ describe("settings, secrets and the window's own state", () => {
 
     expect(snapshot.settingsSummary?.hasGeminiApiKey).toBe(true);
     expect(JSON.stringify(snapshot), "only the presence is reported").not.toContain("AIza-secret-key");
-    expect(await exists(join(home, "config.json"))).toBe(false);
+    expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
     const secrets = await readFile(join(home, "api-keys.json"), "utf8");
     expect(secrets, "the key is not left lying in plain sight").not.toContain("AIza-secret-key");
     expect(JSON.parse(secrets).keys.gemini, "it is stored under its own id").toMatch(/^obf:/);
@@ -2436,7 +2446,7 @@ describe("the save a quit makes", () => {
 
     expect(await runtime.saveForQuit()).toEqual([]);
 
-    expect(await exists(configPath)).toBe(false);
+    expect(await savedSettings(), "the refused change stays unsaved").toEqual(FIRST_LAUNCH);
   });
 
   it("takes work again after a cancelled quit", async () => {

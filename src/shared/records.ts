@@ -88,6 +88,8 @@ export type RecordDetail = LogRecordDetail | ProviderCallRecordDetail;
 // The values the filters offer: every launch and every card that has records.
 export interface RecordSources {
   currentSession: string;
+  // The resolved display zone the records' times are shown in.
+  displayTimezone: string;
   sessions: string[];
   // A card still in the queue carries its file name.
   cards: { cardId: string; name: string | null }[];

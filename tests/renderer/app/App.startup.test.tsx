@@ -234,6 +234,8 @@ function rendererApi(): MumblerShellApi {
 function readySnapshot(): AppSnapshot {
   return {
     interfaceLanguage: { language: "en", locale: "en-US" },
+    systemLanguage: "en",
+    systemTheme: "light",
     appName: "Mumbler",
     appVersion: "test",
     platform: "darwin",

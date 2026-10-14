@@ -18,6 +18,7 @@ function validDraft(): SettingsDraft {
     backupDirectory: "",
     defaultBackupDirectory: "/backup",
     defaultTimezone: "Asia/Tokyo",
+    displayTimezone: "system",
     timestampPattern: "",
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,

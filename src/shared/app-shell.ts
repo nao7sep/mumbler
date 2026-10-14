@@ -1,4 +1,4 @@
-import type { InterfaceLanguage, LanguagePreference } from "./i18n/languages";
+import type { InterfaceLanguage, Language, LanguagePreference } from "./i18n/languages";
 import type { MessageKey } from "./i18n/catalogues";
 import type { Message } from "./i18n/translate";
 import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery } from "./records";
@@ -146,10 +146,14 @@ export interface MumblerSettings {
   // Files
   outputDirectory: string | null;
   backupDirectory: string | null;
-  // Import — the IANA zone a recording time carrying none is read in at
-  // import, or null until the user first chooses one. It interprets imported
-  // data, so once chosen it never follows the computer (timestamp-conventions).
+  // The interpretation zone (timestamp-conventions, Time zones): the zone a
+  // recording time carrying none is read in at import. The computer's zone is
+  // saved as a concrete zone at first launch (null only before that save) and
+  // stays when the computer's changes; System, if chosen, follows it.
   defaultTimezone: string | null;
+  // The display zone: the zone the app's own event times are shown in, System
+  // (following the computer) by default.
+  displayTimezone: string;
   timestampPattern: string;
   // Player
   skipIntervalSec: number;
@@ -346,9 +350,13 @@ export interface SettingsSummary {
   defaultOutputDirectory: string;
   backupDirectory: string | null;
   defaultBackupDirectory: string;
-  // Import — the zone imports read times in: the chosen one, or the computer's
-  // until one is chosen.
+  // Import — the saved interpretation zone (System or an IANA zone), and the
+  // zone it resolves to now.
   defaultTimezone: string;
+  importTimezone: string;
+  // The saved display zone (System or an IANA zone), and the zone it resolves to now.
+  displayTimezone: string;
+  resolvedDisplayTimezone: string;
   // Player
   skipIntervalSec: number;
   previewSnippetSeconds: number;
@@ -377,8 +385,10 @@ export interface SettingsDraft {
   backupDirectory: string;
   literalBackupDirectory?: string;
   defaultBackupDirectory: string;
-  // Import — the chosen zone, or blank until one is chosen.
+  // Import — the saved interpretation zone, System or an IANA zone.
   defaultTimezone: string;
+  // The display zone, System or an IANA zone.
+  displayTimezone: string;
   timestampPattern: string;
   // Player
   skipIntervalSec: number;
@@ -541,6 +551,10 @@ export interface AppSnapshot {
   // The language the main process and the renderer both speak, resolved from
   // the saved choice and the computer's language.
   interfaceLanguage: InterfaceLanguage;
+  // What each System choice resolves to now, which its entry shows
+  // (app-chrome-conventions, Theme; timestamp-conventions, Time zones).
+  systemLanguage: Language;
+  systemTheme: "light" | "dark";
   appName: string;
   appVersion: string;
   platform: Platform;

@@ -13,8 +13,10 @@ import { isAbsolute } from "node:path";
 import {
   DEFAULT_TIMESTAMP_PATTERN,
   formatUtcIsoCompact,
+  SYSTEM_TIMEZONE,
   getSystemTimezone,
   isValidTimezone,
+  resolveTimezone,
   parseUtcMs,
 } from "@shared/timestamps";
 import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
@@ -127,7 +129,8 @@ const SETTINGS_SETS = {
   uiFontFamily: text("UI font"),
   outputDirectory: path("Output directory"),
   backupDirectory: path("Recordings directory"),
-  defaultTimezone: (value) => (value === null || (isText(value) && isValidTimezone(value)) ? null : "Default timezone must be a valid IANA timezone."),
+  defaultTimezone: (value) => (value === null || zoneChoice(value) ? null : "Default timezone must be System or a valid IANA timezone."),
+  displayTimezone: (value) => (zoneChoice(value) ? null : "Display timezone must be System or a valid IANA timezone."),
   timestampPattern: timestampPatternIssue,
   skipIntervalSec: positive("Skip interval"),
   previewSnippetSeconds: positive("Preview snippet seconds"),
@@ -188,9 +191,13 @@ function equalsBuiltIn(key: keyof MumblerSettings, settings: MumblerSettings, bu
 }
 
 // What the file holds for these settings: every set that differs from its built-in.
-/** The zone an import reads recording times in: the chosen one, or the computer's until one is chosen. */
+/** The zone an import reads recording times in, resolved; the computer's before the first-launch save. */
 export function importTimezone(settings: Pick<MumblerSettings, "defaultTimezone">): string {
-  return settings.defaultTimezone ?? getSystemTimezone();
+  return resolveTimezone(settings.defaultTimezone ?? SYSTEM_TIMEZONE);
+}
+
+function zoneChoice(value: unknown): boolean {
+  return isText(value) && (value === SYSTEM_TIMEZONE || isValidTimezone(value));
 }
 
 function storedSets(settings: MumblerSettings): Partial<MumblerSettings> {
@@ -558,9 +565,10 @@ export function createDefaultSettings(): MumblerSettings {
     outputDirectory: null,
     backupDirectory: null,
     // Import
-    // Not chosen yet: imports read times in the computer's zone, which the
-    // Settings window and setup preselect; a chosen zone is always stored.
+    // Saved as the computer's concrete zone at first launch, which then stays
+    // when the computer's zone changes (timestamp-conventions, Time zones).
     defaultTimezone: null,
+    displayTimezone: SYSTEM_TIMEZONE,
     timestampPattern: DEFAULT_TIMESTAMP_PATTERN,
     // Player
     skipIntervalSec: 10,
@@ -768,7 +776,10 @@ export function summarizeSettings(
     backupDirectory: settings.backupDirectory,
     defaultBackupDirectory,
     // Import
-    defaultTimezone: importTimezone(settings),
+    defaultTimezone: settings.defaultTimezone ?? getSystemTimezone(),
+    importTimezone: importTimezone(settings),
+    displayTimezone: settings.displayTimezone,
+    resolvedDisplayTimezone: resolveTimezone(settings.displayTimezone),
     // Player
     skipIntervalSec: settings.skipIntervalSec,
     previewSnippetSeconds: settings.previewSnippetSeconds,
@@ -806,9 +817,9 @@ export function buildSettingsDraft(
     backupDirectory: settings.backupDirectory ?? "",
     literalBackupDirectory: settings.backupDirectory ?? "",
     defaultBackupDirectory,
-    // Import — blank until a zone is chosen; the window shows the computer's
-    // zone in its place, and an unchanged Save leaves it unchosen.
-    defaultTimezone: settings.defaultTimezone ?? "",
+    // Import
+    defaultTimezone: settings.defaultTimezone ?? getSystemTimezone(),
+    displayTimezone: settings.displayTimezone,
     timestampPattern: settings.timestampPattern,
     // Player
     skipIntervalSec: settings.skipIntervalSec,
@@ -859,7 +870,8 @@ export function applySettingsDraft(
     outputDirectory: directory(draft.outputDirectory, draft.literalOutputDirectory),
     backupDirectory: directory(draft.backupDirectory, draft.literalBackupDirectory),
     // Import
-    defaultTimezone: singleLine(draft.defaultTimezone) === "" ? null : singleLine(draft.defaultTimezone),
+    defaultTimezone: singleLine(draft.defaultTimezone),
+    displayTimezone: singleLine(draft.displayTimezone),
     timestampPattern: singleLine(draft.timestampPattern),
     // Player
     skipIntervalSec: draft.skipIntervalSec,

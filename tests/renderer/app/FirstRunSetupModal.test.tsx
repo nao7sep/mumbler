@@ -57,8 +57,9 @@ describe("ordered skippable setup", () => {
     expect(document.body.textContent, "Recordings sits beside the output folder").toContain("/fixtures/Documents/Recordings");
     await click("Skip");
     expect(document.body.textContent).toContain("Set Up Mumbler (4/4)");
-    expect(document.querySelector("select")?.value, "the computer's zone is where the choice starts").toBe("Asia/Tokyo");
-    expect([...document.querySelectorAll("option")].map((option) => option.value)).not.toContain("system");
+    expect(document.querySelector("select")?.value, "the zone first launch saved").toBe("Asia/Tokyo");
+    expect(document.querySelector("option")?.value, "System is offered first").toBe("system");
+    expect(document.querySelector("option")?.textContent).toBe(`System (${Intl.DateTimeFormat().resolvedOptions().timeZone})`);
     await click("Skip");
     expect(close).toHaveBeenCalledOnce();
     expect(dismissFirstRunSetup).toHaveBeenCalledOnce();

@@ -6,8 +6,8 @@ import {
   getSettingsNumberIssues,
   type NumericSettingField,
 } from "@shared/settings-validation";
-import { DEFAULT_TIMESTAMP_PATTERN, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
-import { LANGUAGE_NAMES, LANGUAGES, normalizeLanguagePreference } from "@shared/i18n/languages";
+import { DEFAULT_TIMESTAMP_PATTERN, SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
+import { LANGUAGE_NAMES, LANGUAGES, normalizeLanguagePreference, type Language } from "@shared/i18n/languages";
 import { useI18n } from "../i18n/I18nContext";
 import type { MessageKey } from "@shared/i18n/catalogues";
 import { message, type Message } from "@shared/i18n/translate";
@@ -93,6 +93,8 @@ export function SettingsModal({
   onClearApiKey,
   onRestoreDefaultPrompts,
   onSave,
+  systemLanguage = "en",
+  systemTheme = "light",
 }: {
   draft: SettingsDraft;
   isDirty: boolean;
@@ -109,6 +111,9 @@ export function SettingsModal({
   onClearApiKey: () => void;
   onRestoreDefaultPrompts: () => void;
   onSave: () => void;
+  // What each System entry resolves to now, which it shows beside "System".
+  systemLanguage?: Language;
+  systemTheme?: "light" | "dark";
 }): ReactElement {
   // The API key field is self-contained: its value is committed to the dedicated
   // secrets file the moment "Save key" is pressed, never bundled into the main
@@ -203,7 +208,7 @@ export function SettingsModal({
                     value={draft.language}
                     onChange={(event) => onChange({ ...draft, language: normalizeLanguagePreference(event.target.value) })}
                   >
-                    <option value="system">{t("settings.languageSystem")}</option>
+                    <option value="system">{t("settings.languageSystem", { language: LANGUAGE_NAMES[systemLanguage] })}</option>
                     {LANGUAGES.map((language) => (
                       <option key={language} value={language} lang={language}>
                         {LANGUAGE_NAMES[language]}
@@ -212,6 +217,19 @@ export function SettingsModal({
                   </select>
                 </div>
                 <p className="field-hint">{t("settings.languageHint")}</p>
+                <label className="field">
+                  <span>{t("settings.displayTimezone")}</span>
+                  <select
+                    value={draft.displayTimezone}
+                    onChange={(event) => onChange({ ...draft, displayTimezone: event.target.value })}
+                  >
+                    <option value={SYSTEM_TIMEZONE}>{t("settings.timezoneSystem", { zone: systemTimezone })}</option>
+                    {timezoneOptions.map((tz) => (
+                      <option key={tz} value={tz}>{tz}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="field-hint">{t("settings.displayTimezoneHint")}</p>
               </div>
             </section>
 
@@ -232,7 +250,9 @@ export function SettingsModal({
                           checked={draft.theme === value}
                           onChange={() => onChange({ ...draft, theme: value })}
                         />
-                        <span>{t(labelKey)}</span>
+                        <span>{value === "system"
+                          ? t("settings.themeSystem", { theme: t(systemTheme === "dark" ? "settings.themeDark" : "settings.themeLight") })
+                          : t(labelKey)}</span>
                       </label>
                     ))}
                   </div>
@@ -306,10 +326,10 @@ export function SettingsModal({
                 <label className="field">
                   <span>{t("settings.defaultTimezone")}</span>
                   <select
-                    // Until a zone is chosen, the computer's is where the choice starts.
-                    value={draft.defaultTimezone || systemTimezone}
+                    value={draft.defaultTimezone}
                     onChange={(event) => onChange({ ...draft, defaultTimezone: event.target.value })}
                   >
+                    <option value={SYSTEM_TIMEZONE}>{t("settings.timezoneSystem", { zone: systemTimezone })}</option>
                     {timezoneOptions.map((tz) => (
                       <option key={tz} value={tz}>{tz}</option>
                     ))}

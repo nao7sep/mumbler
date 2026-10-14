@@ -46,11 +46,14 @@ import { ToolManager } from "./binaries/manager";
 import { createDefaultDependencies, createDependenciesStore, type DependenciesValue } from "./binaries/store";
 import {
   formatUtcForDisplay,
+  SYSTEM_TIMEZONE,
   formatUtcMarker,
+  getSystemTimezone,
   isValidTimezone,
   parseTimestampFromFilename,
   recomputeLocalFromUtc,
   recomputeUtcFromLocal,
+  resolveTimezone,
 } from "@shared/timestamps";
 import { abandonBackupStore, closeBackupStore, setBackupStoreSession, setBackupStoreWarn } from "./backupStore";
 import { NewerFormatError } from "./format-versions";
@@ -83,7 +86,7 @@ import {
 import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
 import { type AppLogger, createLogger, serializeError, type SessionLogger } from "./logger";
 import { OperationError } from "./operation-error";
-import { applyThemePreference } from "./theme";
+import { applyThemePreference, currentSystemTheme } from "./theme";
 import { alignAppKit, loadInterfaceCatalogue, mainTranslator, resolveInterfaceLanguage } from "../i18n";
 import { normalizeLanguagePreference, type InterfaceLanguage, type LanguagePreference } from "@shared/i18n/languages";
 import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery } from "@shared/records";
@@ -378,7 +381,19 @@ export class ApplicationRuntime {
           message: message("diagnostic.settingsUnusableBody", { items: [...settingsLoad.unusable] }),
         };
       }
-      const settings = settingsLoad.value;
+      let settings = settingsLoad.value;
+      // The interpretation zone is the computer's at first launch, saved as that
+      // concrete zone so it stays when the computer's zone changes
+      // (timestamp-conventions, Time zones). A saved value this build cannot
+      // use stays in the file instead, under its launch notice.
+      if (settings.defaultTimezone === null && !settingsLoad.unusable.includes("defaultTimezone")) {
+        settings = { ...settings, defaultTimezone: getSystemTimezone() };
+        await settingsStore.save(settings).catch((error: unknown) => logger.warn(
+          "settings.first-zone", "The computer's time zone could not be saved as the import zone; it is used this session.", {
+            error: serializeError(error),
+          },
+        ));
+      }
       await loadInterfaceCatalogue(settings.language);
       // Resolve whether a Gemini key is available (env-first, then the dedicated
       // secrets file) once, so the snapshot can report presence without async I/O.
@@ -697,6 +712,7 @@ export class ApplicationRuntime {
     const names = new Map((this.runtime.state?.cards ?? []).map((card) => [card.id, card.originalFilename]));
     return {
       currentSession: this.runtime.logger.session,
+      displayTimezone: this.runtime.settings === null ? getSystemTimezone() : resolveTimezone(this.runtime.settings.displayTimezone),
       sessions,
       cards: cardIds.map((cardId) => ({ cardId, name: names.get(cardId) ?? null })),
     };
@@ -708,6 +724,8 @@ export class ApplicationRuntime {
     return {
       firstRun: this.firstRun,
       interfaceLanguage: this.interfaceLanguage(),
+      systemLanguage: resolveInterfaceLanguage("system").language,
+      systemTheme: currentSystemTheme(),
       appName: app.getName(),
       appVersion: __APP_VERSION__,
       platform: process.platform,
@@ -1596,7 +1614,12 @@ export class ApplicationRuntime {
 
   private followSettingsCommit(commit: SettingsCommit): void {
     applyThemePreference(this.themePreference());
+    const languageChanged = this.interfaceLanguage().language !== commit.previousLanguage;
     this.followLanguageChange(commit.previous.language, commit.previousLanguage);
+    // A new display zone re-renders the windows' times as a new language does.
+    if (!languageChanged && commit.previous.displayTimezone !== commit.next.displayTimezone) {
+      this.onLanguageChangedCallback?.();
+    }
   }
 
   private async persistSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
@@ -1882,7 +1905,7 @@ export class ApplicationRuntime {
   saveSetupTimezone(timezone: string): Promise<AppSnapshot> {
     return this.runStateChange(async () => {
       this.ensureReady();
-      if (!isValidTimezone(timezone)) throw new OperationError("Choose a valid time zone.");
+      if (timezone !== SYSTEM_TIMEZONE && !isValidTimezone(timezone)) throw new OperationError("Choose a valid time zone.");
       await this.mutateSettings((current) => ({ ...current, defaultTimezone: timezone }));
       return this.getSnapshot();
     });

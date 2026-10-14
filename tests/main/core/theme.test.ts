@@ -21,7 +21,7 @@ vi.mock("electron", () => ({
   nativeTheme: electron.nativeTheme,
 }));
 
-import { applyThemePreference, followOsThemeChanges, windowBackground } from "@main/core/theme";
+import { applyThemePreference, currentSystemTheme, followOsThemeChanges, windowBackground } from "@main/core/theme";
 
 beforeEach(() => {
   electron.windows.splice(0);
@@ -58,5 +58,25 @@ describe("theme", () => {
     const bg = (block: string) => block.match(/--bg:\s*(#[0-9a-f]{6});/i)?.[1]?.toLowerCase();
     expect(windowBackground(false)).toBe(bg(light));
     expect(windowBackground(true)).toBe(bg(dark));
+  });
+});
+
+// app-chrome-conventions, Theme: the System entry names what System resolves to.
+describe("what System resolves to", () => {
+  it("is read while System applies, and kept while Light or Dark overrides what Electron reports", () => {
+    electron.nativeTheme.shouldUseDarkColors = true;
+    applyThemePreference("light");
+    expect(currentSystemTheme(), "the OS was dark before Light applied").toBe("dark");
+
+    electron.nativeTheme.themeSource = "light";
+    electron.nativeTheme.shouldUseDarkColors = false;
+    followOsThemeChanges();
+    electron.listeners.updated!();
+    expect(currentSystemTheme(), "a forced Light says nothing of the OS").toBe("dark");
+
+    electron.nativeTheme.themeSource = "system";
+    electron.nativeTheme.shouldUseDarkColors = false;
+    electron.listeners.updated!();
+    expect(currentSystemTheme(), "an OS change under System is followed").toBe("light");
   });
 });

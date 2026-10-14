@@ -1697,6 +1697,8 @@ function LoadedShell({
           onClearApiKey={() => void settingsModal.handleClearGeminiApiKey()}
           onRestoreDefaultPrompts={() => void settingsModal.handleRestoreDefaultPrompts()}
           onSave={() => void settingsModal.handleSaveSettings()}
+          systemLanguage={snapshot?.systemLanguage}
+          systemTheme={snapshot?.systemTheme}
         />
       ) : null}
 
@@ -1710,7 +1712,7 @@ function LoadedShell({
       {importFlow.pendingReviewDrafts.length > 0 ? (
         <TimestampReviewModal
           items={importFlow.pendingReviewDrafts}
-          defaultTimezone={snapshot?.settingsSummary?.defaultTimezone}
+          defaultTimezone={snapshot?.settingsSummary?.importTimezone}
           onChange={(updatedItem) =>
             importFlow.setPendingReviewDrafts((current) =>
               current.map((item) => (item.id === updatedItem.id ? updatedItem : item)),

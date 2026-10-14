@@ -166,7 +166,9 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
     max: RECORDS_LIST_WIDTH.max,
   });
 
-  const timeFormat = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "medium" }), [locale]);
+  // Shown in the display zone (timestamp-conventions, Time zones).
+  const timeZone = sources?.displayTimezone;
+  const timeFormat = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "medium", timeZone }), [locale, timeZone]);
 
   useEffect(() => {
     document.title = t("records.title");
@@ -194,6 +196,9 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
       cancelled = true;
     };
   }, [sourceReads]);
+
+  // A display zone saved in Settings arrives with the interface-change notice.
+  useEffect(() => window.mumbler.onInterfaceLanguageChanged(() => setSourceReads((count) => count + 1)), []);
 
   // A page applies only while the filters it was read for are still the
   // newest ones asked for.
@@ -507,7 +512,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
       />
       <section className="panel records-detail-pane" aria-busy={detail.status === "loading"}>
         {detail.status === "ready" ? (
-          <RecordDetailView record={detail.record} cards={sources?.cards ?? []} launchLabel={launchLabel} />
+          <RecordDetailView record={detail.record} cards={sources?.cards ?? []} launchLabel={launchLabel} timeZone={timeZone} />
         ) : (
           <p className={`records-note${detail.status === "failed" ? " inline-error" : ""}`}>
             {detail.status === "failed" ? t("records.detailFailed") : detail.status === "none" ? t("records.noSelection") : null}
@@ -555,10 +560,12 @@ function RecordDetailView({
   record,
   cards,
   launchLabel,
+  timeZone,
 }: {
   record: RecordDetail;
   cards: RecordSources["cards"];
   launchLabel: (session: string) => string;
+  timeZone: string | undefined;
 }): ReactElement {
   const { t, seconds, number, locale } = useI18n();
   const timeFormat = useMemo(
@@ -571,8 +578,9 @@ function RecordDetailView({
         minute: "2-digit",
         second: "2-digit",
         fractionalSecondDigits: 3,
+        timeZone,
       }),
-    [locale],
+    [locale, timeZone],
   );
   const time = (value: string): string => timeFormat.format(new Date(value));
   const cardName = record.cardId === null ? null : (cards.find((card) => card.cardId === record.cardId)?.name ?? null);

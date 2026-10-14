@@ -35,6 +35,7 @@ function draft(): SettingsDraft {
     backupDirectory: "",
     defaultBackupDirectory: "/backup",
     defaultTimezone: "Asia/Tokyo",
+    displayTimezone: "system",
     timestampPattern: "",
     skipIntervalSec: 0,
     previewSnippetSeconds: 10,
@@ -227,7 +228,11 @@ describe("SettingsModal theme", () => {
 });
 
 describe("SettingsModal language and time zone", () => {
-  async function renderWith(onChange: (next: SettingsDraft) => void, overrides: Partial<SettingsDraft> = {}) {
+  async function renderWith(
+    onChange: (next: SettingsDraft) => void,
+    overrides: Partial<SettingsDraft> = {},
+    resolved: { systemLanguage?: "ja"; systemTheme?: "dark" } = {},
+  ) {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -248,6 +253,7 @@ describe("SettingsModal language and time zone", () => {
         onClearApiKey: vi.fn(),
         onRestoreDefaultPrompts: vi.fn(),
         onSave: vi.fn(),
+        ...resolved,
       }));
     });
   }
@@ -269,14 +275,26 @@ describe("SettingsModal language and time zone", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ language: "ja" }));
   });
 
-  // timestamp-conventions: the import zone interprets imported data, so it
-  // has no System entry; until one is chosen the computer's zone is shown.
-  it("offers no System entry and shows the computer's zone until one is chosen", async () => {
-    await renderWith(vi.fn(), { defaultTimezone: "" });
-    const select = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
-      .find((candidate) => Array.from(candidate.options).some((option) => option.value === "UTC"))!;
-    expect(Array.from(select.options).map((option) => option.value)).not.toContain("system");
-    expect(select.value).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  // timestamp-conventions and app-chrome-conventions: every System entry
+  // leads its list and shows what it resolves to now.
+  it("lists System first in both zone lists, naming the computer's zone", async () => {
+    await renderWith(vi.fn(), { defaultTimezone: "Asia/Tokyo", displayTimezone: "system" });
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const selects = Array.from(document.querySelectorAll<HTMLSelectElement>("select"))
+      .filter((candidate) => Array.from(candidate.options).some((option) => option.value === "UTC"));
+    expect(selects).toHaveLength(2);
+    for (const select of selects) {
+      expect(select.options[0]?.value).toBe("system");
+      expect(select.options[0]?.textContent).toBe(`System (${zone})`);
+    }
+    expect(selects.map((select) => select.value)).toEqual(["system", "Asia/Tokyo"]);
+  });
+
+  it("names the language and theme System resolves to", async () => {
+    await renderWith(vi.fn(), {}, { systemLanguage: "ja", systemTheme: "dark" });
+    const language = Array.from(document.querySelectorAll<HTMLOptionElement>("option")).find((option) => option.value === "system" && option.textContent?.includes("日本語"));
+    expect(language?.textContent).toBe("System (日本語)");
+    expect(document.body.textContent).toContain("System (Dark)");
   });
 });
 

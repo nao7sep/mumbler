@@ -41,6 +41,7 @@ const readRecordSources = vi.fn<MumblerShellApi["readRecordSources"]>();
 const reportRendererDiagnostic = vi.fn<MumblerShellApi["reportRendererDiagnostic"]>();
 const saveRecordsListWidth = vi.fn<MumblerShellApi["saveRecordsListWidth"]>();
 let recordsChanged: (() => void) | null = null;
+const interfaceListeners = new Set<() => void>();
 const onRecordsChanged = vi.fn<MumblerShellApi["onRecordsChanged"]>((listener) => {
   recordsChanged = listener;
   return () => {
@@ -73,7 +74,7 @@ beforeEach(() => {
   readRecordDetail.mockResolvedValue(callDetail);
   readRecordSources.mockReset();
   readRecordSources.mockResolvedValue({
-    currentSession: SESSION, sessions: [SESSION, "2026-10-01T08:00:00.000Z"], cards: [{ cardId: "card-1", name: "take.wav" }],
+    currentSession: SESSION, displayTimezone: "UTC", sessions: [SESSION, "2026-10-01T08:00:00.000Z"], cards: [{ cardId: "card-1", name: "take.wav" }],
   });
   reportRendererDiagnostic.mockReset();
   reportRendererDiagnostic.mockResolvedValue();
@@ -101,6 +102,7 @@ beforeEach(() => {
     configurable: true,
     value: {
       readRecordsPage, readRecordDetail, readRecordSources, reportRendererDiagnostic, saveRecordsListWidth, onRecordsChanged,
+      onInterfaceLanguageChanged: (listener: () => void) => { interfaceListeners.add(listener); return () => interfaceListeners.delete(listener); },
     } satisfies Partial<MumblerShellApi>,
   });
 });
@@ -165,6 +167,18 @@ describe("RecordsWindow", () => {
     expect(document.body.textContent).toContain("Select a record to see everything it holds.");
     expect(options()[0]!.tabIndex).toBe(0);
     expect(options()[1]!.tabIndex).toBe(-1);
+  });
+
+  // timestamp-conventions: the app's own event times show in the display zone.
+  it("shows record times in the display zone, and reads it again when Settings change it", async () => {
+    readRecordSources.mockResolvedValue({ currentSession: SESSION, displayTimezone: "Asia/Tokyo", sessions: [SESSION], cards: [] });
+    await mount();
+    const shown = new Intl.DateTimeFormat("en", { dateStyle: "short", timeStyle: "medium", timeZone: "Asia/Tokyo" }).format(new Date(call.time));
+    expect(options()[0]!.textContent).toContain(shown);
+
+    const reads = readRecordSources.mock.calls.length;
+    await act(async () => { for (const listener of interfaceListeners) listener(); });
+    expect(readRecordSources.mock.calls.length).toBe(reads + 1);
   });
 
   it("shows everything a selected provider call holds", async () => {

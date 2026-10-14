@@ -554,19 +554,15 @@ describe("settings store", () => {
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, skipIntervalSec: 20 });
   });
 
-  // timestamp-conventions: a zone that interprets imported data has no System
-  // entry, since following the computer would silently re-date imports, so an
-  // earlier build's "system" is a value this build cannot use.
-  it("cannot use a System import zone, and keeps a chosen one", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, defaultTimezone: "system" }));
-    const system = await createSettingsStore(settingsPath(), dir, () => undefined).load();
-    expect(system.unusable).toEqual(["defaultTimezone"]);
-    expect(system.value.defaultTimezone).toBeNull();
+  it("keeps a System or chosen zone for both zone settings, and cannot use anything else", async () => {
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, defaultTimezone: "system", displayTimezone: "Asia/Tokyo" }));
+    const kept = await createSettingsStore(settingsPath(), dir, () => undefined).load();
+    expect(kept.unusable).toEqual([]);
+    expect(kept.value).toMatchObject({ defaultTimezone: "system", displayTimezone: "Asia/Tokyo" });
 
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, defaultTimezone: "Asia/Tokyo" }));
-    const chosen = await createSettingsStore(settingsPath(), dir, () => undefined).load();
-    expect(chosen.unusable).toEqual([]);
-    expect(chosen.value.defaultTimezone).toBe("Asia/Tokyo");
+    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, defaultTimezone: "Mars/Olympus", displayTimezone: "Moon/Tranquility" }));
+    const unusable = await createSettingsStore(settingsPath(), dir, () => undefined).load();
+    expect(unusable.unusable).toEqual(["defaultTimezone", "displayTimezone"]);
   });
 
   it("uses the built-in for a set it cannot use, names it, keeps it through other saves and replaces it at a Settings save", async () => {
