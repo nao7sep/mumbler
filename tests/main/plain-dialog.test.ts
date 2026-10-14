@@ -1,12 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
 
+const windows = vi.hoisted(() => ({
+  loads: true as boolean,
+  last: null as null | { calls: string[]; ready: () => void; scripts: string[] },
+}));
+
 vi.mock("electron", () => ({
   BrowserWindow: class {
-    webContents = { on: vi.fn(), once: vi.fn(), executeJavaScript: vi.fn() };
+    calls: string[] = [];
+    scripts: string[] = [];
+    ready: () => void = () => undefined;
+    webContents = {
+      on: vi.fn(),
+      once: (event: string, handler: () => void) => { if (event === "dom-ready") this.ready = handler; },
+      executeJavaScript: (script: string) => { this.scripts.push(script); return Promise.resolve(240); },
+    };
+    constructor() { windows.last = this; }
     on(): void {}
     isDestroyed(): boolean { return false; }
     close(): void {}
-    loadURL(): Promise<void> { return Promise.reject(new Error("no page")); }
+    show(): void { this.calls.push("show"); }
+    showInactive(): void { this.calls.push("showInactive"); }
+    setContentSize(): void {}
+    loadURL(): Promise<void> { return windows.loads ? Promise.resolve() : Promise.reject(new Error("no page")); }
   },
   screen: { getPrimaryDisplay: () => ({ workArea: { height: 900 } }) },
   nativeTheme: { shouldUseDarkColors: false },
@@ -48,6 +64,22 @@ describe("plain dialog", () => {
   });
 
   it("settles with its dismiss choice when its page cannot load", async () => {
-    await expect(showPlainDialog(dialog).choice).resolves.toBe("cancel");
+    windows.loads = false;
+    try {
+      await expect(showPlainDialog(dialog).choice).resolves.toBe("cancel");
+    } finally {
+      windows.loads = true;
+    }
+  });
+
+  // window-conventions: a question the user's own action raised opens as the
+  // key window, Electron's show() activating the app, with its default choice focused.
+  it("opens activated, as the key window, with its default choice focused", async () => {
+    showPlainDialog(dialog);
+    const window = windows.last!;
+    window.ready();
+    await vi.waitFor(() => expect(window.scripts).toHaveLength(2));
+    expect(window.calls).toEqual(["show"]);
+    expect(window.scripts[1]).toContain('"choice-retry"');
   });
 });
