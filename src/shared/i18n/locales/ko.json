@@ -470,7 +470,7 @@
   "about.version": "버전 {version}",
   "about.description": "음성 녹음을 AI로 전사하고, 전사 내용을 구조화하며, 게시할 준비가 된 제목과 슬러그를 생성하세요.",
   "about.reportIssue": "문제 보고",
-  "about.copyright": "© {year} {author} — GNU GPL v3 이상",
+  "about.copyright": "© {year} {author} · GNU GPL v3 이상",
   "tools.stateNotInstalled": "설치되지 않음",
   "tools.stateUpdateAvailable": "업데이트 있음",
   "tools.stateUpToDate": "최신 상태",

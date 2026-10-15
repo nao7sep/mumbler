@@ -470,7 +470,7 @@
   "about.version": "版本 {version}",
   "about.description": "用 AI 转写语音录音，结构化转写内容，并生成可直接发布的标题和别名。",
   "about.reportIssue": "报告问题",
-  "about.copyright": "© {year} {author} — GNU GPL v3 或更高版本",
+  "about.copyright": "© {year} {author} · GNU GPL v3 或更高版本",
   "tools.stateNotInstalled": "未安装",
   "tools.stateUpdateAvailable": "有可用更新",
   "tools.stateUpToDate": "已是最新",

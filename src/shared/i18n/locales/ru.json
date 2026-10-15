@@ -488,7 +488,7 @@
   "about.version": "Версия {version}",
   "about.description": "Расшифровывайте голосовые записи с помощью ИИ, структурируйте расшифровку и создавайте заголовки и слаги, готовые к публикации.",
   "about.reportIssue": "Сообщить о проблеме",
-  "about.copyright": "© {year} {author} — GNU GPL v3 или новее",
+  "about.copyright": "© {year} {author} · GNU GPL v3 или новее",
   "tools.stateNotInstalled": "Не установлен",
   "tools.stateUpdateAvailable": "Есть обновление",
   "tools.stateUpToDate": "Актуален",

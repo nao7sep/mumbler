@@ -466,7 +466,7 @@
   "about.version": "Version {version}",
   "about.description": "Transcribe voice recordings with AI, structure the transcript, and generate titles and slugs ready to publish.",
   "about.reportIssue": "Report Issue",
-  "about.copyright": "© {year} {author} — GNU GPL v3 or later",
+  "about.copyright": "© {year} {author} · GNU GPL v3 or later",
   "tools.stateNotInstalled": "Not installed",
   "tools.stateUpdateAvailable": "Update available",
   "tools.stateUpToDate": "Up to date",

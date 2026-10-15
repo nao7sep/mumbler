@@ -482,7 +482,7 @@
   "about.version": "Versión {version}",
   "about.description": "Transcribe grabaciones de voz con IA, estructura la transcripción y genera títulos y slugs listos para publicar.",
   "about.reportIssue": "Informar un problema",
-  "about.copyright": "© {year} {author} — GNU GPL v3 o posterior",
+  "about.copyright": "© {year} {author} · GNU GPL v3 o posterior",
   "tools.stateNotInstalled": "No instalada",
   "tools.stateUpdateAvailable": "Actualización disponible",
   "tools.stateUpToDate": "Actualizada",

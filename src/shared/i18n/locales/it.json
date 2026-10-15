@@ -482,7 +482,7 @@
   "about.version": "Versione {version}",
   "about.description": "Trascrivi le registrazioni vocali con l’IA, struttura la trascrizione e genera titoli e slug pronti per la pubblicazione.",
   "about.reportIssue": "Segnala un problema",
-  "about.copyright": "© {year} {author} — GNU GPL v3 o successiva",
+  "about.copyright": "© {year} {author} · GNU GPL v3 o successiva",
   "tools.stateNotInstalled": "Non installato",
   "tools.stateUpdateAvailable": "Aggiornamento disponibile",
   "tools.stateUpToDate": "Aggiornato",

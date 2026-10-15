@@ -82,3 +82,17 @@ describe("AboutModal external results", () => {
     expect(reportRendererDiagnostic).toHaveBeenCalledOnce();
   });
 });
+
+describe("AboutModal copyright", () => {
+  it("names the licence once, on the fleet's one copyright line", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(React.createElement(AboutModal, { version: "0.1.0", onClose: vi.fn() })));
+
+    const meta = document.querySelector(".about-meta");
+    expect(meta?.textContent).toBe("© 2026 Yoshinao Inoguchi · GNU GPL v3 or later");
+    expect(meta?.querySelector("br")).toBeNull();
+    expect(document.body.textContent?.match(/GPL/g)).toHaveLength(1);
+  });
+});

@@ -476,7 +476,7 @@
   "about.version": "Version {version}",
   "about.description": "Transkribieren Sie Sprachaufnahmen mit KI, strukturieren Sie die Transkription, und erzeugen Sie Titel und Slugs, die veröffentlichungsbereit sind.",
   "about.reportIssue": "Problem melden",
-  "about.copyright": "© {year} {author} – GNU GPL v3 oder später",
+  "about.copyright": "© {year} {author} · GNU GPL v3 oder später",
   "tools.stateNotInstalled": "Nicht installiert",
   "tools.stateUpdateAvailable": "Update verfügbar",
   "tools.stateUpToDate": "Aktuell",
