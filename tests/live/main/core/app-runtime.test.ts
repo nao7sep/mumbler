@@ -124,10 +124,15 @@ async function importAudio(runtime: Runtime, home: string, relatives: string[]):
     await copyFile(corpusFile(relative), copy);
     copies.push(copy);
   }
-  return importFiles(runtime, copies);
+  return importFiles(runtime, home, copies);
 }
 
-async function importFiles(runtime: Runtime, files: string[]): Promise<MumblerCard[]> {
+// Confirming an import files the recording in the Recordings folder by default,
+// so the home gets one first, as first-run setup would choose it.
+async function importFiles(runtime: Runtime, home: string, files: string[]): Promise<MumblerCard[]> {
+  const recordings = join(home, "filed-recordings");
+  await mkdir(recordings, { recursive: true });
+  await runtime.saveSetupRecordingsDirectory(recordings);
   const imported = await runtime.importDroppedPaths(files);
   expect(imported.failedImports).toEqual([]);
   const pending = runtime.getSnapshot().state!.pendingImports;
@@ -302,7 +307,7 @@ describe("the live application runtime", () => {
       ).toBeLessThanOrEqual(INLINE_AUDIO_LIMIT_BYTES);
 
       await withRuntime(home, async (runtime) => {
-        const [imported] = await importFiles(runtime, [recording]);
+        const [imported] = await importFiles(runtime, home, [recording]);
         expect(Math.abs(imported!.durationSec! - copies * clipSec), "the recording is the repeated speech").toBeLessThan(0.5);
         expect((await stat(imported!.sourceFilePath)).size, "the imported file the pipeline sends").toBeGreaterThan(
           INLINE_AUDIO_LIMIT_BYTES,
