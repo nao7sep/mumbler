@@ -323,34 +323,54 @@ describe("settling a recording's time", () => {
     expect(player.getAttribute("aria-label")).toContain("Listen to");
   });
 
-  it("offers every time found, in the item's zone, and chooses one", async () => {
+  it("offers each distinct time once, in the item's zone, naming every source that found it", async () => {
     await mountModal([makeItem({
       localTimestampText: "2026-10-14 15:30:12",
       timezone: "Asia/Tokyo",
       timeCandidates: [
         { source: "file-name", utcMs: null, localText: "2026-10-14 15:30:12" },
-        { source: "embedded", utcMs: Date.UTC(2026, 9, 14, 6, 31, 0), localText: null },
-        { source: "file-modified", utcMs: Date.UTC(2026, 9, 15, 1, 0, 0), localText: null },
+        { source: "embedded", utcMs: Date.UTC(2026, 9, 14, 6, 30, 12), localText: null },
+        { source: "file-created", utcMs: Date.UTC(2026, 9, 15, 1, 15, 0), localText: null },
+        { source: "file-modified", utcMs: Date.UTC(2026, 9, 15, 1, 15, 0), localText: null },
       ],
     })]);
 
     const choices = [...document.querySelectorAll<HTMLButtonElement>(".review-row__times button")];
     expect(choices.map((choice) => choice.textContent)).toEqual([
-      "File name: 2026-10-14 15:30:12",
-      "Inside the file: 2026-10-14 15:31:00",
-      "File modified: 2026-10-15 10:00:00",
+      "Name, In file: 2026-10-14 15:30:12",
+      "Created, Modified: 2026-10-15 10:15:00",
     ]);
-    expect(choices.map((choice) => choice.getAttribute("aria-pressed"))).toEqual(["true", "false", "false"]);
+    expect(choices.map((choice) => choice.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+    expect(document.querySelector(".review-row__times")?.getAttribute("aria-label")).toBe("Times found");
+    expect(document.querySelector(".review-row__times")?.textContent, "no visible lead label").not.toContain("Times found");
 
     await act(async () => choices[1]!.click());
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
-      localTimestampText: "2026-10-14 15:31:00",
-      utcTimestampText: "2026-10-14 06:31:00",
+      localTimestampText: "2026-10-15 10:15:00",
+      utcTimestampText: "2026-10-15 01:15:00",
     }));
   });
 
-  it("offers no choices for a recording with no time found", async () => {
-    await mountModal([makeItem({ timeCandidates: [] })]);
-    expect(document.querySelector(".review-row__times")).toBeNull();
+  it("gives disagreeing sources a button each", async () => {
+    await mountModal([makeItem({
+      timezone: "Asia/Tokyo",
+      timeCandidates: [
+        { source: "file-name", utcMs: null, localText: "2026-10-14 15:30:12" },
+        { source: "embedded", utcMs: null, localText: "2026-10-14 15:34:00" },
+      ],
+    })]);
+    expect([...document.querySelectorAll(".review-row__times button")].map((choice) => choice.textContent)).toEqual([
+      "Name: 2026-10-14 15:30:12",
+      "In file: 2026-10-14 15:34:00",
+    ]);
   });
+
+  it("says when no time was found, and shows no error for the empty time", async () => {
+    await mountModal([makeItem({ timeCandidates: [], localTimestampText: "", utcTimestampText: "" })]);
+    expect(document.querySelector(".review-row__times")).toBeNull();
+    expect(document.body.textContent).toContain("No time found in this recording. Listen to it and enter one.");
+    expect(document.querySelector(".row-error")).toBeNull();
+    expect(button("Confirm").disabled, "an empty time still blocks Confirm").toBe(true);
+  });
+
 });

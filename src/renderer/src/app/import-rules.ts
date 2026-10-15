@@ -10,6 +10,30 @@ export function candidateLocalText(item: Pick<PendingImportReviewItem, "timezone
   return local.error === null ? local.localTimestampText : null;
 }
 
+export interface FoundTime {
+  /** The time as the item's zone shows it. */
+  localText: string;
+  /** Where it was found, each once, in the order the review lists them. */
+  sources: RecordingTimeCandidate["source"][];
+  /** The candidate that choosing this time applies. */
+  candidate: RecordingTimeCandidate;
+}
+
+/** The found times as the review offers them: one per distinct time in the
+ * item's zone, naming every source that found it, so agreeing sources share a
+ * button and only disagreeing ones add another. */
+export function foundTimes(item: Pick<PendingImportReviewItem, "timezone" | "timeCandidates">): FoundTime[] {
+  const times = new Map<string, FoundTime>();
+  for (const candidate of item.timeCandidates) {
+    const localText = candidateLocalText(item, candidate);
+    if (localText === null) continue;
+    const found = times.get(localText);
+    if (found === undefined) times.set(localText, { localText, sources: [candidate.source], candidate });
+    else if (!found.sources.includes(candidate.source)) found.sources.push(candidate.source);
+  }
+  return [...times.values()];
+}
+
 /** The review item with a found time chosen: an exact time keeps its instant
  * and shows it in the item's zone; a local one is read in that zone. */
 export function chooseRecordingTime(item: PendingImportReviewItem, candidate: RecordingTimeCandidate): PendingImportReviewItem {

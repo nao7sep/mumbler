@@ -14,7 +14,7 @@ import {
 
 import type { MessageKey } from "@shared/i18n/catalogues";
 
-import { candidateLocalText, chooseRecordingTime } from "./import-rules";
+import { chooseRecordingTime, foundTimes } from "./import-rules";
 import { ModalShell } from "./modal/ModalShell";
 import { ShortenedValue } from "./ShortenedValue";
 import { useI18n } from "../i18n/I18nContext";
@@ -136,7 +136,11 @@ export function TimestampReviewModal({
               : "timestamp.invalidZone";
             const localError = getLocalTimestampError(item.localTimestampText);
             const utcError = getUtcTimestampError(item.utcTimestampText);
-            const rowError = timezoneError ?? localError ?? utcError;
+            // An empty time is something still to do, not a mistake: it keeps
+            // Confirm off without a red error until text that does not parse.
+            const untouched = item.localTimestampText.trim() === "" && item.utcTimestampText.trim() === "";
+            const rowError = timezoneError ?? (untouched ? null : localError ?? utcError);
+            const times = foundTimes(item);
 
             return (
               <div key={item.id} className="review-row">
@@ -151,27 +155,29 @@ export function TimestampReviewModal({
                   src={`mumbler-asset://media/${encodeURIComponent(item.id)}`}
                   aria-label={t("review.listen", { file: item.originalFilename })}
                 />
-                {item.timeCandidates.length > 0 ? (
+                {/* Each distinct time once, naming every source that found it; the
+                    group's own name is for screen readers, the buttons say the rest. */}
+                {times.length > 0 ? (
                   <div className="review-row__times" role="group" aria-label={t("review.timesFound")}>
-                    <span className="field-hint">{t("review.timesFound")}</span>
-                    {item.timeCandidates.map((candidate, index) => {
-                      const localText = candidateLocalText(item, candidate);
-                      if (localText === null) return null;
-                      return (
-                        <button
-                          key={index}
-                          type="button"
-                          className="button button--ghost button--compact"
-                          disabled={isSubmitting}
-                          aria-pressed={item.localTimestampText === localText}
-                          onClick={() => onChange(chooseRecordingTime(item, candidate))}
-                        >
-                          {t("review.timeChoice", { source: t(TIME_SOURCE_LABELS[candidate.source]), time: localText })}
-                        </button>
-                      );
-                    })}
+                    {times.map((found) => (
+                      <button
+                        key={found.localText}
+                        type="button"
+                        className="button button--ghost button--compact"
+                        disabled={isSubmitting}
+                        aria-pressed={item.localTimestampText === found.localText}
+                        onClick={() => onChange(chooseRecordingTime(item, found.candidate))}
+                      >
+                        {t("review.timeChoice", {
+                          source: i18n.list(found.sources.map((source) => t(TIME_SOURCE_LABELS[source]))),
+                          time: found.localText,
+                        })}
+                      </button>
+                    ))}
                   </div>
-                ) : null}
+                ) : (
+                  <p className="field-hint">{t("review.noTimesFound")}</p>
+                )}
                 <div className="review-row__fields">
                   <label className="field">
                     <span>{t("review.localTimestamp")}</span>

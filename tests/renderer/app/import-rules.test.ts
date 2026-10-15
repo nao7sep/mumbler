@@ -7,6 +7,7 @@ import {
   parseDroppedPaths,
   reconcilePendingReviewDrafts,
   chooseRecordingTime,
+  foundTimes,
 } from "@renderer/app/import-rules";
 import { message } from "@shared/i18n/translate";
 
@@ -194,5 +195,23 @@ describe("choosing a found recording time", () => {
   it("reads a local time in the item's zone", () => {
     const chosen = chooseRecordingTime(pending, { source: "file-name", utcMs: null, localText: "2026-10-14 15:30:12" });
     expect(chosen).toMatchObject({ localTimestampText: "2026-10-14 15:30:12", utcTimestampText: "2026-10-14 06:30:12" });
+  });
+});
+
+describe("found times as the review offers them", () => {
+  it("merges an exact and a local time that name the same moment in the item's zone, keeping the first to choose", () => {
+    const exact = { source: "embedded" as const, utcMs: Date.UTC(2026, 9, 14, 6, 30, 12), localText: null };
+    const times = foundTimes({ timezone: "Asia/Tokyo", timeCandidates: [
+      { source: "file-name", utcMs: null, localText: "2026-10-14 15:30:12" },
+      exact,
+      { ...exact },
+    ] });
+    expect(times).toEqual([{ localText: "2026-10-14 15:30:12", sources: ["file-name", "embedded"], candidate: { source: "file-name", utcMs: null, localText: "2026-10-14 15:30:12" } }]);
+  });
+
+  it("splits the same exact time that two zones show differently", () => {
+    const candidates = [{ source: "file-created" as const, utcMs: Date.UTC(2026, 9, 14, 15, 30, 0), localText: null }];
+    expect(foundTimes({ timezone: "Asia/Tokyo", timeCandidates: candidates })[0]?.localText).toBe("2026-10-15 00:30:00");
+    expect(foundTimes({ timezone: "UTC", timeCandidates: candidates })[0]?.localText).toBe("2026-10-14 15:30:00");
   });
 });
