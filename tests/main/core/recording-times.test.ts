@@ -15,11 +15,12 @@ describe("recording times inside an audio file", () => {
     ]);
   });
 
-  it("reads Broadcast Wave origination fields, either date separator, as local time", () => {
-    expect(recordingTimesFromTags({ origination_date: "2026:10:14", origination_time: "15:30:12" })).toEqual([
+  // As ffprobe reports a Broadcast Wave file's origination date and time.
+  it("reads Broadcast Wave's day-only date and time-only creation time, either date separator, as local time", () => {
+    expect(recordingTimesFromTags({ date: "2026:10:14", creation_time: "15:30:12", time_reference: "0" })).toEqual([
       { source: "embedded", utcMs: null, localText: "2026-10-14 15:30:12" },
     ]);
-    expect(recordingTimesFromTags({ origination_date: "2026-10-14", origination_time: "15:30" })[0]?.localText).toBe("2026-10-14 15:30:00");
+    expect(recordingTimesFromTags({ date: "2026-10-14", creation_time: "15:30" })[0]?.localText).toBe("2026-10-14 15:30:00");
   });
 
   it("reads an ID3 or RIFF date with a time as local, whatever the tag's case", () => {
@@ -34,7 +35,6 @@ describe("recording times inside an audio file", () => {
       icrd: "2026-10-14",
       creation_time: "1904-01-01T00:00:00.000000Z",
       tdrc: "yesterday",
-      origination_date: "2026-10-14",
     })).toEqual([]);
   });
 

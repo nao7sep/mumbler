@@ -3,11 +3,12 @@ import type { RecordingTimeCandidate } from "@shared/app-shell";
 // The recording times an audio file carries inside it, as ffprobe reports its
 // container tags. There is no one standard: MP4/M4A keeps `creation_time` in
 // UTC by its format, Apple files may add `com.apple.quicktime.creationdate`
-// with an offset, Broadcast Wave keeps `origination_date` and
-// `origination_time` in local time, and ID3, RIFF INFO and Vorbis comments keep
-// a `date` that is often a year or a day only. A time with a zone or `Z` is
-// exact; one without is local and read in the import zone. Only full dates with
-// a time are offered, since a day alone cannot settle a recording time.
+// with an offset, Broadcast Wave's origination date and time (local) reach
+// ffprobe as a day-only `date` and a time-only `creation_time`, and ID3, RIFF
+// INFO and Vorbis comments keep a `date` that is often a year or a day only. A
+// time with a zone or `Z` is exact; one without is local and read in the import
+// zone. Only full dates with a time are offered, since a day alone cannot
+// settle a recording time.
 
 // yyyy-mm-dd[ T]hh:mm[:ss][.fff][Z|±hh[:]mm], with "-" or ":" between date
 // parts (Broadcast Wave allows either).
@@ -50,8 +51,9 @@ export function recordingTimesFromTags(tags: Readonly<Record<string, unknown>>):
     const value = byName.get(name);
     if (value) add(parse(value));
   }
-  const date = DATE_ONLY.exec(byName.get("origination_date")?.trim() ?? "");
-  const time = TIME_ONLY.exec(byName.get("origination_time")?.trim() ?? "");
+  // Broadcast Wave: the day and the time arrive as two tags.
+  const date = DATE_ONLY.exec(byName.get("date")?.trim() ?? "");
+  const time = TIME_ONLY.exec(byName.get("creation_time")?.trim() ?? "");
   if (date !== null && time !== null) {
     add({ source: "embedded", utcMs: null, localText: local(date[1]!, date[2]!, date[3]!, time[1]!, time[2]!, time[3] ?? "00") });
   }
