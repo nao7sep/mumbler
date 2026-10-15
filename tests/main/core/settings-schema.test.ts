@@ -70,8 +70,9 @@ describe("applySettingsDraft — happy path", () => {
     for (const prompt of [title, slug]) {
       expect(prompt).not.toMatch(/output only|reply with|json/i);
     }
-    expect(title).toContain("in the source's language");
+    expect(title).toContain("in the source's dominant language");
     expect(slug).toContain("Lowercase a–z, digits, and hyphens only");
+    expect(slug).toContain("don't romanize");
   });
 
   it("cleans prompts as multiline bodies and scalars as single lines", () => {

@@ -338,6 +338,8 @@ function connectionCode(error: unknown): string | null {
 function buildTranscriptionPrompt(): string {
   return [
     "Generate a faithful transcript of the spoken audio.",
+    "Write each part in the language it is spoken in, in that language's usual script.",
+    "Never translate. Keep the switches between languages where they happen.",
     "Return only the transcript text.",
     "Do not add summaries, timestamps, headings, speaker labels, markdown, or explanations.",
   ].join(" ");

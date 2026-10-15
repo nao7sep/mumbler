@@ -583,11 +583,11 @@ export function createDefaultSettings(): MumblerSettings {
     concurrencyLimit: 3,
     prompts: {
       structured:
-        "Reorganize the transcript into a well-structured Markdown outline. Preserve all information; resolve obvious self-contradictions using surrounding context. Use the transcript's language. Output Markdown only.\n\n<transcript>\n{transcript}\n</transcript>",
+        "Reorganize the transcript into a well-structured Markdown outline. Preserve all information; resolve obvious self-contradictions using surrounding context. Write the headings and connecting text in the transcript's dominant language: the one whose grammar structures the recording, not whichever language takes up the most of it. A short set phrase borrowed into otherwise single-language speech doesn't make it bilingual. Keep passages spoken in another language in that language; never translate them. Output Markdown only.\n\n<transcript>\n{transcript}\n</transcript>",
       title:
-        "Write a single concise title in the source's language that summarizes the content. The title is plain text with no prefix, no quotation marks around it, no markdown, and no trailing period unless it is a complete sentence.\n\n<source>\n{structured}\n</source>",
+        "Write a single concise title that summarizes the content, in the source's dominant language: the one whose grammar structures the text, not whichever language takes up the most of it. A short set phrase borrowed into otherwise single-language text doesn't make it bilingual. The title is plain text with no prefix, no quotation marks around it, no markdown, and no trailing period unless it is a complete sentence.\n\n<source>\n{structured}\n</source>",
       slug:
-        "Create a short English URL slug for the title. Lowercase a–z, digits, and hyphens only. No leading or trailing hyphen. Aim for 3–6 words.\n\n<title>\n{title}\n</title>",
+        "Create a short English URL slug for the title. Translate the meaning into English; don't romanize words from another language. Names keep their usual English spelling. Lowercase a–z, digits, and hyphens only. No leading or trailing hyphen. Aim for 3–6 words.\n\n<title>\n{title}\n</title>",
     },
     retryPolicy: {
       maxRetries: 3,
