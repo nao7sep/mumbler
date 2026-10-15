@@ -142,6 +142,22 @@ describe("formatUtcIsoCompact", () => {
   });
 });
 
+describe("calendar validity", () => {
+  // As the shared corpus's audio/timestamps/ names: a day the month lacks is
+  // refused like month 13 or hour 25.
+  it.each(["20260230-153012", "20260431-0800", "20270229-1200", "20261314-153012", "20261032-153012", "20261014-253012", "20261014-156012"])(
+    "refuses %s", (stem) => {
+      expect(parseTimestampFromFilename(stem, DEFAULT_TIMESTAMP_PATTERN)).toEqual({ localTimestampText: "", parseStatus: "manual-required" });
+    },
+  );
+
+  it("accepts February 29 in a leap year, and refuses it as typed text otherwise", () => {
+    expect(parseTimestampFromFilename("20280229-1200", DEFAULT_TIMESTAMP_PATTERN).localTimestampText).toBe("2028-02-29 12:00:00");
+    expect(getLocalTimestampError("2027-02-29 12:00:00")).not.toBeNull();
+    expect(getLocalTimestampError("2028-02-29 12:00:00")).toBeNull();
+  });
+});
+
 describe("parseUtcMs", () => {
   it("reads a number as no stored time; instants are stored as text", () => {
     expect(parseUtcMs(1_700_000_000_000)).toBeNull();

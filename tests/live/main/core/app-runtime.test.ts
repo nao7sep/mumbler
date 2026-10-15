@@ -9,7 +9,7 @@
 // throwaway home, where the cached tools are hard-linked.
 
 import { execFile } from "node:child_process";
-import { copyFile, link, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, link, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -372,70 +372,64 @@ describe("the live application runtime", () => {
   });
 });
 
-// An ID3v2.3 tag the way IC recorders write a recording time: the year, the day
-// and month, and the hour and minute as three frames. ffmpeg's own writer does
-// not produce TIME, so the tag is built here and put in front of the audio.
-function withId3v23Time(audio: Buffer, year: string, dayMonth: string, hourMinute: string): Buffer {
-  if (audio.subarray(0, 3).toString() === "ID3") {
-    audio = audio.subarray(10 + ((audio[6]! << 21) | (audio[7]! << 14) | (audio[8]! << 7) | audio[9]!));
-  }
-  const frame = (id: string, text: string): Buffer => {
-    const body = Buffer.concat([Buffer.from([0]), Buffer.from(text, "latin1")]);
-    const header = Buffer.alloc(10);
-    header.write(id, 0, "latin1");
-    header.writeUInt32BE(body.length, 4);
-    return Buffer.concat([header, body]);
-  };
-  const frames = Buffer.concat([frame("TYER", year), frame("TDAT", dayMonth), frame("TIME", hourMinute)]);
-  const size = frames.length;
-  const header = Buffer.from([0x49, 0x44, 0x33, 3, 0, 0, (size >> 21) & 127, (size >> 14) & 127, (size >> 7) & 127, size & 127]);
-  return Buffer.concat([header, frames, audio]);
+// The shared corpus's recording-time cases, written by the programs that own
+// each format, read through the runtime's own staging with the managed ffprobe
+// and checked against the corpus oracle (audio/timestamps/timestamp-cases.json).
+interface TimestampOracle {
+  cases: Array<{
+    file: string;
+    name: { local?: string; invalid?: string } | null;
+    stored: Array<{ field: string; written: string; meaning: "utc" | "offset" | "local"; valid: boolean; ffprobe: string; reads?: Record<string, string> }>;
+    modifiedUtc: string;
+  }>;
 }
 
-describe("recording times stored inside files", () => {
-  // Each format's recording time written the way its recorders store it, then
-  // read through the runtime's own staging with the real managed ffprobe, so a
-  // change in how ffprobe names a tag fails here rather than in use.
-  it("offers the time each format stores inside it when a recording is staged", async () => {
+/** What Mumbler should offer for one stored value, from the oracle's own words. */
+function expectedCandidate(entry: TimestampOracle["cases"][number]["stored"][number]): { utcMs: number | null; localText: string | null } {
+  if (entry.meaning !== "local") {
+    // "2026-10-14T15:30:12+0900" or "2026-10-14T06:30:12Z", as the file holds it.
+    const iso = entry.written.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+    return { utcMs: Date.parse(iso), localText: null };
+  }
+  const value = entry.reads?.creation_time !== undefined && entry.reads.date !== undefined
+    ? `${entry.reads.date} ${entry.reads.creation_time}`
+    : entry.reads?.date ?? entry.written;
+  const [date, time] = value.split(/[T ]/);
+  return { utcMs: null, localText: `${date} ${time!.length === 5 ? `${time}:00` : time}` };
+}
+
+describe("recording times in the shared corpus", () => {
+  it("offers each recording's name time and readable stored times, and refuses the broken ones", async () => {
+    const oracle = JSON.parse(await readFile(corpusFile("audio/timestamps/timestamp-cases.json"), "utf8")) as TimestampOracle;
     const home = await freshHome("times");
     const sources = join(home, "sources");
     await mkdir(sources, { recursive: true });
-    const ffmpeg = join(TOOL_HOME, "bin", process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
-    const tagged = async (name: string, from: string, args: string[]): Promise<string> => {
-      const to = join(sources, name);
-      await execFileAsync(ffmpeg, ["-v", "error", "-y", "-i", corpusFile(from), "-map", "0:a", "-c", "copy", ...args, to]);
-      return to;
-    };
-    const cases: Array<[path: string, expected: { utcMs: number | null; localText: string | null }]> = [
-      [await tagged("mp4-creation.m4a", "audio/speech/english-japanese-pronunciation-96k.m4a", ["-metadata", "creation_time=2026-10-14T06:30:12Z"]),
-        { utcMs: Date.UTC(2026, 9, 14, 6, 30, 12), localText: null }],
-      [await tagged("apple-creationdate.m4a", "audio/speech/english-japanese-pronunciation-96k.m4a",
-        ["-movflags", "use_metadata_tags", "-metadata", "com.apple.quicktime.creationdate=2026-10-14T15:30:12+0900"]),
-        { utcMs: Date.UTC(2026, 9, 14, 6, 30, 12), localText: null }],
-      [await tagged("id3v24.mp3", "audio/speech/english-natural-64k.mp3", ["-metadata", "date=2026-10-14 09:16:00"]),
-        { utcMs: null, localText: "2026-10-14 09:16:00" }],
-      [await tagged("bwf.wav", "audio/speech/english-natural-16k-mono.wav",
-        ["-write_bext", "1", "-metadata", "origination_date=2026:10:13", "-metadata", "origination_time=22:10:05"]),
-        { utcMs: null, localText: "2026-10-13 22:10:05" }],
-      [await tagged("riff-info.wav", "audio/speech/english-natural-16k-mono.wav", ["-metadata", "date=2026-10-12 08:00:00"]),
-        { utcMs: null, localText: "2026-10-12 08:00:00" }],
-      [await tagged("vorbis.flac", "audio/dialogue/dialogue-english-alternating.flac", ["-metadata", "DATE=2026-10-11T07:45:00"]),
-        { utcMs: null, localText: "2026-10-11 07:45:00" }],
-    ];
-    const id3v23 = join(sources, "id3v23.mp3");
-    await writeFile(id3v23, withId3v23Time(await readFile(corpusFile("audio/speech/english-natural-64k.mp3")), "2026", "1410", "0916"));
-    cases.push([id3v23, { utcMs: null, localText: "2026-10-14 09:16:00" }]);
+    const paths = new Map<string, string>();
+    for (const entry of oracle.cases) {
+      const copy = join(sources, entry.file);
+      await copyFile(corpusFile(`audio/timestamps/${entry.file}`), copy);
+      paths.set(entry.file, copy);
+    }
     try {
       await withRuntime(home, async (runtime) => {
-        const imported = await runtime.importDroppedPaths(cases.map(([path]) => path));
+        await runtime.saveSetupTimezone("Asia/Tokyo");
+        const imported = await runtime.importDroppedPaths([...paths.values()]);
         expect(imported.failedImports).toEqual([]);
         const pending = runtime.getSnapshot().state!.pendingImports;
-        for (const [path, expected] of cases) {
-          const item = pending.find((entry) => entry.originalSourcePath === path);
-          expect(item?.timeCandidates.filter((candidate) => candidate.source === "embedded"), basename(path)).toEqual([
-            { source: "embedded", ...expected },
-          ]);
+        const mismatches: string[] = [];
+        for (const entry of oracle.cases) {
+          const item = pending.find((candidate) => candidate.originalSourcePath === paths.get(entry.file))!;
+          const name = item.timeCandidates.filter((candidate) => candidate.source === "file-name").map((candidate) => candidate.localText);
+          const expectedName = entry.name?.local === undefined ? [] : [entry.name.local];
+          if (JSON.stringify(name) !== JSON.stringify(expectedName)) mismatches.push(`${entry.file}: name ${JSON.stringify(name)}, expected ${JSON.stringify(expectedName)}`);
+          const stored = item.timeCandidates.filter((candidate) => candidate.source === "embedded").map(({ utcMs, localText }) => ({ utcMs, localText }));
+          const expectedStored = [...new Map(entry.stored
+            .filter((value) => value.valid && value.ffprobe === "reported")
+            .map((value) => { const candidate = expectedCandidate(value); return [`${candidate.utcMs}|${candidate.localText}`, candidate]; })).values()];
+          const key = (list: typeof stored) => list.map((candidate) => `${candidate.utcMs}|${candidate.localText}`).sort().join(", ");
+          if (key(stored) !== key(expectedStored)) mismatches.push(`${entry.file}: stored [${key(stored)}], expected [${key(expectedStored)}]`);
         }
+        expect(mismatches).toEqual([]);
       });
     } finally {
       await rm(home, { recursive: true, force: true });

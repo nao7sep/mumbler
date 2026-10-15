@@ -57,3 +57,50 @@ describe("recording times inside an audio file", () => {
     expect(recordingTimesFromTags({ creation_time: "2026-10-14T06:30:12Z", date: "2026-10-14T06:30:12Z" })).toHaveLength(1);
   });
 });
+
+// The tags exactly as ffprobe reports them for the shared corpus's
+// audio/timestamps/ files (their manifest entries record them), each written
+// by the program that owns its format; copied here so the default suite needs
+// no corpus checkout. The live lane reads the files themselves.
+const CORPUS_TAGS: Array<[file: string, tags: Record<string, string>, expected: { utc: string } | { local: string } | null]> = [
+  ["20261014-153012-agrees.m4a", {"com.apple.quicktime.creationdate": "2026-10-14T15:30:12+0900"}, { utc: "2026-10-14T06:30:12Z" }],
+  ["20261014-153012-minutes-apart.mp3", {"date": "2026-10-14T15:34:00"}, { local: "2026-10-14 15:34:00" }],
+  ["20261014-153012-stored-broken.flac", {"DATE": "2026-13-14T15:30:12"}, null],
+  ["20261014-153012-zone-apart.m4a", {"com.apple.quicktime.creationdate": "2026-10-14T15:30:12-0400"}, { utc: "2026-10-14T19:30:12Z" }],
+  ["20261014_153012-agrees.mp3", {"date": "2026-10-14T15:30:12"}, { local: "2026-10-14 15:30:12" }],
+  ["20261332-153012-name-broken.mp3", {"date": "2026-10-14T15:30:12"}, { local: "2026-10-14 15:30:12" }],
+  ["apple-creationdate-month-13.m4a", {"com.apple.quicktime.creationdate": "2026-13-14T15:30:12+0900"}, null],
+  ["apple-creationdate-new-york.m4a", {"com.apple.quicktime.creationdate": "2026-10-14T02:30:12-0400"}, { utc: "2026-10-14T06:30:12Z" }],
+  ["apple-creationdate-tokyo.m4a", {"com.apple.quicktime.creationdate": "2026-10-14T15:30:12+0900"}, { utc: "2026-10-14T06:30:12Z" }],
+  ["apple-creationdate-utc.m4a", {"com.apple.quicktime.creationdate": "2026-10-14T06:30:12+0000"}, { utc: "2026-10-14T06:30:12Z" }],
+  ["avfoundation-udta-date.m4a", {"creation_time": "2026-10-14T06:30:12.000000Z"}, { utc: "2026-10-14T06:30:12Z" }],
+  ["bwf-origination-hour-25.wav", {"date": "2026-10-14", "creation_time": "25:30:12"}, null],
+  ["bwf-origination.wav", {"date": "2026-10-14", "creation_time": "15:30:12"}, { local: "2026-10-14 15:30:12" }],
+  ["id3v23-tdat-day-32.mp3", {"date": "2026-10-32 15:30"}, null],
+  ["id3v23-tyer-tdat-time.mp3", {"date": "2026-10-14 15:30"}, { local: "2026-10-14 15:30:00" }],
+  ["id3v24-tdrc-february-30.mp3", {"date": "2026-02-30T15:30:12"}, null],
+  ["id3v24-tdrc-month-13.mp3", {"date": "2026-13-14T15:30:12"}, null],
+  ["id3v24-tdrc.mp3", {"date": "2026-10-14T15:30:12"}, { local: "2026-10-14 15:30:12" }],
+  ["itunes-day.m4a", {"date": "2026-10-14T15:30:12"}, { local: "2026-10-14 15:30:12" }],
+  ["mp4-header-1904.m4a", {"creation_time": "1970-01-01T00:00:01.000000Z"}, null],
+  ["mp4-header-only.m4a", {"creation_time": "2026-10-14T06:30:12.000000Z"}, { utc: "2026-10-14T06:30:12Z" }],
+  ["riff-icrd-truncated.wav", {"date": "2026-10-1"}, null],
+  ["riff-icrd.wav", {"date": "2026-10-14 15:30:12"}, { local: "2026-10-14 15:30:12" }],
+  ["vorbis-date-letter-o.flac", {"DATE": "2026-1O-14T15:30:12"}, null],
+  ["vorbis-date.flac", {"DATE": "2026-10-14T15:30:12"}, { local: "2026-10-14 15:30:12" }],
+];
+
+describe("recording times in the shared corpus's tags", () => {
+  it.each(CORPUS_TAGS)("%s", (_file, tags, expected) => {
+    const found = recordingTimesFromTags(tags);
+    if (expected === null) expect(found, "a broken or unset time is refused").toEqual([]);
+    else if ("utc" in expected) expect(found).toEqual([{ source: "embedded", utcMs: Date.parse(expected.utc), localText: null }]);
+    else expect(found).toEqual([{ source: "embedded", utcMs: null, localText: expected.local }]);
+  });
+
+  it("refuses a day the month does not have, even beside an offset", () => {
+    expect(recordingTimesFromTags({ "com.apple.quicktime.creationdate": "2026-02-30T15:30:12+0900" })).toEqual([]);
+    expect(recordingTimesFromTags({ date: "2026-04-31T08:00:00" })).toEqual([]);
+    expect(recordingTimesFromTags({ date: "2028-02-29T08:00:00" }), "2028 is a leap year").toHaveLength(1);
+  });
+});

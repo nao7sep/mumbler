@@ -1,4 +1,5 @@
 import type { RecordingTimeCandidate } from "@shared/app-shell";
+import { getLocalTimestampError } from "@shared/timestamps";
 
 // The recording times an audio file carries inside it, as ffprobe reports its
 // container tags. There is no one standard: MP4/M4A keeps `creation_time` in
@@ -23,12 +24,21 @@ function local(year: string, month: string, day: string, hour: string, minute: s
   return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
+// A local time is offered only when it names a real moment: no month 13,
+// February 30 or hour 25, which a hand-edited or damaged tag can hold.
+function localCandidate(text: string): RecordingTimeCandidate | null {
+  return getLocalTimestampError(text) === null ? { source: "embedded", utcMs: null, localText: text } : null;
+}
+
 function parse(value: string): RecordingTimeCandidate | null {
   const match = DATE_TIME.exec(value.trim());
   if (match === null) return null;
   const [, year, month, day, hour, minute, second = "00", zone] = match;
   const text = local(year!, month!, day!, hour!, minute!, second);
-  if (zone === undefined) return { source: "embedded", utcMs: null, localText: text };
+  if (zone === undefined) return localCandidate(text);
+  // The digits before an offset are a local time too; Date.parse would roll
+  // February 30 over into March rather than refuse it.
+  if (getLocalTimestampError(text) !== null) return null;
   const offset = zone.toUpperCase() === "Z" ? "Z" : `${zone.slice(0, 3)}:${zone.slice(-2)}`;
   const utcMs = Date.parse(`${year}-${month}-${day}T${hour}:${minute}:${second}${offset}`);
   // MP4 writers that never set the time leave the format's epoch behind.
@@ -55,7 +65,7 @@ export function recordingTimesFromTags(tags: Readonly<Record<string, unknown>>):
   const date = DATE_ONLY.exec(byName.get("date")?.trim() ?? "");
   const time = TIME_ONLY.exec(byName.get("creation_time")?.trim() ?? "");
   if (date !== null && time !== null) {
-    add({ source: "embedded", utcMs: null, localText: local(date[1]!, date[2]!, date[3]!, time[1]!, time[2]!, time[3] ?? "00") });
+    add(localCandidate(local(date[1]!, date[2]!, date[3]!, time[1]!, time[2]!, time[3] ?? "00")));
   }
   return found;
 }

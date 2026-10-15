@@ -275,6 +275,10 @@ function groupsToTimestampParts(groups: Record<string, string>): TimestampParts 
   ) {
     return null;
   }
+  // A day the month has: no February 30, April 31, or February 29 outside a leap year.
+  if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) {
+    return null;
+  }
 
   return { year, month, day, hour, minute, second };
 }
