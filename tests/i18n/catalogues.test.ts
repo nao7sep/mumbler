@@ -155,3 +155,18 @@ describe("catalogues", () => {
     expect(catalogue["menu.about"]).toBe(native);
   });
 });
+
+// localization-conventions, Translation: a choice that follows something
+// outside the app names what it resolves to now, in every language.
+describe("System entries", () => {
+  beforeAll(async () => {
+    await Promise.all(LANGUAGES.map((language) => loadCatalogue(language)));
+  });
+
+  it.each(LANGUAGES)("name their current value in %s", (language) => {
+    const catalogue = loadedCatalogue(language);
+    expect(catalogue["settings.languageSystem"]).toContain("{language}");
+    expect(catalogue["settings.themeSystem"]).toContain("{theme}");
+    expect(catalogue["settings.timezoneSystem"]).toContain("{zone}");
+  });
+});

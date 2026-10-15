@@ -10,7 +10,7 @@ import { DEFAULT_TIMESTAMP_PATTERN, SYSTEM_TIMEZONE, getSupportedTimezones, getS
 import { LANGUAGE_NAMES, LANGUAGES, normalizeLanguagePreference, type Language } from "@shared/i18n/languages";
 import { useI18n } from "../i18n/I18nContext";
 import type { MessageKey } from "@shared/i18n/catalogues";
-import { message, type Message } from "@shared/i18n/translate";
+import { message, type Message, type Translator } from "@shared/i18n/translate";
 import { ModalShell } from "./modal/ModalShell";
 import { useTablist } from "./useTablist";
 import { ExternalLinkIcon } from "./Icon";
@@ -76,6 +76,14 @@ const SETTINGS_TAB_LABELS: Record<SettingsTab, MessageKey> = {
   prompts: "settings.tabPrompts",
   pipeline: "settings.tabPipeline",
 };
+
+/** The language's System entry: the language it resolves to now, named in the
+ * interface language, as every System entry names its value there
+ * (localization-conventions, Translation). */
+export function systemLanguageLabel(i18n: Pick<Translator, "t" | "language">, systemLanguage: Language): string {
+  const name = new Intl.DisplayNames([i18n.language], { type: "language" }).of(systemLanguage) ?? LANGUAGE_NAMES[systemLanguage];
+  return i18n.t("settings.languageSystem", { language: name });
+}
 
 export function SettingsModal({
   draft,
@@ -208,7 +216,7 @@ export function SettingsModal({
                     value={draft.language}
                     onChange={(event) => onChange({ ...draft, language: normalizeLanguagePreference(event.target.value) })}
                   >
-                    <option value="system">{t("settings.languageSystem", { language: LANGUAGE_NAMES[systemLanguage] })}</option>
+                    <option value="system">{systemLanguageLabel(i18n, systemLanguage)}</option>
                     {LANGUAGES.map((language) => (
                       <option key={language} value={language} lang={language}>
                         {LANGUAGE_NAMES[language]}

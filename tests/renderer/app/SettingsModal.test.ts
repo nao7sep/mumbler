@@ -4,8 +4,10 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SettingsModal } from "@renderer/app/SettingsModal";
+import { SettingsModal, systemLanguageLabel } from "@renderer/app/SettingsModal";
 import { message } from "@shared/i18n/translate";
+import { loadCatalogue } from "@shared/i18n/catalogues";
+import { createRendererTranslator } from "@renderer/i18n/I18nContext";
 import type { MumblerShellApi, SettingsDraft } from "@shared/app-shell";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -290,11 +292,21 @@ describe("SettingsModal language and time zone", () => {
     expect(selects.map((select) => select.value)).toEqual(["system", "Asia/Tokyo"]);
   });
 
-  it("names the language and theme System resolves to", async () => {
+  it("names the language and theme System resolves to, in the interface language", async () => {
     await renderWith(vi.fn(), {}, { systemLanguage: "ja", systemTheme: "dark" });
-    const language = Array.from(document.querySelectorAll<HTMLOptionElement>("option")).find((option) => option.value === "system" && option.textContent?.includes("日本語"));
-    expect(language?.textContent).toBe("System (日本語)");
+    const select = document.querySelector<HTMLSelectElement>('select[aria-labelledby="settings-language-heading"]')!;
+    expect(select.options[0]?.textContent).toBe("System (Japanese)");
     expect(document.body.textContent).toContain("System (Dark)");
+  });
+
+  // localization-conventions, Translation: both the word and the value are in
+  // the interface language.
+  it("names the system language in each interface language", async () => {
+    await loadCatalogue("ja");
+    await loadCatalogue("de");
+    expect(systemLanguageLabel(createRendererTranslator("ja"), "ja")).toBe("システム（日本語）");
+    expect(systemLanguageLabel(createRendererTranslator("de"), "en")).toBe("System (Englisch)");
+    expect(systemLanguageLabel(createRendererTranslator("en"), "zh-Hans")).toBe("System (Simplified Chinese)");
   });
 });
 
