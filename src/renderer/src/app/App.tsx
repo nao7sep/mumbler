@@ -1269,7 +1269,7 @@ function LoadedShell({
           onCommit={handleQueueSplitterCommit}
         />
 
-        <section className="detail-pane panel">
+        <section className={`detail-pane panel${selectedCard && detailTab === "transcribe" ? " detail-pane--fill" : ""}`}>
           <div className="panel__header">
             <h2>{t("detail.title")}</h2>
             {/* Acts on the whole recording, so it sits with the recording rather than the player. */}

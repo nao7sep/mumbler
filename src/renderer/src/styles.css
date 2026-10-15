@@ -499,6 +499,9 @@ textarea:focus-visible,
      page scrolls for the detail column while the queue pane scrolls its own
      overflow within the viewport (see .queue-pane). */
   align-items: start;
+  /* As tall as the window leaves below the topbar, so a pane that asks to fill
+     it (.detail-pane--fill) has a height to fill. */
+  flex: 1;
 }
 
 /* The queue/detail resize handle. Taken out of the grid flow (absolute) so it does
@@ -1562,6 +1565,31 @@ select:not([multiple]) {
 
 .field--tall > .result-output {
   flex: 1;
+}
+
+/* The Transcription tab fills the window's height, because transcripts run
+   long: each level down to the transcript and the outline takes what its parent
+   gives it. Their minimum heights still hold, so a shorter window scrolls the
+   page as before. The other tabs keep their own height. */
+.detail-pane--fill {
+  align-self: stretch;
+}
+
+.detail-pane--fill .detail-grid,
+.detail-pane--fill .app-tabpanel:not([hidden]) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-pane--fill .app-tabpanel:not([hidden]) > .detail-card,
+.detail-pane--fill .result-grid {
+  flex: 1;
+}
+
+/* Filling the space is their height, so a dragged one would fight it. */
+.detail-pane--fill .field--tall > .result-output {
+  resize: none;
 }
 
 .action-toolbar {
