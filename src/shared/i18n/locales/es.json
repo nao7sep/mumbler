@@ -453,6 +453,7 @@
   "review.timeFileCreated": "Creado",
   "review.timeFileModified": "Modificado",
   "review.noTimesFound": "No se encontró ninguna hora en esta grabación. Escúchala e introduce una.",
+  "review.fileDatesCaution": "Las fechas de un archivo suelen cambiar al copiarlo o sincronizarlo. Comprueba que esta hora sea correcta.",
   "review.copyToBackup": "Añadir a la carpeta de grabaciones",
   "review.backupHint": "Las grabaciones se guardan en {path}, con el nombre de su hora de grabación. Configura la ubicación en Configuración.",
   "review.deleteOriginals": "Eliminar los originales cuando estén en la carpeta de grabaciones",

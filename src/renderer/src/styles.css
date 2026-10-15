@@ -861,6 +861,12 @@ textarea:focus-visible,
 }
 
 .queue-row__error,
+/* Information about a choice, not a mistake: it never blocks Confirm. */
+.row-caution {
+  color: var(--warning);
+  font-size: 0.75rem;
+}
+
 .row-error {
   color: var(--danger);
   font-size: 0.75rem;
@@ -2003,6 +2009,13 @@ select:not([multiple]) {
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* A row's error and caution each take a line of their own. */
+.review-row__footer {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
 .review-row__title {

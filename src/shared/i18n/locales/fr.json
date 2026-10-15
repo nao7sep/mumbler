@@ -453,6 +453,7 @@
   "review.timeFileCreated": "Créé",
   "review.timeFileModified": "Modifié",
   "review.noTimesFound": "Aucune heure trouvée dans cet enregistrement. Écoutez-le et saisissez-en une.",
+  "review.fileDatesCaution": "Les dates d’un fichier changent souvent lorsqu’il est copié ou synchronisé. Vérifiez que cette heure est la bonne.",
   "review.copyToBackup": "Ajouter au dossier des enregistrements",
   "review.backupHint": "Les enregistrements sont placés dans {path}, nommés selon leur heure d’enregistrement. Choisissez l’emplacement dans les Réglages.",
   "review.deleteOriginals": "Supprimer les originaux une fois dans le dossier des enregistrements",

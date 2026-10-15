@@ -441,6 +441,7 @@
   "review.timeFileCreated": "创建",
   "review.timeFileModified": "修改",
   "review.noTimesFound": "未在此录音中找到时间。请收听后输入。",
+  "review.fileDatesCaution": "文件的日期在复制或同步时经常改变。请确认这个时间是否正确。",
   "review.copyToBackup": "添加到录音保存文件夹",
   "review.backupHint": "录音以录制时间命名，保存到 {path}。可在设置中更改位置。",
   "review.deleteOriginals": "放入录音保存文件夹后删除原始文件",

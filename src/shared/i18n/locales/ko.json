@@ -441,6 +441,7 @@
   "review.timeFileCreated": "생성",
   "review.timeFileModified": "수정",
   "review.noTimesFound": "이 녹음에서 시각을 찾지 못했습니다. 들어 보고 직접 입력하십시오.",
+  "review.fileDatesCaution": "파일 날짜는 복사하거나 동기화할 때 자주 바뀝니다. 이 시각이 맞는지 확인하십시오.",
   "review.copyToBackup": "녹음 보관 폴더에 추가",
   "review.backupHint": "녹음은 녹음 시각 이름으로 {path}에 저장됩니다. 위치는 설정에서 바꿀 수 있습니다.",
   "review.deleteOriginals": "보관 폴더에 추가되면 원본 삭제",

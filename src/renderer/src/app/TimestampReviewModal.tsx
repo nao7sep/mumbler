@@ -14,7 +14,7 @@ import {
 
 import type { MessageKey } from "@shared/i18n/catalogues";
 
-import { chooseRecordingTime, foundTimes } from "./import-rules";
+import { chooseRecordingTime, foundTimes, usesOnlyFileDates } from "./import-rules";
 import { ModalShell } from "./modal/ModalShell";
 import { ShortenedValue } from "./ShortenedValue";
 import { useI18n } from "../i18n/I18nContext";
@@ -260,6 +260,7 @@ export function TimestampReviewModal({
                 </div>
                 <div className="review-row__footer">
                   {rowError ? <span className="row-error">{t(rowError)}</span> : null}
+                  {usesOnlyFileDates(item) ? <span className="row-caution">{t("review.fileDatesCaution")}</span> : null}
                 </div>
               </div>
             );

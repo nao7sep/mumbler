@@ -447,6 +447,7 @@
   "review.timeFileCreated": "Erstellt",
   "review.timeFileModified": "Geändert",
   "review.noTimesFound": "In dieser Aufnahme wurde keine Zeit gefunden. Hören Sie sie an und geben Sie eine ein.",
+  "review.fileDatesCaution": "Dateidaten ändern sich oft, wenn eine Datei kopiert oder synchronisiert wird. Prüfen Sie, ob diese Zeit stimmt.",
   "review.copyToBackup": "In den Aufnahmeordner übernehmen",
   "review.backupHint": "Aufnahmen werden in {path} gespeichert und nach ihrer Aufnahmezeit benannt. Den Speicherort legen Sie in den Einstellungen fest.",
   "review.deleteOriginals": "Originale löschen, sobald sie im Aufnahmeordner sind",

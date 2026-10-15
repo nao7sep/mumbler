@@ -437,6 +437,7 @@
   "review.timeFileCreated": "Created",
   "review.timeFileModified": "Modified",
   "review.noTimesFound": "No time found in this recording. Listen to it and enter one.",
+  "review.fileDatesCaution": "File dates often change when a file is copied or synced. Make sure this time is right.",
   "review.copyToBackup": "Add to Recordings",
   "review.backupHint": "Recordings are saved to {path}, named by their recording time. Configure the location in Settings.",
   "review.deleteOriginals": "Delete the originals once they are in Recordings",

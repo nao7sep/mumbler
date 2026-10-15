@@ -453,6 +453,7 @@
   "review.timeFileCreated": "Criado",
   "review.timeFileModified": "Modificado",
   "review.noTimesFound": "Nenhum horário encontrado nesta gravação. Ouça e informe um.",
+  "review.fileDatesCaution": "As datas de um arquivo costumam mudar quando ele é copiado ou sincronizado. Confira se este horário está correto.",
   "review.copyToBackup": "Adicionar à pasta de gravações",
   "review.backupHint": "As gravações são salvas em {path}, com o nome do horário da gravação. Defina o local em Configurações.",
   "review.deleteOriginals": "Apagar os originais quando estiverem na pasta de gravações",

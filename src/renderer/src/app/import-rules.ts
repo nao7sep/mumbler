@@ -34,6 +34,15 @@ export function foundTimes(item: Pick<PendingImportReviewItem, "timezone" | "tim
   return [...times.values()];
 }
 
+/** Whether the item's time is one only the file's own dates gave: copying or
+ * syncing often changes them, so the review warns while such a time is chosen.
+ * A file date that the name or a stored time agrees with shares their button,
+ * and is not warned about. */
+export function usesOnlyFileDates(item: Pick<PendingImportReviewItem, "timezone" | "timeCandidates" | "localTimestampText">): boolean {
+  return foundTimes(item).some((found) => found.localText === item.localTimestampText
+    && found.sources.every((source) => source === "file-created" || source === "file-modified"));
+}
+
 /** The review item with a found time chosen: an exact time keeps its instant
  * and shows it in the item's zone; a local one is read in that zone. */
 export function chooseRecordingTime(item: PendingImportReviewItem, candidate: RecordingTimeCandidate): PendingImportReviewItem {

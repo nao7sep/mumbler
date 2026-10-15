@@ -365,6 +365,32 @@ describe("settling a recording's time", () => {
     ]);
   });
 
+  describe("the file-date caution", () => {
+    const candidates = [
+      { source: "file-name" as const, utcMs: null, localText: "2026-10-14 15:30:12" },
+      { source: "file-modified" as const, utcMs: Date.UTC(2026, 9, 15, 1, 15, 0), localText: null },
+    ];
+    const caution = () => document.querySelector(".row-caution")?.textContent ?? null;
+
+    it("shows only while a time the file dates alone gave is chosen", async () => {
+      await mountModal([makeItem({ timezone: "Asia/Tokyo", localTimestampText: "2026-10-14 15:30:12", timeCandidates: candidates })]);
+      expect(caution(), "the name's time is chosen").toBeNull();
+      root?.unmount();
+      await mountModal([makeItem({ timezone: "Asia/Tokyo", localTimestampText: "2026-10-15 10:15:00", timeCandidates: candidates })]);
+      expect(caution()).toBe("File dates often change when a file is copied or synced. Make sure this time is right.");
+      expect(button("Confirm").disabled, "the caution never blocks Confirm").toBe(false);
+    });
+
+    it("stays off for a file date the name agrees with, and shows for the same time typed by hand", async () => {
+      const agreeing = [candidates[0]!, { source: "file-modified" as const, utcMs: Date.UTC(2026, 9, 14, 6, 30, 12), localText: null }];
+      await mountModal([makeItem({ timezone: "Asia/Tokyo", localTimestampText: "2026-10-14 15:30:12", timeCandidates: agreeing })]);
+      expect(caution(), "Name, Modified share a button").toBeNull();
+      root?.unmount();
+      await mountModal([makeItem({ timezone: "Asia/Tokyo", localTimestampText: "2026-10-15 10:15:00", utcTimestampText: "2026-10-15 01:15:00", timeCandidates: candidates })]);
+      expect(caution()).not.toBeNull();
+    });
+  });
+
   it("says when no time was found, and shows no error for the empty time", async () => {
     await mountModal([makeItem({ timeCandidates: [], localTimestampText: "", utcTimestampText: "" })]);
     expect(document.querySelector(".review-row__times")).toBeNull();
