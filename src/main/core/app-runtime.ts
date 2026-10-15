@@ -1130,10 +1130,14 @@ export class ApplicationRuntime {
           // Named by its settled recording time alone (timestamp-conventions,
           // Filenames); the card keeps the original name.
           const archivedName = `${formatUtcMarker(new Date(timestamps.confirmedUtc))}${extname(file).toLowerCase()}`;
-          const backupPath = await copyOriginalToBackup(file, backupDir!, archivedName, this.runtime.logger);
-          await this.runtime.logger.info("import.backup-original", "Copied the original into the Recordings folder.", {
+          const filed = await copyOriginalToBackup(file, backupDir!, archivedName, this.runtime.logger);
+          // The same recording imported again is already safe there, so its
+          // source can still be deleted as asked.
+          await this.runtime.logger.info("import.backup-original", filed.reused
+            ? "The original was already in the Recordings folder; nothing was copied."
+            : "Copied the original into the Recordings folder.", {
             originalSourcePath: pendingImport.originalSourcePath,
-            backupPath,
+            backupPath: filed.path,
           });
         } catch (error: unknown) {
           backupSucceeded = false;

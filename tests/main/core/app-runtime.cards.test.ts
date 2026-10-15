@@ -827,6 +827,20 @@ describe("confirming what was dropped in", () => {
     expect(await readFile(archived, "utf8"), "removing the card leaves Recordings alone").toBe("audio for Shibuya Station.wav");
   });
 
+  it("files the same recording imported twice once, and still moves the second source away", async () => {
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(home, "Recordings") });
+    const time = { localTimestampText: "2026-10-14 15:30:12", timezone: "Asia/Tokyo" };
+    const [first] = await dropIn("Shibuya Station.wav");
+    await runtime.confirmPendingImports([{ ...first!, ...time }]);
+    const [second] = await dropIn("Shibuya Station.wav");
+    const { originalWarnings } = await runtime.confirmPendingImports([{ ...second!, ...time }]);
+
+    expect(originalWarnings).toEqual([]);
+    expect(await readdir(join(home, "Recordings")), "one copy, not a suffixed second").toEqual(["20261014-063012-utc.wav"]);
+    expect(await exists(second!.originalSourcePath), "the source is safe in Recordings, so it goes").toBe(false);
+    expect(cards(runtime.getSnapshot()), "each import is still its own card").toHaveLength(2);
+  });
+
   it("copies the original to the backup folder when the user asked for that", async () => {
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(home, "originals") });
     const [pending] = await dropIn("take.wav");

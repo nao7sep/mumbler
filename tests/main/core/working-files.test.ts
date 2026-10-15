@@ -208,17 +208,45 @@ describe("working audio copies", () => {
     );
   });
 
-  it("files an original under the name it is given, with a lowercase suffix when that name is taken", async () => {
-    const source = join(dir, "Shibuya Station.m4a");
+  it("files an original under the name it is given, with a lowercase suffix when a different recording holds it", async () => {
     const backup = join(dir, "backup");
-    await writeFile(source, "audio", "utf8");
+    const first = join(dir, "Shibuya Station.m4a");
+    const other = join(dir, "kitchen-table.m4a");
+    await writeFile(first, "audio", "utf8");
+    await writeFile(other, "other audio", "utf8");
 
-    const first = await copyOriginalToBackup(source, backup, "20261014-063012-utc.m4a");
-    const second = await copyOriginalToBackup(source, backup, "20261014-063012-utc.m4a");
+    const filed = await copyOriginalToBackup(first, backup, "20261014-063012-utc.m4a");
+    const different = await copyOriginalToBackup(other, backup, "20261014-063012-utc.m4a");
 
-    expect(first).toBe(join(backup, "20261014-063012-utc.m4a"));
-    expect(second).toMatch(/[/\\]20261014-063012-utc-[0-9a-z]{8}\.m4a$/);
-    expect(await readFile(source, "utf8"), "the source stays for its caller to delete").toBe("audio");
+    expect(filed).toEqual({ path: join(backup, "20261014-063012-utc.m4a"), reused: false });
+    expect(different.reused).toBe(false);
+    expect(different.path).toMatch(/[/\\]20261014-063012-utc-[0-9a-z]{8}\.m4a$/);
+    expect(await readFile(first, "utf8"), "the source stays for its caller to delete").toBe("audio");
+  });
+
+  it("finds the same recording already filed, under its name or a suffixed one, and copies nothing", async () => {
+    const backup = join(dir, "backup");
+    const recording = join(dir, "take.m4a");
+    const other = join(dir, "other.m4a");
+    await writeFile(recording, "audio", "utf8");
+    await writeFile(other, "other audio", "utf8");
+    await copyOriginalToBackup(other, backup, "20261014-063012-utc.m4a");
+    const suffixed = await copyOriginalToBackup(recording, backup, "20261014-063012-utc.m4a");
+
+    const again = await copyOriginalToBackup(recording, backup, "20261014-063012-utc.M4A".replace(".M4A", ".m4a"));
+
+    expect(again).toEqual({ path: suffixed.path, reused: true });
+    expect((await readdir(backup)).filter((name) => !name.startsWith("."))).toHaveLength(2);
+  });
+
+  it("files a same-size recording with different bytes as a new one", async () => {
+    const backup = join(dir, "backup");
+    const first = join(dir, "a.m4a");
+    const second = join(dir, "b.m4a");
+    await writeFile(first, "aaaa", "utf8");
+    await writeFile(second, "bbbb", "utf8");
+    await copyOriginalToBackup(first, backup, "20261014-063012-utc.m4a");
+    expect((await copyOriginalToBackup(second, backup, "20261014-063012-utc.m4a")).reused).toBe(false);
   });
 
   it("copies an original into the chosen backup directory", async () => {
@@ -226,7 +254,7 @@ describe("working audio copies", () => {
     const backup = join(dir, "backup");
     await writeFile(source, "audio", "utf8");
 
-    const copied = await copyOriginalToBackup(source, backup, "source.m4a");
+    const { path: copied } = await copyOriginalToBackup(source, backup, "source.m4a");
 
     expect(copied).toBe(join(backup, "source.m4a"));
     expect(await readFile(copied, "utf8")).toBe("audio");
@@ -254,7 +282,7 @@ describe("working audio copies", () => {
     await utimes(source, recorded, recorded);
     await chmod(source, 0o444);
     backupFaults.unsupported = code;
-    const copied = await copyOriginalToBackup(source, backup, "source.m4a");
+    const { path: copied } = await copyOriginalToBackup(source, backup, "source.m4a");
     expect(await readFile(copied, "utf8")).toBe("complete audio");
     expect((await stat(copied)).mtime.getTime()).toBe(recorded.getTime());
     if (process.platform !== "win32") expect((await stat(copied)).mode & 0o777).toBe(0o444);
@@ -279,7 +307,7 @@ describe("working audio copies", () => {
     backupFaults.refuseStageCleanup = true;
     const logger = makeLogger();
     vi.mocked(logger.warn).mockRejectedValueOnce(new Error("optional logger failed"));
-    const copied = await copyOriginalToBackup(source, backup, "source.m4a", logger);
+    const { path: copied } = await copyOriginalToBackup(source, backup, "source.m4a", logger);
     expect(await readFile(copied, "utf8")).toBe("complete audio");
     expect(logger.warn).toHaveBeenCalledWith("import.backup-cleanup", expect.any(String), expect.objectContaining({ targetPath: copied, error: expect.objectContaining({ message: "EACCES: permission denied" }) }));
     expect((await readdir(backup)).some((name) => name.startsWith(".mumbler-backup-"))).toBe(true);
@@ -315,7 +343,7 @@ describe("working audio copies", () => {
 
   it.each([
     ["a working copy", (source: string) => copyIntoWorking(source, join(dir, "working"), "clip.wav")],
-    ["a backup of the original", (source: string) => copyOriginalToBackup(source, join(dir, "backup"), "source.m4a")],
+    ["a backup of the original", async (source: string) => (await copyOriginalToBackup(source, join(dir, "backup"), "source.m4a")).path],
   ])("keeps the recording's modified time on %s", async (_name, copy) => {
     const source = join(dir, "clip.wav");
     await writeFile(source, "audio", "utf8");
@@ -332,7 +360,7 @@ describe("working audio copies", () => {
     await chmod(source, 0o640);
 
     const working = await copyIntoWorking(source, join(dir, "working"), "clip.wav");
-    const backup = await copyOriginalToBackup(source, join(dir, "backup"), "source.m4a");
+    const { path: backup } = await copyOriginalToBackup(source, join(dir, "backup"), "source.m4a");
 
     expect((await stat(working)).mode & 0o777).toBe(0o640);
     expect((await stat(backup)).mode & 0o777).toBe(0o640);

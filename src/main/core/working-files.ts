@@ -1,10 +1,11 @@
 import { access, copyFile, link, mkdir, mkdtemp, open, readdir, rm, stat, unlink } from "node:fs/promises";
 import { constants as fsConstants, createReadStream } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 
 import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
 import { fileExists, formatError, isMissingFileError, keepSourceTimesAndMode, syncDirectory, uniquePathInDirectory } from "./file-io";
 
+import { sha256OfFile } from "./binaries/integrity";
 import { type AppLogger, serializeError } from "./logger";
 
 export interface WorkingReconciliationResult {
@@ -73,16 +74,52 @@ async function copyBackupFile(source: string, destination: string): Promise<void
   if (primary !== undefined) throw primary;
 }
 
+// A recording already filed under `targetName`, or under that name with the
+// collision suffix, whose bytes equal the source: importing the same recording
+// again finds it rather than filing a second copy.
+async function alreadyFiled(sourcePath: string, backupDir: string, targetName: string): Promise<string | null> {
+  const extension = extname(targetName).toLowerCase();
+  const stem = targetName.slice(0, targetName.length - extension.length).toLowerCase();
+  const escaped = stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const suffixed = new RegExp(`^${escaped}-[0-9a-z]{8}$`);
+  let names: string[];
+  try {
+    names = await readdir(backupDir);
+  } catch (error: unknown) {
+    if (isMissingFileError(error)) return null;
+    throw error;
+  }
+  const { size } = await stat(sourcePath);
+  let sourceHash: string | null = null;
+  for (const name of names) {
+    const lower = name.toLowerCase();
+    if (extname(lower) !== extension) continue;
+    const nameStem = lower.slice(0, lower.length - extension.length);
+    if (nameStem !== stem && !suffixed.test(nameStem)) continue;
+    const candidate = join(backupDir, name);
+    const info = await stat(candidate).catch(() => null);
+    if (info === null || !info.isFile() || info.size !== size) continue;
+    sourceHash ??= await sha256OfFile(sourcePath);
+    if (await sha256OfFile(candidate) === sourceHash) return candidate;
+  }
+  return null;
+}
+
+/** Files the original in the Recordings folder under `targetName`, with a
+ * suffix when a different recording holds that name, and returns where it is;
+ * `reused` says an identical copy was already there and nothing was written. */
 export async function copyOriginalToBackup(
   sourcePath: string,
   backupDir: string,
   targetName: string,
   logger?: Pick<AppLogger, "warn">,
-): Promise<string> {
+): Promise<{ path: string; reused: boolean }> {
   let stageDir: string | undefined;
   let targetPath: string | undefined;
   try {
     await mkdir(backupDir, { recursive: true });
+    const existing = await alreadyFiled(sourcePath, backupDir, targetName);
+    if (existing !== null) return { path: existing, reused: true };
     targetPath = await uniquePathInDirectory(backupDir, targetName);
     stageDir = await mkdtemp(join(backupDir, ".mumbler-backup-"));
     const stagePath = join(stageDir, "audio");
@@ -95,7 +132,7 @@ export async function copyOriginalToBackup(
       await copyBackupFile(stagePath, targetPath);
     }
     await syncDirectory(backupDir);
-    return targetPath;
+    return { path: targetPath, reused: false };
   } catch (error: unknown) {
     throw new Error(`Failed to copy ${sourcePath} into the Recordings folder ${backupDir}${targetPath === undefined ? "" : ` (target ${targetPath})`}: ${formatError(error)}`, { cause: error });
   } finally {
