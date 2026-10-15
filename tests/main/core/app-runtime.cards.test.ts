@@ -8,7 +8,7 @@ import { pathValue } from "@shared/i18n/translate";
 
 import type { AppSnapshot, MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
 import { hasStaleResults } from "@shared/card-status";
-import { formatUtcMarker, getSystemTimezone } from "@shared/timestamps";
+import { formatUtcMarker, getSystemTimezone, recomputeLocalFromUtc } from "@shared/timestamps";
 
 // The card list as the user builds it: confirm what was dropped in, duplicate a
 // card to trim it twice, move the markers, remove one, start over. This drives
@@ -146,6 +146,13 @@ vi.mock("@shared/audio-import", async (importOriginal) => {
 // Holding the silence analysis keeps a trim in flight, the way ffmpeg does on a
 // long recording, while the user presses the next shortcut.
 const trimGate = vi.hoisted(() => ({ held: null as Promise<void> | null, entered: 0 }));
+// No ffmpeg here: a tag rewrite hands the audio back as it was and reports the
+// tags it was asked to write, as ffprobe would read them back.
+const tagWrites = vi.hoisted(() => ({
+  calls: [] as string[][],
+  failure: null as Error | null,
+  readBack: new Map<string, Record<string, string>>(),
+}));
 vi.mock("@main/core/audio-tools", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@main/core/audio-tools")>();
   return {
@@ -168,6 +175,21 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
       }
       return prepared;
     },
+    rewriteAudioTags: async (params: Parameters<typeof actual.rewriteAudioTags>[0]) => {
+      tagWrites.calls.push(params.tagArgs);
+      if (tagWrites.failure !== null) throw tagWrites.failure;
+      const written: Record<string, string> = {};
+      for (let index = 0; index < params.tagArgs.length - 1; index += 1) {
+        if (params.tagArgs[index] !== "-metadata") continue;
+        const [name, ...value] = params.tagArgs[index + 1]!.split("=");
+        if (value.join("=") !== "") written[name === "origination_date" ? "date" : name === "origination_time" ? "creation_time" : name!] = value.join("=");
+      }
+      tagWrites.readBack.set(params.sourceFilePath, written);
+      return { filePath: params.sourceFilePath, mimeType: "audio/wav", wasDerived: false, cleanup: async () => undefined };
+    },
+    probeAudioStreamTags: async () => ({}),
+    probeContainerTags: async (path: string, signal?: AbortSignal) =>
+      tagWrites.readBack.get(path) ?? actual.probeContainerTags(path, signal),
     probeAudioProfile: async () => {
       probeGate.entered += 1;
       probeGate.onEnter?.();
@@ -277,6 +299,9 @@ beforeEach(async () => {
   importStarts.length = 0;
   trimGate.held = null;
   trimGate.entered = 0;
+  tagWrites.calls = [];
+  tagWrites.failure = null;
+  tagWrites.readBack.clear();
   runtime = await ApplicationRuntime.initialize();
 });
 
@@ -1345,6 +1370,42 @@ describe("working with a card", () => {
     expect(await readFile(`${stem}.wav`, "utf8")).toBe("audio for take.wav");
     expect(await readFile(`${stem}.md`, "utf8")).toBe("OLD MARKDOWN");
     expect((await readdir(join(home, "output"))).sort()).toEqual([basename(`${stem}.json`), basename(`${stem}.md`), basename(`${stem}.wav`)]);
+  });
+
+  it("writes the recording's official start inside the saved audio", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    const ready = cards(runtime.getSnapshot())[0];
+    const result = await runtime.saveCard(card.id);
+    expect(result.kind).toBe("saved");
+    if (result.kind === "saved") expect(result.warnings).toEqual([]);
+    const local = recomputeLocalFromUtc(Math.floor(ready.timestamps.effectiveUtc / 1000) * 1000, ready.timestamps.timezone).localTimestampText;
+    const [date, time] = local.split(" ");
+    expect(tagWrites.calls).toHaveLength(1);
+    expect(tagWrites.calls[0]).toEqual(expect.arrayContaining(["-write_bext", "1", `origination_date=${date}`, `origination_time=${time}`]));
+  });
+
+  it("saves the audio as it was, and says so, when its recording time cannot be written", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    tagWrites.failure = new Error("ffmpeg refused");
+    const result = await runtime.saveCard(card.id);
+    expect(result.kind).toBe("saved");
+    if (result.kind === "saved") expect(result.warnings?.map((warning) => warning.key)).toEqual(["notice.saveTimeNotWritten"]);
+    expect((await readdir(join(home, "output"))).length).toBe(3);
+  });
+
+  it("keeps a saved recording in the queue, ready to save again, when asked", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    const result = await runtime.saveCard(card.id, undefined, { removeAfterSave: false });
+    expect(result.kind).toBe("saved");
+    expect(cards(result.snapshot)).toMatchObject([{ id: card.id, status: "Ready to Save" }]);
+    expect(await exists(card.sourceFilePath), "the kept recording keeps its audio").toBe(true);
+    const again = await runtime.saveCard(card.id);
+    expect(again.kind, "the same name is taken now").toBe("conflict");
+    await runtime.shutdown();
+    expect((await createQueueStore(join(home, "queue.json")).load()).value.cards[0].status).toBe("Ready to Save");
   });
 
   it("reports a committed save with cleanup warnings and removes its working card", async () => {

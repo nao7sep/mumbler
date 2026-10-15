@@ -35,6 +35,7 @@ import { SettingsModal } from "./SettingsModal";
 import { findMatchingGlobalCommand, isActivationTarget, isShortcutsHelpChord, isTypingTarget } from "./shortcut-utils";
 import { TimestampReviewModal } from "./TimestampReviewModal";
 import { QueueList, formatDuration, statusModifier } from "./QueueList";
+import { ShortenedValue } from "./ShortenedValue";
 import { PaneSplitter } from "./PaneSplitter";
 import { usePaneSize } from "./usePaneSize";
 import {
@@ -51,7 +52,7 @@ import { AudioToolsModal } from "./AudioToolsModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
 import { useSettingsModal } from "./useSettingsModal";
-import { formatCardStatusMessage, formatStepName, hasStaleResults, isCardBusy, staleResultsNote } from "./card-status";
+import { formatStepName, hasStaleResults, isCardBusy, staleResultsNote } from "./card-status";
 import { useTablist } from "./useTablist";
 import { CloseIcon } from "./Icon";
 import { presentFailure, reportRendererDiagnostic } from "./presentFailure";
@@ -59,6 +60,7 @@ import { I18nProvider, useI18n } from "../i18n/I18nContext";
 import { isLanguage, type InterfaceLanguage } from "@shared/i18n/languages";
 import { loadCatalogue, type MessageKey } from "@shared/i18n/catalogues";
 import { message, pathValue, type Message } from "@shared/i18n/translate";
+import { outputAudioName } from "@shared/output-name";
 import { CardActionResults, CardErrorDetail, type CardActionError } from "./CardActionResults";
 import { ConfiguredModels } from "./ConfiguredModels";
 import {
@@ -325,6 +327,11 @@ function LoadedShell({
   } | null>(null);
   const [saveConflictError, setSaveConflictError] = useState<Message | null>(null);
   const [pendingRemoveCardId, setPendingRemoveCardId] = useState<string | null>(null);
+  // Recordings whose "remove after saving" box is unticked; every other one
+  // leaves the queue once saved.
+  const [keptAfterSaveCardIds, setKeptAfterSaveCardIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Where a recording kept after its save went, for this session.
+  const [savedAudioPaths, setSavedAudioPaths] = useState<Readonly<Record<string, string>>>({});
   const [removeCardError, setRemoveCardError] = useState<Message | null>(null);
   // Sticky across card switches: reviewing several cards on the same step (e.g.
   // arrowing through the queue on the Transcribe tab) should not snap back to
@@ -1001,7 +1008,8 @@ function LoadedShell({
         setSnapshot(selected);
         if (selected.settingsSummary?.outputDirectory == null) return;
       }
-      const result = await window.mumbler.saveCard(cardId, resolution);
+      const removeAfterSave = !keptAfterSaveCardIds.has(cardId);
+      const result = await window.mumbler.saveCard(cardId, resolution, { removeAfterSave });
       setSnapshot(result.snapshot);
 
       if (result.kind === "conflict") {
@@ -1024,6 +1032,7 @@ function LoadedShell({
       setPendingSaveConflict(null);
       setSaveConflictError(null);
       clearCardActionErrors(cardId);
+      if (!removeAfterSave) setSavedAudioPaths((paths) => ({ ...paths, [cardId]: result.audioPath }));
       addToast(message("notice.saved", { path: pathValue(result.audioPath) }));
       for (const [index, warning] of (result.warnings ?? []).entries()) {
         addPersistent(`save-cleanup-${cardId}-${index}`, warning, "warning");
@@ -1501,9 +1510,6 @@ function LoadedShell({
                   {generateDisabledReason ? (
                     <p className="panel__note">{text(generateDisabledReason)}</p>
                   ) : null}
-                  <p className={`panel__note status-text status-text--${statusModifier(selectedCard.status)}`}>
-                    {text(formatCardStatusMessage(selectedCard))}
-                  </p>
                   {hasStaleResults(selectedCard) ? <p className="panel__note">{text(staleResultsNote)}</p> : null}
                   <div className="result-grid">
                     <label className="field field--tall">
@@ -1646,6 +1652,15 @@ function LoadedShell({
                         {snapshot?.settingsSummary?.outputDirectory ?? t("dialog.chooseOutputFolder")}
                       </dd>
                     </div>
+                    <div>
+                      <dt>{t("output.fileName")}</dt>
+                      <dd>
+                        {(() => {
+                          const name = outputAudioName(selectedCard);
+                          return name === null ? t("output.fileNamePending") : <ShortenedValue kind="name" value={name} />;
+                        })()}
+                      </dd>
+                    </div>
                     {selectedCard.lastError ? (
                       <div>
                         <dt>{t("output.lastStoppedStep")}</dt>
@@ -1663,6 +1678,25 @@ function LoadedShell({
                       {t("output.changeDirectory")}
                     </button>
                   </div>
+                  <p className="field-hint">{t("output.hint")}</p>
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={!keptAfterSaveCardIds.has(selectedCard.id)}
+                      onChange={(event) => {
+                        const cardId = selectedCard.id;
+                        const remove = event.target.checked;
+                        setKeptAfterSaveCardIds((ids) => {
+                          const next = new Set(ids);
+                          if (remove) next.delete(cardId);
+                          else next.add(cardId);
+                          return next;
+                        });
+                      }}
+                      disabled={selectedCardIsBusy}
+                    />
+                    <span>{t("output.removeAfterSave")}</span>
+                  </label>
                   <div className="action-toolbar">
                     <button
                       type="button"
@@ -1670,10 +1704,12 @@ function LoadedShell({
                       onClick={() => void handleSaveCard(selectedCard.id)}
                       disabled={saveDisabledReason !== null}
                     >
-                      {t("output.saveAndRemove")}
+                      {t("output.save")}
                     </button>
                   </div>
-                  <p className="field-hint">{t("output.hint")}</p>
+                  {savedAudioPaths[selectedCard.id] !== undefined ? (
+                    <p className="panel__note">{i18n.node(message("output.savedTo", { path: pathValue(savedAudioPaths[selectedCard.id]!) }))}</p>
+                  ) : null}
                   {hasStaleResults(selectedCard) ? <p className="panel__note">{text(staleResultsNote)}</p> : null}
                   {saveDisabledReason && !selectedCardIsBusy ? (
                     <p className="panel__note">{text(saveDisabledReason)}</p>

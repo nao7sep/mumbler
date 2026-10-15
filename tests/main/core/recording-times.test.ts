@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { isPlausibleFileTime, prefilledRecordingTime, recordingTimesFromTags } from "@main/core/recording-times";
+import {
+  carriesOnlyRecordingTime,
+  isPlausibleFileTime,
+  officialStartUtcMs,
+  prefilledRecordingTime,
+  recordingTimesFromTags,
+  recordingTimeWriteArgs,
+} from "@main/core/recording-times";
 
 // The tags below are as ffprobe 9 reports them for files written the way each
 // format's recorders write them; the live lane writes such files and reads them
@@ -150,5 +157,46 @@ describe("plausible file dates", () => {
     ["2099, an unset recorder clock", Date.UTC(2099, 11, 31), false],
   ])("%s", (_case, ms, plausible) => {
     expect(isPlausibleFileTime(ms, now)).toBe(plausible);
+  });
+});
+
+describe("writing the official start into a saved recording", () => {
+  // 2026-10-15 13:30:22 in Tokyo.
+  const utcMs = Date.UTC(2026, 9, 15, 4, 30, 22);
+  const set = (args: string[] | null) => (args ?? []).filter((arg, index) => args![index - 1]?.startsWith("-metadata") && !arg.endsWith("="));
+
+  it("starts on the whole second the file name has", () => {
+    expect(officialStartUtcMs(utcMs + 999)).toBe(utcMs);
+  });
+
+  it("puts the time where each container's own tools keep it", () => {
+    expect(set(recordingTimeWriteArgs(".m4a", utcMs, "Asia/Tokyo"))).toEqual(["creation_time=2026-10-15T04:30:22Z"]);
+    expect(set(recordingTimeWriteArgs(".MP4", utcMs, "Asia/Tokyo"))).toEqual(["creation_time=2026-10-15T04:30:22Z"]);
+    expect(set(recordingTimeWriteArgs(".mp3", utcMs, "Asia/Tokyo"))).toEqual(["date=2026-10-15T13:30:22"]);
+    expect(set(recordingTimeWriteArgs(".aiff", utcMs, "Asia/Tokyo"))).toEqual(["date=2026-10-15T13:30:22"]);
+    expect(set(recordingTimeWriteArgs(".flac", utcMs, "Asia/Tokyo"))).toEqual(["date=2026-10-15T13:30:22+09:00"]);
+    expect(set(recordingTimeWriteArgs(".ogg", utcMs, "America/New_York"))).toEqual(["date=2026-10-15T00:30:22-04:00"]);
+    expect(set(recordingTimeWriteArgs(".wav", utcMs, "Asia/Tokyo"))).toEqual(["origination_date=2026-10-15", "origination_time=13:30:22"]);
+    expect(recordingTimeWriteArgs(".aac", utcMs, "Asia/Tokyo"), "raw AAC has no tags").toBeNull();
+    expect(recordingTimeWriteArgs(".wav", utcMs, "Not/AZone")).toBeNull();
+  });
+
+  it("clears every time tag the import reads, so no older time is left beside it", () => {
+    const args = recordingTimeWriteArgs(".mp3", utcMs, "Asia/Tokyo")!;
+    for (const name of ["com.apple.quicktime.creationdate", "creation_time", "date", "date_recorded", "tdrc", "icrd"]) {
+      expect(args).toContain(`${name}=`);
+    }
+    expect(recordingTimeWriteArgs(".ogg", utcMs, "Asia/Tokyo")!.filter((arg) => arg === "-metadata")).toEqual([]);
+  });
+
+  it("trusts a saved file only when every time it carries is the official one", () => {
+    const exact = { source: "embedded" as const, utcMs, localText: null };
+    const local = { source: "embedded" as const, utcMs: null, localText: "2026-10-15 13:30:22" };
+    expect(carriesOnlyRecordingTime([exact, local], utcMs, "Asia/Tokyo")).toBe(true);
+    expect(carriesOnlyRecordingTime([], utcMs, "Asia/Tokyo"), "nothing read back").toBe(false);
+    expect(carriesOnlyRecordingTime([exact, { ...local, localText: "2026-10-15 13:30:12" }], utcMs, "Asia/Tokyo"), "an older time left").toBe(false);
+    // What the wav writer stores reads back through the import's own reader.
+    expect(carriesOnlyRecordingTime(recordingTimesFromTags({ date: "2026-10-15", creation_time: "13:30:22" }), utcMs, "Asia/Tokyo")).toBe(true);
+    expect(carriesOnlyRecordingTime(recordingTimesFromTags({ creation_time: "2026-10-15T04:30:22.000000Z" }), utcMs, "Asia/Tokyo")).toBe(true);
   });
 });

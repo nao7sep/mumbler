@@ -10,7 +10,7 @@
 
 import { execFile } from "node:child_process";
 import { copyFile, link, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -436,6 +436,59 @@ describe("recording times in the shared corpus", () => {
             return new Date(candidate.utcMs! + 9 * 60 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
           })();
           if (item.localTimestampText !== first) mismatches.push(`${entry.file}: starts at "${item.localTimestampText}", expected "${first}"`);
+        }
+        expect(mismatches).toEqual([]);
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the recording time a save writes", () => {
+  it("leaves every corpus recording, whole or trimmed, carrying only its official start", async () => {
+    const oracle = JSON.parse(await readFile(corpusFile("audio/timestamps/timestamp-cases.json"), "utf8")) as TimestampOracle;
+    const home = await freshHome("save-times");
+    try {
+      await withRuntime(home, async () => {
+        const tools = await import("@main/core/audio-tools");
+        const times = await import("@main/core/recording-times");
+        const ffmpeg = (await readdir(join(home, "bin"))).find((entry) => entry.replace(/\.exe$/, "") === "ffmpeg")!;
+        // Ogg and AIFF, which the corpus does not hold, made from a recording
+        // with a stored date, so any older comment would show.
+        const made = join(home, "made");
+        await mkdir(made);
+        const sources = oracle.cases.map((entry) => corpusFile(`audio/timestamps/${entry.file}`));
+        for (const [name, codec] of [["vorbis-date.ogg", "libvorbis"], ["vorbis-date.aiff", "pcm_s16be"]] as const) {
+          await execFileAsync(join(home, "bin", ffmpeg), [
+            "-hide_banner", "-loglevel", "error", "-y", "-i", corpusFile("audio/timestamps/vorbis-date.flac"), "-c:a", codec, join(made, name),
+          ]);
+          sources.push(join(made, name));
+        }
+        // 2026-10-15 13:30:22 in Tokyo, before any trim.
+        const startUtcMs = Date.UTC(2026, 9, 15, 4, 30, 22);
+        const mismatches: string[] = [];
+        for (const source of sources) {
+          for (const frontMarkerSec of [null, 1]) {
+            const trimmed = await tools.prepareAudioForTranscription({
+              sourceFilePath: source,
+              workingDir: home,
+              trim: { frontMarkerSec, backMarkerSec: null },
+              trimDecision: null,
+              durationSec: null,
+              audioProfile: null,
+            });
+            const utcMs = startUtcMs + (frontMarkerSec ?? 0) * 1000;
+            const tagArgs = times.recordingTimeWriteArgs(extname(source), utcMs, "Asia/Tokyo");
+            if (tagArgs === null) { mismatches.push(`${basename(source)}: no place for a time`); continue; }
+            const saved = await tools.rewriteAudioTags({ sourceFilePath: trimmed.filePath, workingDir: home, tagArgs });
+            const tags = { ...(await tools.probeAudioStreamTags(saved.filePath)), ...(await tools.probeContainerTags(saved.filePath)) };
+            if (!times.carriesOnlyRecordingTime(times.recordingTimesFromTags(tags), utcMs, "Asia/Tokyo")) {
+              mismatches.push(`${basename(source)}, front trim ${frontMarkerSec ?? 0} s: ${JSON.stringify(tags)}`);
+            }
+            await saved.cleanup();
+            await trimmed.cleanup();
+          }
         }
         expect(mismatches).toEqual([]);
       });

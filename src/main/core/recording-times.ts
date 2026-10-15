@@ -98,3 +98,86 @@ export function prefilledRecordingTime(candidates: readonly RecordingTimeCandida
   }
   return "";
 }
+
+// A saved recording carries its official start inside it: the chosen time
+// moved forward by the front trim, in whole seconds as the file name has it.
+// Each container gets the place its own tools keep a recording time, and every
+// time tag the import reads is cleared first, so no older time is left beside
+// the new one. MP4 keeps UTC; ID3 and Broadcast Wave keep a local time with no
+// zone; Vorbis comments take the local time with its offset. Raw AAC has no
+// tags at all, so it gets none (null).
+const CLEARED_TIME_TAGS = DATE_TIME_TAGS.flatMap((name) => ["-metadata", `${name}=`]);
+
+interface OfficialTime {
+  utc: string;
+  localDate: string;
+  localTime: string;
+  offset: string;
+}
+
+function officialTime(utcMs: number, timezone: string): OfficialTime | null {
+  const local = recomputeLocalFromUtc(utcMs, timezone);
+  if (local.error !== null) return null;
+  const [localDate, localTime] = local.localTimestampText.split(" ") as [string, string];
+  const offsetMinutes = Math.round((Date.parse(`${localDate}T${localTime}Z`) - utcMs) / 60_000);
+  const sign = offsetMinutes < 0 ? "-" : "+";
+  const hours = String(Math.floor(Math.abs(offsetMinutes) / 60)).padStart(2, "0");
+  const minutes = String(Math.abs(offsetMinutes) % 60).padStart(2, "0");
+  return { utc: new Date(utcMs).toISOString().replace(/\.\d{3}Z$/, "Z"), localDate, localTime, offset: `${sign}${hours}:${minutes}` };
+}
+
+/** The second a saved recording starts, as its tags record it. */
+export function officialStartUtcMs(effectiveUtcMs: number): number {
+  return Math.floor(effectiveUtcMs / 1000) * 1000;
+}
+
+/** The ffmpeg arguments that write `utcMs` as the recording time of a file
+ * with `extension`, or null when that container has nowhere to keep one or
+ * the time cannot be read in `timezone`. */
+export function recordingTimeWriteArgs(extension: string, utcMs: number, timezone: string): string[] | null {
+  const time = officialTime(utcMs, timezone);
+  if (time === null) return null;
+  const local = `${time.localDate}T${time.localTime}`;
+  switch (extension.toLowerCase()) {
+    case ".m4a":
+    case ".mp4":
+      return [...CLEARED_TIME_TAGS, "-metadata", `creation_time=${time.utc}`];
+    case ".mp3":
+      return [...CLEARED_TIME_TAGS, "-id3v2_version", "4", "-metadata", `date=${local}`];
+    case ".aif":
+    case ".aiff":
+      return [...CLEARED_TIME_TAGS, "-write_id3v2", "1", "-metadata", `date=${local}`];
+    case ".flac":
+      return [...CLEARED_TIME_TAGS, "-metadata", `date=${local}${time.offset}`];
+    case ".ogg":
+    case ".oga":
+      // Ogg keeps its comments with the stream, not the file.
+      return [
+        ...DATE_TIME_TAGS.flatMap((name) => ["-metadata:s:a:0", `${name}=`]),
+        "-metadata:s:a:0", `date=${local}${time.offset}`,
+      ];
+    case ".wav":
+      // One place only: RIFF INFO's date would reach ffprobe under the same
+      // name as Broadcast Wave's.
+      return [
+        ...CLEARED_TIME_TAGS,
+        "-write_bext", "1",
+        "-metadata", `origination_date=${time.localDate}`,
+        "-metadata", `origination_time=${time.localTime}`,
+      ];
+    default:
+      return null;
+  }
+}
+
+/** Whether the times read back from a saved file are the official start and
+ * nothing else. */
+export function carriesOnlyRecordingTime(
+  candidates: readonly RecordingTimeCandidate[],
+  utcMs: number,
+  timezone: string,
+): boolean {
+  const local = recomputeLocalFromUtc(utcMs, timezone);
+  return candidates.length > 0 && candidates.every((candidate) =>
+    candidate.utcMs !== null ? candidate.utcMs === utcMs : candidate.localText === local.localTimestampText);
+}

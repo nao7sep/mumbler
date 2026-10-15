@@ -24,6 +24,7 @@ import {
   type RendererErrorReport,
   type SaveCardResult,
   type SaveOutputFile,
+  type SaveCardOptions,
   type SaveConflictResolution,
   type SettingsDraft,
   type StartupFailure,
@@ -39,9 +40,21 @@ import {
   configureToolResolver,
   prepareAudioForTranscription,
   probeAudioProfile,
+  probeAudioStreamTags,
   probeContainerTags,
+  rewriteAudioTags,
+  type PreparedAudioInput,
 } from "./audio-tools";
-import { isPlausibleFileTime, prefilledRecordingTime, recordingTimesFromTags } from "./recording-times";
+import {
+  carriesOnlyRecordingTime,
+  isPlausibleFileTime,
+  officialStartUtcMs,
+  prefilledRecordingTime,
+  recordingTimesFromTags,
+  recordingTimeWriteArgs,
+} from "./recording-times";
+import { outputBaseName } from "@shared/output-name";
+import { isCancelledError } from "./cancellation";
 import { ToolManager } from "./binaries/manager";
 import { createDefaultDependencies, createDependenciesStore, type DependenciesValue } from "./binaries/store";
 import {
@@ -1938,6 +1951,7 @@ export class ApplicationRuntime {
   async saveCard(
     cardId: string,
     resolution?: SaveConflictResolution,
+    options: SaveCardOptions = { removeAfterSave: true },
   ): Promise<SaveCardResult> {
     this.ensureReady();
     const card = this.requireCard(cardId, "Card to save does not exist.");
@@ -1968,7 +1982,7 @@ export class ApplicationRuntime {
     // hands the card back as Ready to Save.
     card.status = "Saving";
     const controller = new AbortController();
-    const run = this.runSave(card, resolution, controller.signal);
+    const run = this.runSave(card, resolution, options, controller.signal);
     this.activeSaves.set(controller, run);
     try {
       const outcome = await run;
@@ -1981,6 +1995,7 @@ export class ApplicationRuntime {
   private async runSave(
     card: MumblerCard,
     resolution: SaveConflictResolution | undefined,
+    options: SaveCardOptions,
     signal: AbortSignal,
   ): Promise<SaveOutcome> {
     let outcome: SaveOutcome | null = null;
@@ -1988,7 +2003,8 @@ export class ApplicationRuntime {
       await this.persistState();
       outcome = await this.writeCardOutputs(card, resolution, signal);
     } finally {
-      if (outcome?.kind !== "saved") {
+      // A recording kept after its save stays ready to be saved again.
+      if (outcome?.kind !== "saved" || !options.removeAfterSave) {
         card.status = "Ready to Save";
         await this.persistState().catch((error: unknown) =>
           this.runtime.logger.error("card.save-settlement-failed", "Could not persist the recording's ready state after saving stopped.", error, {
@@ -1999,7 +2015,7 @@ export class ApplicationRuntime {
     // Publication is the commit point: once the files are out, the save has
     // succeeded, and removing the card from the queue is cleanup that reports
     // its own failure to the log rather than turning the save into a failure.
-    if (outcome.kind === "saved") {
+    if (outcome.kind === "saved" && options.removeAfterSave) {
       await this.discardWorkingCard(card);
     }
     return outcome;
@@ -2022,7 +2038,7 @@ export class ApplicationRuntime {
     if (outputDirectory === null) throw new OperationError("Choose a save folder before exporting a recording.");
     await mkdir(outputDirectory, { recursive: true });
 
-    const finalAudio = await prepareAudioForTranscription({
+    const trimmedAudio = await prepareAudioForTranscription({
       sourceFilePath: card.sourceFilePath,
       workingDir: this.runtime.paths!.workingDir,
       trim: card.trim,
@@ -2033,10 +2049,13 @@ export class ApplicationRuntime {
       signal,
     });
 
+    let stamped: Awaited<ReturnType<typeof this.stampRecordingTime>> | null = null;
     let committed: Extract<SaveOutcome, { kind: "saved" }> | null = null;
     try {
+      stamped = await this.stampRecordingTime(card, trimmedAudio, signal);
+      const finalAudio = stamped.audio;
       const extension = extname(finalAudio.filePath) || extname(card.sourceFilePath);
-      const baseName = `${formatUtcMarker(new Date(card.timestamps.effectiveUtc))}-${card.metadata.slug}`;
+      const baseName = outputBaseName(card)!;
       const initialTargets: SaveTargetPaths = {
         audioPath: join(outputDirectory, `${baseName}${extension}`),
         jsonPath: join(outputDirectory, `${baseName}.json`),
@@ -2130,10 +2149,14 @@ export class ApplicationRuntime {
         overwrite: resolution === "overwrite",
       });
 
+      if (stamped.warning !== null) warnings.push(stamped.warning);
       committed = { kind: "saved", ...targetPaths, warnings };
       return committed;
     } finally {
-      try { await finalAudio.cleanup(); }
+      try {
+        if (stamped !== null && stamped.audio !== trimmedAudio) await stamped.audio.cleanup();
+        await trimmedAudio.cleanup();
+      }
       catch (error) {
         await logger.warn("save.prepared-audio-cleanup-failed", "Could not clean up prepared save audio.", {
           cardId, error: serializeError(error),
@@ -2141,6 +2164,46 @@ export class ApplicationRuntime {
         committed?.warnings?.push(message("notice.saveCleanupFailed", { folder: pathValue(this.runtime.paths!.workingDir) }));
       }
     }
+  }
+
+  // The saved audio carries its official start inside it (recording-times.ts),
+  // read back by the same reader new recordings get before it is trusted. A format
+  // with no place for a time is saved as it is; a write that fails, or reads
+  // back as anything else, saves the audio as it was and says so.
+  private async stampRecordingTime(
+    card: MumblerCard,
+    audio: PreparedAudioInput,
+    signal: AbortSignal,
+  ): Promise<{ audio: PreparedAudioInput; warning: Message | null }> {
+    const utcMs = officialStartUtcMs(card.timestamps.effectiveUtc);
+    const timezone = card.timestamps.timezone;
+    const extension = extname(audio.filePath);
+    const notWritten = message("notice.saveTimeNotWritten");
+    if (!isValidTimezone(timezone)) return { audio, warning: notWritten };
+    const tagArgs = recordingTimeWriteArgs(extension, utcMs, timezone);
+    if (tagArgs === null) {
+      await this.runtime.logger.info("save.time-not-writable", "This audio format has no place for a recording time.", { cardId: card.id, extension });
+      return { audio, warning: null };
+    }
+    let rewritten: PreparedAudioInput | null = null;
+    try {
+      rewritten = await rewriteAudioTags({ sourceFilePath: audio.filePath, workingDir: this.runtime.paths!.workingDir, tagArgs, signal });
+      const tags = { ...(await probeAudioStreamTags(rewritten.filePath, signal)), ...(await probeContainerTags(rewritten.filePath, signal)) };
+      if (carriesOnlyRecordingTime(recordingTimesFromTags(tags), utcMs, timezone)) return { audio: rewritten, warning: null };
+      await this.runtime.logger.warn("save.time-mismatch", "The saved audio did not read back with its recording time.", {
+        cardId: card.id, extension, tags,
+      });
+    } catch (error: unknown) {
+      if (isCancelledError(error)) {
+        await rewritten?.cleanup();
+        throw error;
+      }
+      await this.runtime.logger.warn("save.time-write-failed", "Could not write the recording time into the saved audio.", {
+        cardId: card.id, extension, error: serializeError(error),
+      });
+    }
+    await rewritten?.cleanup();
+    return { audio, warning: notWritten };
   }
 
   // These are actual deletion owners: card/import disposal removes input paths,

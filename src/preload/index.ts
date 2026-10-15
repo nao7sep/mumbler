@@ -13,6 +13,7 @@ import {
   type PromptTemplates,
   type RendererErrorReport,
   type SaveCardResult,
+  type SaveCardOptions,
   type SaveConflictResolution,
   type SettingsDraft,
   type ToolName,
@@ -100,8 +101,8 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.chooseOriginalsDirectory) as Promise<AppSnapshot>,
   chooseOutputDirectory: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.chooseOutputDirectory) as Promise<AppSnapshot>,
-  saveCard: (cardId: string, resolution?: SaveConflictResolution) =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.saveCard, cardId, resolution) as Promise<SaveCardResult>,
+  saveCard: (cardId: string, resolution?: SaveConflictResolution, options?: SaveCardOptions) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.saveCard, cardId, resolution, options) as Promise<SaveCardResult>,
   removeCard: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.removeCard, cardId) as Promise<AppSnapshot>,
   reportRendererError: (report: RendererErrorReport) =>

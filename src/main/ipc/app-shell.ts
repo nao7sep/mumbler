@@ -6,6 +6,7 @@ import {
   type GenerateTarget,
   type PendingImportReviewItem,
   type RendererErrorReport,
+  type SaveCardOptions,
   type SaveConflictResolution,
   type SettingsDraft,
   type ToolName,
@@ -289,9 +290,11 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
 
   handle(
     APP_SHELL_CHANNELS.saveCard,
-    (_event, cardId: string, resolution?: SaveConflictResolution) => {
+    (_event, cardId: string, resolution?: SaveConflictResolution, options?: SaveCardOptions) => {
       assertString(cardId, "cardId");
-      return runtime.saveCard(cardId, resolution);
+      return runtime.saveCard(cardId, resolution, {
+        removeAfterSave: options === undefined || options === null || options.removeAfterSave !== false,
+      });
     },
   );
 

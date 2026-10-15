@@ -104,8 +104,8 @@ describe("the app-shell IPC boundary", () => {
     ["saveSettingsDraft", "saveSettingsDraft", [{ model: "gemini-3.7-flash" }]],
     ["setGeminiApiKey", "setGeminiApiKey", ["a-key"]],
     ["clearGeminiApiKey", "clearGeminiApiKey", []],
-    ["saveCard", "saveCard", ["card-1", undefined]],
-    ["saveCard", "saveCard", ["card-1", "overwrite"]],
+    ["saveCard", "saveCard", ["card-1", undefined, { removeAfterSave: true }]],
+    ["saveCard", "saveCard", ["card-1", "overwrite", { removeAfterSave: false }]],
     ["removeCard", "removeCard", ["card-1"]],
     ["reportRendererError", "reportRendererError", [{ message: "boom" }]],
     ["reportRendererDiagnostic", "reportRendererDiagnostic", [{ message: "note" }]],
@@ -133,6 +133,14 @@ describe("the app-shell IPC boundary", () => {
     expect(runtime[method]).toHaveBeenCalledExactlyOnceWith(...args);
     expect(result).toBe(`${method} result`);
   });
+
+  it.each([[undefined], [null], ["keep"], [{}], [{ removeAfterSave: "no" }]])(
+    "removes a saved recording unless the renderer asks plainly to keep it (%j)",
+    async (options) => {
+      await invoke(APP_SHELL_CHANNELS.saveCard, "card-1", undefined, options);
+      expect(runtime.saveCard).toHaveBeenCalledExactlyOnceWith("card-1", undefined, { removeAfterSave: true });
+    },
+  );
 
   it.each(["openImportDialog", "pickOutputDirectory", "chooseOutputDirectory"] as const)(
     "gives %s the window that asked, and refuses when the sender has none",

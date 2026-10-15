@@ -184,6 +184,59 @@ export async function probeContainerTags(
   return typeof tags === "object" && tags !== null ? (tags as Record<string, unknown>) : {};
 }
 
+// The first audio stream's own tags, where Ogg keeps its comments.
+export async function probeAudioStreamTags(
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const { stdout } = await runTool(resolveFfprobePath(), [
+    "-v",
+    "error",
+    "-select_streams",
+    "a:0",
+    "-show_entries",
+    "stream_tags",
+    "-of",
+    "json",
+    filePath,
+  ], { timeoutMs: PROBE_TIMEOUT_MS, signal });
+  const tags = (JSON.parse(stdout) as { streams?: Array<{ tags?: unknown }> }).streams?.[0]?.tags;
+  return typeof tags === "object" && tags !== null ? (tags as Record<string, unknown>) : {};
+}
+
+/** Re-packs `sourceFilePath`'s audio unchanged into the working folder, with
+ * its tags kept except as `tagArgs` set or clear them. */
+export async function rewriteAudioTags(params: {
+  sourceFilePath: string;
+  workingDir: string;
+  tagArgs: string[];
+  signal?: AbortSignal;
+}): Promise<PreparedAudioInput> {
+  const derivedDir = join(params.workingDir, "derived");
+  await mkdir(derivedDir, { recursive: true });
+  const extension = extname(params.sourceFilePath) || ".audio";
+  // not recorded: derived/ holds disposable audio, as for a trim.
+  const outputPath = join(derivedDir, `${nanoid()}${extension}`);
+  try {
+    await runTool(resolveFfmpegPath(), [
+      "-hide_banner", "-loglevel", "error", "-y",
+      "-i", params.sourceFilePath,
+      "-map", "0:a", "-c", "copy", "-map_metadata", "0",
+      ...params.tagArgs,
+      outputPath,
+    ], { timeoutMs: TRANSCODE_TIMEOUT_MS, signal: params.signal });
+  } catch (error: unknown) {
+    await cleanupDerivedFile(outputPath);
+    throw error;
+  }
+  return {
+    filePath: outputPath,
+    mimeType: inferAudioMimeType(params.sourceFilePath),
+    wasDerived: true,
+    cleanup: async () => cleanupDerivedFile(outputPath),
+  };
+}
+
 export async function probeAudioProfile(
   filePath: string,
   signal?: AbortSignal,

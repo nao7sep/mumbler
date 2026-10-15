@@ -607,6 +607,11 @@ export interface ConfirmImportsResult {
 
 export type SaveConflictResolution = "overwrite" | "suffix" | "cancel";
 
+// Whether the recording leaves the queue once its files are out.
+export interface SaveCardOptions {
+  removeAfterSave: boolean;
+}
+
 export interface SaveOutputFile {
   path: string;
   status: "saved" | "unchanged" | "failed" | "pending";
@@ -669,7 +674,7 @@ export interface MumblerShellApi {
   saveSetupRecordingsDirectory(directory: string): Promise<AppSnapshot>;
   saveSetupTimezone(timezone: string): Promise<AppSnapshot>;
   chooseOriginalsDirectory(): Promise<AppSnapshot>;
-  saveCard(cardId: string, resolution?: SaveConflictResolution): Promise<SaveCardResult>;
+  saveCard(cardId: string, resolution?: SaveConflictResolution, options?: SaveCardOptions): Promise<SaveCardResult>;
   removeCard(cardId: string): Promise<AppSnapshot>;
   reportRendererError(report: RendererErrorReport): Promise<AppSnapshot>;
   reportRendererDiagnostic(report: RendererErrorReport): Promise<void>;
