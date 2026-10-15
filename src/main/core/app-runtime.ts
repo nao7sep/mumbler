@@ -1387,7 +1387,7 @@ export class ApplicationRuntime {
     return `mumbler-asset://media/${encodeURIComponent(cardId)}`;
   }
 
-  // A card's working recording, or a pending import's, which the review plays.
+  // A card's working recording, or that of a pending import, which the review plays.
   resolveCardSourcePath(cardId: string): string | null {
     if (this.runtime.state === null) {
       return null;
@@ -1725,8 +1725,8 @@ export class ApplicationRuntime {
     await this.pipeline.drainQueued();
   }
 
-  // The app-owned work still running that a quit would stop, which the user's
-  // quit asks about first. Queued recordings are not counted: they stay queued
+  // The app-owned work still running that a quit would stop, which a quit by
+  // the user asks about first. Queued recordings are not counted: they stay queued
   // in the saved queue and start again at the next launch.
   runningWork(): RunningWork {
     const busy: readonly MumblerCard["status"][] = ["Transcribing", "Generating Metadata", "Saving"];

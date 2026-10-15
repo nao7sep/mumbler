@@ -288,7 +288,7 @@ function pendingImportIssue(item: unknown): string | null {
   const record = asRecord(item);
   if (record === null) return "a pending import is not an object";
   const flag = ["deleteOriginalOnConfirm", "copyToBackupOnConfirm"].find((key) => typeof record[key] !== "boolean");
-  return textIssue("a pending import's", record, [
+  return textIssue("a pending import entry's", record, [
     "id",
     "originalFilename",
     "originalSourcePath",
@@ -296,7 +296,7 @@ function pendingImportIssue(item: unknown): string | null {
     "localTimestampText",
     "timezone",
     "utcTimestampText",
-  ]) ?? (flag === undefined ? null : `a pending import's ${flag} is not true or false`);
+  ]) ?? (flag === undefined ? null : `a pending import entry's ${flag} is not true or false`);
 }
 
 function cardIssue(item: unknown): string | null {
