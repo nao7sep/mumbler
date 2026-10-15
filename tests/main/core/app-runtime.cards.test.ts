@@ -1,4 +1,4 @@
-import { access, link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { access, link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { dialog, shell } from "electron";
@@ -768,6 +768,35 @@ describe("confirming what was dropped in", () => {
     ]);
 
     expect(cards(snapshot).map((card) => card.originalFilename)).toEqual(["earlier.wav", "later.wav"]);
+  });
+
+  // File dates a copy, an archive or an unset clock leaves are set here on real
+  // files; Git keeps no file dates, so the shared corpus cannot carry them.
+  it.each([
+    ["Unix zero", Date.UTC(1970, 0, 1)],
+    ["the 1980 floor of ZIP and FAT dates", Date.UTC(1980, 0, 1)],
+    ["2099, an unset recorder clock", Date.UTC(2099, 11, 31)],
+  ])("offers no file date left at %s, and prefills nothing from it", async (_case, ms) => {
+    const path = join(sourceDir, "kitchen-table.m4a");
+    await writeFile(path, "audio for kitchen-table.m4a");
+    await utimes(path, new Date(ms), new Date(ms));
+    await runtime.importDroppedPaths([path]);
+    const [pending] = runtime.getSnapshot().state!.pendingImports;
+    expect(pending!.timeCandidates.filter((candidate) => candidate.source === "file-modified")).toEqual([]);
+    expect(pending!.timeCandidates.filter((candidate) => candidate.utcMs === Math.floor(ms / 1000) * 1000)).toEqual([]);
+    expect(pending!.localTimestampText).toBe("");
+    expect(pending!.parseStatus).toBe("manual-required");
+  });
+
+  it("offers a plausible file date as a choice, and still prefills only from the name", async () => {
+    const path = join(sourceDir, "20261014-153012.m4a");
+    await writeFile(path, "audio for 20261014-153012.m4a");
+    const modified = Date.UTC(2026, 9, 15, 1, 0, 0);
+    await utimes(path, new Date(modified), new Date(modified));
+    await runtime.importDroppedPaths([path]);
+    const [pending] = runtime.getSnapshot().state!.pendingImports;
+    expect(pending!.timeCandidates).toContainEqual({ source: "file-modified", utcMs: modified, localText: null });
+    expect(pending!.localTimestampText).toBe("2026-10-14 15:30:12");
   });
 
   it("offers the file's own times for review and plays a pending import from its working copy", async () => {

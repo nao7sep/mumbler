@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { recordingTimesFromTags } from "@main/core/recording-times";
+import { isPlausibleFileTime, prefilledRecordingTime, recordingTimesFromTags } from "@main/core/recording-times";
 
 // The tags below are as ffprobe 9 reports them for files written the way each
 // format's recorders write them; the live lane writes such files and reads them
@@ -112,5 +112,43 @@ describe("recording times in the shared corpus's tags", () => {
     expect(recordingTimesFromTags({ "com.apple.quicktime.creationdate": "2026-02-30T15:30:12+0900" })).toEqual([]);
     expect(recordingTimesFromTags({ date: "2026-04-31T08:00:00" })).toEqual([]);
     expect(recordingTimesFromTags({ date: "2028-02-29T08:00:00" }), "2028 is a leap year").toHaveLength(1);
+  });
+});
+
+describe("the time the review starts with", () => {
+  const name = { source: "file-name" as const, utcMs: null, localText: "2026-10-14 15:30:12" };
+  const storedLocal = { source: "embedded" as const, utcMs: null, localText: "2026-10-14 15:34:00" };
+  const storedExact = { source: "embedded" as const, utcMs: Date.UTC(2026, 9, 14, 6, 30, 12), localText: null };
+  const modified = { source: "file-modified" as const, utcMs: Date.UTC(2026, 9, 15, 1, 0, 0), localText: null };
+  // A broken name or tag never becomes a candidate, so "broken" here is "absent".
+  it.each([
+    ["no name, no stored time", [modified], ""],
+    ["no name, a stored local time", [storedLocal, modified], "2026-10-14 15:34:00"],
+    ["no name, a stored exact time, read in the import zone", [storedExact, modified], "2026-10-14 15:30:12"],
+    ["a name and no stored time", [name, modified], "2026-10-14 15:30:12"],
+    ["a name that disagrees with the stored time, which the name wins", [name, storedLocal, modified], "2026-10-14 15:30:12"],
+    ["the first of several stored times", [storedLocal, storedExact], "2026-10-14 15:34:00"],
+  ])("%s", (_case, candidates, expected) => {
+    expect(prefilledRecordingTime(candidates, "Asia/Tokyo")).toBe(expected);
+  });
+
+  it("never starts from a file date", () => {
+    expect(prefilledRecordingTime([modified, { ...modified, source: "file-created" }], "Asia/Tokyo")).toBe("");
+  });
+});
+
+describe("plausible file dates", () => {
+  const now = Date.UTC(2026, 9, 15, 3, 0, 0);
+  it.each([
+    ["Unix zero", Date.UTC(1970, 0, 1), false],
+    ["the 1980 floor of ZIP and FAT dates", Date.UTC(1980, 0, 1), false],
+    ["just before 1990", Date.UTC(1989, 11, 31, 23, 59, 59), false],
+    ["1990", Date.UTC(1990, 0, 1), true],
+    ["now", now, true],
+    ["within a day ahead, a clock a little fast", now + 23 * 60 * 60 * 1000, true],
+    ["more than a day ahead", now + 25 * 60 * 60 * 1000, false],
+    ["2099, an unset recorder clock", Date.UTC(2099, 11, 31), false],
+  ])("%s", (_case, ms, plausible) => {
+    expect(isPlausibleFileTime(ms, now)).toBe(plausible);
   });
 });

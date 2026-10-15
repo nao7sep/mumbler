@@ -41,7 +41,7 @@ import {
   probeAudioProfile,
   probeContainerTags,
 } from "./audio-tools";
-import { recordingTimesFromTags } from "./recording-times";
+import { isPlausibleFileTime, prefilledRecordingTime, recordingTimesFromTags } from "./recording-times";
 import { ToolManager } from "./binaries/manager";
 import { createDefaultDependencies, createDependenciesStore, type DependenciesValue } from "./binaries/store";
 import {
@@ -2369,11 +2369,17 @@ export class ApplicationRuntime {
       });
     }
     const second = (ms: number) => Math.floor(ms / 1000) * 1000;
-    if (sourceStats.birthtimeMs > 0) timeCandidates.push({ source: "file-created", utcMs: second(sourceStats.birthtimeMs), localText: null });
-    timeCandidates.push({ source: "file-modified", utcMs: second(sourceStats.mtimeMs), localText: null });
+    const now = Date.now();
+    if (sourceStats.birthtimeMs > 0 && isPlausibleFileTime(sourceStats.birthtimeMs, now)) {
+      timeCandidates.push({ source: "file-created", utcMs: second(sourceStats.birthtimeMs), localText: null });
+    }
+    if (isPlausibleFileTime(sourceStats.mtimeMs, now)) {
+      timeCandidates.push({ source: "file-modified", utcMs: second(sourceStats.mtimeMs), localText: null });
+    }
+    const localTimestampText = prefilledRecordingTime(timeCandidates, importZone);
     const utcResult =
-      parsed.localTimestampText.length > 0
-        ? recomputeUtcFromLocal(parsed.localTimestampText, importZone)
+      localTimestampText.length > 0
+        ? recomputeUtcFromLocal(localTimestampText, importZone)
         : { utcMs: null, error: null };
 
     const pendingImport: PendingImportReviewItem = {
@@ -2383,10 +2389,10 @@ export class ApplicationRuntime {
       originalSourcePath: sourcePath,
       workingFilePath,
       fileSizeBytes: sourceStats.size,
-      localTimestampText: parsed.localTimestampText,
+      localTimestampText,
       timezone: importZone,
       utcTimestampText: utcResult.error === null && utcResult.utcMs !== null ? formatUtcForDisplay(utcResult.utcMs) : "",
-      parseStatus: parsed.parseStatus,
+      parseStatus: localTimestampText.length > 0 ? "parsed" : "manual-required",
       timeCandidates,
       // An imported original is moved into Recordings by default: copied, then
       // deleted once the copy is complete.

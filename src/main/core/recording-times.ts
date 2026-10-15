@@ -1,5 +1,5 @@
 import type { RecordingTimeCandidate } from "@shared/app-shell";
-import { getLocalTimestampError } from "@shared/timestamps";
+import { getLocalTimestampError, recomputeLocalFromUtc } from "@shared/timestamps";
 
 // The recording times an audio file carries inside it, as ffprobe reports its
 // container tags. There is no one standard: MP4/M4A keeps `creation_time` in
@@ -68,4 +68,33 @@ export function recordingTimesFromTags(tags: Readonly<Record<string, unknown>>):
     add(localCandidate(local(date[1]!, date[2]!, date[3]!, time[1]!, time[2]!, time[3] ?? "00")));
   }
   return found;
+}
+
+// A file date a copy, an archive or an unset clock can leave behind is not a
+// recording time: before 1990, which takes in Unix zero and the 1980 floor of
+// ZIP and FAT dates, or more than a day after now.
+const EARLIEST_FILE_TIME_MS = Date.UTC(1990, 0, 1);
+const FUTURE_SLACK_MS = 24 * 60 * 60 * 1000;
+
+/** Whether a file's created or modified time could be when it was recorded. */
+export function isPlausibleFileTime(ms: number, nowMs: number): boolean {
+  return Number.isFinite(ms) && ms >= EARLIEST_FILE_TIME_MS && ms <= nowMs + FUTURE_SLACK_MS;
+}
+
+/** The local time the review starts with, in `timezone`: the file name's when
+ * it has one, which every recorder but the iPad writes; otherwise the first
+ * time stored inside the file; otherwise none. File dates are offered, never
+ * chosen, since a copy or sync can change them. */
+export function prefilledRecordingTime(candidates: readonly RecordingTimeCandidate[], timezone: string): string {
+  const name = candidates.find((candidate) => candidate.source === "file-name");
+  if (name?.localText) return name.localText;
+  for (const candidate of candidates) {
+    if (candidate.source !== "embedded") continue;
+    if (candidate.localText !== null) return candidate.localText;
+    if (candidate.utcMs !== null) {
+      const local = recomputeLocalFromUtc(candidate.utcMs, timezone);
+      if (local.error === null) return local.localTimestampText;
+    }
+  }
+  return "";
 }

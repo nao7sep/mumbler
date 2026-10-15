@@ -151,6 +151,11 @@ describe("calendar validity", () => {
     },
   );
 
+  it("reads a two-digit year 70 or later as 19xx, and earlier as 20xx", () => {
+    expect(parseTimestampFromFilename("700101-0000", DEFAULT_TIMESTAMP_PATTERN).localTimestampText).toBe("1970-01-01 00:00:00");
+    expect(parseTimestampFromFilename("691231-2359", DEFAULT_TIMESTAMP_PATTERN).localTimestampText).toBe("2069-12-31 23:59:00");
+  });
+
   it("accepts February 29 in a leap year, and refuses it as typed text otherwise", () => {
     expect(parseTimestampFromFilename("20280229-1200", DEFAULT_TIMESTAMP_PATTERN).localTimestampText).toBe("2028-02-29 12:00:00");
     expect(getLocalTimestampError("2027-02-29 12:00:00")).not.toBeNull();

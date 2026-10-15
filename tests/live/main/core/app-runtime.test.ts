@@ -399,7 +399,7 @@ function expectedCandidate(entry: TimestampOracle["cases"][number]["stored"][num
 }
 
 describe("recording times in the shared corpus", () => {
-  it("offers each recording's name time and readable stored times, and refuses the broken ones", async () => {
+  it("offers each recording's name time and readable stored times, refuses the broken ones, and starts from the right one", async () => {
     const oracle = JSON.parse(await readFile(corpusFile("audio/timestamps/timestamp-cases.json"), "utf8")) as TimestampOracle;
     const home = await freshHome("times");
     const sources = join(home, "sources");
@@ -428,6 +428,14 @@ describe("recording times in the shared corpus", () => {
             .map((value) => { const candidate = expectedCandidate(value); return [`${candidate.utcMs}|${candidate.localText}`, candidate]; })).values()];
           const key = (list: typeof stored) => list.map((candidate) => `${candidate.utcMs}|${candidate.localText}`).sort().join(", ");
           if (key(stored) !== key(expectedStored)) mismatches.push(`${entry.file}: stored [${key(stored)}], expected [${key(expectedStored)}]`);
+          // The review starts from the name's time, else the first stored one, in Tokyo time.
+          const first = expectedName[0] ?? (() => {
+            const candidate = entry.stored.filter((value) => value.valid && value.ffprobe === "reported").map(expectedCandidate)[0];
+            if (candidate === undefined) return "";
+            if (candidate.localText !== null) return candidate.localText;
+            return new Date(candidate.utcMs! + 9 * 60 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
+          })();
+          if (item.localTimestampText !== first) mismatches.push(`${entry.file}: starts at "${item.localTimestampText}", expected "${first}"`);
         }
         expect(mismatches).toEqual([]);
       });
