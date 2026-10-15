@@ -400,8 +400,6 @@
   "settings.defaultTimezoneHint": "Les heures d’enregistrement sans fuseau horaire, comme dans la plupart des noms de fichiers, sont lues dans ce fuseau. Un fuseau choisi ici reste quand celui de l’ordinateur change\u00a0; Système suit l’ordinateur.",
   "settings.displayTimezone": "Fuseau horaire d’affichage",
   "settings.displayTimezoneHint": "Les heures des événements de l’app, comme dans le Journal, sont affichées dans ce fuseau.",
-  "error.timezoneLink": "La liste de référence des fuseaux horaires n’a pas pu être ouverte. Réessayez.",
-  "settings.timezoneLink": "Liste complète des fuseaux horaires sur Wikipédia",
   "settings.timestampPattern": "Modèles d’horodatage",
   "settings.timestampPatternHint": "Chaque modèle est une expression régulière. Ils sont essayés de haut en bas, et le premier qui trouve une date et une heure réelles est utilisé. Groupes nommés\u00a0: {year} (2 ou 4 chiffres), {month}, {day}, {hour}, {minute}, {second} (facultatif).",
   "settings.resetTimestampPattern": "Réinitialiser les modèles",

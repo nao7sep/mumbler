@@ -388,8 +388,6 @@
   "settings.defaultTimezoneHint": "不带时区保存的录制时间（例如大多数文件名中的时间）按此时区读取。在此选择的时区不会随电脑时区改变；“跟随系统”会随电脑改变。",
   "settings.displayTimezone": "显示时区",
   "settings.displayTimezoneHint": "应用自身事件的时间（例如记录中的时间）按此时区显示。",
-  "error.timezoneLink": "无法打开时区参考列表。请重试。",
-  "settings.timezoneLink": "维基百科上的完整时区列表",
   "settings.timestampPattern": "时间戳匹配模式",
   "settings.timestampPatternHint": "每个模式都是一个正则表达式。从上到下依次尝试，使用第一个找到真实日期和时间的模式。命名分组：{year}（2 位或 4 位）、{month}、{day}、{hour}、{minute}、{second}（可选）。",
   "settings.resetTimestampPattern": "重置匹配模式",

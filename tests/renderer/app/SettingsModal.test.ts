@@ -71,16 +71,6 @@ afterEach(async () => {
 });
 
 describe("SettingsModal results", () => {
-  function deferred<T>() {
-    let resolve!: (value: T | PromiseLike<T>) => void;
-    let reject!: (reason?: unknown) => void;
-    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-      resolve = resolvePromise;
-      reject = rejectPromise;
-    });
-    return { promise, resolve, reject };
-  }
-
   it("announces save failures and associates numeric validation with its field", async () => {
     const container = document.createElement("div");
     document.body.append(container);
@@ -117,79 +107,6 @@ describe("SettingsModal results", () => {
       .toBe("Skip interval must be a positive integer.");
   });
 
-  it("owns timezone-reference rejection locally without leaking diagnostics", async () => {
-    const container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-    openExternal.mockRejectedValueOnce(new Error("EACCES /private/tmp/timezone-browser"));
-
-    await act(async () => {
-      root?.render(React.createElement(SettingsModal, {
-        draft: draft(),
-        isDirty: false,
-        isSaving: false,
-        isSavingApiKey: false,
-        isPickingOutputDirectory: false,
-        isPickingBackupDirectory: false,
-        errorMessage: null,
-        onChange: vi.fn(),
-        onClose: vi.fn(),
-        onPickOutputDirectory: vi.fn(),
-        onPickBackupDirectory: vi.fn(),
-        onSetApiKey: vi.fn(),
-        onClearApiKey: vi.fn(),
-        onRestoreDefaultPrompts: vi.fn(),
-        onSave: vi.fn(),
-      }));
-    });
-
-    const link = document.querySelector<HTMLAnchorElement>('a[href*="time_zones"]');
-    await act(async () => link?.click());
-    expect(document.body.textContent).toContain("The time zone reference could not be opened. Try again.");
-    expect(document.body.textContent).not.toContain("EACCES");
-    expect(reportRendererDiagnostic).toHaveBeenCalledOnce();
-
-    openExternal.mockResolvedValueOnce();
-    await act(async () => link?.click());
-    expect(document.body.textContent).not.toContain("The time zone reference could not be opened. Try again.");
-  });
-
-  it("ignores an older timezone-link settlement after a newer success", async () => {
-    const container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-    await act(async () => {
-      root?.render(React.createElement(SettingsModal, {
-        draft: draft(),
-        isDirty: false,
-        isSaving: false,
-        isSavingApiKey: false,
-        isPickingOutputDirectory: false,
-        isPickingBackupDirectory: false,
-        errorMessage: null,
-        onChange: vi.fn(),
-        onClose: vi.fn(),
-        onPickOutputDirectory: vi.fn(),
-        onPickBackupDirectory: vi.fn(),
-        onSetApiKey: vi.fn(),
-        onClearApiKey: vi.fn(),
-        onRestoreDefaultPrompts: vi.fn(),
-        onSave: vi.fn(),
-      }));
-    });
-
-    const first = deferred<void>();
-    const second = deferred<void>();
-    openExternal.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-    const link = document.querySelector<HTMLAnchorElement>('a[href*="time_zones"]');
-    await act(async () => { link?.click(); link?.click(); });
-    await act(async () => second.resolve());
-    await act(async () => first.reject(new Error("EACCES /private/tmp/STALE-TIMEZONE")));
-
-    expect(document.body.textContent).not.toContain("time zone reference could not be opened");
-    expect(document.body.textContent).not.toContain("STALE-TIMEZONE");
-    expect(reportRendererDiagnostic).toHaveBeenCalledOnce();
-  });
 });
 
 describe("SettingsModal theme", () => {
@@ -279,6 +196,12 @@ describe("SettingsModal language and time zone", () => {
 
   // timestamp-conventions and app-chrome-conventions: every System entry
   // leads its list and shows what it resolves to now.
+  it("offers the zones as a list, with no outside reference to look them up in", async () => {
+    await renderWith(vi.fn());
+    expect(document.querySelector('a[href*="wikipedia"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("Wikipedia");
+  });
+
   it("lists System first in both zone lists, naming the computer's zone", async () => {
     await renderWith(vi.fn(), { defaultTimezone: "Asia/Tokyo", displayTimezone: "system" });
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;

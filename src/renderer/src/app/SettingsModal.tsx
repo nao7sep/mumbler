@@ -11,14 +11,11 @@ import { DEFAULT_TIMESTAMP_PATTERNS, SYSTEM_TIMEZONE, getSupportedTimezones, get
 import { LANGUAGE_NAMES, LANGUAGES, normalizeLanguagePreference, type Language } from "@shared/i18n/languages";
 import { useI18n } from "../i18n/I18nContext";
 import type { MessageKey } from "@shared/i18n/catalogues";
-import { message, type Message, type Translator } from "@shared/i18n/translate";
+import { type Message, type Translator } from "@shared/i18n/translate";
 import { ModalShell } from "./modal/ModalShell";
 import { useTablist } from "./useTablist";
-import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ExternalLinkIcon } from "./Icon";
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from "./Icon";
 import { InlineError } from "./InlineResult";
-import { presentFailure } from "./presentFailure";
-
-const TIMEZONE_REFERENCE_URL = "https://en.wikipedia.org/wiki/List_of_tz_database_time_zones";
 
 // One model field: free-typed, with a warning line when the id has no row in
 // SUPPORTED_MODELS, and beside it the role's Thinking field per the
@@ -137,8 +134,6 @@ export function SettingsModal({
   // Settings Save. The raw key is held only in this local state until then.
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
-  const [timezoneLinkError, setTimezoneLinkError] = useState<Message | null>(null);
-  const timezoneLinkAttempt = useRef(0);
   const settingsTablist = useTablist<SettingsTab>({
     tabs: SETTINGS_TABS,
     selected: activeTab,
@@ -361,34 +356,6 @@ export function SettingsModal({
                   </select>
                 </label>
                 <p className="field-hint">{t("settings.defaultTimezoneHint")}</p>
-                <p className="field-hint">
-                  <a
-                    href={TIMEZONE_REFERENCE_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      const attempt = ++timezoneLinkAttempt.current;
-                      void window.mumbler.openExternal(TIMEZONE_REFERENCE_URL)
-                        .then(() => {
-                          if (timezoneLinkAttempt.current === attempt) setTimezoneLinkError(null);
-                        })
-                        .catch((error: unknown) => {
-                          const failure = presentFailure(
-                            error,
-                            message("error.timezoneLink"),
-                            "settings timezone link failed",
-                          );
-                          if (timezoneLinkAttempt.current === attempt) setTimezoneLinkError(failure);
-                        });
-                    }}
-                  >{t("settings.timezoneLink")} <ExternalLinkIcon /></a>
-                </p>
-                {timezoneLinkError ? (
-                  <InlineError onDismiss={() => setTimezoneLinkError(null)}>
-                    {text(timezoneLinkError)}
-                  </InlineError>
-                ) : null}
                 <div className="field">
                   <span id="settings-timestamp-patterns-label">{t("settings.timestampPattern")}</span>
                   <ol className="pattern-list" aria-labelledby="settings-timestamp-patterns-label">

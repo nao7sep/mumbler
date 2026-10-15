@@ -394,8 +394,6 @@
   "settings.defaultTimezoneHint": "Aufnahmezeiten ohne Zeitzone, wie in den meisten Dateinamen, werden in dieser Zeitzone gelesen. Eine hier gewählte Zeitzone bleibt, wenn sich die Zeitzone des Computers ändert; System folgt dem Computer.",
   "settings.displayTimezone": "Zeitzone der Anzeige",
   "settings.displayTimezoneHint": "Zeiten der App-eigenen Ereignisse, etwa im Protokoll, werden in dieser Zeitzone angezeigt.",
-  "error.timezoneLink": "Die Übersicht der Zeitzonen konnte nicht geöffnet werden. Versuchen Sie es erneut.",
-  "settings.timezoneLink": "Vollständige Liste der Zeitzonen auf Wikipedia",
   "settings.timestampPattern": "Zeitstempelmuster",
   "settings.timestampPatternHint": "Jedes Muster ist ein regulärer Ausdruck. Sie werden von oben nach unten versucht; das erste, das ein gültiges Datum mit Uhrzeit findet, wird verwendet. Benannte Gruppen: {year} (2 oder 4 Ziffern), {month}, {day}, {hour}, {minute}, {second} (optional).",
   "settings.resetTimestampPattern": "Muster zurücksetzen",

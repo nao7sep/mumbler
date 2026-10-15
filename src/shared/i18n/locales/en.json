@@ -384,8 +384,6 @@
   "settings.defaultTimezoneHint": "Recording times saved without a time zone, as in most file names, are read in this zone. A zone chosen here stays when the computer’s zone changes; System follows the computer.",
   "settings.displayTimezone": "Display Time Zone",
   "settings.displayTimezoneHint": "Times of the app’s own events, such as in Records, are shown in this zone.",
-  "error.timezoneLink": "The time zone reference could not be opened. Try again.",
-  "settings.timezoneLink": "Full time zone list on Wikipedia",
   "settings.timestampPattern": "Timestamp Patterns",
   "settings.timestampPatternHint": "Each pattern is a regular expression. They are tried from the top, and the first that finds a real date and time is used. Named groups: {year} (2 or 4 digits), {month}, {day}, {hour}, {minute}, {second} (optional).",
   "settings.resetTimestampPattern": "Reset patterns",

@@ -400,8 +400,6 @@
   "settings.defaultTimezoneHint": "Las horas de grabación guardadas sin zona horaria, como en la mayoría de los nombres de archivo, se leen en esta zona. Una zona elegida aquí se mantiene aunque cambie la del ordenador; Sistema sigue al ordenador.",
   "settings.displayTimezone": "Zona horaria de visualización",
   "settings.displayTimezoneHint": "Las horas de los eventos de la propia app, como en el Registro, se muestran en esta zona.",
-  "error.timezoneLink": "No se pudo abrir la referencia de zonas horarias. Inténtalo de nuevo.",
-  "settings.timezoneLink": "Lista completa de zonas horarias en Wikipedia",
   "settings.timestampPattern": "Patrones de marca de tiempo",
   "settings.timestampPatternHint": "Cada patrón es una expresión regular. Se prueban de arriba abajo y se usa el primero que encuentra una fecha y hora reales. Grupos con nombre: {year} (2 o 4 dígitos), {month}, {day}, {hour}, {minute}, {second} (opcional).",
   "settings.resetTimestampPattern": "Restablecer patrones",

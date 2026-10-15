@@ -400,8 +400,6 @@
   "settings.defaultTimezoneHint": "Gli orari di registrazione salvati senza fuso orario, come nella maggior parte dei nomi di file, vengono letti in questo fuso. Un fuso scelto qui resta quando cambia quello del computer; Sistema segue il computer.",
   "settings.displayTimezone": "Fuso orario di visualizzazione",
   "settings.displayTimezoneHint": "Gli orari degli eventi dell’app, come nel Registro, sono mostrati in questo fuso.",
-  "error.timezoneLink": "Impossibile aprire l’elenco di riferimento dei fusi orari. Riprova.",
-  "settings.timezoneLink": "Elenco completo dei fusi orari su Wikipedia",
   "settings.timestampPattern": "Schemi di data e ora",
   "settings.timestampPatternHint": "Ogni schema è un’espressione regolare. Vengono provati dall’alto e si usa il primo che trova una data e un’ora reali. Gruppi con nome: {year} (2 o 4 cifre), {month}, {day}, {hour}, {minute}, {second} (facoltativo).",
   "settings.resetTimestampPattern": "Ripristina gli schemi",

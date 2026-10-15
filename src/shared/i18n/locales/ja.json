@@ -388,8 +388,6 @@
   "settings.defaultTimezoneHint": "多くのファイル名のように、タイムゾーンなしで保存された録音日時は、このタイムゾーンで読み取られます。ここで選んだタイムゾーンは、コンピュータのタイムゾーンが変わってもそのままです。「システム」はコンピュータに合わせます。",
   "settings.displayTimezone": "表示のタイムゾーン",
   "settings.displayTimezoneHint": "記録など、アプリ自身の出来事の日時をこのタイムゾーンで表示します。",
-  "error.timezoneLink": "タイムゾーンの一覧を開けませんでした。もう一度お試しください。",
-  "settings.timezoneLink": "Wikipediaでタイムゾーンの一覧を見る",
   "settings.timestampPattern": "日時のパターン",
   "settings.timestampPatternHint": "各パターンは正規表現です。上から順に試し、実在する日時が見つかった最初のものを使います。名前付きグループ：{year}（2桁または4桁）、{month}、{day}、{hour}、{minute}、{second}（省略可）。",
   "settings.resetTimestampPattern": "パターンをリセット",

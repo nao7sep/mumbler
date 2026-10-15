@@ -400,8 +400,6 @@
   "settings.defaultTimezoneHint": "Horários de gravação salvos sem fuso horário, como na maioria dos nomes de arquivo, são lidos neste fuso. Um fuso escolhido aqui continua quando o do computador muda; Sistema acompanha o computador.",
   "settings.displayTimezone": "Fuso horário de exibição",
   "settings.displayTimezoneHint": "Os horários dos eventos do próprio app, como no Registro, são mostrados neste fuso.",
-  "error.timezoneLink": "Não foi possível abrir a referência de fusos horários. Tente novamente.",
-  "settings.timezoneLink": "Lista completa de fusos horários na Wikipédia",
   "settings.timestampPattern": "Padrões de data e hora",
   "settings.timestampPatternHint": "Cada padrão é uma expressão regular. Eles são testados de cima para baixo, e usa-se o primeiro que encontra uma data e hora reais. Grupos nomeados: {year} (2 ou 4 dígitos), {month}, {day}, {hour}, {minute}, {second} (opcional).",
   "settings.resetTimestampPattern": "Redefinir padrões",
