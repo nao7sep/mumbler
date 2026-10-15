@@ -46,6 +46,7 @@ describe("createDefaultLayout", () => {
       queueWidth: QUEUE_WIDTH.default,
       recordsListWidth: RECORDS_LIST_WIDTH.default,
       selectedCardId: null,
+      setupPending: false,
     });
   });
 });
@@ -56,7 +57,14 @@ describe("normalizeLayout", () => {
       queueWidth: 640,
       recordsListWidth: RECORDS_LIST_WIDTH.max,
       selectedCardId: null,
+      setupPending: false,
     });
+  });
+
+  it("keeps first-run setup pending only when the file says so plainly", () => {
+    expect(normalizeLayout({ setupPending: true }).setupPending).toBe(true);
+    expect(normalizeLayout({ setupPending: "yes" }).setupPending).toBe(false);
+    expect(normalizeLayout({}).setupPending).toBe(false);
   });
 
   it("self-heals a missing or garbage width to the default rather than rejecting", () => {

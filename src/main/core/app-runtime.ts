@@ -520,6 +520,17 @@ export class ApplicationRuntime {
         );
       }
 
+      // Setup is owed from a first launch until it is finished or dismissed, so
+      // a quit partway through brings it back rather than losing it.
+      if (firstRun && !layout.setupPending) {
+        layout = { ...layout, setupPending: true };
+        await layoutStore?.save(layout).catch((error: unknown) => logger.warn(
+          "setup.pending-save", "Could not record that first-run setup is pending; it shows this session only.", {
+            error: serializeError(error),
+          },
+        ));
+      }
+
       const runtime = new ApplicationRuntime({
         paths,
         settings,
@@ -538,7 +549,7 @@ export class ApplicationRuntime {
         hasGeminiApiKey,
       });
 
-      runtime.firstRun = firstRun;
+      runtime.firstRun = layout.setupPending;
 
       await runtime.initializeTools();
 
@@ -625,10 +636,16 @@ export class ApplicationRuntime {
     this.onPipelineProgressCallback = callback;
   }
 
-  dismissFirstRunSetup(): void {
-    // Owned by the app session, so reopening the Mac window does not repeat
-    // completed/skipped setup. No durable marker or skipped setting is written.
+  // Setup finished or dismissed: it is not shown again, this session (reopening
+  // the Mac window) or later. Only the pending marker in layout.json records it;
+  // no skipped setting is written.
+  async dismissFirstRunSetup(): Promise<void> {
     this.firstRun = false;
+    const layout = this.runtime.layout;
+    if (layout?.setupPending !== true) return;
+    const next: MumblerLayout = { ...layout, setupPending: false };
+    this.runtime.layout = next;
+    await this.runtime.layoutStore?.save(next);
   }
 
   onDependenciesChanged(callback: () => void): void {

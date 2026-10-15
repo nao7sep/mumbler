@@ -548,6 +548,9 @@ export interface MumblerLayout {
   queueWidth: number;
   recordsListWidth: number;
   selectedCardId: string | null;
+  // First-run setup is still owed: set at a first launch, cleared when setup is
+  // finished or dismissed, so quitting partway shows it again next launch.
+  setupPending: boolean;
 }
 
 export interface AppSnapshot {

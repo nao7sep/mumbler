@@ -83,14 +83,32 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
   const pickRecordings = () => run(async () => {
     onSnapshot(await window.mumbler.chooseOriginalsDirectory());
   }, message("error.chooseBackupFolder"), "setup recordings folder save failed");
-  // Use These Folders saves each suggestion not already replaced by a pick.
-  const useFolders = () => run(async () => {
-    let latest = snapshot;
-    if (summary.backupDirectory === null) latest = await window.mumbler.saveSetupRecordingsDirectory(summary.defaultBackupDirectory);
-    if (summary.outputDirectory === null) latest = await window.mumbler.saveSetupDirectory(summary.defaultOutputDirectory);
-    onSnapshot(latest);
-    next();
-  }, message("error.chooseOutputFolder"), "setup folders save failed");
+  // Use These Folders saves each suggestion not already replaced by a pick. Each
+  // save shows at once, so one that succeeded stays shown when the other fails,
+  // and a failure names its own folder.
+  async function useFolders(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      if (summary.backupDirectory === null) {
+        try {
+          onSnapshot(await window.mumbler.saveSetupRecordingsDirectory(summary.defaultBackupDirectory));
+        } catch (cause) {
+          setError(presentFailure(cause, message("error.chooseBackupFolder"), "setup recordings folder save failed"));
+          return;
+        }
+      }
+      if (summary.outputDirectory === null) {
+        try {
+          onSnapshot(await window.mumbler.saveSetupDirectory(summary.defaultOutputDirectory));
+        } catch (cause) {
+          setError(presentFailure(cause, message("error.chooseOutputFolder"), "setup output folder save failed"));
+          return;
+        }
+      }
+      next();
+    } finally { setBusy(false); }
+  }
   const useTimezone = () => run(async () => {
     onSnapshot(await window.mumbler.saveSetupTimezone(timezone));
     await finish();

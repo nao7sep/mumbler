@@ -342,14 +342,19 @@ describe("first-run setup and user-owned destinations", () => {
     } finally { picker.mockRestore(); vi.unstubAllEnvs(); }
   });
 
-  it("offers setup for a new root, writes no config on launch, and does not repeat for an existing root", async () => {
+  it("offers setup for a new root, saves only the first-launch zone, and offers it again until it is finished", async () => {
     expect(runtime.getSnapshot().firstRun).toBe(true);
     expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
     // The electron stand-in reports /tmp as the Documents folder.
     expect(runtime.getSnapshot().settingsSummary?.defaultOutputDirectory).toBe(join("/tmp", "Mumbler"));
     await runtime.shutdown();
     runtime = await ApplicationRuntime.initialize();
+    expect(runtime.getSnapshot().firstRun, "a quit partway through setup brings it back").toBe(true);
+    await runtime.dismissFirstRunSetup();
     expect(runtime.getSnapshot().firstRun).toBe(false);
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+    expect(runtime.getSnapshot().firstRun, "finished setup does not repeat").toBe(false);
     expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
   });
 
@@ -379,7 +384,7 @@ describe("first-run setup and user-owned destinations", () => {
     const originals = join(root, "existing-originals");
     await writeFile(join(home, "config.json"), JSON.stringify({ formatVersion: 1, backupDirectory: originals, concurrencyLimit: "future", futureChoice: { keep: true } }));
     runtime = await ApplicationRuntime.initialize();
-    expect(runtime.getSnapshot().firstRun).toBe(false);
+    expect(runtime.getSnapshot().firstRun, "setup the first launch left unfinished is still offered").toBe(true);
     await runtime.saveSetupDirectory(join(root, "chosen"));
     expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toMatchObject({ backupDirectory: originals, concurrencyLimit: "future", futureChoice: { keep: true } });
   });

@@ -541,8 +541,10 @@ function LoadedShell({
   // of the launch-check toggle, since the app cannot trim or probe without it. An
   // available update is NOT a reason to interrupt; it surfaces only via the status
   // chip. Open once, so a refresh can't reopen it against the user who just closed.
+  // First-run setup shows the tools as its first step; one still missing when
+  // setup closes, its step skipped, opens them then.
   useEffect(() => {
-    if (dependencies === null || initialSnapshot.firstRun) {
+    if (dependencies === null || showSetup) {
       return;
     }
     const requiredMissing = dependencies.some(
@@ -552,7 +554,7 @@ function LoadedShell({
       autoOpenedAudioToolsRef.current = true;
       setShowAudioTools(true);
     }
-  }, [dependencies]);
+  }, [dependencies, showSetup]);
 
   useEffect(() => {
     snapshotRef.current = snapshot;

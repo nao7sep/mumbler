@@ -28,6 +28,7 @@ export function createDefaultLayout(): MumblerLayout {
     queueWidth: QUEUE_WIDTH.default,
     recordsListWidth: RECORDS_LIST_WIDTH.default,
     selectedCardId: null,
+    setupPending: false,
   };
 }
 
@@ -36,6 +37,7 @@ export function normalizeLayout(raw: Record<string, unknown>): MumblerLayout {
     queueWidth: clampQueueWidth(raw.queueWidth),
     recordsListWidth: clampRecordsListWidth(raw.recordsListWidth),
     selectedCardId: typeof raw.selectedCardId === "string" ? raw.selectedCardId : null,
+    setupPending: raw.setupPending === true,
   };
 }
 

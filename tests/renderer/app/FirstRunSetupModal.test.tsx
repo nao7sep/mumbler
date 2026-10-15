@@ -104,6 +104,27 @@ describe("ordered skippable setup", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  it("shows the saved Recordings folder and names the output folder when only that save fails", async () => {
+    await click("Skip"); await click("Skip");
+    const filed = { ...snapshot, settingsSummary: { ...snapshot.settingsSummary!, backupDirectory: "/fixtures/Documents/Recordings" } } as AppSnapshot;
+    saveSetupRecordingsDirectory.mockResolvedValueOnce(filed);
+    saveSetupDirectory.mockRejectedValueOnce(new Error("EACCES"));
+    await click("Use These Folders");
+    expect(update).toHaveBeenCalledWith(filed);
+    expect(document.body.textContent).toContain("The output folder could not be selected.");
+    expect(document.body.textContent).toContain("Set Up Mumbler (3/4)");
+  });
+
+  it("names the Recordings folder when its save fails, and leaves the output folder alone", async () => {
+    await click("Skip"); await click("Skip");
+    saveSetupRecordingsDirectory.mockRejectedValueOnce(new Error("EACCES"));
+    await click("Use These Folders");
+    expect(document.body.textContent).toContain("The Recordings folder could not be selected.");
+    expect(saveSetupDirectory).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Set Up Mumbler (3/4)");
+  });
+
   it("saves the Recordings folder as soon as it is picked, and the confirmed time zone at the end", async () => {
     await click("Skip"); await click("Skip");
     chooseOriginalsDirectory.mockResolvedValueOnce(snapshot);
