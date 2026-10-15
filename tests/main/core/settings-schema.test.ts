@@ -86,21 +86,21 @@ describe("applySettingsDraft — happy path", () => {
     expect(result.uiFontFamily).toBe("Iosevka, monospace");
   });
 
-  it("trims directories to null when blank and reads the timestamp patterns one per line", () => {
+  it("trims directories to null when blank and keeps the filled timestamp pattern rows in order", () => {
     const draft = freshDraft();
     draft.outputDirectory = "   ";
     draft.backupDirectory = join(TEST_HOME, "custom", "backups");
-    draft.timestampPatterns = "\r\n  (?<year>\\d{4})  \r\n\r\n(?<year>\\d{2})|x\n  \n";
+    draft.timestampPatterns = ["", "  (?<year>\\d{4})  ", " ", "(?<year>\\d{2})|x\r\n"];
     const result = applySettingsDraft(createDefaultSettings(), draft, TEST_HOME);
     expect(result.outputDirectory).toBeNull();
     expect(result.backupDirectory).toBe(join(TEST_HOME, "custom", "backups"));
     expect(result.timestampPatterns).toEqual(["(?<year>\\d{4})", "(?<year>\\d{2})|x"]);
   });
 
-  it("shows the built-in patterns one per line, and stores nothing for them unchanged", () => {
+  it("shows the built-in patterns as rows, and keeps them equal to the built-in when unchanged", () => {
     const defaults = createDefaultSettings();
     const draft = buildSettingsDraft(defaults, "", "", true);
-    expect(draft.timestampPatterns.split("\n")).toEqual([...DEFAULT_TIMESTAMP_PATTERNS]);
+    expect(draft.timestampPatterns).toEqual([...DEFAULT_TIMESTAMP_PATTERNS]);
     expect(applySettingsDraft(defaults, draft).timestampPatterns).toEqual(defaults.timestampPatterns);
   });
 
@@ -192,14 +192,19 @@ describe("applySettingsDraft — validation", () => {
 
   it("rejects timestamp patterns with no line in them", () => {
     const draft = freshDraft();
-    draft.timestampPatterns = "  \n \n";
+    draft.timestampPatterns = ["  ", ""];
     expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow("At least one timestamp pattern is required.");
   });
 
   it("names the pattern that is not a valid regular expression", () => {
     const draft = freshDraft();
-    draft.timestampPatterns = "(?<year>\\d{4})\n(?<year>\\d{4}";
+    draft.timestampPatterns = ["(?<year>\\d{4})", "(?<year>\\d{4}"];
     expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow("Timestamp pattern 2 must be a valid regular expression.");
+  });
+
+  it("treats a draft whose patterns are not rows as having none", () => {
+    const draft = { ...freshDraft(), timestampPatterns: "(?<year>\\d{4})" as unknown as string[] };
+    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow("At least one timestamp pattern is required.");
   });
 
   it("requires the {transcript} placeholder in the structured prompt", () => {

@@ -65,3 +65,19 @@ export function ExternalLinkIcon(props: IconProps): ReactElement {
     </IconBase>
   );
 }
+
+export function ChevronUpIcon(props: IconProps): ReactElement {
+  return (
+    <IconBase {...props}>
+      <path d="M6 15L12 9L18 15" />
+    </IconBase>
+  );
+}
+
+export function ChevronDownIcon(props: IconProps): ReactElement {
+  return (
+    <IconBase {...props}>
+      <path d="M6 9L12 15L18 9" />
+    </IconBase>
+  );
+}

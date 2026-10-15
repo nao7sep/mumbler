@@ -824,7 +824,7 @@ export function buildSettingsDraft(
     // Import
     defaultTimezone: settings.defaultTimezone ?? getSystemTimezone(),
     displayTimezone: settings.displayTimezone,
-    timestampPatterns: settings.timestampPatterns.join("\n"),
+    timestampPatterns: [...settings.timestampPatterns],
     // Player
     skipIntervalSec: settings.skipIntervalSec,
     previewSnippetSeconds: settings.previewSnippetSeconds,
@@ -876,8 +876,10 @@ export function applySettingsDraft(
     // Import
     defaultTimezone: singleLine(draft.defaultTimezone),
     displayTimezone: singleLine(draft.displayTimezone),
-    // One pattern per line; blank lines are not patterns.
-    timestampPatterns: multiline(draft.timestampPatterns).split("\n").map((line) => singleLine(line)).filter((line) => line.length > 0),
+    // One pattern per row; a blank row is not a pattern.
+    timestampPatterns: (Array.isArray(draft.timestampPatterns) ? draft.timestampPatterns : [])
+      .map((row) => singleLine(String(row)))
+      .filter((row) => row.length > 0),
     // Player
     skipIntervalSec: draft.skipIntervalSec,
     previewSnippetSeconds: draft.previewSnippetSeconds,

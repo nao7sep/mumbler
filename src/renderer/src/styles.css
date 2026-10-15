@@ -1479,15 +1479,33 @@ textarea:focus-visible,
     box-shadow var(--motion) ease;
 }
 
-/* The timestamp patterns, one regex per line: monospaced, and scrolled sideways
-   rather than wrapped, so each line stays one pattern. */
-.field textarea.settings-patterns {
+/* The timestamp patterns: one row per regex, in the order they are tried, each
+   with its own move and remove buttons. Monospaced, since a pattern is code. */
+.pattern-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pattern-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.field .pattern-row__input {
+  flex: 1;
+  min-width: 0;
   font-family: var(--font-mono);
-  font-size: 0.85rem;
-  line-height: 1.6;
-  white-space: pre;
-  overflow-x: auto;
-  resize: vertical;
+}
+
+.pattern-row__action {
+  flex: none;
+  width: var(--control-sm);
+  padding: 0;
+  font-size: 0.875rem;
 }
 
 /* Every one-line field is the same height, whatever kind it is: a text box, a

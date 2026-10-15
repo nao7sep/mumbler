@@ -131,6 +131,8 @@
   "common.namesAndMore": {
     "other": "{names} 외 {count}개"
   },
+  "settingsIssue.timestampPatternsRequired": "시간 패턴을 하나 이상 추가하세요.",
+  "settingsIssue.timestampPatternInvalid": "시간 패턴 {number}은(는) 올바른 정규식이 아닙니다.",
   "settingsIssue.skipIntervalSec": "건너뛰기 간격은 양의 정수여야 합니다.",
   "settingsIssue.previewSnippetSeconds": "미리 듣기 길이는 양의 정수여야 합니다.",
   "settingsIssue.concurrencyLimit": "동시 전사 수는 양의 정수여야 합니다.",
@@ -389,8 +391,13 @@
   "error.timezoneLink": "시간대 참고 목록을 열 수 없습니다. 다시 시도하십시오.",
   "settings.timezoneLink": "Wikipedia의 전체 시간대 목록",
   "settings.timestampPattern": "시간 패턴",
-  "settings.timestampPatternHint": "한 줄에 정규식 하나씩 적습니다. 위에서부터 차례로 시도하며, 실제 날짜와 시각을 찾은 첫 번째 패턴을 사용합니다. 이름 있는 그룹: {year}(2자리 또는 4자리), {month}, {day}, {hour}, {minute}, {second}(선택 사항).",
+  "settings.timestampPatternHint": "각 패턴은 정규식입니다. 위에서부터 차례로 시도하며, 실제 날짜와 시각을 찾은 첫 번째 패턴을 사용합니다. 이름 있는 그룹: {year}(2자리 또는 4자리), {month}, {day}, {hour}, {minute}, {second}(선택 사항).",
   "settings.resetTimestampPattern": "패턴 재설정",
+  "settings.timestampPatternRow": "패턴 {number}",
+  "settings.moveTimestampPatternUp": "패턴 {number} 위로",
+  "settings.moveTimestampPatternDown": "패턴 {number} 아래로",
+  "settings.removeTimestampPattern": "패턴 {number} 제거",
+  "settings.addTimestampPattern": "패턴 추가",
   "settings.player": "플레이어",
   "settings.skipInterval": "건너뛰기 간격(초)",
   "settings.skipIntervalHint": "왼쪽 / 오른쪽 키로 건너뛰는 초입니다.",

@@ -4,6 +4,7 @@ import { THEME_PREFERENCES, type SettingsDraft } from "@shared/app-shell";
 import { rowFor, thinkingAfterModelEdit } from "@shared/ai-models";
 import {
   getSettingsNumberIssues,
+  getTimestampPatternIssues,
   type NumericSettingField,
 } from "@shared/settings-validation";
 import { DEFAULT_TIMESTAMP_PATTERNS, SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
@@ -13,7 +14,7 @@ import type { MessageKey } from "@shared/i18n/catalogues";
 import { message, type Message, type Translator } from "@shared/i18n/translate";
 import { ModalShell } from "./modal/ModalShell";
 import { useTablist } from "./useTablist";
-import { ExternalLinkIcon } from "./Icon";
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ExternalLinkIcon } from "./Icon";
 import { InlineError } from "./InlineResult";
 import { presentFailure } from "./presentFailure";
 
@@ -85,6 +86,14 @@ export function systemLanguageLabel(i18n: Pick<Translator, "t" | "language">, sy
   return i18n.t("settings.languageSystem", { language: name });
 }
 
+// The rows with one moved from `from` to `to`, for the pattern list's arrows.
+function movedRow(rows: readonly string[], from: number, to: number): string[] {
+  const next = [...rows];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved!);
+  return next;
+}
+
 export function SettingsModal({
   draft,
   isDirty,
@@ -141,7 +150,9 @@ export function SettingsModal({
   const i18n = useI18n();
   const { t, text } = i18n;
   const numberIssues = useMemo(() => getSettingsNumberIssues(draft), [draft]);
-  const canSave = isDirty && numberIssues.length === 0 && !isSaving;
+  const patternIssues = useMemo(() => getTimestampPatternIssues(draft.timestampPatterns), [draft.timestampPatterns]);
+  const patternIssueRows = new Set(patternIssues.map((issue) => issue.row));
+  const canSave = isDirty && numberIssues.length === 0 && patternIssues.length === 0 && !isSaving;
   const numberIssueByField = new Map(numberIssues.map((issue) => [issue.field, issue]));
   const numberFieldProps = (field: NumericSettingField): {
     "aria-invalid": true | undefined;
@@ -189,11 +200,16 @@ export function SettingsModal({
 
         {errorMessage ? <InlineError>{text(errorMessage)}</InlineError> : null}
 
-        {numberIssues.length > 0 ? (
+        {numberIssues.length + patternIssues.length > 0 ? (
           <InlineError>
             <ul className="settings-number-errors">
               {numberIssues.map((issue) => (
                 <li id={`settings-number-error-${issue.field}`} key={issue.field}>
+                  {text(issue.message)}
+                </li>
+              ))}
+              {patternIssues.map((issue) => (
+                <li id={issue.row === null ? undefined : `settings-pattern-error-${issue.row}`} key={`pattern-${issue.row}`}>
                   {text(issue.message)}
                 </li>
               ))}
@@ -373,17 +389,64 @@ export function SettingsModal({
                     {text(timezoneLinkError)}
                   </InlineError>
                 ) : null}
-                <label className="field">
-                  <span>{t("settings.timestampPattern")}</span>
-                  <textarea
-                    className="settings-patterns"
-                    rows={DEFAULT_TIMESTAMP_PATTERNS.length + 1}
-                    wrap="off"
-                    spellCheck={false}
-                    value={draft.timestampPatterns}
-                    onChange={(event) => onChange({ ...draft, timestampPatterns: event.target.value })}
-                  />
-                </label>
+                <div className="field">
+                  <span id="settings-timestamp-patterns-label">{t("settings.timestampPattern")}</span>
+                  <ol className="pattern-list" aria-labelledby="settings-timestamp-patterns-label">
+                    {draft.timestampPatterns.map((pattern, row) => (
+                      <li className="pattern-row" key={row}>
+                        <input
+                          className="pattern-row__input"
+                          spellCheck={false}
+                          value={pattern}
+                          aria-label={t("settings.timestampPatternRow", { number: row + 1 })}
+                          aria-invalid={patternIssueRows.has(row) ? true : undefined}
+                          aria-describedby={patternIssueRows.has(row) ? `settings-pattern-error-${row}` : undefined}
+                          onChange={(event) => onChange({ ...draft, timestampPatterns: draft.timestampPatterns.map((current, index) => (index === row ? event.target.value : current)) })}
+                        />
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact pattern-row__action"
+                          aria-label={t("settings.moveTimestampPatternUp", { number: row + 1 })}
+                          title={t("settings.moveTimestampPatternUp", { number: row + 1 })}
+                          disabled={isSaving || row === 0}
+                          onClick={() => onChange({ ...draft, timestampPatterns: movedRow(draft.timestampPatterns, row, row - 1) })}
+                        >
+                          <ChevronUpIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact pattern-row__action"
+                          aria-label={t("settings.moveTimestampPatternDown", { number: row + 1 })}
+                          title={t("settings.moveTimestampPatternDown", { number: row + 1 })}
+                          disabled={isSaving || row === draft.timestampPatterns.length - 1}
+                          onClick={() => onChange({ ...draft, timestampPatterns: movedRow(draft.timestampPatterns, row, row + 1) })}
+                        >
+                          <ChevronDownIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--ghost button--compact pattern-row__action"
+                          aria-label={t("settings.removeTimestampPattern", { number: row + 1 })}
+                          title={t("settings.removeTimestampPattern", { number: row + 1 })}
+                          disabled={isSaving}
+                          onClick={() => onChange({ ...draft, timestampPatterns: draft.timestampPatterns.filter((_, index) => index !== row) })}
+                        >
+                          <CloseIcon />
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                  <div>
+                    <button
+                      type="button"
+                      className="button button--ghost button--compact"
+                      disabled={isSaving}
+                      onClick={() => onChange({ ...draft, timestampPatterns: [...draft.timestampPatterns, ""] })}
+                    >
+                      {t("settings.addTimestampPattern")}
+                    </button>
+                  </div>
+                </div>
                 <p className="field-hint">{i18n.rich("settings.timestampPatternHint", {
                   year: <code>year</code>,
                   month: <code>month</code>,
@@ -396,7 +459,7 @@ export function SettingsModal({
                   <button
                     type="button"
                     className="button button--danger"
-                    onClick={() => onChange({ ...draft, timestampPatterns: DEFAULT_TIMESTAMP_PATTERNS.join("\n") })}
+                    onClick={() => onChange({ ...draft, timestampPatterns: [...DEFAULT_TIMESTAMP_PATTERNS] })}
                     disabled={isSaving}
                   >
                     {t("settings.resetTimestampPattern")}

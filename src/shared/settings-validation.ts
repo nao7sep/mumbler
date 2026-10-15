@@ -59,3 +59,28 @@ export function getSettingsNumberIssues(draft: SettingsDraft): NumericSettingIss
     (rule) => ({ field: rule.field, message: message(rule.issue) }),
   );
 }
+
+export interface TimestampPatternIssue {
+  // The row the issue is about, or null for the list as a whole.
+  row: number | null;
+  message: Message;
+}
+
+// The timestamp pattern rows' issues, shared like the numeric rules: a blank row
+// is dropped at save, so the list needs one filled row, and each filled row must
+// compile. Rows are numbered from 1, as the editor shows them.
+export function getTimestampPatternIssues(rows: readonly string[]): TimestampPatternIssue[] {
+  const filled = rows.map((row) => row.trim());
+  if (filled.every((row) => row.length === 0)) {
+    return [{ row: null, message: message("settingsIssue.timestampPatternsRequired") }];
+  }
+  return filled.flatMap((row, index) => {
+    if (row.length === 0) return [];
+    try {
+      new RegExp(row);
+      return [];
+    } catch {
+      return [{ row: index, message: message("settingsIssue.timestampPatternInvalid", { number: index + 1 }) }];
+    }
+  });
+}

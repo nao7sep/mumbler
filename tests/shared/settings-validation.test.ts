@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { SettingsDraft } from "@shared/app-shell";
 import {
   getSettingsNumberIssues,
+  getTimestampPatternIssues,
   isPositiveIntegerSetting,
   isRatioSetting,
 } from "@shared/settings-validation";
@@ -19,7 +20,7 @@ function validDraft(): SettingsDraft {
     defaultBackupDirectory: "/backup",
     defaultTimezone: "Asia/Tokyo",
     displayTimezone: "system",
-    timestampPatterns: "",
+    timestampPatterns: ["(?<year>\\d{4})"],
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,
     hasGeminiApiKey: false,
@@ -126,5 +127,19 @@ describe("getSettingsNumberIssues", () => {
       "Metadata generation timeout must be a positive integer.",
       "Retry jitter must be between 0 and 1.",
     ]);
+  });
+});
+
+describe("getTimestampPatternIssues", () => {
+  it("needs one filled row, and ignores blank ones", () => {
+    expect(getTimestampPatternIssues([]).map((issue) => [issue.row, issue.message.key])).toEqual([[null, "settingsIssue.timestampPatternsRequired"]]);
+    expect(getTimestampPatternIssues(["", "  "]).map((issue) => issue.row)).toEqual([null]);
+    expect(getTimestampPatternIssues(["", "(?<year>\\d{4})", " "])).toEqual([]);
+  });
+
+  it("points at each row that does not compile, numbered as the editor shows it", () => {
+    const issues = getTimestampPatternIssues(["(?<year>\\d{4})", "(", "", "[a-"]);
+    expect(issues.map((issue) => issue.row)).toEqual([1, 3]);
+    expect(issues[0]!.message).toEqual({ key: "settingsIssue.timestampPatternInvalid", values: { number: 2 } });
   });
 });

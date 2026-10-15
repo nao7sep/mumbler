@@ -392,8 +392,8 @@ export interface SettingsDraft {
   defaultTimezone: string;
   // The display zone, System or an IANA zone.
   displayTimezone: string;
-  // The timestamp patterns, one per line.
-  timestampPatterns: string;
+  // The timestamp patterns as the rows of the list editor, blank rows included.
+  timestampPatterns: string[];
   // Player
   skipIntervalSec: number;
   previewSnippetSeconds: number;

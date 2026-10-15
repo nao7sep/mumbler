@@ -131,6 +131,8 @@
   "common.namesAndMore": {
     "other": "{names} ほか {count} 件"
   },
+  "settingsIssue.timestampPatternsRequired": "日時のパターンを 1 つ以上追加してください。",
+  "settingsIssue.timestampPatternInvalid": "日時のパターン {number} は正しい正規表現ではありません。",
   "settingsIssue.skipIntervalSec": "スキップ間隔には正の整数を指定してください。",
   "settingsIssue.previewSnippetSeconds": "プレビューの長さには正の整数を指定してください。",
   "settingsIssue.concurrencyLimit": "同時文字起こし数には正の整数を指定してください。",
@@ -389,8 +391,13 @@
   "error.timezoneLink": "タイムゾーンの一覧を開けませんでした。もう一度お試しください。",
   "settings.timezoneLink": "Wikipediaでタイムゾーンの一覧を見る",
   "settings.timestampPattern": "日時のパターン",
-  "settings.timestampPatternHint": "1 行に 1 つの正規表現を書きます。上から順に試し、実在する日時が見つかった最初のものを使います。名前付きグループ：{year}（2桁または4桁）、{month}、{day}、{hour}、{minute}、{second}（省略可）。",
+  "settings.timestampPatternHint": "各パターンは正規表現です。上から順に試し、実在する日時が見つかった最初のものを使います。名前付きグループ：{year}（2桁または4桁）、{month}、{day}、{hour}、{minute}、{second}（省略可）。",
   "settings.resetTimestampPattern": "パターンをリセット",
+  "settings.timestampPatternRow": "パターン {number}",
+  "settings.moveTimestampPatternUp": "パターン {number} を上へ",
+  "settings.moveTimestampPatternDown": "パターン {number} を下へ",
+  "settings.removeTimestampPattern": "パターン {number} を削除",
+  "settings.addTimestampPattern": "パターンを追加",
   "settings.player": "プレーヤー",
   "settings.skipInterval": "スキップ間隔（秒）",
   "settings.skipIntervalHint": "左右キーで移動する秒数です。",

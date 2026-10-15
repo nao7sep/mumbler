@@ -38,7 +38,7 @@ function draft(): SettingsDraft {
     defaultBackupDirectory: "/backup",
     defaultTimezone: "Asia/Tokyo",
     displayTimezone: "system",
-    timestampPatterns: "",
+    timestampPatterns: ["(?<year>\\d{4})"],
     skipIntervalSec: 0,
     previewSnippetSeconds: 10,
     hasGeminiApiKey: false,
@@ -504,5 +504,56 @@ describe("SettingsModal AI tab", () => {
     const panel = await renderAiTab({ ...draft(), transcriptionModel: " GEMINI-3.8-FLASH ", outlineModel: "gemini-3.8-flash", metadataModel: "custom-model" });
     const warnings = Array.from(panel.querySelectorAll(".field-hint--warning")).map((node) => node.textContent);
     expect(warnings).toEqual(["Not a supported model. It may not work as expected."]);
+  });
+});
+
+describe("SettingsModal timestamp patterns", () => {
+  async function renderPatterns(timestampPatterns: string[], onChange = vi.fn()) {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(React.createElement(SettingsModal, {
+        draft: { ...draft(), timestampPatterns }, isDirty: true, isSaving: false, isSavingApiKey: false,
+        isPickingOutputDirectory: false, isPickingBackupDirectory: false, errorMessage: null,
+        onChange, onClose: vi.fn(), onPickOutputDirectory: vi.fn(), onPickBackupDirectory: vi.fn(),
+        onSetApiKey: vi.fn(), onClearApiKey: vi.fn(), onRestoreDefaultPrompts: vi.fn(), onSave: vi.fn(),
+      }));
+    });
+    return onChange;
+  }
+  const button = (label: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+  const changed = (onChange: ReturnType<typeof vi.fn>) => (onChange.mock.calls.at(-1)![0] as SettingsDraft).timestampPatterns;
+
+  it("shows one row per pattern, in order", async () => {
+    await renderPatterns(["a", "b", "c"]);
+    const rows = Array.from(document.querySelectorAll<HTMLInputElement>(".pattern-row__input"));
+    expect(rows.map((row) => [row.value, row.getAttribute("aria-label")])).toEqual([["a", "Pattern 1"], ["b", "Pattern 2"], ["c", "Pattern 3"]]);
+    expect(button("Move pattern 1 up").disabled, "the first row has nowhere up to go").toBe(true);
+    expect(button("Move pattern 3 down").disabled, "the last row has nowhere down to go").toBe(true);
+  });
+
+  it("moves, removes and adds rows in the draft", async () => {
+    const onChange = await renderPatterns(["a", "b", "c"]);
+    await act(async () => button("Move pattern 2 up").click());
+    expect(changed(onChange)).toEqual(["b", "a", "c"]);
+    await act(async () => button("Move pattern 2 down").click());
+    expect(changed(onChange)).toEqual(["a", "c", "b"]);
+    await act(async () => button("Remove pattern 2").click());
+    expect(changed(onChange)).toEqual(["a", "c"]);
+    const add = Array.from(document.querySelectorAll("button")).find((element) => element.textContent === "Add pattern")!;
+    await act(async () => add.click());
+    expect(changed(onChange)).toEqual(["a", "b", "c", ""]);
+  });
+
+  it("marks a row that does not compile and holds Save until it does", async () => {
+    await renderPatterns(["(?<year>\\d{4})", "("]);
+    const rows = document.querySelectorAll<HTMLInputElement>(".pattern-row__input");
+    expect(rows[0]!.getAttribute("aria-invalid")).toBeNull();
+    expect(rows[1]!.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(rows[1]!.getAttribute("aria-describedby")!)?.textContent)
+      .toBe("Timestamp pattern 2 is not a valid regular expression.");
+    const save = Array.from(document.querySelectorAll("button")).find((element) => element.textContent === "Save")!;
+    expect(save.disabled).toBe(true);
   });
 });
