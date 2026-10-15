@@ -70,9 +70,19 @@
   "quit.transcripts": "le trascrizioni",
   "quit.settings": "le impostazioni",
   "quit.edits": "le modifiche in sospeso nella finestra",
-  "windowClose.discardSettingsBody": "Hai modifiche non salvate nelle Impostazioni. Scartarle e chiudere la finestra?",
-  "windowClose.title": "Mumbler non si è chiuso",
-  "windowClose.body": "Non è stato possibile salvare le modifiche in sospeso nella finestra. La finestra rimane aperta per consentire un nuovo tentativo.",
+  "quit.workTitle": "Mumbler sta ancora lavorando",
+  "quit.workRecordings": {
+    "one": "{count} registrazione è ancora in elaborazione. Uscire la interrompe; potrai generarla o salvarla di nuovo più tardi.",
+    "many": "{count} registrazioni sono ancora in elaborazione. Uscire le interrompe; potrai generarle o salvarle di nuovo più tardi.",
+    "other": "{count} registrazioni sono ancora in elaborazione. Uscire le interrompe; potrai generarle o salvarle di nuovo più tardi."
+  },
+  "quit.workTools": {
+    "one": "{count} strumento audio è ancora in fase di installazione. Uscire interrompe l’installazione.",
+    "many": "{count} strumenti audio sono ancora in fase di installazione. Uscire interrompe la loro installazione.",
+    "other": "{count} strumenti audio sono ancora in fase di installazione. Uscire interrompe la loro installazione."
+  },
+  "quit.keepWorking": "Continua a lavorare",
+  "quit.stopAndQuit": "Interrompi ed esci",
   "diagnostic.storageTitle": "Impossibile determinare la posizione di archiviazione",
   "diagnostic.storageBody": "Mumbler non ha potuto usare la cartella di archiviazione configurata. Ripristina l’accesso a quella cartella o rimuovi la variabile MUMBLER_DATA_DIR, poi riapri l’app.",
   "diagnostic.corruptTitle": "Impossibile caricare i dati salvati",

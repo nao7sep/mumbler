@@ -70,9 +70,19 @@
   "quit.transcripts": "les transcriptions",
   "quit.settings": "les réglages",
   "quit.edits": "les modifications en attente dans la fenêtre",
-  "windowClose.discardSettingsBody": "Vous avez des modifications non enregistrées dans les Réglages. Les abandonner et fermer la fenêtre\u00a0?",
-  "windowClose.title": "Mumbler ne s’est pas fermé",
-  "windowClose.body": "Les modifications en attente dans la fenêtre n’ont pas pu être enregistrées. La fenêtre reste ouverte pour vous permettre de réessayer.",
+  "quit.workTitle": "Mumbler travaille encore",
+  "quit.workRecordings": {
+    "one": "{count} enregistrement est encore en cours de traitement. Quitter l’arrête\u00a0; vous pourrez le générer ou l’enregistrer à nouveau plus tard.",
+    "many": "{count} enregistrements sont encore en cours de traitement. Quitter les arrête\u00a0; vous pourrez les générer ou les enregistrer à nouveau plus tard.",
+    "other": "{count} enregistrements sont encore en cours de traitement. Quitter les arrête\u00a0; vous pourrez les générer ou les enregistrer à nouveau plus tard."
+  },
+  "quit.workTools": {
+    "one": "{count} outil audio est encore en cours d’installation. Quitter arrête l’installation.",
+    "many": "{count} outils audio sont encore en cours d’installation. Quitter arrête leur installation.",
+    "other": "{count} outils audio sont encore en cours d’installation. Quitter arrête leur installation."
+  },
+  "quit.keepWorking": "Continuer",
+  "quit.stopAndQuit": "Arrêter et quitter",
   "diagnostic.storageTitle": "Impossible de déterminer l’emplacement de stockage",
   "diagnostic.storageBody": "Mumbler n’a pas pu utiliser le dossier de stockage configuré. Rétablissez l’accès à ce dossier ou supprimez la variable MUMBLER_DATA_DIR, puis rouvrez l’app.",
   "diagnostic.corruptTitle": "Impossible de charger les données enregistrées",

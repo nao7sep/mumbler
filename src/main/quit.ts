@@ -1,11 +1,10 @@
 import type { Translator } from "@shared/i18n/translate";
 
-import type { QuitSaveFailure } from "./core/app-runtime";
+import type { QuitSaveFailure, RunningWork } from "./core/app-runtime";
 import type { PlainDialog } from "./plain-dialog";
 
 // Every quit path in one place (unsaved-edits conventions, Quitting). The menu
-// Quit, Cmd+Q, the Dock's Quit and closing the main window on Windows are the
-// user's; an OS logout, restart or shutdown is a session end. Both save the
+// Quit, Cmd+Q, the Dock's Quit and closing the main window are the user's; an OS logout, restart or shutdown is a session end. Both save the
 // same work. A user's quit whose save fails is held, and the user chooses
 // Retry, Quit anyway or Cancel; a session end never asks, and exits within the
 // budget below, under the 5 s Windows gives a session-end message before it
@@ -21,8 +20,11 @@ export type QuitChoice = "retry" | "quit-anyway" | "cancel";
 export type QuitFailure = readonly (QuitSaveFailure | "edits")[] | "stalled";
 
 export interface QuitSteps {
-  /** A user's quit first: when the window holds session-only drafts, asks
-   * whether to discard them; resolves false when the user keeps them. */
+  /** A user's quit first: when app-owned work is still running, asks whether
+   * to stop it; resolves false when the user keeps it running. */
+  confirmStopWork(): Promise<boolean>;
+  /** Then, when the window holds session-only drafts, asks whether to discard
+   * them; resolves false when the user keeps them. */
   confirmDiscardDrafts(): Promise<boolean>;
   /** Asks the main window to send the edits it has not sent yet. */
   flushEdits(signal: AbortSignal): Promise<void>;
@@ -99,24 +101,30 @@ export function createQuitController(steps: QuitSteps): QuitController {
     exit();
   }
 
+  // A question a user's quit asks before it ends anything; false cancels the
+  // quit. A session end never asks, and one that closed the question goes on.
+  async function asked(question: () => Promise<boolean>, event: string, what: string): Promise<boolean> {
+    if (sessionEnding) return true;
+    let proceed: boolean;
+    try {
+      proceed = await question();
+    } catch (error: unknown) {
+      steps.warn(event, `The ${what} question could not be shown; cancelling the quit.`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      proceed = false;
+    }
+    return proceed || sessionEnding;
+  }
+
   async function run(): Promise<void> {
-    // Session-only drafts are not quit-time saves: a user's quit asks before it
-    // discards them, and a session end never asks (unsaved-edits-conventions).
-    if (!sessionEnding) {
-      let proceed: boolean;
-      try {
-        proceed = await steps.confirmDiscardDrafts();
-      } catch (error: unknown) {
-        steps.warn("quit.drafts-question-failed", "The unsaved-changes question could not be shown; cancelling the quit.", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        proceed = false;
-      }
-      // A session end that closed the question goes on without asking.
-      if (!proceed && !sessionEnding) {
-        running = false;
-        return;
-      }
+    // Running app-owned work is asked about before quit stops it, and
+    // session-only drafts, which are not quit-time saves, before quit discards
+    // them (unsaved-edits-conventions, Closing and quitting).
+    if (!(await asked(steps.confirmStopWork, "quit.work-question-failed", "running-work"))
+      || !(await asked(steps.confirmDiscardDrafts, "quit.drafts-question-failed", "unsaved-changes"))) {
+      running = false;
+      return;
     }
     for (;;) {
       const flush = new AbortController();
@@ -205,19 +213,37 @@ const FAILURE_NAMES = {
   edits: "quit.edits",
 } as const satisfies Record<QuitSaveFailure | "edits", string>;
 
-const DISCARD_DRAFT_BODIES = {
-  quit: "quit.discardSettingsBody",
-  close: "windowClose.discardSettingsBody",
-} as const;
+/** Asked before a user's quit stops app-owned work still running, or null when
+ * none runs: Keep working, the default, cancels the quit; Stop and quit goes on. */
+export function stopWorkDialog(translator: Translator, work: RunningWork): PlainDialog<"quit" | "cancel"> | null {
+  const sentences = [
+    ...(work.recordings > 0 ? [translator.t("quit.workRecordings", { count: work.recordings })] : []),
+    ...(work.tools > 0 ? [translator.t("quit.workTools", { count: work.tools })] : []),
+  ];
+  if (sentences.length === 0) return null;
+  return {
+    language: translator.language,
+    title: translator.t("quit.workTitle"),
+    bodyLabel: translator.t("quit.detailsLabel"),
+    // Joined as the language joins sentences.
+    body: sentences.length === 2 ? translator.t("common.sentences", { first: sentences[0]!, rest: sentences[1]! }) : sentences[0]!,
+    actions: [
+      { choice: "cancel", label: translator.t("quit.keepWorking") },
+      { choice: "quit", label: translator.t("quit.stopAndQuit"), tone: "danger" },
+    ],
+    focus: "cancel",
+    dismiss: "cancel",
+  };
+}
 
-/** Asked before a user's quit or window close discards a session-only draft:
- * Keep editing, the default, keeps it; Discard goes on without saving it. */
-export function discardDraftsDialog(translator: Translator, action: "quit" | "close"): PlainDialog<"discard" | "cancel"> {
+/** Asked before a user's quit discards a session-only draft: Keep editing, the
+ * default, keeps it; Discard goes on without saving it. */
+export function discardDraftsDialog(translator: Translator): PlainDialog<"discard" | "cancel"> {
   return {
     language: translator.language,
     title: translator.t("decision.discardTitle"),
     bodyLabel: translator.t("quit.detailsLabel"),
-    body: translator.t(DISCARD_DRAFT_BODIES[action]),
+    body: translator.t("quit.discardSettingsBody"),
     actions: [
       { choice: "cancel", label: translator.t("decision.keepEditing") },
       { choice: "discard", label: translator.t("decision.discard"), tone: "danger" },

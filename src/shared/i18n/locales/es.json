@@ -70,9 +70,19 @@
   "quit.transcripts": "las transcripciones",
   "quit.settings": "la configuración",
   "quit.edits": "los cambios pendientes de la ventana",
-  "windowClose.discardSettingsBody": "Tienes cambios sin guardar en la Configuración. ¿Descartarlos y cerrar la ventana?",
-  "windowClose.title": "Mumbler no se cerró",
-  "windowClose.body": "No se pudieron guardar los cambios pendientes de la ventana. La ventana sigue abierta para que puedas volver a intentarlo.",
+  "quit.workTitle": "Mumbler todavía está trabajando",
+  "quit.workRecordings": {
+    "one": "Todavía se está procesando {count} grabación. Salir la detiene; puedes volver a generarla o guardarla más tarde.",
+    "many": "Todavía se están procesando {count} grabaciones. Salir las detiene; puedes volver a generarlas o guardarlas más tarde.",
+    "other": "Todavía se están procesando {count} grabaciones. Salir las detiene; puedes volver a generarlas o guardarlas más tarde."
+  },
+  "quit.workTools": {
+    "one": "Todavía se está instalando {count} herramienta de audio. Salir detiene la instalación.",
+    "many": "Todavía se están instalando {count} herramientas de audio. Salir detiene su instalación.",
+    "other": "Todavía se están instalando {count} herramientas de audio. Salir detiene su instalación."
+  },
+  "quit.keepWorking": "Seguir trabajando",
+  "quit.stopAndQuit": "Detener y salir",
   "diagnostic.storageTitle": "No se pudo determinar la ubicación de almacenamiento",
   "diagnostic.storageBody": "Mumbler no pudo usar la carpeta de almacenamiento configurada. Restablece el acceso a esa carpeta o quita la variable MUMBLER_DATA_DIR y vuelve a abrir la app.",
   "diagnostic.corruptTitle": "No se pudieron cargar los datos guardados",

@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { QuitSaveFailure } from "@main/core/app-runtime";
-import { createQuitController, discardDraftsDialog, quitFailureDialog, type QuitChoice, type QuitFailure, type QuitSteps } from "@main/quit";
+import { createQuitController, discardDraftsDialog, quitFailureDialog, stopWorkDialog, type QuitChoice, type QuitFailure, type QuitSteps } from "@main/quit";
 import { loadCatalogue } from "@shared/i18n/catalogues";
 import { createTranslator } from "@shared/i18n/translate";
 
@@ -24,6 +24,7 @@ function harness(overrides: Partial<QuitSteps> = {}): Harness {
   let exits = 0;
   let answer: (choice: QuitChoice) => void = () => undefined;
   const steps: QuitSteps = {
+    confirmStopWork: async () => true,
     confirmDiscardDrafts: async () => true,
     flushEdits: async () => { calls.push("flush"); },
     save: async () => { calls.push("save"); return []; },
@@ -309,13 +310,76 @@ describe("a session end", () => {
 });
 
 describe("the unsaved-changes question", () => {
-  it("offers Keep editing, focused, then Discard, and names the quit or the window close", () => {
+  it("offers Keep editing, focused, then Discard, and names the quit", () => {
     const translator = createTranslator("en");
-    const quit = discardDraftsDialog(translator, "quit");
+    const quit = discardDraftsDialog(translator);
     expect(quit.actions.map((action) => [action.choice, action.label, action.tone])).toEqual([["cancel", "Keep editing", undefined], ["discard", "Discard", "danger"]]);
     expect([quit.focus, quit.dismiss]).toEqual(["cancel", "cancel"]);
     expect(quit.body).toBe("You have unsaved changes in Settings. Discard them and quit?");
-    expect(discardDraftsDialog(translator, "close").body).toBe("You have unsaved changes in Settings. Discard them and close the window?");
+  });
+});
+
+describe("the running-work question", () => {
+  it("asks nothing when no work runs", () => {
+    expect(stopWorkDialog(createTranslator("en"), { recordings: 0, tools: 0 })).toBeNull();
+  });
+
+  it("names the work a quit would stop, keeps working by default, and stops it only on request", () => {
+    const dialog = stopWorkDialog(createTranslator("en"), { recordings: 2, tools: 1 })!;
+    expect(dialog.title).toBe("Mumbler is still working");
+    expect(dialog.body).toBe(
+      "2 recordings are still being processed. Quitting stops them; you can generate or save them again later. "
+      + "1 audio tool is still being installed. Quitting stops the installation.",
+    );
+    expect(dialog.actions.map((action) => [action.choice, action.label, action.tone])).toEqual([["cancel", "Keep Working", undefined], ["quit", "Stop and Quit", "danger"]]);
+    expect([dialog.focus, dialog.dismiss]).toEqual(["cancel", "cancel"]);
+  });
+});
+
+describe("running work at a user's quit", () => {
+  it("asks before the drafts question, and keeps the app and its work on Keep working", async () => {
+    let finish!: (proceed: boolean) => void;
+    const quit = harness();
+    quit.steps.confirmStopWork = () => { quit.calls.push("work"); return new Promise((resolve) => { finish = resolve; }); };
+    quit.steps.confirmDiscardDrafts = async () => { quit.calls.push("drafts"); return true; };
+    const controller = createQuitController(quit.steps);
+
+    controller.request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quit.calls, "nothing stops while the question is open").toEqual(["work"]);
+    finish(false);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(quit.calls).toEqual(["work"]);
+    expect(quit.exits()).toBe(0);
+    expect(controller.isRunning()).toBe(false);
+  });
+
+  it("stops the work and quits through the ordinary save on Stop and quit", async () => {
+    const quit = harness();
+    quit.steps.confirmStopWork = async () => { quit.calls.push("work"); return true; };
+    createQuitController(quit.steps).request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quit.calls).toEqual(["work", "flush", "save", "close", "exit"]);
+  });
+
+  it("never asks at a session end, and one that arrives during the question goes on", async () => {
+    const quit = harness();
+    quit.steps.confirmStopWork = () => { quit.calls.push("work"); return never<boolean>(); };
+    const controller = createQuitController(quit.steps);
+    controller.request("user");
+    await vi.advanceTimersByTimeAsync(0);
+    controller.request("session-end");
+    await vi.advanceTimersByTimeAsync(4_500);
+    expect(quit.calls).toContain("dismiss");
+    expect(quit.exits()).toBe(1);
+
+    const ending = harness();
+    ending.steps.confirmStopWork = async () => { ending.calls.push("work"); return false; };
+    createQuitController(ending.steps).request("session-end");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ending.calls).not.toContain("work");
+    expect(ending.exits()).toBe(1);
   });
 });
 

@@ -21,6 +21,8 @@ const state = vi.hoisted(() => ({
   heldDraftsReplies: [] as (() => void)[],
   ipcListeners: new Map<string, (event: { sender: unknown }, request: unknown, reply: unknown) => void>(),
   powerListeners: new Map<string, () => void>(),
+  runningWork: { recordings: 0, tools: 0 },
+  workChoice: "cancel" as "quit" | "cancel",
 }));
 
 // The main window as main sees it: its handlers by event, and the edits request
@@ -96,6 +98,7 @@ const runtime = vi.hoisted(() => ({
   saveForQuit: vi.fn(() => state.saveForQuit()),
   resumeAfterCancelledQuit: vi.fn(async () => undefined),
   closeForQuit: vi.fn(async () => undefined),
+  runningWork: vi.fn(() => state.runningWork),
 }));
 
 vi.mock("@main/core/app-runtime", () => ({
@@ -115,7 +118,8 @@ vi.mock("@main/plain-dialog", () => ({
   showPlainDialog: (dialog: { actions: { choice: string }[] }) => {
     state.questions.push(dialog);
     const drafts = dialog.actions.some((action) => action.choice === "discard");
-    return { choice: Promise.resolve(drafts ? state.draftsChoice : state.quitChoice), close: vi.fn() };
+    const work = dialog.actions.some((action) => action.choice === "quit");
+    return { choice: Promise.resolve(work ? state.workChoice : drafts ? state.draftsChoice : state.quitChoice), close: vi.fn() };
   },
 }));
 vi.mock("@main/startup-failure-dialog", () => ({
@@ -147,6 +151,8 @@ beforeEach(() => {
   state.heldDraftsReplies.length = 0;
   state.ipcListeners.clear();
   state.powerListeners.clear();
+  state.runningWork = { recordings: 0, tools: 0 };
+  state.workChoice = "cancel";
   mainWindow.handlers.clear();
   mainWindow.flushRequests = 0;
   mainWindow.discards = 0;
@@ -324,7 +330,7 @@ describe("quit", () => {
     expect(state.exits).toEqual([0]);
   });
 
-  it("opens no question for a Mac window close that a session end overtakes", async () => {
+  it("opens no question for a Mac window close a session end overtakes", async () => {
     onPlatform("darwin");
     state.unsavedDrafts = ["settings"];
     state.holdDraftsReply = true;
@@ -424,30 +430,60 @@ describe("quit", () => {
     expect(saves).toBe(choice === "retry" ? 2 : 1);
   });
 
-  it("retains the Mac window when its edit save fails", async () => {
-    onPlatform("darwin");
-    state.flushSucceeded = false;
-    await boot();
-    mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
-    expect(mainWindow.closes).toBe(0);
-    expect(state.exits).toEqual([]);
-    expect(runtime.saveForQuit).not.toHaveBeenCalled();
-  });
-
-  it("only closes the main window on macOS, after it sends its unsent edits", async () => {
+  // window-conventions: closing the main window ends the app on every platform.
+  it("quits through the save when the main window is closed on macOS", async () => {
     onPlatform("darwin");
     await boot();
     const close = { preventDefault: vi.fn() };
 
     mainWindow.handlers.get("close")!(close);
-    await vi.waitFor(() => expect(mainWindow.closes).toBe(1));
-    mainWindow.handlers.get("close")!({ preventDefault: close.preventDefault });
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
 
+    expect(close.preventDefault).toHaveBeenCalledOnce();
     expect(mainWindow.flushRequests).toBe(1);
-    expect(close.preventDefault, "the second close goes through").toHaveBeenCalledOnce();
-    expect(runtime.saveForQuit).not.toHaveBeenCalled();
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the Mac window and asks when its edits cannot be sent", async () => {
+    onPlatform("darwin");
+    state.flushSucceeded = false;
+    await boot();
+    mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(runtime.resumeAfterCancelledQuit).toHaveBeenCalledOnce());
+    expect(state.questions).toHaveLength(1);
+    expect(mainWindow.closes).toBe(0);
     expect(state.exits).toEqual([]);
+  });
+
+  // unsaved-edits-conventions: quit asks about app-owned work still running.
+  it("asks before stopping running work, and keeps the app and its work on Keep Working", async () => {
+    state.runningWork = { recordings: 1, tools: 0 };
+    const beforeQuit = await boot();
+    beforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runtime.saveForQuit, "nothing stops while the user keeps the work").not.toHaveBeenCalled();
+    expect(mainWindow.flushRequests).toBe(0);
+    expect(state.exits).toEqual([]);
+  });
+
+  it("stops running work and quits on Stop and Quit, from the window's close too", async () => {
+    onPlatform("darwin");
+    state.runningWork = { recordings: 0, tools: 1 };
+    state.workChoice = "quit";
+    await boot();
+    mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    expect(state.questions).toHaveLength(1);
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+  });
+
+  it("never asks about running work at a session end", async () => {
+    state.runningWork = { recordings: 2, tools: 0 };
+    await boot();
+    state.powerListeners.get("shutdown")!();
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    expect(state.questions).toEqual([]);
   });
 });
 

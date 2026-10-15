@@ -174,6 +174,14 @@ class ImportAdmissionError extends Error {
 /** The user's own work a quit could not save. */
 export type QuitSaveFailure = "queue" | "transcripts" | "settings";
 
+/** The app-owned work still running that a quit would stop. */
+export interface RunningWork {
+  /** Recordings being transcribed, generated or saved. */
+  recordings: number;
+  /** Audio tools being installed or updated. */
+  tools: number;
+}
+
 // What a save produced, before the snapshot that reports it is taken: the
 // snapshot is built only after the card's status has settled.
 type SaveOutcome =
@@ -1715,6 +1723,18 @@ export class ApplicationRuntime {
 
   async drainQueuedCards(): Promise<void> {
     await this.pipeline.drainQueued();
+  }
+
+  // The app-owned work still running that a quit would stop, which the user's
+  // quit asks about first. Queued recordings are not counted: they stay queued
+  // in the saved queue and start again at the next launch.
+  runningWork(): RunningWork {
+    const busy: readonly MumblerCard["status"][] = ["Transcribing", "Generating Metadata", "Saving"];
+    return {
+      recordings: (this.runtime.state?.cards ?? []).filter((card) => busy.includes(card.status)).length,
+      tools: (this.runtime.toolManager?.listStatuses() ?? [])
+        .filter((status) => status.transient.kind === "running" && status.transient.operation === "provision").length,
+    };
   }
 
   // The quit's save (unsaved-edits conventions, Quitting). Stops new pipelines

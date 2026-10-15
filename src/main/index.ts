@@ -11,10 +11,9 @@ import { showStartupFailureDialog } from "./startup-failure-dialog";
 import { loadInterfaceCatalogue, mainTranslator } from "./i18n";
 import { installApplicationMenu } from "./app-menu";
 import { notifyRecordsChanged, openRecordsWindow } from "./records-window";
-import { createQuitController, discardDraftsDialog, QUIT_BUDGETS, quitFailureDialog, type QuitController } from "./quit";
+import { createQuitController, discardDraftsDialog, QUIT_BUDGETS, quitFailureDialog, stopWorkDialog, type QuitController } from "./quit";
 import { showPlainDialog, type OpenPlainDialog } from "./plain-dialog";
 import { discardWindowDrafts, flushWindowEdits, queryWindowDrafts } from "./pending-edits";
-import { createWindowCloseController } from "./window-close";
 
 app.setName("Mumbler");
 
@@ -41,21 +40,18 @@ let runtimeForShutdown: ApplicationRuntime | null = null;
 // Every quit path goes through it once the runtime exists.
 let quitController: QuitController | null = null;
 // The main window, apart from the records window beside it: closing it quits
-// on Windows and Linux, and on macOS the Dock reopens it.
+// on every platform (window-conventions), and the other windows go with it.
 let mainWindow: BrowserWindow | null = null;
 
-let cancelWindowClose: (() => void) | null = null;
-
-// Asks before a user's quit or window close discards the window's session-only
-// drafts, such as unsaved Settings changes; true goes on. A window that does
-// not answer in time is taken to hold none, so it cannot hold the quit open.
-// `cancelled` aborts when a session end takes over while the window is still
-// being asked: no question opens after that, and false means nothing was
-// discarded (the quit goes on regardless; a window close stops).
+// Asks before a user's quit discards the window's session-only drafts, such as
+// unsaved Settings changes; true goes on. A window that does not answer in time
+// is taken to hold none, so it cannot hold the quit open. `cancelled` aborts
+// when a session end takes over while the window is still being asked: no
+// question opens after that, and false means nothing was discarded (the quit
+// goes on regardless).
 async function confirmDiscardDrafts(
   runtime: ApplicationRuntime,
   window: BrowserWindow | null,
-  action: "quit" | "close",
   shown: (question: OpenPlainDialog<"discard" | "cancel"> | null) => void,
   cancelled: AbortSignal,
 ): Promise<boolean> {
@@ -63,7 +59,7 @@ async function confirmDiscardDrafts(
   const drafts = await queryWindowDrafts(window, timeout);
   if (cancelled.aborted) return false;
   if (drafts.length === 0) return true;
-  const question = showPlainDialog(discardDraftsDialog(runtime.translator(), action));
+  const question = showPlainDialog(discardDraftsDialog(runtime.translator()));
   shown(question);
   try {
     if ((await question.choice) !== "discard") return false;
@@ -77,17 +73,26 @@ async function confirmDiscardDrafts(
 function createQuit(runtime: ApplicationRuntime): QuitController {
   let question: OpenPlainDialog<"retry" | "quit-anyway" | "cancel"> | null = null;
   let draftsQuestion: OpenPlainDialog<"discard" | "cancel"> | null = null;
+  let workQuestion: OpenPlainDialog<"quit" | "cancel"> | null = null;
   let draftsQuery = new AbortController();
   return createQuitController({
+    // Running work the app owns is asked about before quit stops it
+    // (unsaved-edits-conventions, Closing and quitting).
+    confirmStopWork: async () => {
+      const dialog = stopWorkDialog(runtime.translator(), runtime.runningWork());
+      if (dialog === null) return true;
+      workQuestion = showPlainDialog(dialog);
+      try {
+        return (await workQuestion.choice) === "quit";
+      } finally {
+        workQuestion = null;
+      }
+    },
     confirmDiscardDrafts: () => {
-      cancelWindowClose?.();
       draftsQuery = new AbortController();
-      return confirmDiscardDrafts(runtime, mainWindow, "quit", (shown) => { draftsQuestion = shown; }, draftsQuery.signal);
+      return confirmDiscardDrafts(runtime, mainWindow, (shown) => { draftsQuestion = shown; }, draftsQuery.signal);
     },
-    flushEdits: (signal) => {
-      cancelWindowClose?.();
-      return flushWindowEdits(mainWindow, signal);
-    },
+    flushEdits: (signal) => flushWindowEdits(mainWindow, signal),
     save: () => runtime.saveForQuit(),
     resume: () => runtime.resumeAfterCancelledQuit(),
     close: (details) => runtime.closeForQuit(details),
@@ -102,6 +107,7 @@ function createQuit(runtime: ApplicationRuntime): QuitController {
     dismissQuestion: () => {
       draftsQuery.abort();
       question?.close();
+      workQuestion?.close();
       draftsQuestion?.close();
     },
     warn: (event, message, details) => {
@@ -115,48 +121,12 @@ function createQuit(runtime: ApplicationRuntime): QuitController {
 async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
   const window = await createMainWindow(runtime);
   mainWindow = window;
-  let editsSentForClose = false;
-  let notice: OpenPlainDialog<"dismiss"> | null = null;
-  let draftsQuestion: OpenPlainDialog<"discard" | "cancel"> | null = null;
-  const close = createWindowCloseController({
-    confirm: (signal) => confirmDiscardDrafts(runtime, window, "close", (shown) => { draftsQuestion = shown; }, signal),
-    flush: (signal) => flushWindowEdits(window, signal),
-    close: () => {
-      editsSentForClose = true;
-      if (!window.isDestroyed()) window.close();
-    },
-    failed: async () => {
-      const translator = runtime.translator();
-      notice = showPlainDialog({
-        language: translator.language,
-        title: translator.t("windowClose.title"),
-        bodyLabel: translator.t("quit.detailsLabel"),
-        body: translator.t("windowClose.body"),
-        actions: [{ choice: "dismiss", label: translator.t("common.close") }],
-        focus: "dismiss",
-        dismiss: "dismiss",
-      });
-      try { await notice.choice; } finally { notice = null; }
-    },
-    dismiss: () => {
-      notice?.close();
-      draftsQuestion?.close();
-    },
-  });
-  cancelWindowClose = () => close.cancel();
+  // Closing the main window quits on every platform, through the same quit
+  // flow and questions as every other quit, which a question can cancel.
   window.on("close", (event) => {
-    // Closing the main window quits on Windows and Linux, through the same
-    // save as every other quit, which a failed save can cancel.
-    if (process.platform !== "darwin") {
-      if (quitController === null) return;
-      event.preventDefault();
-      quitController.request("user");
-      return;
-    }
-    // On macOS it only closes the window, after it sends its unsent edits.
-    if (editsSentForClose) return;
+    if (quitController === null) return;
     event.preventDefault();
-    if (!quitController?.isRunning()) close.request();
+    quitController.request("user");
   });
   // Windows does not send before-quit for logout/restart. Start best-effort
   // saving without vetoing or extending the OS session end; Windows may end
@@ -171,12 +141,7 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
     quitController?.request("session-end");
   });
   window.once("closed", () => {
-    close.cancel();
-    if (mainWindow === window) {
-      mainWindow = null;
-      cancelWindowClose = null;
-    }
-    if (process.platform !== "darwin") app.quit();
+    if (mainWindow === window) mainWindow = null;
   });
 }
 
@@ -292,11 +257,6 @@ async function bootstrap(): Promise<void> {
     });
   });
 
-  app.on("activate", () => {
-    if (mainWindow === null || mainWindow.isDestroyed()) {
-      void openMainWindow(runtime).catch(handleBootstrapFailure);
-    }
-  });
 }
 
 let handlingBootstrapFailure = false;
@@ -347,10 +307,9 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(bootstrap).catch(handleBootstrapFailure);
 
+  // Only an exit closes the main window, so this is the same end on every platform.
   app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-      app.quit();
-    }
+    app.quit();
   });
 
   // The menu's Quit, Cmd+Q, the Dock's Quit and, on macOS, a logout, restart

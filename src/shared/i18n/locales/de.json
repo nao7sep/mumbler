@@ -70,9 +70,17 @@
   "quit.transcripts": "die Transkriptionen",
   "quit.settings": "die Einstellungen",
   "quit.edits": "die noch nicht gespeicherten Änderungen im Fenster",
-  "windowClose.discardSettingsBody": "Sie haben ungespeicherte Änderungen in den Einstellungen. Verwerfen und das Fenster schließen?",
-  "windowClose.title": "Mumbler wurde nicht geschlossen",
-  "windowClose.body": "Die Änderungen im Fenster konnten nicht gespeichert werden. Das Fenster bleibt geöffnet, damit Sie es erneut versuchen können.",
+  "quit.workTitle": "Mumbler arbeitet noch",
+  "quit.workRecordings": {
+    "one": "{count} Aufnahme wird noch verarbeitet. Beenden bricht sie ab; Sie können sie später erneut erstellen oder speichern.",
+    "other": "{count} Aufnahmen werden noch verarbeitet. Beenden bricht sie ab; Sie können sie später erneut erstellen oder speichern."
+  },
+  "quit.workTools": {
+    "one": "{count} Audiowerkzeug wird noch installiert. Beenden bricht die Installation ab.",
+    "other": "{count} Audiowerkzeuge werden noch installiert. Beenden bricht ihre Installation ab."
+  },
+  "quit.keepWorking": "Weiterarbeiten",
+  "quit.stopAndQuit": "Abbrechen und beenden",
   "diagnostic.storageTitle": "Speicherort konnte nicht ermittelt werden",
   "diagnostic.storageBody": "Mumbler konnte den eingestellten Speicherordner nicht verwenden. Stellen Sie den Zugriff auf diesen Ordner wieder her oder entfernen Sie die Einstellung MUMBLER_DATA_DIR und öffnen Sie die App dann erneut.",
   "diagnostic.corruptTitle": "Gespeicherte Daten konnten nicht geladen werden",

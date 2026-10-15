@@ -70,9 +70,19 @@
   "quit.transcripts": "as transcrições",
   "quit.settings": "as configurações",
   "quit.edits": "as alterações pendentes da janela",
-  "windowClose.discardSettingsBody": "Você tem alterações não salvas nas Configurações. Descartá-las e fechar a janela?",
-  "windowClose.title": "O Mumbler não fechou",
-  "windowClose.body": "Não foi possível salvar as alterações pendentes da janela. A janela permanece aberta para você tentar novamente.",
+  "quit.workTitle": "O Mumbler ainda está trabalhando",
+  "quit.workRecordings": {
+    "one": "{count} gravação ainda está sendo processada. Encerrar a interrompe; você pode gerá-la ou salvá-la novamente depois.",
+    "many": "{count} gravações ainda estão sendo processadas. Encerrar as interrompe; você pode gerá-las ou salvá-las novamente depois.",
+    "other": "{count} gravações ainda estão sendo processadas. Encerrar as interrompe; você pode gerá-las ou salvá-las novamente depois."
+  },
+  "quit.workTools": {
+    "one": "{count} ferramenta de áudio ainda está sendo instalada. Encerrar interrompe a instalação.",
+    "many": "{count} ferramentas de áudio ainda estão sendo instaladas. Encerrar interrompe a instalação delas.",
+    "other": "{count} ferramentas de áudio ainda estão sendo instaladas. Encerrar interrompe a instalação delas."
+  },
+  "quit.keepWorking": "Continuar trabalhando",
+  "quit.stopAndQuit": "Interromper e encerrar",
   "diagnostic.storageTitle": "Não foi possível determinar o local de armazenamento",
   "diagnostic.storageBody": "O Mumbler não conseguiu usar a pasta de armazenamento configurada. Restaure o acesso a essa pasta ou remova a variável MUMBLER_DATA_DIR e abra o app novamente.",
   "diagnostic.corruptTitle": "Não foi possível carregar os dados salvos",

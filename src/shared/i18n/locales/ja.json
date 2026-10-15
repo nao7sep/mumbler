@@ -70,9 +70,15 @@
   "quit.transcripts": "文字起こし",
   "quit.settings": "設定",
   "quit.edits": "ウインドウの未保存の編集",
-  "windowClose.discardSettingsBody": "「設定」に保存していない変更があります。破棄してウインドウを閉じますか？",
-  "windowClose.title": "Mumblerは閉じられませんでした",
-  "windowClose.body": "ウインドウの編集を保存できませんでした。再試行できるよう、ウインドウは開いたままです。",
+  "quit.workTitle": "Mumblerはまだ処理中です",
+  "quit.workRecordings": {
+    "other": "{count} 件の録音を処理中です。終了すると処理は止まります。あとで生成または保存をやり直せます。"
+  },
+  "quit.workTools": {
+    "other": "{count} 件のオーディオツールをインストール中です。終了するとインストールは止まります。"
+  },
+  "quit.keepWorking": "処理を続ける",
+  "quit.stopAndQuit": "止めて終了",
   "diagnostic.storageTitle": "保存場所を特定できませんでした",
   "diagnostic.storageBody": "Mumblerは設定された保存フォルダを使用できませんでした。そのフォルダへのアクセスを回復するか、MUMBLER_DATA_DIRの指定を削除してから、アプリを開き直してください。",
   "diagnostic.corruptTitle": "保存されたデータを読み込めませんでした",

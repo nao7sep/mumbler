@@ -60,9 +60,17 @@
   "quit.transcripts": "the transcriptions",
   "quit.settings": "the settings",
   "quit.edits": "the window’s pending edits",
-  "windowClose.discardSettingsBody": "You have unsaved changes in Settings. Discard them and close the window?",
-  "windowClose.title": "Mumbler did not close",
-  "windowClose.body": "The window could not save its pending edits. It remains open so you can try again.",
+  "quit.workTitle": "Mumbler is still working",
+  "quit.workRecordings": {
+    "one": "{count} recording is still being processed. Quitting stops it; you can generate or save it again later.",
+    "other": "{count} recordings are still being processed. Quitting stops them; you can generate or save them again later."
+  },
+  "quit.workTools": {
+    "one": "{count} audio tool is still being installed. Quitting stops the installation.",
+    "other": "{count} audio tools are still being installed. Quitting stops their installation."
+  },
+  "quit.keepWorking": "Keep Working",
+  "quit.stopAndQuit": "Stop and Quit",
   "diagnostic.storageTitle": "Storage Location Could Not Be Resolved",
   "diagnostic.storageBody": "Mumbler could not use its configured storage folder. Restore access to that folder or remove the MUMBLER_DATA_DIR override, then reopen the app.",
   "diagnostic.corruptTitle": "Saved Data Could Not Be Loaded",
