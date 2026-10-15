@@ -98,6 +98,16 @@ describe("recording times in the shared corpus's tags", () => {
     else expect(found).toEqual([{ source: "embedded", utcMs: null, localText: expected.local }]);
   });
 
+  // An iPad Voice Memo's layout, the one recorder that puts no time in its file
+  // name: ffprobe reports only the movie header's creation time, the moment
+  // recording started (its 3GPP date atom holds the same moment, unreported).
+  // The value is the corpus's synthetic moment; only the layout is the device's.
+  it("reads an iPad Voice Memo's creation time as exact", () => {
+    expect(recordingTimesFromTags({ creation_time: "2026-10-14T06:30:12.000000Z" })).toEqual([
+      { source: "embedded", utcMs: Date.UTC(2026, 9, 14, 6, 30, 12), localText: null },
+    ]);
+  });
+
   it("refuses a day the month does not have, even beside an offset", () => {
     expect(recordingTimesFromTags({ "com.apple.quicktime.creationdate": "2026-02-30T15:30:12+0900" })).toEqual([]);
     expect(recordingTimesFromTags({ date: "2026-04-31T08:00:00" })).toEqual([]);
