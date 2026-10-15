@@ -829,6 +829,26 @@ textarea:focus-visible,
   flex-wrap: wrap;
 }
 
+/* The name and the row's ×, which keeps its place at the right as the name shortens. */
+.queue-row__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.queue-row__head .queue-row__filename {
+  flex: 1 1 auto;
+}
+
+.queue-row__remove {
+  flex: 0 0 auto;
+}
+
+.queue-row__remove:disabled {
+  opacity: 0.4;
+}
+
 /* The name identifies the row: one line, keeping its beginning; the Info tab
    shows it whole once the row is selected. */
 .queue-row__filename {
@@ -1722,10 +1742,6 @@ select:not([multiple]) {
 
 .control-row--two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.control-row--five {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 /* A player button keeps its column as the label grows: it may take a second

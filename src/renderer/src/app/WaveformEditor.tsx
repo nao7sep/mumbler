@@ -92,7 +92,6 @@ interface WaveformEditorProps {
   previewSnippetSeconds: number;
   skipIntervalSec: number;
   disabled: boolean;
-  onDuplicateCard: (cardId: string) => Promise<void>;
   onTrimCommit: (cardId: string, trim: CardTrim) => Promise<void>;
 }
 
@@ -111,7 +110,6 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   previewSnippetSeconds,
   skipIntervalSec,
   disabled,
-  onDuplicateCard,
   onTrimCommit,
 }, ref): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -555,14 +553,6 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     waveSurfer.setTime(next);
   }
 
-  async function duplicateCard(): Promise<void> {
-    try {
-      await onDuplicateCard(card.id);
-    } catch (error: unknown) {
-      setPlayerError(presentFailure(error, message("player.duplicateFailed"), "recording duplication failed"));
-    }
-  }
-
   function onMarkerInputKeyDown(
     side: "front" | "back",
     event: KeyboardEvent<HTMLInputElement>,
@@ -612,7 +602,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       ) : null}
       {playerError ? <InlineError>{text(playerError)}</InlineError> : null}
 
-      <div className="control-row control-row--five">
+      <div className="control-row">
         <button type="button" className="button button--ghost" onClick={() => void playPause()} disabled={!hasCurrentMedia}>
           {isPlaying ? t("player.pause") : t("player.play")}
         </button>
@@ -639,14 +629,6 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
           disabled={disabled || (draftTrim.frontMarkerSec === null && draftTrim.backMarkerSec === null)}
         >
           {t("player.clearMarkers")}
-        </button>
-        <button
-          type="button"
-          className="button button--ghost"
-          onClick={() => void duplicateCard()}
-          disabled={disabled}
-        >
-          {t("player.duplicate")}
         </button>
       </div>
 

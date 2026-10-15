@@ -24,4 +24,8 @@ export const COMMAND_DEFINITIONS: CommandDefinition[] = [
   // Workflow
   { id: "transcribe-selected", labelKey: "command.generateAll",             groupKey: "commandGroup.workflow", keys: ["t"] },
   { id: "save-selected",       labelKey: "command.save",                     groupKey: "commandGroup.workflow", keys: ["s"] },
+  { id: "duplicate-selected",  labelKey: "command.duplicate",                groupKey: "commandGroup.workflow", keys: ["d"] },
+  // The queue row's × is pointer-only, so a row holds one tab stop; these keys
+  // are its keyboard route (composite-control-conventions).
+  { id: "remove-selected",     labelKey: "command.remove",                   groupKey: "commandGroup.workflow", keys: ["Delete", "Backspace"] },
 ];

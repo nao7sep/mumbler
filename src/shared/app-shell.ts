@@ -88,7 +88,9 @@ export type CommandId =
   | "set-front-marker"
   | "set-back-marker"
   | "transcribe-selected"
-  | "save-selected";
+  | "save-selected"
+  | "duplicate-selected"
+  | "remove-selected";
 
 export interface CommandDefinition {
   id: CommandId;

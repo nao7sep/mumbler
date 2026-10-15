@@ -6,7 +6,8 @@
 import type { ReactElement } from "react";
 
 import type { CardStatus, MumblerCard } from "@shared/app-shell";
-import { cardErrorMessage, formatCardStatusMessage } from "./card-status";
+import { cardErrorMessage, formatCardStatusMessage, isCardBusy } from "./card-status";
+import { CloseIcon } from "./Icon";
 import { useI18n } from "../i18n/I18nContext";
 import { useQueueListbox } from "./useQueueListbox";
 
@@ -33,9 +34,13 @@ export interface QueueListProps {
   cards: MumblerCard[];
   selectedCardId: string | null;
   onSelect: (cardId: string) => void;
+  /** Asks to remove a card; its × is disabled while the card is busy. */
+  onRequestRemove: (cardId: string) => void;
+  /** Cards with work running that their status does not show yet. */
+  busyCardIds?: readonly string[];
 }
 
-export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): ReactElement {
+export function QueueList({ cards, selectedCardId, onSelect, onRequestRemove, busyCardIds = [] }: QueueListProps): ReactElement {
   const { t, text } = useI18n();
   const { containerProps, getOptionProps } = useQueueListbox({
     cardIds: cards.map((card) => card.id),
@@ -55,7 +60,24 @@ export function QueueList({ cards, selectedCardId, onSelect }: QueueListProps): 
             if (card.id !== selectedCardId) onSelect(card.id);
           }}
         >
-          <strong className="queue-row__filename">{card.originalFilename}</strong>
+          <div className="queue-row__head">
+            <strong className="queue-row__filename">{card.originalFilename}</strong>
+            {/* Pointer-only, so the row stays one tab stop: Delete or Backspace
+                is its keyboard route (composite-control-conventions). */}
+            <button
+              type="button"
+              tabIndex={-1}
+              className="result-close queue-row__remove"
+              aria-label={t("queue.removeRecording", { file: card.originalFilename })}
+              disabled={isCardBusy(card) || busyCardIds.includes(card.id)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRequestRemove(card.id);
+              }}
+            >
+              <CloseIcon />
+            </button>
+          </div>
           <div className="queue-row__meta">
             <span>{card.timestamps.effectiveLocal}</span>
             {card.durationSec !== null ? (

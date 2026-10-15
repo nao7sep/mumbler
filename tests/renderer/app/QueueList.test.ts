@@ -45,7 +45,7 @@ describe("QueueList card results", () => {
       root?.render(React.createElement(QueueList, {
         cards: [card("failed", "Error"), card("cancelled", "Cancelled")],
         selectedCardId: "failed",
-        onSelect: vi.fn(),
+        onSelect: vi.fn(), onRequestRemove: vi.fn(),
       }));
     });
 
@@ -66,7 +66,7 @@ describe("QueueList card results", () => {
     const failed = card("failed", "Error");
     failed.lastError!.message = "TypeError EACCES /private/tmp/RAW-SENTINEL";
     failed.lastError!.providerReason = "This model is unavailable.";
-    await act(async () => root?.render(React.createElement(QueueList, { cards: [failed], selectedCardId: failed.id, onSelect: vi.fn() })));
+    await act(async () => root?.render(React.createElement(QueueList, { cards: [failed], selectedCardId: failed.id, onSelect: vi.fn(), onRequestRemove: vi.fn() })));
     const alert = document.querySelector('[role="alert"]')!;
     expect(alert.textContent).toBe("The recording could not be transcribed. Check Managed tools and Gemini settings, then try again.");
     expect(document.body.textContent).not.toContain("RAW-SENTINEL");
@@ -91,6 +91,7 @@ describe("QueueList card results", () => {
         cards,
         selectedCardId: "card-1",
         onSelect,
+        onRequestRemove: vi.fn(),
       }));
     });
 
@@ -108,8 +109,41 @@ describe("QueueList card results", () => {
         cards: [],
         selectedCardId: null,
         onSelect,
+        onRequestRemove: vi.fn(),
       }));
     });
     expect(document.querySelector('[role="listbox"]')?.getAttribute("tabindex")).toBe("0");
+  });
+});
+
+describe("removing a recording from its row", () => {
+  it("asks through each row's ×, which is not a tab stop and does not select the row", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const onSelect = vi.fn();
+    const onRequestRemove = vi.fn();
+    await act(async () => root?.render(React.createElement(QueueList, {
+      cards: [card("first", "Imported"), card("second", "Imported")], selectedCardId: "first", onSelect, onRequestRemove,
+    })));
+    const remove = container.querySelectorAll<HTMLButtonElement>(".queue-row__remove");
+    expect(remove).toHaveLength(2);
+    expect(remove[1]!.tabIndex).toBe(-1);
+    expect(remove[1]!.getAttribute("aria-label")).toBe("Remove second.wav");
+
+    await act(async () => remove[1]!.click());
+    expect(onRequestRemove).toHaveBeenCalledExactlyOnceWith("second");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("disables the × while the recording is busy", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(React.createElement(QueueList, {
+      cards: [card("busy", "Queued"), card("starting", "Imported"), card("idle", "Imported")],
+      selectedCardId: "idle", onSelect: vi.fn(), onRequestRemove: vi.fn(), busyCardIds: ["starting"],
+    })));
+    expect([...container.querySelectorAll<HTMLButtonElement>(".queue-row__remove")].map((button) => button.disabled)).toEqual([true, true, false]);
   });
 });

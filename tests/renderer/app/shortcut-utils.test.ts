@@ -70,6 +70,8 @@ describe("findMatchingGlobalCommand", () => {
       "set-back-marker": "b",
       "transcribe-selected": "t",
       "save-selected": "s",
+      "duplicate-selected": "d",
+      "remove-selected": "Delete",
     };
 
     for (const command of COMMAND_DEFINITIONS) {
@@ -126,5 +128,15 @@ describe("isShortcutsHelpChord", () => {
   it("stands down while an IME composition is in progress", () => {
     expect(isShortcutsHelpChord(keydown({ key: "/", metaKey: true, isComposing: true }), true)).toBe(false);
     expect(isShortcutsHelpChord(keydown({ key: "/", ctrlKey: true, keyCode: 229 }), false)).toBe(false);
+  });
+});
+
+describe("recording shortcuts", () => {
+  const press = (key: string) => findMatchingGlobalCommand(new KeyboardEvent("keydown", { key }));
+  it("duplicates with D and asks to remove with Delete or Backspace", () => {
+    expect(press("d")).toBe("duplicate-selected");
+    expect(press("D")).toBe("duplicate-selected");
+    expect(press("Delete")).toBe("remove-selected");
+    expect(press("Backspace")).toBe("remove-selected");
   });
 });

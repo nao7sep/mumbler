@@ -660,9 +660,23 @@ function LoadedShell({
   }
 
   async function handleDuplicateCard(cardId: string): Promise<void> {
-    const nextSnapshot = await window.mumbler.duplicateCard(cardId);
-    setSnapshot(nextSnapshot);
-    addToast(message("notice.duplicated"));
+    clearCardActionError(cardId, "duplicate-card");
+    try {
+      const nextSnapshot = await window.mumbler.duplicateCard(cardId);
+      setSnapshot(nextSnapshot);
+      addToast(message("notice.duplicated"));
+    } catch (error: unknown) {
+      setCardActionError(cardId, "duplicate-card", presentFailure(error, message("detail.duplicateFailed"), "recording duplication failed"));
+    }
+  }
+
+  // The removal question, from the queue row's × or Delete; a busy card is
+  // refused by the runtime too, so its × is shown disabled.
+  function requestRemoveCard(cardId: string): void {
+    const card = snapshot?.state?.cards.find((entry) => entry.id === cardId);
+    if (card === undefined || isCardBusy(card) || activePipelineCards.includes(cardId)) return;
+    setRemoveCardError(null);
+    setPendingRemoveCardId(cardId);
   }
 
   async function handleTrimCommit(cardId: string, trim: MumblerCard["trim"]): Promise<void> {
@@ -915,6 +929,12 @@ function LoadedShell({
         if (selectedCard.status === "Ready to Save" && !selectedCardIsBusy) {
           await handleSaveCard(selectedCard.id);
         }
+        return;
+      case "duplicate-selected":
+        if (!selectedCardIsBusy) await handleDuplicateCard(selectedCard.id);
+        return;
+      case "remove-selected":
+        requestRemoveCard(selectedCard.id);
         return;
       default:
         return;
@@ -1208,6 +1228,8 @@ function LoadedShell({
               cards={snapshot.state.cards}
               selectedCardId={snapshot.queueSummary?.selectedCardId ?? null}
               onSelect={(cardId) => void handleCardSelect(cardId)}
+              onRequestRemove={requestRemoveCard}
+              busyCardIds={activePipelineCards}
             />
           ) : (
             <section className="panel panel--nested queue-empty">
@@ -1243,6 +1265,19 @@ function LoadedShell({
         <section className="detail-pane panel">
           <div className="panel__header">
             <h2>{t("detail.title")}</h2>
+            {/* Acts on the whole recording, so it sits with the recording rather than the player. */}
+            {selectedCard ? (
+              <div className="toolbar">
+                <button
+                  type="button"
+                  className="button button--ghost"
+                  onClick={() => void handleDuplicateCard(selectedCard.id)}
+                  disabled={selectedCardIsBusy}
+                >
+                  {t("detail.duplicate")}
+                </button>
+              </div>
+            ) : null}
           </div>
 
           {selectedCard ? (
@@ -1379,7 +1414,6 @@ function LoadedShell({
                     previewSnippetSeconds={snapshot?.settingsSummary?.previewSnippetSeconds ?? 10}
                     skipIntervalSec={snapshot?.settingsSummary?.skipIntervalSec ?? 5}
                     disabled={selectedCardIsBusy}
-                    onDuplicateCard={handleDuplicateCard}
                     onTrimCommit={handleTrimCommit}
                   />
                   <div className="trim-analysis">
@@ -1639,17 +1673,6 @@ function LoadedShell({
                       disabled={saveDisabledReason !== null}
                     >
                       {t("output.saveAndRemove")}
-                    </button>
-                    <button
-                      type="button"
-                      className="button button--danger"
-                      onClick={() => {
-                        setRemoveCardError(null);
-                        setPendingRemoveCardId(selectedCard.id);
-                      }}
-                      disabled={selectedCardIsBusy}
-                    >
-                      {t("common.remove")}
                     </button>
                   </div>
                   <p className="field-hint">{t("output.hint")}</p>

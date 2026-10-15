@@ -164,7 +164,6 @@ const card: MumblerCard = {
 let root: Root | null = null;
 let container: HTMLDivElement;
 let onTrimCommit: Mock<(cardId: string, trim: CardTrim) => Promise<void>>;
-let onDuplicateCard: Mock<(cardId: string) => Promise<void>>;
 let getCardMediaSource: Mock<(cardId: string) => Promise<string>>;
 let handle: React.RefObject<WaveformEditorHandle | null>;
 
@@ -180,7 +179,6 @@ async function mountEditor(options: { trim?: CardTrim; disabled?: boolean; ready
         previewSnippetSeconds: 10,
         skipIntervalSec: 5,
         disabled: options.disabled ?? false,
-        onDuplicateCard,
         onTrimCommit,
       }),
     );
@@ -225,7 +223,6 @@ function text(): string {
 beforeEach(() => {
   wave.reset();
   onTrimCommit = vi.fn(async () => undefined);
-  onDuplicateCard = vi.fn(async () => undefined);
   getCardMediaSource = vi.fn(async () => "mumbler-asset://media/card-1");
   (window as unknown as { mumbler: unknown }).mumbler = { getCardMediaSource };
   container = document.createElement("div");
@@ -422,7 +419,6 @@ describe("setting the markers", () => {
     expect(markerInput("front").disabled).toBe(true);
     expect(button("Set Front at Cursor").disabled).toBe(true);
     expect(button("Clear Markers").disabled).toBe(true);
-    expect(button("Duplicate Recording").disabled).toBe(true);
   });
 });
 
@@ -517,16 +513,10 @@ describe("dragging the kept range on the waveform", () => {
   });
 });
 
-describe("duplicating the recording", () => {
-  it("asks for a duplicate, and says so when that fails", async () => {
+describe("the player's own controls", () => {
+  it("leaves duplicating the recording to the detail pane's header", async () => {
     await mountEditor();
-
-    await click("Duplicate Recording");
-    expect(onDuplicateCard).toHaveBeenCalledExactlyOnceWith("card-1");
-
-    onDuplicateCard.mockRejectedValue(new Error("no space"));
-    await click("Duplicate Recording");
-    expect(text()).toContain("The recording could not be duplicated");
+    expect(text()).not.toContain("Duplicate");
   });
 });
 
@@ -540,7 +530,6 @@ describe("text typed but not yet committed", () => {
           previewSnippetSeconds: 10,
           skipIntervalSec: 5,
           disabled: false,
-          onDuplicateCard,
           onTrimCommit,
         }),
       );
