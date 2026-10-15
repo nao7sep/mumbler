@@ -6,7 +6,7 @@ import {
   getSettingsNumberIssues,
   type NumericSettingField,
 } from "@shared/settings-validation";
-import { DEFAULT_TIMESTAMP_PATTERN, SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
+import { DEFAULT_TIMESTAMP_PATTERNS, SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
 import { LANGUAGE_NAMES, LANGUAGES, normalizeLanguagePreference, type Language } from "@shared/i18n/languages";
 import { useI18n } from "../i18n/I18nContext";
 import type { MessageKey } from "@shared/i18n/catalogues";
@@ -375,11 +375,13 @@ export function SettingsModal({
                 ) : null}
                 <label className="field">
                   <span>{t("settings.timestampPattern")}</span>
-                  <input
-                    style={{ fontFamily: "var(--font-mono)", fontSize: "1.05em" }}
+                  <textarea
+                    className="settings-patterns"
+                    rows={DEFAULT_TIMESTAMP_PATTERNS.length + 1}
+                    wrap="off"
                     spellCheck={false}
-                    value={draft.timestampPattern}
-                    onChange={(event) => onChange({ ...draft, timestampPattern: event.target.value })}
+                    value={draft.timestampPatterns}
+                    onChange={(event) => onChange({ ...draft, timestampPatterns: event.target.value })}
                   />
                 </label>
                 <p className="field-hint">{i18n.rich("settings.timestampPatternHint", {
@@ -394,7 +396,7 @@ export function SettingsModal({
                   <button
                     type="button"
                     className="button button--danger"
-                    onClick={() => onChange({ ...draft, timestampPattern: DEFAULT_TIMESTAMP_PATTERN })}
+                    onClick={() => onChange({ ...draft, timestampPatterns: DEFAULT_TIMESTAMP_PATTERNS.join("\n") })}
                     disabled={isSaving}
                   >
                     {t("settings.resetTimestampPattern")}

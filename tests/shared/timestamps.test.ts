@@ -7,7 +7,7 @@ import {
   getSupportedTimezones,
   getUtcTimestampError,
   isValidTimezone,
-  DEFAULT_TIMESTAMP_PATTERN,
+  DEFAULT_TIMESTAMP_PATTERNS,
   parseUtcMs,
   parseTimestampFromFilename,
   recomputeLocalFromUtc,
@@ -16,7 +16,7 @@ import {
 
 describe("parseTimestampFromFilename", () => {
   it("parses a full four-digit-year stem with seconds", () => {
-    const result = parseTimestampFromFilename("20260422-094400", DEFAULT_TIMESTAMP_PATTERN);
+    const result = parseTimestampFromFilename("20260422-094400", DEFAULT_TIMESTAMP_PATTERNS);
     expect(result).toEqual({
       localTimestampText: "2026-04-22 09:44:00",
       parseStatus: "parsed",
@@ -24,38 +24,46 @@ describe("parseTimestampFromFilename", () => {
   });
 
   it("defaults the optional seconds group to 00", () => {
-    const result = parseTimestampFromFilename("20260422-0944", DEFAULT_TIMESTAMP_PATTERN);
+    const result = parseTimestampFromFilename("20260422-0944", DEFAULT_TIMESTAMP_PATTERNS);
     expect(result.localTimestampText).toBe("2026-04-22 09:44:00");
     expect(result.parseStatus).toBe("parsed");
   });
 
   it("expands a two-digit year below the 70 pivot into the 2000s", () => {
-    const result = parseTimestampFromFilename("690101-0000", DEFAULT_TIMESTAMP_PATTERN);
+    const result = parseTimestampFromFilename("690101-0000", DEFAULT_TIMESTAMP_PATTERNS);
     expect(result.localTimestampText).toBe("2069-01-01 00:00:00");
   });
 
   it("expands a two-digit year at/above the 70 pivot into the 1900s", () => {
-    const result = parseTimestampFromFilename("700101-0000", DEFAULT_TIMESTAMP_PATTERN);
+    const result = parseTimestampFromFilename("700101-0000", DEFAULT_TIMESTAMP_PATTERNS);
     expect(result.localTimestampText).toBe("1970-01-01 00:00:00");
   });
 
   it("rejects an out-of-range month and reports manual-required", () => {
-    const result = parseTimestampFromFilename("20261322-0944", DEFAULT_TIMESTAMP_PATTERN);
+    const result = parseTimestampFromFilename("20261322-0944", DEFAULT_TIMESTAMP_PATTERNS);
     expect(result).toEqual({ localTimestampText: "", parseStatus: "manual-required" });
   });
 
-  it("parses each shape of an alternation whose alternatives use the named groups", () => {
-    const pattern = `${DEFAULT_TIMESTAMP_PATTERN}|(?<day>\\d{2})\\.(?<month>\\d{2})\\.(?<year>\\d{4}) (?<hour>\\d{2})h(?<minute>\\d{2})`;
-    expect(parseTimestampFromFilename("20260422-094400", pattern).localTimestampText).toBe("2026-04-22 09:44:00");
-    expect(parseTimestampFromFilename("rec 22.04.2026 09h44", pattern).localTimestampText).toBe("2026-04-22 09:44:00");
+  it("tries an added pattern after the built-in ones", () => {
+    const patterns = [...DEFAULT_TIMESTAMP_PATTERNS, String.raw`(?<day>\d{2})\.(?<month>\d{2})\.(?<year>\d{4}) (?<hour>\d{2})h(?<minute>\d{2})`];
+    expect(parseTimestampFromFilename("20260422-094400", patterns).localTimestampText).toBe("2026-04-22 09:44:00");
+    expect(parseTimestampFromFilename("rec 22.04.2026 09h44", patterns).localTimestampText).toBe("2026-04-22 09:44:00");
   });
 
-  it("reports manual-required for a pattern that does not compile, without throwing", () => {
-    expect(parseTimestampFromFilename("20260422-094400", "(")).toEqual({ localTimestampText: "", parseStatus: "manual-required" });
+  it("skips a pattern that does not compile, without throwing", () => {
+    expect(parseTimestampFromFilename("20260422-094400", ["(", ...DEFAULT_TIMESTAMP_PATTERNS]).localTimestampText).toBe("2026-04-22 09:44:00");
+    expect(parseTimestampFromFilename("20260422-094400", ["("])).toEqual({ localTimestampText: "", parseStatus: "manual-required" });
+  });
+
+  it("moves on to the next pattern when one finds no real date and time", () => {
+    expect(parseTimestampFromFilename("x", [String.raw`(?<year>\d{4})`, ...DEFAULT_TIMESTAMP_PATTERNS]).parseStatus).toBe("manual-required");
+    const impossibleFirst = [String.raw`(?<year>\d{4})(?<month>\d{2})(?<day>\d{2})`, ...DEFAULT_TIMESTAMP_PATTERNS];
+    expect(parseTimestampFromFilename("20261332_20261014-1530", impossibleFirst).parseStatus).toBe("manual-required");
+    expect(parseTimestampFromFilename("+48123456789_240506_225406577", DEFAULT_TIMESTAMP_PATTERNS).localTimestampText).toBe("2024-05-06 22:54:06");
   });
 
   it("returns manual-required when no pattern matches", () => {
-    const result = parseTimestampFromFilename("not-a-timestamp", DEFAULT_TIMESTAMP_PATTERN);
+    const result = parseTimestampFromFilename("not-a-timestamp", DEFAULT_TIMESTAMP_PATTERNS);
     expect(result).toEqual({ localTimestampText: "", parseStatus: "manual-required" });
   });
 });
@@ -147,17 +155,17 @@ describe("calendar validity", () => {
   // refused like month 13 or hour 25.
   it.each(["20260230-153012", "20260431-0800", "20270229-1200", "20261314-153012", "20261032-153012", "20261014-253012", "20261014-156012"])(
     "refuses %s", (stem) => {
-      expect(parseTimestampFromFilename(stem, DEFAULT_TIMESTAMP_PATTERN)).toEqual({ localTimestampText: "", parseStatus: "manual-required" });
+      expect(parseTimestampFromFilename(stem, DEFAULT_TIMESTAMP_PATTERNS)).toEqual({ localTimestampText: "", parseStatus: "manual-required" });
     },
   );
 
   it("reads a two-digit year 70 or later as 19xx, and earlier as 20xx", () => {
-    expect(parseTimestampFromFilename("700101-0000", DEFAULT_TIMESTAMP_PATTERN).localTimestampText).toBe("1970-01-01 00:00:00");
-    expect(parseTimestampFromFilename("691231-2359", DEFAULT_TIMESTAMP_PATTERN).localTimestampText).toBe("2069-12-31 23:59:00");
+    expect(parseTimestampFromFilename("700101-0000", DEFAULT_TIMESTAMP_PATTERNS).localTimestampText).toBe("1970-01-01 00:00:00");
+    expect(parseTimestampFromFilename("691231-2359", DEFAULT_TIMESTAMP_PATTERNS).localTimestampText).toBe("2069-12-31 23:59:00");
   });
 
   it("accepts February 29 in a leap year, and refuses it as typed text otherwise", () => {
-    expect(parseTimestampFromFilename("20280229-1200", DEFAULT_TIMESTAMP_PATTERN).localTimestampText).toBe("2028-02-29 12:00:00");
+    expect(parseTimestampFromFilename("20280229-1200", DEFAULT_TIMESTAMP_PATTERNS).localTimestampText).toBe("2028-02-29 12:00:00");
     expect(getLocalTimestampError("2027-02-29 12:00:00")).not.toBeNull();
     expect(getLocalTimestampError("2028-02-29 12:00:00")).toBeNull();
   });
@@ -236,4 +244,39 @@ describe("validation helpers", () => {
     expect(getUtcTimestampError("2026-04-22 09:44:00")).toBeNull();
     expect(getUtcTimestampError("garbage")).toBe("timestamp.utcFormat");
   });
+});
+
+// Names as recorders, phones and apps write them (company research
+// recording-file-names), read by the built-in patterns.
+describe("the built-in timestamp patterns", () => {
+  it.each([
+    ["191010_1010", "2019-10-10 10:10:00"], // Sony
+    ["Important_191010_1010_01", "2019-10-10 10:10:00"], // Sony, prefixed and divided
+    ["110531-130512", "2011-05-31 13:05:12"], // Zoom date option
+    ["240101_000000_Tr1", "2024-01-01 00:00:00"], // Zoom H4essential
+    ["TX01_MIC002_20250527_202904_orig", "2025-05-27 20:29:04"], // DJI Mic Mini 2S
+    ["recording-20150607-120024", "2015-06-07 12:00:24"], // Hi-Q
+    ["H2 FY2021 Review 20210615_140058-Meeting Recording", "2021-06-15 14:00:58"], // Teams
+    ["20180105 060425", "2018-01-05 06:04:25"], // Voice Memos library
+    ["CallRecord_20230619-121746_+12192826655", "2023-06-19 12:17:46"], // GrapheneOS
+    ["+12025550123_230115_143022", "2023-01-15 14:30:22"], // a number before the date
+    ["John@+391234567890_20240115143022", "2024-01-15 14:30:22"], // Huawei call recorder
+    ["2026-10-15 14-03-22", "2026-10-15 14:03:22"], // OBS
+    ["audio_2026-10-15_14-03-22", "2026-10-15 14:03:22"], // Telegram Desktop
+    ["00000012-AUDIO-2024-03-15-09-14-22", "2024-03-15 09:14:22"], // WhatsApp iOS export
+    ["WhatsApp Ptt 2021-07-28 at 12.00.11", "2021-07-28 12:00:11"], // WhatsApp Web
+    ["signal-2026-10-15-14-03-22-123", "2026-10-15 14:03:22"], // Signal
+    ["2026-06-23 09.30.00 Weekly Standup", "2026-06-23 09:30:00"], // Zoom local folder
+    ["audio_1@15-10-2026_14-03-22", "2026-10-15 14:03:22"], // Telegram chat export
+    ["2020_0101_0000", "2020-01-01 00:00:00"], // Zoom PodTrak
+    ["20261014153012", "2026-10-14 15:30:12"], // OBS compact
+  ])("reads %s", (stem, expected) => {
+    expect(parseTimestampFromFilename(stem, DEFAULT_TIMESTAMP_PATTERNS)).toEqual({ localTimestampText: expected, parseStatus: "parsed" });
+  });
+
+  it.each(["ZOOM0001", "REC00001", "New Recording 3", "PTT-20250117-WA0008", "210101_001", "180101-T001", "Recording (14)", "My recording #1"])(
+    "finds no time in %s", (stem) => {
+      expect(parseTimestampFromFilename(stem, DEFAULT_TIMESTAMP_PATTERNS).parseStatus).toBe("manual-required");
+    },
+  );
 });

@@ -1664,7 +1664,7 @@ export class ApplicationRuntime {
       transcriptionModel: nextSettings["gemini.transcription"],
       metadataModel: nextSettings["gemini.metadata"],
       defaultTimezone: nextSettings.defaultTimezone,
-      timestampPattern: nextSettings.timestampPattern,
+      timestampPatterns: nextSettings.timestampPatterns,
       previewSnippetSeconds: nextSettings.previewSnippetSeconds,
       concurrencyLimit: nextSettings.concurrencyLimit,
     });
@@ -2416,7 +2416,7 @@ export class ApplicationRuntime {
     });
 
     const filenameStem = basename(originalFilename, extname(originalFilename));
-    const parsed = parseTimestampFromFilename(filenameStem, settings.timestampPattern);
+    const parsed = parseTimestampFromFilename(filenameStem, settings.timestampPatterns);
     // The zone the filename's local time is read in. Each card keeps its own zone
     // from here on, so a later change of the setting never re-dates a recording
     // already imported.

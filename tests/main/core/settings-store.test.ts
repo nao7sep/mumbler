@@ -517,7 +517,7 @@ describe("settings store", () => {
   });
 
   it("keeps keys this build does not know through every save, as a newer Mumbler wrote them", async () => {
-    const future = { added: { by: "a newer Mumbler" }, timestampPatterns: ["(?<year>\\d{4})"] };
+    const future = { added: { by: "a newer Mumbler" }, dictionary: ["mumbler"] };
     await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, theme: "dark", ...future }));
     const store = createSettingsStore(settingsPath());
     const loaded = await store.load();
@@ -665,8 +665,9 @@ describe("settings store", () => {
   });
 
   it.each([
-    ["timestampPattern", ""],
-    ["timestampPattern", "(?<year>"],
+    ["timestampPatterns", []],
+    ["timestampPatterns", "(?<year>\\d{4})"],
+    ["timestampPatterns", ["(?<year>"]],
     ["gemini.endpoint", "ftp://example.test"],
     ["gemini.endpoint", "https://user:secret@example.test"],
     ["gemini.outline", "  "],

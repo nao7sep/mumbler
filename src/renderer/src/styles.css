@@ -1479,6 +1479,17 @@ textarea:focus-visible,
     box-shadow var(--motion) ease;
 }
 
+/* The timestamp patterns, one regex per line: monospaced, and scrolled sideways
+   rather than wrapped, so each line stays one pattern. */
+.field textarea.settings-patterns {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+  resize: vertical;
+}
+
 /* Every one-line field is the same height, whatever kind it is: a text box, a
    number box and a select in one form must line up. A textarea grows instead. */
 .field input:not([type="checkbox"]):not([type="radio"]),

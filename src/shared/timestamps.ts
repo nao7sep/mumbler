@@ -1,10 +1,24 @@
 import type { TimestampParseStatus } from "./app-shell";
 import type { MessageKey } from "./i18n/catalogues";
 
-// The built-in filename timestamp pattern: one regex whose alternatives, joined
-// with `|`, each use the named groups year, month, day, hour, minute, second.
-export const DEFAULT_TIMESTAMP_PATTERN =
-  "(?<year>\\d{2}(?:\\d{2})?)(?<month>\\d{2})(?<day>\\d{2})[-_](?<hour>\\d{2})(?<minute>\\d{2})(?<second>\\d{2})?";
+// The built-in filename timestamp patterns, tried in order, the names met most
+// often first. Each uses the named groups year, month, day, hour, minute and
+// optionally second. The shapes are the ones recorders, phones and apps write
+// (research recording-file-names):
+export const DEFAULT_TIMESTAMP_PATTERNS: readonly string[] = [
+  // 20261014-153012, 191010_1010, 20180105 060425: Sony, Zoom, DJI, Teams, Voice
+  // Memos files, and call recorders that put a phone number before the date.
+  String.raw`(?<!\d)(?<year>\d{2}(?:\d{2})?)(?<month>\d{2})(?<day>\d{2})[-_ ](?<hour>\d{2})(?<minute>\d{2})(?<second>\d{2})?`,
+  // 2026-10-15 14-03-22, audio_2026-10-15_14-03-22, 2021-07-28 at 12.00.11:
+  // OBS, Telegram, Audacity, WhatsApp, Signal, Zoom folders.
+  String.raw`(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})\D{1,4}(?<hour>\d{2})[-.](?<minute>\d{2})(?:[-.](?<second>\d{2}))?`,
+  // 20240115143022: Huawei call recordings, OBS's compact option.
+  String.raw`(?<year>\d{4})(?<month>\d{2})(?<day>\d{2})(?<hour>\d{2})(?<minute>\d{2})(?<second>\d{2})`,
+  // 15-10-2026_14-03-22: Telegram Desktop's chat export, day first.
+  String.raw`(?<day>\d{2})-(?<month>\d{2})-(?<year>\d{4})_(?<hour>\d{2})-(?<minute>\d{2})-(?<second>\d{2})`,
+  // 2020_0101_0000: Zoom PodTrak.
+  String.raw`(?<year>\d{4})_(?<month>\d{2})(?<day>\d{2})_(?<hour>\d{2})(?<minute>\d{2})`,
+];
 
 interface TimestampParts {
   year: number;
@@ -61,21 +75,24 @@ export function resolveTimezone(setting: string): string {
   return setting === SYSTEM_TIMEZONE ? getSystemTimezone() : setting;
 }
 
+// The first pattern, in order, whose first match is a real date and time.
 export function parseTimestampFromFilename(
   filenameStem: string,
-  pattern: string,
+  patterns: readonly string[],
 ): { localTimestampText: string; parseStatus: TimestampParseStatus } {
-  try {
-    const match = new RegExp(pattern).exec(filenameStem);
-    const parts = match?.groups ? groupsToTimestampParts(match.groups) : null;
-    if (parts !== null) {
-      return {
-        localTimestampText: formatLocalTimestamp(parts),
-        parseStatus: "parsed",
-      };
+  for (const pattern of patterns) {
+    try {
+      const match = new RegExp(pattern).exec(filenameStem);
+      const parts = match?.groups ? groupsToTimestampParts(match.groups) : null;
+      if (parts !== null) {
+        return {
+          localTimestampText: formatLocalTimestamp(parts),
+          parseStatus: "parsed",
+        };
+      }
+    } catch {
+      // A pattern that does not compile parses nothing.
     }
-  } catch {
-    // A pattern that does not compile parses nothing.
   }
 
   return {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { join, parse } from "node:path";
 
-import { getSystemTimezone, isValidTimezone } from "@shared/timestamps";
+import { DEFAULT_TIMESTAMP_PATTERNS, getSystemTimezone, isValidTimezone } from "@shared/timestamps";
 import {
   applySettingsDraft,
   buildSettingsDraft,
@@ -86,15 +86,22 @@ describe("applySettingsDraft — happy path", () => {
     expect(result.uiFontFamily).toBe("Iosevka, monospace");
   });
 
-  it("trims directories to null when blank and cleans the timestamp pattern as a single line", () => {
+  it("trims directories to null when blank and reads the timestamp patterns one per line", () => {
     const draft = freshDraft();
     draft.outputDirectory = "   ";
     draft.backupDirectory = join(TEST_HOME, "custom", "backups");
-    draft.timestampPattern = "  (?<year>\\d{4})|(?<year>\\d{2})  ";
+    draft.timestampPatterns = "\r\n  (?<year>\\d{4})  \r\n\r\n(?<year>\\d{2})|x\n  \n";
     const result = applySettingsDraft(createDefaultSettings(), draft, TEST_HOME);
     expect(result.outputDirectory).toBeNull();
     expect(result.backupDirectory).toBe(join(TEST_HOME, "custom", "backups"));
-    expect(result.timestampPattern).toBe("(?<year>\\d{4})|(?<year>\\d{2})");
+    expect(result.timestampPatterns).toEqual(["(?<year>\\d{4})", "(?<year>\\d{2})|x"]);
+  });
+
+  it("shows the built-in patterns one per line, and stores nothing for them unchanged", () => {
+    const defaults = createDefaultSettings();
+    const draft = buildSettingsDraft(defaults, "", "", true);
+    expect(draft.timestampPatterns.split("\n")).toEqual([...DEFAULT_TIMESTAMP_PATTERNS]);
+    expect(applySettingsDraft(defaults, draft).timestampPatterns).toEqual(defaults.timestampPatterns);
   });
 
   it("expands and absolutizes typed directories against HOME, never cwd", () => {
@@ -183,16 +190,16 @@ describe("applySettingsDraft — validation", () => {
     expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow(/timezone/i);
   });
 
-  it("rejects an empty timestamp pattern", () => {
+  it("rejects timestamp patterns with no line in them", () => {
     const draft = freshDraft();
-    draft.timestampPattern = "   ";
-    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow("Timestamp pattern is required.");
+    draft.timestampPatterns = "  \n \n";
+    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow("At least one timestamp pattern is required.");
   });
 
-  it("rejects a timestamp pattern that is not a valid regular expression", () => {
+  it("names the pattern that is not a valid regular expression", () => {
     const draft = freshDraft();
-    draft.timestampPattern = "(?<year>\\d{4}";
-    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow("Timestamp pattern must be a valid regular expression.");
+    draft.timestampPatterns = "(?<year>\\d{4})\n(?<year>\\d{4}";
+    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow("Timestamp pattern 2 must be a valid regular expression.");
   });
 
   it("requires the {transcript} placeholder in the structured prompt", () => {

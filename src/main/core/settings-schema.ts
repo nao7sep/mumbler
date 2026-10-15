@@ -11,7 +11,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import {
-  DEFAULT_TIMESTAMP_PATTERN,
+  DEFAULT_TIMESTAMP_PATTERNS,
   formatUtcIsoCompact,
   SYSTEM_TIMEZONE,
   getSystemTimezone,
@@ -64,14 +64,18 @@ function model(label: string): SetValidator {
   return (value) => (isText(value) && value.trim().length > 0 ? null : `${label} model is required.`);
 }
 
-function timestampPatternIssue(value: unknown): string | null {
-  if (!isText(value) || value.length === 0) return "Timestamp pattern is required.";
-  try {
-    new RegExp(value);
-    return null;
-  } catch {
-    return "Timestamp pattern must be a valid regular expression.";
+function timestampPatternsIssue(value: unknown): string | null {
+  if (!Array.isArray(value) || value.length === 0 || !value.every((pattern) => isText(pattern) && pattern.length > 0)) {
+    return "At least one timestamp pattern is required.";
   }
+  for (const [index, pattern] of value.entries()) {
+    try {
+      new RegExp(pattern as string);
+    } catch {
+      return `Timestamp pattern ${index + 1} must be a valid regular expression.`;
+    }
+  }
+  return null;
 }
 
 function endpointIssue(value: unknown): string | null {
@@ -131,7 +135,7 @@ const SETTINGS_SETS = {
   backupDirectory: path("Recordings directory"),
   defaultTimezone: (value) => (value === null || zoneChoice(value) ? null : "Default timezone must be System or a valid IANA timezone."),
   displayTimezone: (value) => (zoneChoice(value) ? null : "Display timezone must be System or a valid IANA timezone."),
-  timestampPattern: timestampPatternIssue,
+  timestampPatterns: timestampPatternsIssue,
   skipIntervalSec: positive("Skip interval"),
   previewSnippetSeconds: positive("Preview snippet seconds"),
   "gemini.endpoint": endpointIssue,
@@ -569,7 +573,7 @@ export function createDefaultSettings(): MumblerSettings {
     // when the computer's zone changes (timestamp-conventions, Time zones).
     defaultTimezone: null,
     displayTimezone: SYSTEM_TIMEZONE,
-    timestampPattern: DEFAULT_TIMESTAMP_PATTERN,
+    timestampPatterns: [...DEFAULT_TIMESTAMP_PATTERNS],
     // Player
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,
@@ -820,7 +824,7 @@ export function buildSettingsDraft(
     // Import
     defaultTimezone: settings.defaultTimezone ?? getSystemTimezone(),
     displayTimezone: settings.displayTimezone,
-    timestampPattern: settings.timestampPattern,
+    timestampPatterns: settings.timestampPatterns.join("\n"),
     // Player
     skipIntervalSec: settings.skipIntervalSec,
     previewSnippetSeconds: settings.previewSnippetSeconds,
@@ -872,7 +876,8 @@ export function applySettingsDraft(
     // Import
     defaultTimezone: singleLine(draft.defaultTimezone),
     displayTimezone: singleLine(draft.displayTimezone),
-    timestampPattern: singleLine(draft.timestampPattern),
+    // One pattern per line; blank lines are not patterns.
+    timestampPatterns: multiline(draft.timestampPatterns).split("\n").map((line) => singleLine(line)).filter((line) => line.length > 0),
     // Player
     skipIntervalSec: draft.skipIntervalSec,
     previewSnippetSeconds: draft.previewSnippetSeconds,

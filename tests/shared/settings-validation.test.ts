@@ -19,7 +19,7 @@ function validDraft(): SettingsDraft {
     defaultBackupDirectory: "/backup",
     defaultTimezone: "Asia/Tokyo",
     displayTimezone: "system",
-    timestampPattern: "",
+    timestampPatterns: "",
     skipIntervalSec: 10,
     previewSnippetSeconds: 10,
     hasGeminiApiKey: false,

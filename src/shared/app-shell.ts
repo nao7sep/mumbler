@@ -156,7 +156,8 @@ export interface MumblerSettings {
   // The display zone: the zone the app's own event times are shown in, System
   // (following the computer) by default.
   displayTimezone: string;
-  timestampPattern: string;
+  // The file-name timestamp patterns, tried in order: one set, edited as a list.
+  timestampPatterns: string[];
   // Player
   skipIntervalSec: number;
   previewSnippetSeconds: number;
@@ -391,7 +392,8 @@ export interface SettingsDraft {
   defaultTimezone: string;
   // The display zone, System or an IANA zone.
   displayTimezone: string;
-  timestampPattern: string;
+  // The timestamp patterns, one per line.
+  timestampPatterns: string;
   // Player
   skipIntervalSec: number;
   previewSnippetSeconds: number;

@@ -389,7 +389,7 @@
   "error.timezoneLink": "タイムゾーンの一覧を開けませんでした。もう一度お試しください。",
   "settings.timezoneLink": "Wikipediaでタイムゾーンの一覧を見る",
   "settings.timestampPattern": "日時のパターン",
-  "settings.timestampPatternHint": "候補は|で区切ります。名前付きグループ：{year}（2桁または4桁）、{month}、{day}、{hour}、{minute}、{second}（省略可）。",
+  "settings.timestampPatternHint": "1 行に 1 つの正規表現を書きます。上から順に試し、実在する日時が見つかった最初のものを使います。名前付きグループ：{year}（2桁または4桁）、{month}、{day}、{hour}、{minute}、{second}（省略可）。",
   "settings.resetTimestampPattern": "パターンをリセット",
   "settings.player": "プレーヤー",
   "settings.skipInterval": "スキップ間隔（秒）",

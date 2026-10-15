@@ -395,7 +395,7 @@
   "error.timezoneLink": "Die Übersicht der Zeitzonen konnte nicht geöffnet werden. Versuchen Sie es erneut.",
   "settings.timezoneLink": "Vollständige Liste der Zeitzonen auf Wikipedia",
   "settings.timestampPattern": "Zeitstempelmuster",
-  "settings.timestampPatternHint": "Alternativen mit | verbinden. Benannte Gruppen: {year} (2 oder 4 Ziffern), {month}, {day}, {hour}, {minute}, {second} (optional).",
+  "settings.timestampPatternHint": "Ein regulärer Ausdruck pro Zeile, von oben nach unten versucht; der erste, der ein gültiges Datum mit Uhrzeit findet, wird verwendet. Benannte Gruppen: {year} (2 oder 4 Ziffern), {month}, {day}, {hour}, {minute}, {second} (optional).",
   "settings.resetTimestampPattern": "Muster zurücksetzen",
   "settings.player": "Wiedergabe",
   "settings.skipInterval": "Sprungintervall (Sekunden)",
