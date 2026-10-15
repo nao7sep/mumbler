@@ -310,6 +310,25 @@ describe("SettingsModal language and time zone", () => {
   });
 });
 
+describe("SettingsModal folders", () => {
+  it("lists the Recordings folder, where imports go, before the output folder", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(React.createElement(SettingsModal, {
+        draft: draft(), isDirty: false, isSaving: false, isSavingApiKey: false,
+        isPickingOutputDirectory: false, isPickingBackupDirectory: false, errorMessage: null,
+        onChange: vi.fn(), onClose: vi.fn(), onPickOutputDirectory: vi.fn(), onPickBackupDirectory: vi.fn(),
+        onSetApiKey: vi.fn(), onClearApiKey: vi.fn(), onRestoreDefaultPrompts: vi.fn(), onSave: vi.fn(),
+      }));
+    });
+    const labels = Array.from(document.querySelectorAll(".field > span")).map((label) => label.textContent);
+    expect(labels.indexOf("Recordings Directory")).toBeGreaterThanOrEqual(0);
+    expect(labels.indexOf("Recordings Directory")).toBeLessThan(labels.indexOf("Output Directory"));
+  });
+});
+
 describe("SettingsModal AI tab", () => {
   // The modal is held the way the app holds it: each change becomes the next draft.
   function HeldSettings({ initial, onChange }: { initial: SettingsDraft; onChange: (draft: SettingsDraft) => void }) {

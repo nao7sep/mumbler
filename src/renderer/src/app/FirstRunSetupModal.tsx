@@ -86,8 +86,8 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
   // Use These Folders saves each suggestion not already replaced by a pick.
   const useFolders = () => run(async () => {
     let latest = snapshot;
-    if (summary.outputDirectory === null) latest = await window.mumbler.saveSetupDirectory(summary.defaultOutputDirectory);
     if (summary.backupDirectory === null) latest = await window.mumbler.saveSetupRecordingsDirectory(summary.defaultBackupDirectory);
+    if (summary.outputDirectory === null) latest = await window.mumbler.saveSetupDirectory(summary.defaultOutputDirectory);
     onSnapshot(latest);
     next();
   }, message("error.chooseOutputFolder"), "setup folders save failed");
@@ -117,17 +117,18 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
           {snapshot.settingsSummary?.hasGeminiApiKey && <p className="field-hint">{t("settings.apiKeyConfigured")}</p>}
           <p className="field-hint">{t("settings.apiKeyHint", { variable: "GEMINI_API_KEY" })}</p>
         </> : step === 3 ? <>
-          <section className="setup-section" aria-labelledby="setup-output">
-            <h3 id="setup-output">{t("settings.outputDirectory")}</h3>
-            <p>{t("setup.outputBody")}</p>
-            <p className="setup-folder">{summary.outputDirectory ?? summary.defaultOutputDirectory}</p>
-            <button type="button" className="button button--ghost" disabled={busy} onClick={() => void pickOutput()}>{t("setup.chooseFolder")}</button>
-          </section>
+          {/* Recordings come in before exports go out, so their folder leads. */}
           <section className="setup-section" aria-labelledby="setup-recordings">
             <h3 id="setup-recordings">{t("settings.backupDirectory")}</h3>
             <p>{t("setup.recordingsBody")}</p>
             <p className="setup-folder">{summary.backupDirectory ?? summary.defaultBackupDirectory}</p>
             <button type="button" className="button button--ghost" disabled={busy} onClick={() => void pickRecordings()}>{t("setup.chooseFolder")}</button>
+          </section>
+          <section className="setup-section" aria-labelledby="setup-output">
+            <h3 id="setup-output">{t("settings.outputDirectory")}</h3>
+            <p>{t("setup.outputBody")}</p>
+            <p className="setup-folder">{summary.outputDirectory ?? summary.defaultOutputDirectory}</p>
+            <button type="button" className="button button--ghost" disabled={busy} onClick={() => void pickOutput()}>{t("setup.chooseFolder")}</button>
           </section>
         </> : <>
           <p>{t("setup.timezoneBody")}</p>

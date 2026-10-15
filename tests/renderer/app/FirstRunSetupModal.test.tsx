@@ -53,8 +53,8 @@ describe("ordered skippable setup", () => {
     await click("Skip");
     expect(document.body.textContent).toContain("Set Up Mumbler (2/4)");
     await click("Skip");
-    expect(document.body.textContent).toContain("/fixtures/Documents/Mumbler");
-    expect(document.body.textContent, "Recordings sits beside the output folder").toContain("/fixtures/Documents/Recordings");
+    const folders = [...document.querySelectorAll(".setup-folder")].map((folder) => folder.textContent);
+    expect(folders, "Recordings, where imports go, leads the output folder").toEqual(["/fixtures/Documents/Recordings", "/fixtures/Documents/Mumbler"]);
     await click("Skip");
     expect(document.body.textContent).toContain("Set Up Mumbler (4/4)");
     expect(document.querySelector("select")?.value, "the zone first launch saved").toBe("Asia/Tokyo");
@@ -91,7 +91,8 @@ describe("ordered skippable setup", () => {
   it("keeps a cancelled picker on the folder step, then saves both suggested folders", async () => {
     await click("Skip"); await click("Skip");
     pickOutputDirectory.mockResolvedValueOnce(null);
-    await act(async () => buttons("Choose Another Folder")[0]!.click());
+    // The output folder, which follows Recordings.
+    await act(async () => buttons("Choose Another Folder")[1]!.click());
     expect(saveSetupDirectory).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Set Up Mumbler (3/4)");
     saveSetupDirectory.mockResolvedValueOnce(snapshot);
@@ -106,7 +107,7 @@ describe("ordered skippable setup", () => {
   it("saves the Recordings folder as soon as it is picked, and the confirmed time zone at the end", async () => {
     await click("Skip"); await click("Skip");
     chooseOriginalsDirectory.mockResolvedValueOnce(snapshot);
-    await act(async () => buttons("Choose Another Folder")[1]!.click());
+    await act(async () => buttons("Choose Another Folder")[0]!.click());
     expect(chooseOriginalsDirectory).toHaveBeenCalledOnce();
     await click("Skip");
     const select = document.querySelector("select")!;

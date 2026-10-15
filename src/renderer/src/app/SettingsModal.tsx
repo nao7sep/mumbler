@@ -283,27 +283,7 @@ export function SettingsModal({
             <section className="settings-section">
               <h3>{t("settings.files")}</h3>
               <div className="field-stack">
-                <label className="field">
-                  <span>{t("settings.outputDirectory")}</span>
-                  <div className="inline-action-field">
-                    <input
-                      value={draft.outputDirectory}
-                      placeholder={draft.defaultOutputDirectory}
-                      onChange={(event) => onChange({ ...draft, outputDirectory: event.target.value })}
-                    />
-                    <button
-                      type="button"
-                      className="button button--ghost"
-                      onClick={onPickOutputDirectory}
-                      disabled={isPickingOutputDirectory}
-                    >
-                      {t("common.browse")}
-                    </button>
-                  </div>
-                </label>
-                <p className="field-hint">
-                  {t("settings.outputDirectoryHint", { path: draft.defaultOutputDirectory })}
-                </p>
+                {/* Recordings come in before exports go out, so their folder leads. */}
                 <label className="field">
                   <span>{t("settings.backupDirectory")}</span>
                   <div className="inline-action-field">
@@ -324,6 +304,27 @@ export function SettingsModal({
                 </label>
                 <p className="field-hint">
                   {t("settings.backupDirectoryHint", { option: t("review.copyToBackup"), path: draft.defaultBackupDirectory })}
+                </p>
+                <label className="field">
+                  <span>{t("settings.outputDirectory")}</span>
+                  <div className="inline-action-field">
+                    <input
+                      value={draft.outputDirectory}
+                      placeholder={draft.defaultOutputDirectory}
+                      onChange={(event) => onChange({ ...draft, outputDirectory: event.target.value })}
+                    />
+                    <button
+                      type="button"
+                      className="button button--ghost"
+                      onClick={onPickOutputDirectory}
+                      disabled={isPickingOutputDirectory}
+                    >
+                      {t("common.browse")}
+                    </button>
+                  </div>
+                </label>
+                <p className="field-hint">
+                  {t("settings.outputDirectoryHint", { path: draft.defaultOutputDirectory })}
                 </p>
               </div>
             </section>
