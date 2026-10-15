@@ -524,6 +524,8 @@
   "player.cursor": "Cursore: {time}",
   "player.duration": "Durata: {time}",
   "player.loading": "Caricamento dell’audio di lavoro…",
+  "player.drawingWaveform": "Disegno della forma d’onda… Riproduzione e taglio funzionano già.",
+  "player.waveformFailed": "Non è stato possibile disegnare la forma d’onda. Riproduzione e taglio funzionano comunque.",
   "player.pause": "Pausa",
   "player.play": "Riproduci",
   "player.setFrontAtCursor": "Inizio al cursore",

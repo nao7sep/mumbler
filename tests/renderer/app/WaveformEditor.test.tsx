@@ -49,10 +49,12 @@ const wave = vi.hoisted(() => {
     return regions;
   }
 
-  function makePlayer(url: string, regions: ReturnType<typeof makeRegions>, duration: number) {
+  type PlayerOptions = { media?: HTMLMediaElement; peaks?: Float32Array[]; duration?: number };
+  function makePlayer(url: string, regions: ReturnType<typeof makeRegions>, duration: number, options: PlayerOptions = {}) {
     const player = {
       ...subscriptions(),
       url,
+      options,
       regions,
       duration,
       currentTime: 0,
@@ -74,6 +76,10 @@ const wave = vi.hoisted(() => {
         player.playPauseCalls += 1;
       },
       setOptions: () => undefined,
+      loads: [] as Array<{ url: string; peaks: Float32Array[]; duration: number }>,
+      load: async (url: string, peaks: Float32Array[], duration: number) => {
+        player.loads.push({ url, peaks, duration });
+      },
       // Do not erase listeners here: each actual unsubscribe must prove its
       // own disposal independently of the player's destruction.
       destroy: () => { player.destroyCalls += 1; },
@@ -99,8 +105,10 @@ const wave = vi.hoisted(() => {
       return regions;
     },
     set nextDuration(value: number) { nextDuration = value; },
-    createPlayer(options: { url: string; plugins: Array<ReturnType<typeof makeRegions>> }) {
-      const player = makePlayer(options.url, options.plugins[0]!, nextDuration);
+    createPlayer(options: { url: string; plugins: Array<ReturnType<typeof makeRegions>>; media?: HTMLMediaElement; peaks?: Float32Array[]; duration?: number }) {
+      const player = makePlayer(options.url, options.plugins[0]!, nextDuration, {
+        media: options.media, peaks: options.peaks, duration: options.duration,
+      });
       players.push(player);
       return player;
     },
@@ -165,6 +173,8 @@ let root: Root | null = null;
 let container: HTMLDivElement;
 let onTrimCommit: Mock<(cardId: string, trim: CardTrim) => Promise<void>>;
 let getCardMediaSource: Mock<(cardId: string) => Promise<string>>;
+let getCardWaveformPeaks: Mock<(cardId: string) => Promise<Float32Array>>;
+let cancelCardWaveformPeaks: Mock<(cardId: string) => Promise<void>>;
 let handle: React.RefObject<WaveformEditorHandle | null>;
 
 /** Mounts the editor on `trim` and brings the player to the state after load. */
@@ -224,7 +234,12 @@ beforeEach(() => {
   wave.reset();
   onTrimCommit = vi.fn(async () => undefined);
   getCardMediaSource = vi.fn(async () => "mumbler-asset://media/card-1");
-  (window as unknown as { mumbler: unknown }).mumbler = { getCardMediaSource };
+  getCardWaveformPeaks = vi.fn(async () => Float32Array.of(0.1, 0.5, 0.2));
+  cancelCardWaveformPeaks = vi.fn(async () => undefined);
+  (window as unknown as { mumbler: unknown }).mumbler = {
+    getCardMediaSource, getCardWaveformPeaks, cancelCardWaveformPeaks,
+    reportRendererDiagnostic: vi.fn(async () => undefined),
+  };
   container = document.createElement("div");
   document.body.append(container);
 });
@@ -699,3 +714,68 @@ describe("text typed but not yet committed", () => {
   });
 });
 
+
+describe("the waveform summary and streamed playback", () => {
+  function render(next: Partial<MumblerCard> = {}): Promise<void> {
+    return act(async () => {
+      root?.render(React.createElement(WaveformEditor, {
+        ref: handle, card: { ...card, ...next }, previewSnippetSeconds: 10, skipIntervalSec: 5, disabled: false, onTrimCommit,
+      }));
+    });
+  }
+
+  beforeEach(() => {
+    handle = createRef<WaveformEditorHandle>();
+    root = createRoot(container);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+  });
+
+  it("builds the player on the summary and its own audio element, never on a download of the file", async () => {
+    await render();
+    const options = wave.player.options;
+    expect(wave.player.url).toBe("mumbler-asset://media/card-1");
+    expect(options.media).toBeInstanceOf(HTMLAudioElement);
+    expect(options.duration).toBe(300);
+    expect(options.peaks).toHaveLength(1);
+    expect(getCardWaveformPeaks).toHaveBeenCalledExactlyOnceWith("card-1");
+  });
+
+  it("draws a summary that arrives after the player in place, without rebuilding the player", async () => {
+    let finish!: (peaks: Float32Array) => void;
+    getCardWaveformPeaks.mockImplementationOnce(() => new Promise<Float32Array>((resolve) => { finish = resolve; }));
+    await render();
+    expect(text()).toContain("Drawing the waveform");
+    expect(button("Play").disabled, "playback does not wait for the drawing").toBe(false);
+    const summary = Float32Array.of(0.2, 0.9);
+    await act(async () => finish(summary));
+    expect(wave.players).toHaveLength(1);
+    expect(wave.player.loads).toEqual([{ url: "mumbler-asset://media/card-1", peaks: [summary], duration: 300 }]);
+    expect(text()).not.toContain("Drawing the waveform");
+  });
+
+  it("keeps playback and trimming when the waveform cannot be drawn", async () => {
+    getCardWaveformPeaks.mockRejectedValueOnce(new Error("The waveform could not be drawn."));
+    await render();
+    expect(text()).toContain("The waveform could not be drawn. Playback and trimming still work.");
+    expect(button("Play").disabled).toBe(false);
+  });
+
+  it("stops the summary run when another recording is opened before it arrives", async () => {
+    getCardWaveformPeaks.mockImplementationOnce(() => new Promise<Float32Array>(() => undefined));
+    await render();
+    await render({ id: "card-2" });
+    expect(cancelCardWaveformPeaks).toHaveBeenCalledExactlyOnceWith("card-1");
+  });
+
+  it("stops its audio element and lets go of the file when the player closes", async () => {
+    await render();
+    const media = wave.player.options.media as HTMLAudioElement;
+    expect(media.getAttribute("src")).toBeNull();
+    media.setAttribute("src", "mumbler-asset://media/card-1");
+    await act(async () => root?.unmount());
+    root = null;
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
+    expect(media.getAttribute("src")).toBeNull();
+  });
+});

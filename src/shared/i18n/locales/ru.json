@@ -530,6 +530,8 @@
   "player.cursor": "Курсор: {time}",
   "player.duration": "Длительность: {time}",
   "player.loading": "Загрузка рабочего аудиофайла…",
+  "player.drawingWaveform": "Рисуется форма волны… Воспроизведение и обрезка уже работают.",
+  "player.waveformFailed": "Не удалось нарисовать форму волны. Воспроизведение и обрезка по-прежнему работают.",
   "player.pause": "Пауза",
   "player.play": "Слушать",
   "player.setFrontAtCursor": "Начало по курсору",

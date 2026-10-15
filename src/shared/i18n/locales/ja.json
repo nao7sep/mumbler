@@ -512,6 +512,8 @@
   "player.cursor": "カーソル：{time}",
   "player.duration": "長さ：{time}",
   "player.loading": "作業音声を読み込み中…",
+  "player.drawingWaveform": "波形を描いています…。再生とトリミングはもう使えます。",
+  "player.waveformFailed": "波形を描けませんでした。再生とトリミングはそのまま使えます。",
   "player.pause": "一時停止",
   "player.play": "再生",
   "player.setFrontAtCursor": "カーソル位置を開始に",

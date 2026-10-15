@@ -512,6 +512,8 @@
   "player.cursor": "光标：{time}",
   "player.duration": "时长：{time}",
   "player.loading": "正在载入工作音频…",
+  "player.drawingWaveform": "正在绘制波形…播放和裁剪已可使用。",
+  "player.waveformFailed": "无法绘制波形。播放和裁剪仍可使用。",
   "player.pause": "暂停",
   "player.play": "播放",
   "player.setFrontAtCursor": "将光标处设为起点",

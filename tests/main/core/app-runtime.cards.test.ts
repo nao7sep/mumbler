@@ -5,6 +5,7 @@ import { dialog, shell } from "electron";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pathValue } from "@shared/i18n/translate";
+import { CancelledError } from "@main/core/cancellation";
 
 import type { AppSnapshot, MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
 import { hasStaleResults } from "@shared/card-status";
@@ -148,6 +149,10 @@ vi.mock("@shared/audio-import", async (importOriginal) => {
 const trimGate = vi.hoisted(() => ({ held: null as Promise<void> | null, entered: 0 }));
 // No ffmpeg here: a tag rewrite hands the audio back as it was and reports the
 // tags it was asked to write, as ffprobe would read them back.
+// The waveform summary: each run is held until the test settles it.
+const waveforms = vi.hoisted(() => ({
+  runs: [] as Array<{ path: string; signal?: AbortSignal; settle: (peaks: Float32Array) => void; fail: (error: Error) => void }>,
+}));
 const tagWrites = vi.hoisted(() => ({
   calls: [] as string[][],
   failure: null as Error | null,
@@ -188,6 +193,10 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
       return { filePath: params.sourceFilePath, mimeType: "audio/wav", wasDerived: false, cleanup: async () => undefined };
     },
     probeAudioStreamTags: async () => ({}),
+    computeWaveformPeaks: (path: string, signal?: AbortSignal) => new Promise<Float32Array>((resolve, reject) => {
+      waveforms.runs.push({ path, signal, settle: resolve, fail: reject });
+      signal?.addEventListener("abort", () => reject(new CancelledError("stopped")), { once: true });
+    }),
     probeContainerTags: async (path: string, signal?: AbortSignal) =>
       tagWrites.readBack.get(path) ?? actual.probeContainerTags(path, signal),
     probeAudioProfile: async () => {
@@ -299,6 +308,7 @@ beforeEach(async () => {
   importStarts.length = 0;
   trimGate.held = null;
   trimGate.entered = 0;
+  waveforms.runs = [];
   tagWrites.calls = [];
   tagWrites.failure = null;
   tagWrites.readBack.clear();
@@ -1375,6 +1385,48 @@ describe("working with a card", () => {
     expect(await readFile(`${stem}.wav`, "utf8")).toBe("audio for take.wav");
     expect(await readFile(`${stem}.md`, "utf8")).toBe("OLD MARKDOWN");
     expect((await readdir(join(home, "output"))).sort()).toEqual([basename(`${stem}.json`), basename(`${stem}.md`), basename(`${stem}.wav`)]);
+  });
+
+  it("computes a recording's waveform once, shares a run already going, and keeps it for the session", async () => {
+    const card = await confirmed();
+    const first = runtime.getCardWaveformPeaks(card.id);
+    const second = runtime.getCardWaveformPeaks(card.id);
+    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    expect(waveforms.runs[0]!.path).toBe(card.sourceFilePath);
+    waveforms.runs[0]!.settle(Float32Array.of(0.5));
+    expect([...(await first)]).toEqual([0.5]);
+    expect([...(await second)]).toEqual([0.5]);
+    expect([...(await runtime.getCardWaveformPeaks(card.id))]).toEqual([0.5]);
+    expect(waveforms.runs, "kept, not computed again").toHaveLength(1);
+  });
+
+  it("stops a waveform run the player no longer waits for, and computes it afresh next time", async () => {
+    const card = await confirmed();
+    const waiting = runtime.getCardWaveformPeaks(card.id);
+    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    runtime.cancelCardWaveformPeaks(card.id);
+    await expect(waiting).rejects.toBeInstanceOf(CancelledError);
+    expect(waveforms.runs[0]!.signal?.aborted).toBe(true);
+    void runtime.getCardWaveformPeaks(card.id).catch(() => undefined);
+    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(2));
+  });
+
+  it("says the waveform could not be drawn when its run fails", async () => {
+    const card = await confirmed();
+    const waiting = runtime.getCardWaveformPeaks(card.id);
+    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    waveforms.runs[0]!.fail(new Error("ffmpeg exited with code 1"));
+    await expect(waiting).rejects.toThrow("The waveform could not be drawn.");
+  });
+
+  it("stops a waveform being drawn when Mumbler quits", async () => {
+    const card = await confirmed();
+    const waiting = runtime.getCardWaveformPeaks(card.id).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    await runtime.shutdown();
+    expect(waveforms.runs[0]!.signal?.aborted).toBe(true);
+    expect(await waiting).toBeInstanceOf(CancelledError);
+    runtime = await ApplicationRuntime.initialize();
   });
 
   it("writes the recording's official start inside the saved audio", async () => {

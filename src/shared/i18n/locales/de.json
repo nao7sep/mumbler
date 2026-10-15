@@ -518,6 +518,8 @@
   "player.cursor": "Cursor: {time}",
   "player.duration": "Dauer: {time}",
   "player.loading": "Arbeitsaudio wird geladen\u00a0…",
+  "player.drawingWaveform": "Die Wellenform wird gezeichnet\u00a0… Wiedergabe und Zuschneiden funktionieren bereits.",
+  "player.waveformFailed": "Die Wellenform konnte nicht gezeichnet werden. Wiedergabe und Zuschneiden funktionieren weiterhin.",
   "player.pause": "Pause",
   "player.play": "Abspielen",
   "player.setFrontAtCursor": "Anfang am Cursor",

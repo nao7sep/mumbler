@@ -524,6 +524,8 @@
   "player.cursor": "Curseur\u00a0: {time}",
   "player.duration": "Durée\u00a0: {time}",
   "player.loading": "Chargement de l’audio de travail…",
+  "player.drawingWaveform": "Tracé de la forme d’onde… La lecture et la coupe fonctionnent déjà.",
+  "player.waveformFailed": "La forme d’onde n’a pas pu être tracée. La lecture et la coupe fonctionnent toujours.",
   "player.pause": "Pause",
   "player.play": "Lire",
   "player.setFrontAtCursor": "Début au curseur",

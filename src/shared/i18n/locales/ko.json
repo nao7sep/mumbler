@@ -512,6 +512,8 @@
   "player.cursor": "커서: {time}",
   "player.duration": "길이: {time}",
   "player.loading": "작업용 오디오 불러오는 중…",
+  "player.drawingWaveform": "파형을 그리는 중… 재생과 자르기는 이미 사용할 수 있습니다.",
+  "player.waveformFailed": "파형을 그리지 못했습니다. 재생과 자르기는 계속 사용할 수 있습니다.",
   "player.pause": "일시 정지",
   "player.play": "재생",
   "player.setFrontAtCursor": "커서에서 시작 설정",

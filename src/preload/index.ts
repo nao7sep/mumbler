@@ -75,6 +75,10 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.updateCardTrim, cardId, trim) as Promise<AppSnapshot>,
   getCardMediaSource: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getCardMediaSource, cardId) as Promise<string>,
+  getCardWaveformPeaks: (cardId: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.getCardWaveformPeaks, cardId) as Promise<Float32Array>,
+  cancelCardWaveformPeaks: (cardId: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelCardWaveformPeaks, cardId) as Promise<void>,
   generateCardStep: (cardId: string, target: GenerateTarget) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.generateCardStep, cardId, target) as Promise<AppSnapshot>,
   cancelCardProcessing: (cardId: string) =>

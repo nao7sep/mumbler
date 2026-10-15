@@ -508,6 +508,8 @@
   "player.cursor": "Cursor: {time}",
   "player.duration": "Duration: {time}",
   "player.loading": "Loading working audio…",
+  "player.drawingWaveform": "Drawing the waveform… Playback and trimming already work.",
+  "player.waveformFailed": "The waveform could not be drawn. Playback and trimming still work.",
   "player.pause": "Pause",
   "player.play": "Play",
   "player.setFrontAtCursor": "Set Front at Cursor",

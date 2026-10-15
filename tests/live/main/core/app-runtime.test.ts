@@ -503,6 +503,43 @@ describe("the recording time a save writes", () => {
   });
 });
 
+describe("the waveform summary", () => {
+  it("summarises a long recording from a stream, small and in proportion to its length", async () => {
+    const home = await freshHome("waveform");
+    try {
+      await withRuntime(home, async () => {
+        const tools = await import("@main/core/audio-tools");
+        const ffmpeg = (await readdir(join(home, "bin"))).find((entry) => entry.replace(/\.exe$/, "") === "ffmpeg")!;
+        // Ten minutes of 48 kHz stereo, a tone on the left channel only.
+        const recording = join(home, "long.wav");
+        await execFileAsync(join(home, "bin", ffmpeg), [
+          "-hide_banner", "-loglevel", "error", "-y",
+          "-f", "lavfi", "-i", "aevalsrc=0.5*sin(2*PI*440*t)|0:s=48000:d=600",
+          "-c:a", "pcm_s16le", recording,
+        ]);
+        const started = Date.now();
+        const peaks = await tools.computeWaveformPeaks(recording);
+        const elapsedMs = Date.now() - started;
+        expect(Math.abs(peaks.length - 60_000), `${peaks.length} levels for 600 s`).toBeLessThanOrEqual(2);
+        expect(peaks.byteLength, "the summary, not the audio, is kept").toBe(peaks.length * 4);
+        const middle = peaks.slice(100, -100);
+        expect(Math.min(...middle), "the loud left channel shows").toBeGreaterThan(0.45);
+        expect(Math.max(...middle)).toBeLessThan(0.55);
+        expect(elapsedMs, `${elapsedMs} ms for ten minutes`).toBeLessThan(60_000);
+
+        // Every corpus recording gives a summary of about its own length.
+        for (const entry of (await manifest()).filter((item) => item.path.startsWith("audio/speech/") && isSupportedAudioImportName(item.path))) {
+          const durationSec = Number(entry.probe?.format?.duration);
+          const summary = await tools.computeWaveformPeaks(corpusFile(entry.path));
+          expect(Math.abs(summary.length - durationSec * 100), entry.path).toBeLessThanOrEqual(5);
+        }
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("the live lane's own word recall", () => {
   it("counts each spoken word once", () => {
     const expected = words("Thank you. Thank you, please.");

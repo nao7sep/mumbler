@@ -19,6 +19,7 @@ import { InlineError } from "./InlineResult";
 import { useComposing, isComposingKeyboardEvent } from "./useComposing";
 import { presentFailure } from "./presentFailure";
 import { useWaveformPalette } from "./waveform-palette";
+import { WAVEFORM_PEAKS_PER_SECOND } from "@shared/waveform";
 
 type Regions = ReturnType<typeof RegionsPlugin.create>;
 
@@ -131,6 +132,15 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   disabledRef.current = disabled;
 
   const [mediaSource, setMediaSource] = useState<{ cardId: string; url: string } | null>(null);
+  // The waveform summary the main process computes from a stream of the file
+  // (computeWaveformPeaks). The player never downloads the recording: it draws
+  // this, and its audio element streams the file through the media handler.
+  const [peaks, setPeaks] = useState<{ cardId: string; data: Float32Array } | null>(null);
+  const [waveformState, setWaveformState] = useState<"drawing" | "drawn" | "failed">("drawing");
+  const peaksRef = useRef(peaks);
+  peaksRef.current = peaks;
+  // Which summary the current player draws, so arriving peaks replace only a placeholder.
+  const drawnPeaksRef = useRef<Float32Array | null>(null);
   const i18n = useI18n();
   const { t, text } = i18n;
   const [playerError, setPlayerError] = useState<Message | null>(null);
@@ -249,13 +259,50 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   }, [card.id]);
 
   useEffect(() => {
-    if (containerRef.current === null || mediaSource === null || mediaSource.cardId !== card.id) {
+    let cancelled = false;
+    let settled = false;
+    setPeaks(null);
+    setWaveformState("drawing");
+    void window.mumbler
+      .getCardWaveformPeaks(card.id)
+      .then((data) => {
+        settled = true;
+        if (cancelled) return;
+        setPeaks({ cardId: card.id, data });
+        setWaveformState("drawn");
+      })
+      .catch((error: unknown) => {
+        settled = true;
+        if (cancelled) return;
+        // Playback and trimming do not need the drawing, so only it is lost.
+        presentFailure(error, message("player.waveformFailed"), "waveform summary failed");
+        setWaveformState("failed");
+      });
+    return () => {
+      cancelled = true;
+      if (!settled) void window.mumbler.cancelCardWaveformPeaks(card.id).catch(() => undefined);
+    };
+  }, [card.id]);
+
+  // The duration the player is built on: the recording's probed one, or, when
+  // the probe found none, the summary's length once it arrives.
+  const shownPeaks = peaks !== null && peaks.cardId === card.id ? peaks.data : null;
+  const playerDurationSec = card.durationSec ?? (shownPeaks !== null && shownPeaks.length > 0 ? shownPeaks.length / WAVEFORM_PEAKS_PER_SECOND : null);
+
+  useEffect(() => {
+    if (containerRef.current === null || mediaSource === null || mediaSource.cardId !== card.id || playerDurationSec === null || playerDurationSec <= 0) {
       return;
     }
 
     const loadedCardId = mediaSource.cardId;
     let active = true;
     const regions = RegionsPlugin.create();
+    // The player's own audio element, given to WaveSurfer so that drawing the
+    // summary when it arrives never pauses playback. It streams the file.
+    const media = document.createElement("audio");
+    media.preload = "metadata";
+    const ready = peaksRef.current !== null && peaksRef.current.cardId === loadedCardId ? peaksRef.current.data : null;
+    drawnPeaksRef.current = ready;
     const waveSurfer = WaveSurfer.create({
       container: containerRef.current,
       height: 184,
@@ -267,6 +314,11 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       autoScroll: true,
       autoCenter: true,
       url: mediaSource.url,
+      media,
+      // Until the summary arrives, a silent placeholder: the timeline, the
+      // cursor and the trim region work at once.
+      peaks: [ready ?? Float32Array.of(0)],
+      duration: playerDurationSec,
       plugins: [regions],
     });
 
@@ -364,9 +416,27 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       regionsRef.current = null;
       waveSurferRef.current = null;
       playerCardIdRef.current = null;
+      drawnPeaksRef.current = null;
       waveSurfer.destroy();
+      // WaveSurfer leaves an element it was given alone: stop it and let go of the file.
+      media.pause();
+      media.removeAttribute("src");
+      media.load();
     };
-  }, [mediaSource, card.id]);
+  }, [mediaSource, card.id, playerDurationSec]);
+
+  // The summary arrived after the player was built: draw it in place of the
+  // placeholder. The source stays the same, so playback goes on undisturbed.
+  useEffect(() => {
+    const waveSurfer = currentPlayer();
+    if (waveSurfer === null || shownPeaks === null || mediaSource === null || playerDurationSec === null) return;
+    if (drawnPeaksRef.current === shownPeaks) return;
+    drawnPeaksRef.current = shownPeaks;
+    void waveSurfer.load(mediaSource.url, [shownPeaks], playerDurationSec).catch((error: unknown) => {
+      presentFailure(error, message("player.waveformFailed"), "waveform draw failed");
+      setWaveformState("failed");
+    });
+  }, [shownPeaks, mediaSource, playerDurationSec]);
 
   useEffect(() => {
     const waveSurfer = currentPlayer();
@@ -599,6 +669,10 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
       {isLoadingMedia ? (
         <p className="panel__note">{t("player.loading")}</p>
+      ) : waveformState === "drawing" ? (
+        <p className="panel__note">{t("player.drawingWaveform")}</p>
+      ) : waveformState === "failed" ? (
+        <p className="panel__note">{t("player.waveformFailed")}</p>
       ) : null}
       {playerError ? <InlineError>{text(playerError)}</InlineError> : null}
 

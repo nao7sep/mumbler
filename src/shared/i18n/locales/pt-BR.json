@@ -524,6 +524,8 @@
   "player.cursor": "Cursor: {time}",
   "player.duration": "Duração: {time}",
   "player.loading": "Carregando o áudio de trabalho…",
+  "player.drawingWaveform": "Desenhando a forma de onda… A reprodução e o corte já funcionam.",
+  "player.waveformFailed": "Não foi possível desenhar a forma de onda. A reprodução e o corte continuam funcionando.",
   "player.pause": "Pausar",
   "player.play": "Reproduzir",
   "player.setFrontAtCursor": "Início no cursor",

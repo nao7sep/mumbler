@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { promisify } from "node:util";
@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { nanoid } from "nanoid";
 
 import type { AudioProfile, CardTrim, TrimDecision, ToolName } from "@shared/app-shell";
+import { WAVEFORM_PEAKS_PER_SECOND } from "@shared/waveform";
 import { type AppLogger } from "./logger";
 import { CancelledError, isNodeAbortError } from "./cancellation";
 
@@ -63,8 +64,18 @@ export async function runTool(
   // it: a tool that ignores SIGTERM would outlive the bound it was given, and
   // the await would hang exactly as it did before.
   const promise = execFileAsync(toolPath, args);
-  const child = promise.child;
+  return superviseTool(toolPath, promise.child, promise.then(({ stdout }) => ({ stdout })), options);
+}
 
+// The bound, the escalation and the cancellation shared by every tool run: the
+// returned promise settles only after the child has actually exited.
+async function superviseTool<T>(
+  toolPath: string,
+  child: ChildProcess,
+  done: Promise<T>,
+  options: RunToolOptions,
+): Promise<T> {
+  const isAborted = (): boolean => options.signal?.aborted === true;
   let escalation: ReturnType<typeof setTimeout> | null = null;
   const stop = (): void => {
     try {
@@ -107,19 +118,104 @@ export async function runTool(
     return null;
   };
   try {
-    const { stdout } = await promise.catch((error: unknown) => {
+    const result = await done.catch((error: unknown) => {
       throw stoppedError(error) ?? error;
     });
     // A tool can handle SIGTERM and exit zero. Its output still belongs to the
     // stopped operation; classify that only after the child has actually exited.
     const error = stoppedError();
     if (error) throw error;
-    return { stdout };
+    return result;
   } finally {
     clearTimeout(deadline);
     if (escalation !== null) clearTimeout(escalation);
     options.signal?.removeEventListener("abort", onAbort);
   }
+}
+
+// A tool whose output is too large to collect, handed to `onStdout` chunk by
+// chunk as it arrives, under the same bound and cancellation as runTool.
+export async function streamTool(
+  toolPath: string,
+  args: string[],
+  options: RunToolOptions & { onStdout: (chunk: Buffer) => void },
+): Promise<void> {
+  if (options.signal?.aborted === true) throw new CancelledError();
+  const child = spawn(toolPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+  // The end of stderr names what went wrong; the rest is not kept.
+  let stderrTail = "";
+  child.stderr!.on("data", (chunk: Buffer) => {
+    stderrTail = (stderrTail + chunk.toString("utf8")).slice(-2_000);
+  });
+  child.stdout!.on("data", options.onStdout);
+  const done = new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${basename(toolPath)} exited with ${signal ?? `code ${code}`}${stderrTail.trim() ? `: ${stderrTail.trim()}` : ""}`));
+    });
+  });
+  return superviseTool(toolPath, child, done, options);
+}
+
+// The waveform the player draws: the loudest sample of any channel in each
+// hundredth of a second. ffmpeg decodes the recording as a stream at 8 kHz, the
+// rate the player's own decoding used, and only the summary is kept, so memory
+// follows the recording's duration (about 3 MB for two hours), never its size.
+const WAVEFORM_SAMPLE_RATE = 8_000;
+
+// Folds a stream of interleaved little-endian float samples into the summary,
+// across chunk boundaries that may split a sample or a frame.
+export class WaveformPeakReducer {
+  private peaks = new Float32Array(4_096);
+  private count = 0;
+  private current = 0;
+  private framesInPeak = 0;
+  private sampleInFrame = 0;
+  private carry: Buffer = Buffer.alloc(0);
+
+  constructor(private readonly channels: number, private readonly framesPerPeak: number) {}
+
+  push(chunk: Buffer): void {
+    const data = this.carry.length > 0 ? Buffer.concat([this.carry, chunk]) : chunk;
+    const whole = data.length - (data.length % 4);
+    for (let offset = 0; offset < whole; offset += 4) {
+      const sample = Math.abs(data.readFloatLE(offset));
+      if (sample > this.current) this.current = sample;
+      if (++this.sampleInFrame === this.channels) {
+        this.sampleInFrame = 0;
+        if (++this.framesInPeak === this.framesPerPeak) this.close();
+      }
+    }
+    this.carry = Buffer.from(data.subarray(whole));
+  }
+
+  finish(): Float32Array {
+    if (this.framesInPeak > 0 || this.sampleInFrame > 0) this.close();
+    return this.peaks.slice(0, this.count);
+  }
+
+  private close(): void {
+    if (this.count === this.peaks.length) {
+      const grown = new Float32Array(this.peaks.length * 2);
+      grown.set(this.peaks);
+      this.peaks = grown;
+    }
+    this.peaks[this.count++] = this.current;
+    this.current = 0;
+    this.framesInPeak = 0;
+  }
+}
+
+export async function computeWaveformPeaks(filePath: string, signal?: AbortSignal): Promise<Float32Array> {
+  const channels = 2;
+  const reducer = new WaveformPeakReducer(channels, WAVEFORM_SAMPLE_RATE / WAVEFORM_PEAKS_PER_SECOND);
+  await streamTool(resolveFfmpegPath(), [
+    "-hide_banner", "-loglevel", "error", "-nostdin",
+    "-i", filePath,
+    "-vn", "-ac", String(channels), "-ar", String(WAVEFORM_SAMPLE_RATE), "-f", "f32le", "pipe:1",
+  ], { timeoutMs: TRANSCODE_TIMEOUT_MS, signal, onStdout: (chunk) => reducer.push(chunk) });
+  return reducer.finish();
 }
 
 // ffmpeg/ffprobe are managed dependencies resolved through the ToolManager (see

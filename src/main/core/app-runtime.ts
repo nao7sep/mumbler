@@ -37,6 +37,7 @@ import { isCardBusy, sameTrim } from "@shared/card-status";
 import { COMMAND_DEFINITIONS } from "@shared/commands";
 import {
   analyzeTrimDecision,
+  computeWaveformPeaks,
   configureToolResolver,
   prepareAudioForTranscription,
   probeAudioProfile,
@@ -284,6 +285,10 @@ export class ApplicationRuntime {
   // Request numbers never repeat, so an entry removed and taken again cannot
   // hand a superseded analysis the number it started with.
   private readonly trimRequests = new Map<string, number>();
+  // Waveform summaries for the player, by working file, kept for the session
+  // while a card or pending import still uses the file, and the runs computing them.
+  private readonly waveformPeaks = new Map<string, Float32Array>();
+  private readonly waveformWork = new Map<string, { controller: AbortController; done: Promise<Float32Array> }>();
   private lastTrimRequest = 0;
 
   private constructor(runtime: AppRuntimeState) {
@@ -1421,6 +1426,58 @@ export class ApplicationRuntime {
     return `mumbler-asset://media/${encodeURIComponent(cardId)}`;
   }
 
+  // The waveform summary the player draws (computeWaveformPeaks), computed once
+  // per working file and kept for the session. A second request for the same
+  // file joins the run already going.
+  async getCardWaveformPeaks(cardId: string): Promise<Float32Array> {
+    this.ensureReady();
+    const filePath = this.resolveCardSourcePath(cardId);
+    if (filePath === null) throw new OperationError("Card media source no longer exists.");
+    this.pruneWaveformPeaks();
+    const kept = this.waveformPeaks.get(filePath);
+    if (kept !== undefined) return kept;
+    let work = this.waveformWork.get(filePath);
+    if (work === undefined) {
+      const controller = new AbortController();
+      const done = computeWaveformPeaks(filePath, controller.signal)
+        .then((peaks) => {
+          this.waveformPeaks.set(filePath, peaks);
+          return peaks;
+        })
+        .finally(() => {
+          if (this.waveformWork.get(filePath)?.controller === controller) this.waveformWork.delete(filePath);
+        });
+      work = { controller, done };
+      this.waveformWork.set(filePath, work);
+    }
+    try {
+      return await work.done;
+    } catch (error: unknown) {
+      if (isCancelledError(error)) throw error;
+      await this.runtime.logger.warn("waveform.failed", "Could not compute the recording's waveform.", {
+        cardId, error: serializeError(error),
+      });
+      throw new OperationError("The waveform could not be drawn.");
+    }
+  }
+
+  // The player moved on before the waveform arrived: its run stops.
+  cancelCardWaveformPeaks(cardId: string): void {
+    const filePath = this.resolveCardSourcePath(cardId);
+    if (filePath !== null) this.waveformWork.get(filePath)?.controller.abort();
+  }
+
+  // A summary is dropped once no card or pending import uses its file.
+  private pruneWaveformPeaks(): void {
+    const used = new Set([
+      ...(this.runtime.state?.cards ?? []).map((card) => card.sourceFilePath),
+      ...(this.runtime.state?.pendingImports ?? []).map((item) => item.workingFilePath),
+    ]);
+    for (const filePath of this.waveformPeaks.keys()) {
+      if (!used.has(filePath)) this.waveformPeaks.delete(filePath);
+    }
+  }
+
   // A card's working recording, or that of a pending import, which the review plays.
   resolveCardSourcePath(cardId: string): string | null {
     if (this.runtime.state === null) {
@@ -1880,6 +1937,11 @@ export class ApplicationRuntime {
   // session end skips them (data-backup-conventions).
   closeForQuit(details: Record<string, unknown> = {}): Promise<void> {
     this.closePromise ??= (async () => {
+      // A waveform being drawn is display work: it stops, and its ffmpeg exits.
+      const waveforms = [...this.waveformWork.values()].map(({ controller, done }) => {
+        controller.abort();
+        return done.then(() => undefined, () => undefined);
+      });
       let backups: Promise<void> = Promise.resolve();
       if (details.origin === "session-end") abandonBackupStore();
       else backups = closeBackupStore(BACKUP_QUIT_DRAIN_MS);
@@ -1887,7 +1949,7 @@ export class ApplicationRuntime {
         ...details,
         cardCount: this.runtime.state?.cards.length ?? 0,
       }).catch(() => undefined);
-      await Promise.all([backups, this.runtime.logger.close()]);
+      await Promise.all([backups, ...waveforms, this.runtime.logger.close()]);
     })();
     return this.closePromise;
   }
