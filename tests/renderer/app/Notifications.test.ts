@@ -9,6 +9,7 @@ import {
   ToastNotifications,
   clearPersistentOwner,
   pipelineCompletionNotification,
+  toastDuration,
   upsertPersistentNotification,
   type AppNotification,
 } from "@renderer/app/Notifications";
@@ -133,5 +134,52 @@ describe("notification lifetime and severity surfaces", () => {
     );
     await act(async () => buttons[1]!.click());
     expect(onDismiss).toHaveBeenCalledWith("error-2");
+  });
+});
+
+describe("toast timing", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("gives longer text more time, up to a ceiling", () => {
+    expect(toastDuration("")).toBe(4000);
+    expect(toastDuration("Recording duplicated.")).toBeGreaterThan(toastDuration("Saved."));
+    expect(toastDuration("保存しました")).toBe(toastDuration("abcdef"));
+    expect(toastDuration("x".repeat(1000))).toBe(15000);
+  });
+
+  const toast: AppNotification = { id: "toast", message: message("notice.duplicated"), kind: "toast" };
+  const lifetime = toastDuration(english.text(toast.message));
+
+  it("dismisses itself once its time is up", async () => {
+    vi.useFakeTimers();
+    const onDismiss = vi.fn();
+    await render(React.createElement(ToastNotifications, { notifications: [toast], onDismiss }));
+    await act(async () => vi.advanceTimersByTime(lifetime - 1));
+    expect(onDismiss).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(onDismiss).toHaveBeenCalledWith("toast");
+  });
+
+  it("holds while hovered and resumes the rest of its time after", async () => {
+    vi.useFakeTimers();
+    const onDismiss = vi.fn();
+    await render(React.createElement(ToastNotifications, { notifications: [toast], onDismiss }));
+    const element = document.querySelector<HTMLElement>(".toast")!;
+    await act(async () => vi.advanceTimersByTime(1000));
+    await act(async () => element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    await act(async () => vi.advanceTimersByTime(lifetime * 3));
+    expect(onDismiss).not.toHaveBeenCalled();
+    await act(async () => element.dispatchEvent(new MouseEvent("mouseout", { bubbles: true })));
+    await act(async () => vi.advanceTimersByTime(lifetime - 1001));
+    expect(onDismiss).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(onDismiss).toHaveBeenCalledWith("toast");
+  });
+
+  it("dismisses at once when clicked", async () => {
+    const onDismiss = vi.fn();
+    await render(React.createElement(ToastNotifications, { notifications: [toast], onDismiss }));
+    await act(async () => document.querySelector<HTMLElement>(".toast")!.click());
+    expect(onDismiss).toHaveBeenCalledWith("toast");
   });
 });

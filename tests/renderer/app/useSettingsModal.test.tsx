@@ -6,6 +6,7 @@ import { useSettingsModal } from "@renderer/app/useSettingsModal";
 import { applySettingsDraft, buildSettingsDraft, createDefaultSettings } from "@main/core/settings-schema";
 import { join, parse } from "node:path";
 import type { MumblerShellApi } from "@shared/app-shell";
+import { message } from "@shared/i18n/translate";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | null = null;
 let state: ReturnType<typeof useSettingsModal>;
@@ -14,10 +15,16 @@ const pickOutputDirectory = vi.fn<MumblerShellApi["pickOutputDirectory"]>();
 const initial = () => buildSettingsDraft(createDefaultSettings(), "", "", true);
 let opened = initial;
 let unsaved: { report: () => string[]; discard: () => void } | null = null;
-function Harness() { state = useSettingsModal({ onSnapshotUpdate: vi.fn(), onError: vi.fn(), onNotice: vi.fn() }); return null; }
+const onNotice = vi.fn();
+const onLastingNotice = vi.fn();
+const clearGeminiApiKey = vi.fn<MumblerShellApi["clearGeminiApiKey"]>();
+function Harness() { state = useSettingsModal({ onSnapshotUpdate: vi.fn(), onError: vi.fn(), onNotice, onLastingNotice }); return null; }
 beforeEach(async () => {
   saveSettingsDraft.mockReset();
   pickOutputDirectory.mockReset();
+  clearGeminiApiKey.mockReset();
+  onNotice.mockReset();
+  onLastingNotice.mockReset();
   saveSettingsDraft.mockResolvedValue({} as Awaited<ReturnType<MumblerShellApi["saveSettingsDraft"]>>);
   opened = initial;
   Object.defineProperty(window, "mumbler", {
@@ -27,6 +34,7 @@ beforeEach(async () => {
       getDefaultPrompts: vi.fn(async () => createDefaultSettings().prompts),
       saveSettingsDraft,
       pickOutputDirectory,
+      clearGeminiApiKey,
       onUnsavedDrafts: (report, discard) => { unsaved = { report, discard }; return () => { unsaved = null; }; },
     } satisfies Partial<MumblerShellApi>,
   });
@@ -89,5 +97,24 @@ describe("picked Settings directories", () => {
       expect(applySettingsDraft(createDefaultSettings(), saveSettingsDraft.mock.calls[0]![0], home))
         .toMatchObject({ outputDirectory: output, backupDirectory: originals });
     } finally { vi.unstubAllEnvs(); }
+  });
+});
+
+describe("removing the stored API key", () => {
+  const removed = (hasGeminiApiKey: boolean) =>
+    ({ settingsSummary: { hasGeminiApiKey } }) as Awaited<ReturnType<MumblerShellApi["clearGeminiApiKey"]>>;
+
+  it("confirms a plain removal with a toast", async () => {
+    clearGeminiApiKey.mockResolvedValueOnce(removed(false));
+    await act(async () => state.handleClearGeminiApiKey());
+    expect(onNotice).toHaveBeenCalledWith(message("notice.apiKeyRemoved"));
+    expect(onLastingNotice).not.toHaveBeenCalled();
+  });
+
+  it("keeps the news that an environment key is still in use until it is closed", async () => {
+    clearGeminiApiKey.mockResolvedValueOnce(removed(true));
+    await act(async () => state.handleClearGeminiApiKey());
+    expect(onLastingNotice).toHaveBeenCalledWith(message("notice.apiKeyRemovedEnvRemains"));
+    expect(onNotice).not.toHaveBeenCalled();
   });
 });

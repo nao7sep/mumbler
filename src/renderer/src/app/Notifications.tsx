@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { MumblerCard } from "@shared/app-shell";
 
 import { message, nameValue, type Message } from "@shared/i18n/translate";
@@ -89,11 +89,59 @@ export function PersistentNotifications({
   );
 }
 
+// Long enough to read: a base, then more for each character, up to a ceiling.
+const TOAST_BASE_MS = 4000;
+const TOAST_PER_CHARACTER_MS = 60;
+const TOAST_MAX_MS = 15000;
+
+export function toastDuration(text: string): number {
+  return Math.min(TOAST_MAX_MS, TOAST_BASE_MS + [...text].length * TOAST_PER_CHARACTER_MS);
+}
+
+function Toast({
+  notification,
+  onDismiss,
+}: {
+  notification: Extract<AppNotification, { kind: "toast" }>;
+  onDismiss: (id: string) => void;
+}): ReactElement {
+  const i18n = useI18n();
+  const [paused, setPaused] = useState(false);
+  // What is left of the countdown, so a pause resumes rather than restarts it.
+  const remainingMs = useRef(toastDuration(i18n.text(notification.message)));
+
+  useEffect(() => {
+    if (paused) return;
+    const startedAt = Date.now();
+    const timer = setTimeout(() => onDismiss(notification.id), remainingMs.current);
+    return () => {
+      clearTimeout(timer);
+      remainingMs.current -= Date.now() - startedAt;
+    };
+  }, [paused, notification.id, onDismiss]);
+
+  return (
+    <div
+      role="status"
+      aria-atomic="true"
+      className="toast toast--info"
+      onClick={() => onDismiss(notification.id)}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+    >
+      {i18n.node(notification.message)}
+    </div>
+  );
+}
+
+// Each toast leaves on its own once read; hovering or focusing one holds it,
+// and a click dismisses it at once.
 export function ToastNotifications({
   notifications,
   onDismiss,
 }: NotificationProps): ReactElement | null {
-  const i18n = useI18n();
   const toasts = notifications.filter(
     (notification): notification is Extract<AppNotification, { kind: "toast" }> =>
       notification.kind === "toast",
@@ -103,15 +151,7 @@ export function ToastNotifications({
   return (
     <div className="toast-container">
       {toasts.map((notification) => (
-        <div
-          key={notification.id}
-          role="status"
-          aria-atomic="true"
-          className="toast toast--info"
-          onClick={() => onDismiss(notification.id)}
-        >
-          {i18n.node(notification.message)}
-        </div>
+        <Toast key={notification.id} notification={notification} onDismiss={onDismiss} />
       ))}
     </div>
   );

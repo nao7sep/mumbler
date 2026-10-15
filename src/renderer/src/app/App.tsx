@@ -293,12 +293,9 @@ function LoadedShell({
   });
   const snapshotRef = useRef<AppSnapshot | null>(initialSnapshot);
 
+  // ToastNotifications times each toast out by its length.
   const addToast = useCallback((toast: Message) => {
-    const id = nanoid();
-    setNotifications(prev => [...prev, { id, message: toast, kind: "toast" }]);
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 4000);
+    setNotifications(prev => [...prev, { id: nanoid(), message: toast, kind: "toast" }]);
   }, []);
 
   const addPersistent = useCallback((
@@ -368,6 +365,7 @@ function LoadedShell({
     onSnapshotUpdate: setSnapshot,
     onError: (msg) => addPersistent("settings-load", msg, "error"),
     onNotice: addToast,
+    onLastingNotice: (msg) => addPersistent("settings-api-key", msg, "info"),
   });
 
   // Apply the configured UI font by overriding the `--font-ui` CSS variable on :root; blank reverts

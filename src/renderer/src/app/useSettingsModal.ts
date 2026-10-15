@@ -8,6 +8,8 @@ interface UseSettingsModalOptions {
   onSnapshotUpdate: (snapshot: AppSnapshot) => void;
   onError: (message: Message) => void;
   onNotice: (message: Message) => void;
+  // A notice that stays until closed, for news the user must not miss.
+  onLastingNotice: (message: Message) => void;
 }
 
 interface UseSettingsModalResult {
@@ -38,6 +40,7 @@ export function useSettingsModal({
   onSnapshotUpdate,
   onError,
   onNotice,
+  onLastingNotice,
 }: UseSettingsModalOptions): UseSettingsModalResult {
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
@@ -179,12 +182,13 @@ export function useSettingsModal({
       applyHasKey(nextSnapshot.settingsSummary?.hasGeminiApiKey ?? false);
       setSettingsErrorMessage(null);
       // An env-supplied key can still resolve after clearing the stored one, so
-      // the message reflects what actually happened rather than assuming removal.
-      onNotice(
-        nextSnapshot.settingsSummary?.hasGeminiApiKey
-          ? message("notice.apiKeyRemovedEnvRemains")
-          : message("notice.apiKeyRemoved"),
-      );
+      // the message reflects what actually happened rather than assuming removal,
+      // and that surprise stays until the user closes it.
+      if (nextSnapshot.settingsSummary?.hasGeminiApiKey) {
+        onLastingNotice(message("notice.apiKeyRemovedEnvRemains"));
+      } else {
+        onNotice(message("notice.apiKeyRemoved"));
+      }
     } catch (error: unknown) {
       setSettingsErrorMessage(presentFailure(error, message("error.apiKeyRemove"), "Gemini API key removal failed"));
     } finally {
