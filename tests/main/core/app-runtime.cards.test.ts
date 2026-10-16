@@ -1411,6 +1411,30 @@ describe("working with a card", () => {
     await vi.waitFor(() => expect(waveforms.runs).toHaveLength(2));
   });
 
+  it("starts afresh rather than joining a stopped run, as a player that closes and reopens at once does", async () => {
+    const card = await confirmed();
+    const first = runtime.getCardWaveformPeaks(card.id).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    runtime.cancelCardWaveformPeaks(card.id);
+    const second = runtime.getCardWaveformPeaks(card.id);
+    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(2));
+    waveforms.runs[1]!.settle(Float32Array.of(0.25));
+    expect([...(await second)]).toEqual([0.25]);
+    expect(await first).toBeInstanceOf(CancelledError);
+  });
+
+  it("keeps a run going while another player still waits for it", async () => {
+    const card = await confirmed();
+    const first = runtime.getCardWaveformPeaks(card.id).catch((error: unknown) => error);
+    const second = runtime.getCardWaveformPeaks(card.id);
+    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    runtime.cancelCardWaveformPeaks(card.id);
+    expect(waveforms.runs[0]!.signal?.aborted).toBe(false);
+    waveforms.runs[0]!.settle(Float32Array.of(0.75));
+    expect([...(await second)]).toEqual([0.75]);
+    expect([...(await first) as Float32Array]).toEqual([0.75]);
+  });
+
   it("says the waveform could not be drawn when its run fails", async () => {
     const card = await confirmed();
     const waiting = runtime.getCardWaveformPeaks(card.id);

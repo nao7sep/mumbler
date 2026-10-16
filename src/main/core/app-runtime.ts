@@ -288,7 +288,7 @@ export class ApplicationRuntime {
   // Waveform summaries for the player, by working file, kept for the session
   // while a card or pending import still uses the file, and the runs computing them.
   private readonly waveformPeaks = new Map<string, Float32Array>();
-  private readonly waveformWork = new Map<string, { controller: AbortController; done: Promise<Float32Array> }>();
+  private readonly waveformWork = new Map<string, { controller: AbortController; done: Promise<Float32Array>; waiting: number }>();
   private lastTrimRequest = 0;
 
   private constructor(runtime: AppRuntimeState) {
@@ -1428,7 +1428,9 @@ export class ApplicationRuntime {
 
   // The waveform summary the player draws (computeWaveformPeaks), computed once
   // per working file and kept for the session. A second request for the same
-  // file joins the run already going.
+  // file joins the run already going, unless that run was stopped: a player that
+  // closes and reopens at once (React's development double mount, or a quick
+  // switch away and back) gets a fresh run rather than the stopped one's error.
   async getCardWaveformPeaks(cardId: string): Promise<Float32Array> {
     this.ensureReady();
     const filePath = this.resolveCardSourcePath(cardId);
@@ -1437,7 +1439,7 @@ export class ApplicationRuntime {
     const kept = this.waveformPeaks.get(filePath);
     if (kept !== undefined) return kept;
     let work = this.waveformWork.get(filePath);
-    if (work === undefined) {
+    if (work === undefined || work.controller.signal.aborted) {
       const controller = new AbortController();
       const done = computeWaveformPeaks(filePath, controller.signal)
         .then((peaks) => {
@@ -1447,9 +1449,10 @@ export class ApplicationRuntime {
         .finally(() => {
           if (this.waveformWork.get(filePath)?.controller === controller) this.waveformWork.delete(filePath);
         });
-      work = { controller, done };
+      work = { controller, done, waiting: 0 };
       this.waveformWork.set(filePath, work);
     }
+    work.waiting += 1;
     try {
       return await work.done;
     } catch (error: unknown) {
@@ -1461,10 +1464,14 @@ export class ApplicationRuntime {
     }
   }
 
-  // The player moved on before the waveform arrived: its run stops.
+  // A player moved on before the waveform arrived. The run stops once no player
+  // is waiting for it any more.
   cancelCardWaveformPeaks(cardId: string): void {
     const filePath = this.resolveCardSourcePath(cardId);
-    if (filePath !== null) this.waveformWork.get(filePath)?.controller.abort();
+    const work = filePath === null ? undefined : this.waveformWork.get(filePath);
+    if (work === undefined) return;
+    work.waiting = Math.max(0, work.waiting - 1);
+    if (work.waiting === 0) work.controller.abort();
   }
 
   // A summary is dropped once no card or pending import uses its file.
