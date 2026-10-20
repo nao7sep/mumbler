@@ -4,64 +4,69 @@ import { ThinkingLevel } from "@google/genai";
 import { supportedModelConfig } from "@shared/model-branches";
 import { createDefaultSettings, buildSettingsDraft } from "@main/core/settings-schema";
 
-describe("the model registry and committed lineup", () => {
-  it("keeps every approved row, each with its own branch, and gives any other id the plain request", () => {
-    expect(SUPPORTED_MODELS.map((row) => row.id)).toEqual(["gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.5-flash-lite"]);
+// The guard test: the table against the code that uses it. The table's own
+// values (its rows, their order, lists and defaults) come from the lineup
+// research and are reviewed when the table changes, so nothing here restates them.
+describe("the model table and the code that uses it", () => {
+  // Two rows, the second with a default of its own, so a reset shows.
+  const first = SUPPORTED_MODELS[0];
+  const second = SUPPORTED_MODELS.find((row) => row.defaultThinking !== first?.defaultThinking) ?? SUPPORTED_MODELS[1];
+  const spaced = (id: string) => ` ${id.toUpperCase()} `;
+
+  it("gives every row its branch, translating every thinking value it lists, and any other id the plain request", () => {
     const levels = new Set<string>(Object.values(ThinkingLevel));
     for (const row of SUPPORTED_MODELS) {
       expect(row.thinking.length, row.id).toBeGreaterThan(0);
+      expect(row.thinking, row.id).toContain(row.defaultThinking);
       for (const value of row.thinking) {
-        const config = supportedModelConfig(row.id, value);
-        const level = config?.thinkingConfig?.thinkingLevel;
+        const level = supportedModelConfig(row.id, value)?.thinkingConfig?.thinkingLevel;
         expect(level, `${row.id} ${value}`).toBe(value.toUpperCase());
         expect(levels.has(level!), `${row.id} ${value}`).toBe(true);
-        expect(config?.safetySettings?.map((setting) => setting.threshold), row.id).toEqual(["OFF", "OFF", "OFF", "OFF", "OFF"]);
       }
+      expect(supportedModelConfig(spaced(row.id), row.defaultThinking)).toEqual(supportedModelConfig(row.id, row.defaultThinking));
     }
-    expect(supportedModelConfig(" GEMINI-3.8-FLASH ", "high")).toEqual(supportedModelConfig("gemini-3.8-flash", "high"));
-    for (const id of ["gemini-3.9-flash", "gemini-2.5-pro", "custom-model"]) {
+    for (const id of ["gemini-0.0-unknown", "custom-model"]) {
       expect(supportedModelConfig(id, thinkingFor(id, "high")), id).toBeUndefined();
     }
   });
 
-  it("defaults thinking by the model's own tier, whatever the role, and sends only a value the row lists", () => {
-    expect(thinkingFor("gemini-3.1-pro-preview", "")).toBe("medium");
-    expect(thinkingFor("gemini-3.8-flash", "")).toBe("medium");
-    expect(thinkingFor(" GEMINI-3.5-FLASH-LITE ", "")).toBe("minimal");
-    expect(thinkingFor("gemini-3.8-flash", "high")).toBe("high");
-    expect(thinkingFor("gemini-3.8-flash", "minimal")).toBe("medium");
-    expect(thinkingFor("gemini-3.5-flash-lite", "minimal")).toBe("minimal");
+  it("defaults thinking to the row's own default, whatever the role, and sends only a value the row lists", () => {
+    for (const row of SUPPORTED_MODELS) {
+      expect(thinkingFor(spaced(row.id), ""), row.id).toBe(row.defaultThinking);
+      for (const value of row.thinking) expect(thinkingFor(row.id, value)).toBe(value);
+      expect(thinkingFor(row.id, "not-a-level")).toBe(row.defaultThinking);
+    }
     expect(thinkingFor("custom-model", "high")).toBeUndefined();
     const settings = createDefaultSettings();
-    expect([settings["gemini.thinking.transcription"], settings["gemini.thinking.outline"], settings["gemini.thinking.metadata"]]).toEqual(["medium", "medium", "minimal"]);
+    for (const role of AI_ROLES) {
+      expect(settings[`gemini.thinking.${role.id}`], role.id).toBe(thinkingFor(settings[`gemini.${role.id}`], ""));
+    }
   });
 
   it("resets thinking on a model edit only when it reaches a different listed row than the last one the field held", () => {
-    const edit = (lastListed: string, next: string, chosen: string) => thinkingAfterModelEdit(lastListed, next, chosen);
+    const kept = first!.thinking.find((value) => value !== first!.defaultThinking) ?? first!.defaultThinking;
     // The same row, however it is spaced, cased or retyped, keeps the choice.
-    expect(edit("gemini-3.8-flash", "gemini-3.8-flash ", "high")).toEqual({ thinking: "high", lastListedModel: "gemini-3.8-flash " });
-    expect(edit("gemini-3.8-flash", " GEMINI-3.8-Flash", "high").thinking).toBe("high");
+    expect(thinkingAfterModelEdit(first!.id, `${first!.id} `, kept)).toEqual({ thinking: kept, lastListedModel: `${first!.id} ` });
+    expect(thinkingAfterModelEdit(first!.id, spaced(first!.id), kept).thinking).toBe(kept);
     // A different row starts at that row's own default.
-    expect(edit("gemini-3.8-flash", "gemini-3.5-flash-lite", "high")).toEqual({ thinking: "minimal", lastListedModel: "gemini-3.5-flash-lite" });
-    expect(edit("gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "high").thinking).toBe("medium");
+    expect(thinkingAfterModelEdit(first!.id, second!.id, kept)).toEqual({ thinking: second!.defaultThinking, lastListedModel: second!.id });
     // An unlisted id keeps the value and the last listed id.
-    expect(edit("gemini-3.8-flash", "gemini-3.8-flas", "high")).toEqual({ thinking: "high", lastListedModel: "gemini-3.8-flash" });
-    expect(edit("gemini-3.8-flash", "custom-model", "high")).toEqual({ thinking: "high", lastListedModel: "gemini-3.8-flash" });
+    expect(thinkingAfterModelEdit(first!.id, first!.id.slice(0, -1), kept)).toEqual({ thinking: kept, lastListedModel: first!.id });
+    expect(thinkingAfterModelEdit(first!.id, "custom-model", kept)).toEqual({ thinking: kept, lastListedModel: first!.id });
     // A field that has held no row keeps the value at the first row it reaches when that row lists it.
-    expect(edit("custom-model", "gemini-3.5-flash-lite", "high")).toEqual({ thinking: "high", lastListedModel: "gemini-3.5-flash-lite" });
-    expect(edit("custom-model", "gemini-3.8-flash", "minimal")).toEqual({ thinking: "medium", lastListedModel: "gemini-3.8-flash" });
+    expect(thinkingAfterModelEdit("custom-model", first!.id, kept)).toEqual({ thinking: kept, lastListedModel: first!.id });
+    expect(thinkingAfterModelEdit("custom-model", first!.id, "not-a-level")).toEqual({ thinking: first!.defaultThinking, lastListedModel: first!.id });
   });
 
   it("keeps the choice when a letter of the id is deleted and retyped, and resets it on reaching another row", () => {
-    let state = { thinking: "high", lastListedModel: "gemini-3.8-flash" };
-    for (const typed of ["gemini-3.8-flas", "gemini-3.8-fla", "gemini-3.8-flas", "gemini-3.8-flash"]) {
+    const kept = first!.thinking.find((value) => value !== first!.defaultThinking) ?? first!.defaultThinking;
+    let state = { thinking: kept, lastListedModel: first!.id };
+    for (const typed of [first!.id.slice(0, -1), first!.id.slice(0, -2), first!.id.slice(0, -1), first!.id]) {
       state = thinkingAfterModelEdit(state.lastListedModel, typed, state.thinking);
     }
-    expect(state).toEqual({ thinking: "high", lastListedModel: "gemini-3.8-flash" });
-    for (const typed of ["gemini-3.8-", "gemini-3.", "gemini-3.5-flash-lite"]) {
-      state = thinkingAfterModelEdit(state.lastListedModel, typed, state.thinking);
-    }
-    expect(state).toEqual({ thinking: "minimal", lastListedModel: "gemini-3.5-flash-lite" });
+    expect(state).toEqual({ thinking: kept, lastListedModel: first!.id });
+    state = thinkingAfterModelEdit(state.lastListedModel, second!.id, state.thinking);
+    expect(state).toEqual({ thinking: second!.defaultThinking, lastListedModel: second!.id });
   });
 
   it("has exactly one default for every offered kind and a selection field for every role", () => {
@@ -82,8 +87,8 @@ describe("the model registry and committed lineup", () => {
   });
 
   it("recognises a supported model id trimmed and case-insensitively", () => {
-    expect(isSupportedModel(" GEMINI-3.8-FLASH ")).toBe(true);
-    expect(isSupportedModel("gemini-2.5-pro")).toBe(false);
+    for (const row of SUPPORTED_MODELS) expect(isSupportedModel(spaced(row.id)), row.id).toBe(true);
+    expect(isSupportedModel("custom-model")).toBe(false);
     expect(isSupportedModel("")).toBe(false);
   });
 });

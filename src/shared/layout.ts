@@ -1,9 +1,9 @@
 // Single source of truth for the window's minimum size and the pane lengths the
 // stylesheet lays out with. The renderer sets those lengths as CSS variables
-// from these values at startup, so the window minimums
-// derived here and the layout on screen cannot disagree. TOPBAR_BLOCK,
-// DETAIL_MIN_HEIGHT and RECORDS_FILTERS_HEIGHT are estimates of rendered
-// heights, not lengths the stylesheet uses.
+// from these values at startup, so the window minimums derived here and the
+// layout on screen cannot disagree. TOPBAR_BLOCK, DETAIL_MIN_HEIGHT and
+// RECORDS_FILTERS_HEIGHT are heights the layout produces rather than sets; the
+// live layout lane renders the app in Electron and measures them.
 
 // Horizontal padding reserved by `.app-shell` (padding: 20px 24px → 24px each
 // side). Counts as fixed chrome on the width axis.
@@ -43,11 +43,11 @@ export const DETAIL_MIN_WIDTH = 640;
 // Vertical chrome reserved above the panes by `.app-shell` (padding: 20px top +
 // 20px bottom) plus the topbar block.
 //
-// Topbar: padding 14px*2 (28) + the 1.5rem/line-height-1.5 h1 (~36) ≈ 64, plus
-// its 20px margin-bottom = 84. Shell vertical padding = 40. Total fixed vertical
-// chrome before any pane = 124.
+// Topbar: padding 14px*2 (28) + the 1.5rem/line-height-1.5 h1 (36) + its 1px
+// border top and bottom = 66, plus its 20px margin-bottom = 86. The live layout
+// lane measures the rendered topbar against this. Shell vertical padding = 40.
 export const SHELL_PADDING_Y = 40;
-const TOPBAR_BLOCK = 84;
+export const TOPBAR_BLOCK = 86;
 export const VERTICAL_CHROME = SHELL_PADDING_Y + TOPBAR_BLOCK;
 
 // Detail stack minimum height: the smallest height at which the detail pane's
