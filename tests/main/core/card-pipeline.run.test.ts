@@ -40,7 +40,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { executeCardPipeline, type CardPipelineContext } from "@main/core/card-pipeline";
+import { executeCardPipeline, type CardPipelineContext, GEMINI_ATTEMPTS } from "@main/core/card-pipeline";
 import { createDefaultSettings, createEmptyQueue } from "@main/core/settings-schema";
 
 function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
@@ -288,17 +288,16 @@ describe("executeCardPipeline", () => {
     expect(mockGenerateText.mock.calls.map(([params]) => params.field)).toEqual([undefined, "title", "slug"]);
   });
 
-  it("retries a retryable failure as many times as the retry setting allows", async () => {
+  it("asks again after a retryable failure, up to its attempt limit", async () => {
     vi.useFakeTimers();
     try {
       mockGenerateText.mockRejectedValue(new ApiError({ status: 503, message: JSON.stringify({ error: { code: 503, message: "Wait before retrying.", status: "UNAVAILABLE" } }) }));
       const card = makeCard();
       const ctx = makeContext(card, new AbortController().signal);
-      ctx.settings.retryPolicy.maxRetries = 5;
       const run = executeCardPipeline(card.id, "structured", "generate", ctx);
       await vi.runAllTimersAsync();
       await run;
-      expect(mockGenerateText).toHaveBeenCalledTimes(6);
+      expect(mockGenerateText).toHaveBeenCalledTimes(GEMINI_ATTEMPTS);
       expect(card.lastError?.providerReason).toBe("Wait before retrying.");
     } finally { vi.useRealTimers(); }
   });
@@ -321,9 +320,12 @@ describe("executeCardPipeline", () => {
     mockGenerateText.mockRejectedValue(new ApiError({ status: 503, message: JSON.stringify({ error: { code: 503, message: "Overloaded.", status: "UNAVAILABLE" } }) }));
     const unavailable = makeCard();
     const unavailableCtx = makeContext(unavailable, new AbortController().signal);
-    unavailableCtx.settings.retryPolicy.maxRetries = 1;
-    unavailableCtx.settings.retryPolicy.initialDelayMs = 1;
-    await executeCardPipeline(unavailable.id, "structured", "generate", unavailableCtx);
+    vi.useFakeTimers();
+    try {
+      const run = executeCardPipeline(unavailable.id, "structured", "generate", unavailableCtx);
+      await vi.runAllTimersAsync();
+      await run;
+    } finally { vi.useRealTimers(); }
     expect(unavailable.lastError).not.toHaveProperty("refused");
 
     const keyless = makeCard();

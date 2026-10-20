@@ -1,10 +1,9 @@
-// Single source of truth for the window's minimum size.
-//
-// Pane sizing: window-conventions. These constants mirror the layout in
-// src/renderer/src/styles.css.
-//
-// When a value here changes, change the matching CSS rule (noted per constant)
-// and the derivation stays correct automatically.
+// Single source of truth for the window's minimum size and the pane lengths the
+// stylesheet lays out with. The renderer sets those lengths as CSS variables
+// from these values at startup, so the window minimums
+// derived here and the layout on screen cannot disagree. TOPBAR_BLOCK,
+// DETAIL_MIN_HEIGHT and RECORDS_FILTERS_HEIGHT are estimates of rendered
+// heights, not lengths the stylesheet uses.
 
 // Horizontal padding reserved by `.app-shell` (padding: 20px 24px → 24px each
 // side). Counts as fixed chrome on the width axis.
@@ -47,7 +46,7 @@ export const DETAIL_MIN_WIDTH = 640;
 // Topbar: padding 14px*2 (28) + the 1.5rem/line-height-1.5 h1 (~36) ≈ 64, plus
 // its 20px margin-bottom = 84. Shell vertical padding = 40. Total fixed vertical
 // chrome before any pane = 124.
-const SHELL_PADDING_Y = 40;
+export const SHELL_PADDING_Y = 40;
 const TOPBAR_BLOCK = 84;
 export const VERTICAL_CHROME = SHELL_PADDING_Y + TOPBAR_BLOCK;
 
@@ -59,6 +58,10 @@ export const VERTICAL_CHROME = SHELL_PADDING_Y + TOPBAR_BLOCK;
 // padding) around them. Kept deliberately modest so it stays ≤ the default
 // height; a real floor, not the literal sum of every stacked card.
 export const DETAIL_MIN_HEIGHT = 600;
+
+// The main window's opening size on first launch, before it remembers its own.
+export const WINDOW_DEFAULT_WIDTH = 1480;
+export const WINDOW_DEFAULT_HEIGHT = 940;
 
 // Derived — do not hand-edit. The minimum width is the sum of the pane minimums
 // plus the workspace gap plus the horizontal shell chrome.

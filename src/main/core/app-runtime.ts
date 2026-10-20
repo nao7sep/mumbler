@@ -2252,7 +2252,7 @@ export class ApplicationRuntime {
     }
   }
 
-  // The saved audio carries its official start inside it (recording-times.ts),
+  // The saved audio carries its official start inside it,
   // read back by the same reader new recordings get before it is trusted. A format
   // with no place for a time is saved as it is; a write that fails, or reads
   // back as anything else, saves the audio as it was and says so.
@@ -2701,7 +2701,7 @@ export class ApplicationRuntime {
   }
 }
 
-// The single storage-root resolver lives in its own electron-free module (storage-root.ts) so the pure Node
+// The single storage-root resolver lives in its own electron-free module so the pure Node
 // backup store can resolve the root the same way without importing electron. Re-exported here so the
 // existing callers and tests that reach it through app-runtime keep working (it is imported at the top for
 // getAppPaths' own use).

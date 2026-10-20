@@ -40,7 +40,7 @@ vi.mock("@main/core/binaries/archive", () => ({
 vi.mock("@main/core/binaries/arch", () => ({
   assertArm64Slice: vi.fn(),
 }));
-// Native permission behavior is verified in tests/live/main/core/binaries/manager.test.ts.
+// Native permission behavior is verified in the live lane.
 // Ordinary manager fixtures stub the outbound command, just like architecture.
 vi.mock("@main/core/audio-tools", async (importOriginal) => ({
   ...await importOriginal<typeof import("@main/core/audio-tools")>(),

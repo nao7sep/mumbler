@@ -11,9 +11,8 @@
  * convention removes. A value that cannot be made into a usable absolute path is a reported startup error,
  * never a silent fallback to the default.
  *
- * This module holds no electron import, so both the electron main runtime (app-runtime.ts, which re-exports
- * it) and the pure Node backup store (backupStore.ts) resolve the root the same way without dragging
- * electron into the store. Pure and home-injectable, so it is unit-testable without touching the real
+ * This module holds no electron import, so both the electron main runtime, which re-exports it, and the
+ * pure Node backup store resolve the root the same way without dragging electron into the store. Pure and home-injectable, so it is unit-testable without touching the real
  * environment. Resolution is lazy at every call site (never frozen into an import-time constant), so a
  * half-set environment is never captured before it is fully set.
  */

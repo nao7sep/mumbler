@@ -104,18 +104,6 @@ export interface CommandDefinition {
   keys: readonly string[];
 }
 
-export interface RetryPolicy {
-  maxRetries: number;
-  initialDelayMs: number;
-  maxDelayMs: number;
-  jitterRatio: number;
-}
-
-export interface OperationTimeouts {
-  transcriptionMs: number;
-  metadataMs: number;
-}
-
 export interface PromptTemplates {
   structured: string;
   title: string;
@@ -176,8 +164,6 @@ export interface MumblerSettings {
   "gemini.thinking.metadata": string;
   concurrencyLimit: number;
   prompts: PromptTemplates;
-  retryPolicy: RetryPolicy;
-  timeouts: OperationTimeouts;
   // Managed audio tools (ffmpeg/ffprobe), per the managed-runtime-dependencies
   // conventions. The one update switch: whether to run the (cached, staleness-
   // gated) latest-version check at launch. Nothing auto-downloads or auto-installs;
@@ -416,12 +402,6 @@ export interface SettingsDraft {
   structuredPrompt: string;
   titlePrompt: string;
   slugPrompt: string;
-  retryMaxRetries: number;
-  retryInitialDelayMs: number;
-  retryMaxDelayMs: number;
-  retryJitterRatio: number;
-  transcriptionTimeoutMs: number;
-  metadataTimeoutMs: number;
 }
 
 export interface QueueSummary {

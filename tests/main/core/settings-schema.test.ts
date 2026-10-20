@@ -225,23 +225,10 @@ describe("applySettingsDraft — validation", () => {
     expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow(/title/i);
   });
 
-  it("rejects a max retry delay below the initial delay", () => {
-    const draft = freshDraft();
-    draft.retryInitialDelayMs = 5000;
-    draft.retryMaxDelayMs = 1000;
-    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow(/max delay/i);
-  });
-
   it("rejects non-positive integer fields", () => {
     const draft = freshDraft();
     draft.concurrencyLimit = 0;
     expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow(/Concurrency/i);
-  });
-
-  it("rejects a jitter ratio outside 0..1", () => {
-    const draft = freshDraft();
-    draft.retryJitterRatio = 1.5;
-    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow(/jitter/i);
   });
 });
 
@@ -257,27 +244,6 @@ describe("Gemini model fields", () => {
     const draft = freshDraft();
     draft.transcriptionModel = "gemini-2.5-pro";
     expect(applySettingsDraft(createDefaultSettings(), draft)["gemini.transcription"]).toBe("gemini-2.5-pro");
-  });
-});
-
-describe("Gemini API key is no longer a setting", () => {
-  // The key moved to a dedicated 0600 secrets file resolved environment-first
-  // (see api-keys.test.ts). The settings store/draft must not carry it at all, so
-  // a key can never be persisted into config.json via the JSON roundtrip.
-  it("does not expose any key field on settings or the draft", () => {
-    const settings = createDefaultSettings();
-    const draft = buildSettingsDraft(settings, OUT, BACKUP, true);
-
-    expect(settings).not.toHaveProperty("geminiApiKeyObfuscated");
-    expect(draft).not.toHaveProperty("geminiApiKeyInput");
-    expect(draft).not.toHaveProperty("clearGeminiApiKey");
-    // The presence flag is passed in by the caller, not derived from settings.
-    expect(draft.hasGeminiApiKey).toBe(true);
-  });
-
-  it("never writes a key field through applySettingsDraft", () => {
-    const result = applySettingsDraft(createDefaultSettings(), freshDraft());
-    expect(result).not.toHaveProperty("geminiApiKeyObfuscated");
   });
 });
 

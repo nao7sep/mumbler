@@ -176,31 +176,22 @@ describe("sanitizeSlug", () => {
 });
 
 describe("computeRetryDelayMs", () => {
-  const policy = { maxRetries: 5, initialDelayMs: 1000, maxDelayMs: 16000, jitterRatio: 0 };
+  function at(attempt: number, random: number): number {
+    const spy = vi.spyOn(Math, "random").mockReturnValue(random);
+    try { return computeRetryDelayMs(attempt); } finally { spy.mockRestore(); }
+  }
 
-  it("grows by powers of four with no jitter", () => {
-    expect(computeRetryDelayMs(1, policy)).toBe(1000);
-    expect(computeRetryDelayMs(2, policy)).toBe(4000);
-    expect(computeRetryDelayMs(3, policy)).toBe(16000);
+  it("grows by powers of four from a second, centred when the jitter draws the middle", () => {
+    expect([1, 2, 3].map((attempt) => at(attempt, 0.5))).toEqual([1000, 4000, 16000]);
   });
 
-  it("clamps to the configured maximum delay", () => {
-    expect(computeRetryDelayMs(4, policy)).toBe(16000);
-    expect(computeRetryDelayMs(10, policy)).toBe(16000);
+  it("stops growing at sixteen seconds", () => {
+    expect(at(4, 0.5)).toBe(16000);
+    expect(at(10, 0.5)).toBe(16000);
   });
 
-  it("applies jitter within the symmetric window", () => {
-    const jittered = { ...policy, jitterRatio: 0.25 }; // window = 250 at base 1000
-    const random = vi.spyOn(Math, "random");
-    try {
-      random.mockReturnValue(0); // offset = -window
-      expect(computeRetryDelayMs(1, jittered)).toBe(750);
-      random.mockReturnValue(1); // offset = +window
-      expect(computeRetryDelayMs(1, jittered)).toBe(1250);
-      random.mockReturnValue(0.5); // offset = 0
-      expect(computeRetryDelayMs(1, jittered)).toBe(1000);
-    } finally {
-      random.mockRestore();
-    }
+  it("spreads each wait by a fifth either way", () => {
+    expect(at(1, 0)).toBe(800);
+    expect(at(1, 1)).toBe(1200);
   });
 });

@@ -3,8 +3,7 @@ import type { MessageKey } from "./i18n/catalogues";
 
 // The built-in filename timestamp patterns, tried in order, the names met most
 // often first. Each uses the named groups year, month, day, hour, minute and
-// optionally second. The shapes are the ones recorders, phones and apps write
-// (research recording-file-names):
+// optionally second. The shapes are the ones recorders, phones and apps write:
 export const DEFAULT_TIMESTAMP_PATTERNS: readonly string[] = [
   // 20261014-153012, 191010_1010, 20180105 060425: Sony, Zoom, DJI, Teams, Voice
   // Memos files, and call recorders that put a phone number before the date.

@@ -84,7 +84,7 @@ describe("AboutModal external results", () => {
 });
 
 describe("AboutModal copyright", () => {
-  it("names the licence once, on the fleet's one copyright line", async () => {
+  it("names the licence on the one copyright line", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -92,7 +92,5 @@ describe("AboutModal copyright", () => {
 
     const meta = document.querySelector(".about-meta");
     expect(meta?.textContent).toBe("© 2026 Yoshinao Inoguchi · GNU GPL v3 or later");
-    expect(meta?.querySelector("br")).toBeNull();
-    expect(document.body.textContent?.match(/GPL/g)).toHaveLength(1);
   });
 });

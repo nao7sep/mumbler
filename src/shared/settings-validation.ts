@@ -11,20 +11,11 @@ export function isPositiveIntegerSetting(value: number): boolean {
   return Number.isInteger(value) && value > 0;
 }
 
-export function isRatioSetting(value: number): boolean {
-  return Number.isFinite(value) && value >= 0 && value <= 1;
-}
 
 export type NumericSettingField =
   | "skipIntervalSec"
   | "previewSnippetSeconds"
-  | "concurrencyLimit"
-  | "retryMaxRetries"
-  | "retryInitialDelayMs"
-  | "retryMaxDelayMs"
-  | "retryJitterRatio"
-  | "transcriptionTimeoutMs"
-  | "metadataTimeoutMs";
+  | "concurrencyLimit";
 
 interface NumericSettingRule {
   field: NumericSettingField;
@@ -43,12 +34,6 @@ const NUMERIC_SETTING_RULES: NumericSettingRule[] = [
   { field: "skipIntervalSec", isValid: isPositiveIntegerSetting, issue: "settingsIssue.skipIntervalSec" },
   { field: "previewSnippetSeconds", isValid: isPositiveIntegerSetting, issue: "settingsIssue.previewSnippetSeconds" },
   { field: "concurrencyLimit", isValid: isPositiveIntegerSetting, issue: "settingsIssue.concurrencyLimit" },
-  { field: "retryMaxRetries", isValid: isPositiveIntegerSetting, issue: "settingsIssue.retryMaxRetries" },
-  { field: "retryInitialDelayMs", isValid: isPositiveIntegerSetting, issue: "settingsIssue.retryInitialDelayMs" },
-  { field: "retryMaxDelayMs", isValid: isPositiveIntegerSetting, issue: "settingsIssue.retryMaxDelayMs" },
-  { field: "transcriptionTimeoutMs", isValid: isPositiveIntegerSetting, issue: "settingsIssue.transcriptionTimeoutMs" },
-  { field: "metadataTimeoutMs", isValid: isPositiveIntegerSetting, issue: "settingsIssue.metadataTimeoutMs" },
-  { field: "retryJitterRatio", isValid: isRatioSetting, issue: "settingsIssue.retryJitterRatio" },
 ];
 
 // One field-addressable issue per invalid numeric setting, in form order. The

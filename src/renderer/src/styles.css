@@ -27,7 +27,7 @@
   --border: #c7d7c4;
   --border-subtle: #dbe6d6;
   /* One strength per kind of line, each held to its kind's contrast target where
-     it is painted (interface-styling-conventions; company/tools/measure-lines). Light
+     it is painted, measured on the rendered surfaces (interface-styling-conventions). Light
      section and control lines are translucent, so one over a muted fill reads
      like one over white; row lines stay opaque, since a collapsed table border
      straddles the cell edge. A variant covers a surface the base would miss,
@@ -116,18 +116,10 @@
      cannot read a custom property, so the stroke repeats --text-secondary. */
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%23526255' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
-  /* Pane minimums. Kept in sync with @shared/layout (DETAIL_MIN_WIDTH /
-     QUEUE_MIN_WIDTH), the single source of truth the window minimum derives
-     from. The detail pane uses --detail-min-width as its grid track floor so it
-     can never collapse to zero width. */
-  --queue-width: 400px;
-  --detail-min-width: 640px;
-
-  /* Fixed vertical chrome above the panes: shell padding (20px top + 20px
-     bottom) + the topbar block (padding 28 + ~36 h1 ≈ 64, + 20 margin-bottom =
-     84). Mirrors VERTICAL_CHROME in @shared/layout. The sticky queue pane bounds
-     its own scroll against this instead of a guessed offset. */
-  --vertical-chrome: 124px;
+  /* The pane lengths (--shell-padding-x/-y, --workspace-gap, --queue-width,
+     --detail-min-width, --vertical-chrome and the --records-* lengths) are set
+     on this element at startup from @shared/layout, where the window minimums
+     are derived from them. */
 }
 
 /* The dark theme: deep green-black surfaces under the same green identity.
@@ -368,7 +360,7 @@ textarea:focus-visible,
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  padding: 20px 24px;
+  padding: var(--shell-padding-y) var(--shell-padding-x);
 }
 
 .topbar {
@@ -490,7 +482,7 @@ textarea:focus-visible,
      minimum (@shared/layout) covers the queue min plus the detail min plus the gap
      and chrome. */
   grid-template-columns: var(--queue-width) minmax(var(--detail-min-width), 1fr);
-  gap: 20px;
+  gap: var(--workspace-gap);
   /* Positioning context for the absolutely-placed splitter, which sits in the gap
      between the two tracks (below). */
   position: relative;
@@ -505,15 +497,15 @@ textarea:focus-visible,
 }
 
 /* The queue/detail resize handle. Taken out of the grid flow (absolute) so it does
-   not consume a track, and positioned to overlay the 20px gap that begins exactly
-   at --queue-width. Full-height hit target with a slim centred grip that brightens
+   not consume a track, and positioned to overlay the workspace gap that begins
+   exactly at --queue-width. Full-height hit target with a slim centred grip that brightens
    on hover; the pointer gesture lives in PaneSplitter. */
 .workspace-splitter {
   position: absolute;
   top: 0;
   bottom: 0;
   left: var(--queue-width);
-  width: 20px;
+  width: var(--workspace-gap);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -724,7 +716,7 @@ textarea:focus-visible,
      replacement for the old guessed `calc(100vh - 100px)`. Sticky top matches
      the shell's top padding so the pane pins just below the topbar. */
   position: sticky;
-  top: 20px;
+  top: var(--shell-padding-y);
   max-height: calc(100vh - var(--vertical-chrome));
   transition: background-color var(--motion) ease, border-color var(--motion) ease, box-shadow var(--motion) ease;
 }
@@ -1228,7 +1220,7 @@ textarea:focus-visible,
   padding: 0 14px;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   background: transparent;
   transition:
     background-color var(--motion) ease,
@@ -1990,7 +1982,7 @@ select:not([multiple]) {
   padding: 0;
   border: 0;
   border-radius: 6px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
 }
@@ -2502,20 +2494,20 @@ html.records-page body {
 .records-shell {
   height: 100vh;
   display: grid;
-  grid-template-columns: var(--records-list-width) minmax(420px, 1fr);
-  gap: 16px;
-  padding: 16px;
+  grid-template-columns: var(--records-list-width) minmax(var(--records-detail-min-width), 1fr);
+  gap: var(--records-gap);
+  padding: var(--records-padding);
   /* Positioning context for the splitter in the gap. */
   position: relative;
 }
 
-/* The splitter overlays the 16px gap, which starts after the shell's padding
-   and the list pane. */
+/* The splitter overlays the gap, which starts after the shell's padding and
+   the list pane. */
 .records-shell > .workspace-splitter {
-  top: 16px;
-  bottom: 16px;
-  left: calc(16px + var(--records-list-width));
-  width: 16px;
+  top: var(--records-padding);
+  bottom: var(--records-padding);
+  left: calc(var(--records-padding) + var(--records-list-width));
+  width: var(--records-gap);
 }
 
 .records-list-pane,

@@ -160,7 +160,7 @@ export async function executeCardPipeline(
               mimeType: preparedAudio.mimeType,
               model: settings["gemini.transcription"],
               thinking: thinkingFor(settings["gemini.transcription"], settings["gemini.thinking.transcription"]),
-              timeoutMs: settings.timeouts.transcriptionMs,
+              timeoutMs: TRANSCRIPTION_TIMEOUT_MS,
               signal: ctx.signal,
               logger,
               recordCall,
@@ -229,7 +229,7 @@ export async function executeCardPipeline(
             prompt: structuredPrompt,
             model: settings["gemini.outline"],
             thinking: thinkingFor(settings["gemini.outline"], settings["gemini.thinking.outline"]),
-            timeoutMs: settings.timeouts.transcriptionMs,
+            timeoutMs: TRANSCRIPTION_TIMEOUT_MS,
             signal: ctx.signal,
             recordCall,
           }),
@@ -290,7 +290,7 @@ export async function executeCardPipeline(
             field: "title",
             model: settings["gemini.metadata"],
             thinking: thinkingFor(settings["gemini.metadata"], settings["gemini.thinking.metadata"]),
-            timeoutMs: settings.timeouts.metadataMs,
+            timeoutMs: METADATA_TIMEOUT_MS,
             signal: ctx.signal,
             recordCall,
           }),
@@ -341,7 +341,7 @@ export async function executeCardPipeline(
             field: "slug",
             model: settings["gemini.metadata"],
             thinking: thinkingFor(settings["gemini.metadata"], settings["gemini.thinking.metadata"]),
-            timeoutMs: settings.timeouts.metadataMs,
+            timeoutMs: METADATA_TIMEOUT_MS,
             signal: ctx.signal,
             recordCall,
           }),
@@ -445,13 +445,26 @@ async function setCardStepState(
   await ctx.persistState();
 }
 
+// How long one call may take: a transcription carries a whole recording and
+// a long one takes minutes; an outline, title or slug is text in, text out.
+export const TRANSCRIPTION_TIMEOUT_MS = 30 * 60 * 1000;
+export const METADATA_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Gemini is asked at most three times for one step, and only after an answer
+// it did not process (isRetryableGeminiError). The waits between grow fast,
+// from about a second to at most 16, spread a little so several cards do not
+// retry together.
+export const GEMINI_ATTEMPTS = 3;
+const RETRY_INITIAL_DELAY_MS = 1_000;
+const RETRY_MAX_DELAY_MS = 16_000;
+const RETRY_JITTER_RATIO = 0.2;
+
 async function executeWithRetry<T>(params: {
   cardId: string;
   step: Exclude<CardProcessingStep, null>;
   op: string;
   execute: (recordCall: RecordProviderCall) => Promise<T>;
 }, ctx: CardPipelineContext): Promise<T> {
-  const { retryPolicy } = ctx.settings;
   const logger = ctx.logger;
 
   let attempt = 1;
@@ -463,7 +476,7 @@ async function executeWithRetry<T>(params: {
         logger.providerCall({ ...call, cardId: params.cardId, step: params.step, attempt: callAttempt }));
     } catch (error: unknown) {
       const retryable = isRetryableGeminiError(error);
-      const exhausted = attempt > retryPolicy.maxRetries;
+      const exhausted = attempt >= GEMINI_ATTEMPTS;
 
       await logger.warn(params.op, "Gemini step attempt failed.", {
         cardId: params.cardId,
@@ -478,7 +491,7 @@ async function executeWithRetry<T>(params: {
         throw error;
       }
 
-      const delayMs = computeRetryDelayMs(attempt, retryPolicy);
+      const delayMs = computeRetryDelayMs(attempt);
       await logger.debug(params.op, "Retrying Gemini step after delay.", {
         cardId: params.cardId,
         step: params.step,
@@ -614,15 +627,9 @@ function cardFailureMessage(step: CardProcessingStep): string {
 
 // Uses 4^n (not 2^n) for aggressive backoff suited to Gemini API rate limits,
 // which penalize rapid retries more heavily than typical HTTP services.
-export function computeRetryDelayMs(
-  attempt: number,
-  retryPolicy: MumblerSettings["retryPolicy"],
-): number {
-  const baseDelay = Math.min(
-    retryPolicy.maxDelayMs,
-    retryPolicy.initialDelayMs * 4 ** (attempt - 1),
-  );
-  const jitterWindow = Math.round(baseDelay * retryPolicy.jitterRatio);
+export function computeRetryDelayMs(attempt: number): number {
+  const baseDelay = Math.min(RETRY_MAX_DELAY_MS, RETRY_INITIAL_DELAY_MS * 4 ** (attempt - 1));
+  const jitterWindow = Math.round(baseDelay * RETRY_JITTER_RATIO);
   const jitterOffset =
     jitterWindow === 0 ? 0 : Math.round((Math.random() * jitterWindow * 2) - jitterWindow);
   return Math.max(0, baseDelay + jitterOffset);

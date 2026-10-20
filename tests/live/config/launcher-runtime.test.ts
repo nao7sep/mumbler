@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
@@ -86,7 +87,9 @@ describe.skipIf(process.platform !== "win32")("Windows launcher process ownershi
       if (grandchild && alive(grandchild)) process.kill(grandchild, "SIGKILL");
       await terminate(runtime);
       await terminate(unrelated);
-      await run("release-if-owner", "current-test-owner");
+      // The copy's own owner file, keyed to this test's root.
+      const copy = await import(pathToFileURL(launcher).href) as { releaseRuntime: (token: string) => Promise<boolean> };
+      await copy.releaseRuntime("current-test-owner");
       await rm(root, { recursive: true, force: true });
     }
   });

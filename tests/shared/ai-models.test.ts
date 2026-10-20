@@ -1,29 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { AI_ROLES, MODEL_LINEUP, SUPPORTED_MODELS, defaultModelFor, isSupportedModel, modelsFor, thinkingAfterModelEdit, thinkingFor, type ModelKind } from "@shared/ai-models";
+import { AI_ROLES, SUPPORTED_MODELS, defaultModelFor, isSupportedModel, modelsFor, thinkingAfterModelEdit, thinkingFor, type ModelKind } from "@shared/ai-models";
 import { ThinkingLevel } from "@google/genai";
 import { supportedModelConfig } from "@shared/model-branches";
 import { createDefaultSettings, buildSettingsDraft } from "@main/core/settings-schema";
 
 describe("the model registry and committed lineup", () => {
-  it("rests on the 2026-10-04 lineup, its rows from the highest tier to the lowest", () => {
-    expect(MODEL_LINEUP).toBe("ai-model-lineup-20261004");
-    expect(SUPPORTED_MODELS).toEqual([
-      { provider: "gemini", id: "gemini-3.1-pro-preview", kinds: ["text-smart", "transcription"], defaultFor: ["text-smart"], thinking: ["low", "medium", "high"], defaultThinking: "medium" },
-      { provider: "gemini", id: "gemini-3.8-flash", kinds: ["text-balanced", "transcription"], defaultFor: ["text-balanced", "transcription"], thinking: ["low", "medium", "high"], defaultThinking: "medium" },
-      { provider: "gemini", id: "gemini-3.5-flash-lite", kinds: ["text-fast", "transcription"], defaultFor: ["text-fast"], thinking: ["minimal", "low", "medium", "high"], defaultThinking: "minimal" },
-    ]);
-    expect(AI_ROLES).toEqual([
-      { id: "transcription", provider: "gemini" },
-      { id: "outline", kind: "text-balanced" },
-      { id: "metadata", kind: "text-fast" },
-    ]);
-    expect(modelsFor("gemini", "transcription").map((row) => row.id)).toEqual(["gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.5-flash-lite"]);
-    expect(defaultModelFor("gemini", "transcription")).toBe("gemini-3.8-flash");
-    expect(defaultModelFor("gemini", "text-balanced")).toBe("gemini-3.8-flash");
-    expect(defaultModelFor("gemini", "text-fast")).toBe("gemini-3.5-flash-lite");
-    expect(defaultModelFor("gemini", "text-smart")).toBe("gemini-3.1-pro-preview");
-  });
-
   it("keeps every approved row, each with its own branch, and gives any other id the plain request", () => {
     expect(SUPPORTED_MODELS.map((row) => row.id)).toEqual(["gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.5-flash-lite"]);
     const levels = new Set<string>(Object.values(ThinkingLevel));

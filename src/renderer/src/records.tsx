@@ -2,10 +2,12 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import { denyUnhandledExternalDrop } from "./app/external-drop-boundary";
+import { applyLayoutVariables } from "./layout-variables";
 import { RendererErrorBoundary } from "./app/RendererErrorBoundary";
 import { RecordsApp } from "./records/RecordsWindow";
 import "./styles.css";
 
+applyLayoutVariables(document.documentElement);
 window.addEventListener("dragover", denyUnhandledExternalDrop);
 window.addEventListener("drop", denyUnhandledExternalDrop);
 

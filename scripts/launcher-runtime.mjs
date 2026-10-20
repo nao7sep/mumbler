@@ -42,32 +42,11 @@ export function ownsProcess(processInfo, identity) {
   const executableName = identity.executable.toLowerCase();
   const macBundleExecutable = `/${identity.label.toLowerCase()}.app/contents/macos/${executableName}`;
   const windowsExecutable = `/${executableName}.exe`;
-  if (identity.kind === "electron") {
-    return combined.includes("/node_modules/.bin/electron-vite")
-      || combined.includes("/node_modules/electron-vite/")
-      || combined.includes("/node_modules/electron/dist/")
-      || combined.includes(macBundleExecutable)
-      || combined.includes(windowsExecutable);
-  }
-  if (identity.kind === "tauri") {
-    return combined.includes("/node_modules/.bin/tauri")
-      || combined.includes("/node_modules/@tauri-apps/cli/")
-      || combined.includes("/node_modules/.bin/vite")
-      || combined.includes("/node_modules/vite/")
-      || combined.includes(`/target/debug/${executableName}`)
-      || combined.includes(`/target/release/${executableName}`)
-      || combined.includes(macBundleExecutable);
-  }
-  if (identity.kind === "web") {
-    return combined.includes("/node_modules/.bin/vite")
-      || combined.includes("/node_modules/.bin/tsx")
-      || combined.includes("/node_modules/.bin/concurrently")
-      || combined.includes("/node_modules/vite/")
-      || combined.includes("/node_modules/tsx/")
-      || combined.includes("/node_modules/concurrently/")
-      || combined.includes("/scripts/run-dev.ts");
-  }
-  throw new Error(`Unknown runtime identity: ${identity.kind}`);
+  return combined.includes("/node_modules/.bin/electron-vite")
+    || combined.includes("/node_modules/electron-vite/")
+    || combined.includes("/node_modules/electron/dist/")
+    || combined.includes(macBundleExecutable)
+    || combined.includes(windowsExecutable);
 }
 
 export function parsePosixProcesses(stdout) {
@@ -254,8 +233,6 @@ async function waitForHttp(url, timeoutMilliseconds) {
 async function waitForExecutable(executablePath, timeoutMilliseconds) {
   const expected = normalized(resolve(executablePath));
   const repoRelativeExpected = normalized(relative(REPO_ROOT, expected));
-  const targetMarker = expected.lastIndexOf("/target/");
-  const targetRelativeExpected = targetMarker >= 0 ? expected.slice(targetMarker + 1) : "";
   const deadline = Date.now() + timeoutMilliseconds;
   while (Date.now() < deadline) {
     const processes = await listProcesses();
@@ -265,10 +242,7 @@ async function waitForExecutable(executablePath, timeoutMilliseconds) {
       const command = normalized(item.commandLine);
       if (executable === expected || command === expected || command.startsWith(expected + " ")) return true;
       const relativeMatch = command === repoRelativeExpected
-        || command.startsWith(repoRelativeExpected + " ")
-        || (targetRelativeExpected && (
-          command === targetRelativeExpected || command.startsWith(targetRelativeExpected + " ")
-        ));
+        || command.startsWith(repoRelativeExpected + " ");
       if (!relativeMatch) return false;
       let parent = byPid.get(item.parentPid);
       while (parent) {
@@ -287,8 +261,8 @@ function parseIdentity(args) {
   const kind = args.shift();
   const label = args.shift();
   const executable = args.shift();
-  if (!["electron", "tauri", "web"].includes(kind) || !label || !executable) {
-    throw new Error("Expected runtime identity: <electron|tauri|web> <label> <executable-name>.");
+  if (kind !== "electron" || !label || !executable) {
+    throw new Error("Expected runtime identity: electron <label> <executable-name>.");
   }
   return { kind, label, executable };
 }
@@ -305,12 +279,6 @@ async function main(args) {
     const token = args.shift();
     if (!token) throw new Error("Expected is-owner <token>.");
     if (!await isRuntimeOwner(token)) process.exitCode = 3;
-    return;
-  }
-  if (command === "release-if-owner") {
-    const token = args.shift();
-    if (!token) throw new Error("Expected release-if-owner <token>.");
-    await releaseRuntime(token);
     return;
   }
   if (command === "stop") {
@@ -347,7 +315,7 @@ async function main(args) {
     await waitForExecutable(executablePath, timeout);
     return;
   }
-  throw new Error("Expected one of: claim, is-owner, release-if-owner, stop, stop-if-owner, check-endpoint, wait-http, wait-process.");
+  throw new Error("Expected one of: claim, is-owner, stop, stop-if-owner, check-endpoint, wait-http, wait-process.");
 }
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";

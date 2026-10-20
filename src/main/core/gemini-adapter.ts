@@ -33,7 +33,7 @@ function generationConfig(model: string, thinking: string | undefined, field?: s
 }
 
 // The SDK's own retries would resend a request that may already have been billed,
-// stacking on top of card-pipeline's retryPolicy. `attempts: 1` disables them so the
+// stacking on top of the pipeline's own retries. `attempts: 1` disables them so the
 // pipeline is the only retry authority. The SDK's ApiError does not expose
 // Retry-After, so the pipeline's own backoff spaces its retries. `timeout` is the
 // same bound already used for the call's AbortSignal, not a second, shorter deadline.

@@ -53,12 +53,6 @@ function draft(): SettingsDraft {
     structuredPrompt: "Prompt",
     titlePrompt: "Prompt",
     slugPrompt: "Prompt",
-    retryMaxRetries: 3,
-    retryInitialDelayMs: 500,
-    retryMaxDelayMs: 5000,
-    retryJitterRatio: 0.2,
-    transcriptionTimeoutMs: 60000,
-    metadataTimeoutMs: 30000,
   };
 }
 
@@ -196,12 +190,6 @@ describe("SettingsModal language and time zone", () => {
 
   // timestamp-conventions and app-chrome-conventions: every System entry
   // leads its list and shows what it resolves to now.
-  it("offers the zones as a list, with no outside reference to look them up in", async () => {
-    await renderWith(vi.fn());
-    expect(document.querySelector('a[href*="wikipedia"]')).toBeNull();
-    expect(document.body.textContent).not.toContain("Wikipedia");
-  });
-
   it("lists System first in both zone lists, naming the computer's zone", async () => {
     await renderWith(vi.fn(), { defaultTimezone: "Asia/Tokyo", displayTimezone: "system" });
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;

@@ -6,7 +6,6 @@ import {
   getSettingsNumberIssues,
   getTimestampPatternIssues,
   isPositiveIntegerSetting,
-  isRatioSetting,
 } from "@shared/settings-validation";
 
 function validDraft(): SettingsDraft {
@@ -35,12 +34,6 @@ function validDraft(): SettingsDraft {
     structuredPrompt: "{transcript}",
     titlePrompt: "{transcript}",
     slugPrompt: "{title}",
-    retryMaxRetries: 3,
-    retryInitialDelayMs: 500,
-    retryMaxDelayMs: 5000,
-    retryJitterRatio: 0.2,
-    transcriptionTimeoutMs: 60000,
-    metadataTimeoutMs: 30000,
   };
 }
 
@@ -56,20 +49,6 @@ describe("isPositiveIntegerSetting", () => {
     expect(isPositiveIntegerSetting(2.5)).toBe(false);
     expect(isPositiveIntegerSetting(Number.NaN)).toBe(false);
     expect(isPositiveIntegerSetting(Number.POSITIVE_INFINITY)).toBe(false);
-  });
-});
-
-describe("isRatioSetting", () => {
-  it("accepts the inclusive 0..1 range", () => {
-    expect(isRatioSetting(0)).toBe(true);
-    expect(isRatioSetting(0.2)).toBe(true);
-    expect(isRatioSetting(1)).toBe(true);
-  });
-
-  it("rejects values outside 0..1 and non-finite values", () => {
-    expect(isRatioSetting(-0.1)).toBe(false);
-    expect(isRatioSetting(1.5)).toBe(false);
-    expect(isRatioSetting(Number.NaN)).toBe(false);
   });
 });
 
@@ -103,29 +82,19 @@ describe("getSettingsNumberIssues", () => {
 
   it("flags a fractional value in an integer field", () => {
     const draft = validDraft();
-    draft.transcriptionTimeoutMs = 1500.5;
+    draft.concurrencyLimit = 1.5;
     expect(getSettingsNumberErrors(draft)).toEqual([
-      "Transcription timeout must be a positive integer.",
-    ]);
-  });
-
-  it("flags an out-of-range jitter ratio", () => {
-    const draft = validDraft();
-    draft.retryJitterRatio = 7;
-    expect(getSettingsNumberErrors(draft)).toEqual([
-      "Retry jitter must be between 0 and 1.",
+      "Concurrent transcriptions must be a positive integer.",
     ]);
   });
 
   it("reports every invalid field in form order", () => {
     const draft = validDraft();
     draft.skipIntervalSec = 0;
-    draft.retryJitterRatio = 2;
-    draft.metadataTimeoutMs = Number.NaN;
+    draft.concurrencyLimit = Number.NaN;
     expect(getSettingsNumberErrors(draft)).toEqual([
       "Skip interval must be a positive integer.",
-      "Metadata generation timeout must be a positive integer.",
-      "Retry jitter must be between 0 and 1.",
+      "Concurrent transcriptions must be a positive integer.",
     ]);
   });
 });

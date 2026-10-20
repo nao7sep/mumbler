@@ -71,7 +71,7 @@ const TEXT_PAIRS: ReadonlyArray<[string, string]> = [
 ];
 
 // A control edge over the surface it sits on, read against that surface. The
-// painted check over every surface is company/tools/measure-lines.
+// lines as painted on every surface are measured outside this suite.
 const CONTROL_EDGE_PAIRS: ReadonlyArray<[string, string]> = [
   ["--line-control", "--surface-raised"],
   ["--line-control-on-muted", "--surface-muted"],

@@ -1,5 +1,4 @@
-// Per-app realization of the fleet text-cleanup conventions
-// (company/conventions/20260619-004022-utc-text-cleanup-conventions.md).
+// Mumbler's copy of the fleet's text-cleanup rules (text-cleanup-conventions).
 //
 // There is no shared package: each app copies the canonical algorithm into its
 // own small helper and tests it locally. Mumbler stores AI-generated bodies

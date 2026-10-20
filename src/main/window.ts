@@ -2,7 +2,7 @@ import { BrowserWindow, Menu, nativeTheme } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from "@shared/layout";
+import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH, WINDOW_DEFAULT_HEIGHT, WINDOW_DEFAULT_WIDTH } from "@shared/layout";
 import { configureWindowMinimum } from "./window-minimum";
 import { isAllowedExternalUrl, openExternalUrl } from "./external-url";
 import type { ApplicationRuntime } from "./core/app-runtime";
@@ -65,8 +65,8 @@ export function buildWindowOptions(): Electron.BrowserWindowConstructorOptions {
       bounds: true,
       displayMode: process.platform === "win32",
     },
-    width: 1480,
-    height: 940,
+    width: WINDOW_DEFAULT_WIDTH,
+    height: WINDOW_DEFAULT_HEIGHT,
     // Derived — do not hand-edit. Sourced from @shared/layout, which sums the
     // pane minimums plus the fixed chrome.
     minWidth: WINDOW_MIN_WIDTH,

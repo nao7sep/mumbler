@@ -10,7 +10,7 @@ import { TOOL_NAMES } from "./registry";
 // re-derived is stored, and both survivors are NETWORK facts with no on-disk
 // source: the last-known latest and the last *successful* check time. `present`
 // is NOT persisted — it is scanned from disk at startup — and neither is the
-// INSTALLED version, which is read from the binary itself (installed-version.ts):
+// INSTALLED version, which is read from the binary itself:
 // a fact about a file kept away from that file drifts the moment an install does
 // not write the record, and a present tool with no recorded version can only read
 // as "installed (not checked)" forever. No integrity flag, fault flag, or

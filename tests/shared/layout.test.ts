@@ -16,11 +16,10 @@ import {
   WINDOW_MIN_HEIGHT,
   WINDOW_MIN_WIDTH,
   WORKSPACE_GAP,
+  WINDOW_DEFAULT_HEIGHT,
+  WINDOW_DEFAULT_WIDTH,
 } from "@shared/layout";
 
-// The app's designed default size (mirrors buildWindowOptions in src/main/window.ts).
-const DEFAULT_WIDTH = 1480;
-const DEFAULT_HEIGHT = 940;
 
 describe("window minimum derivation", () => {
   it("derives WINDOW_MIN_WIDTH from the pane minimums + gap + chrome", () => {
@@ -38,8 +37,8 @@ describe("window minimum derivation", () => {
   it("keeps the derived minimums at or below the default size", () => {
     // The window must be able to open at its default size, so the default can
     // never be smaller than the enforced minimum.
-    expect(WINDOW_MIN_WIDTH).toBeLessThanOrEqual(DEFAULT_WIDTH);
-    expect(WINDOW_MIN_HEIGHT).toBeLessThanOrEqual(DEFAULT_HEIGHT);
+    expect(WINDOW_MIN_WIDTH).toBeLessThanOrEqual(WINDOW_DEFAULT_WIDTH);
+    expect(WINDOW_MIN_HEIGHT).toBeLessThanOrEqual(WINDOW_DEFAULT_HEIGHT);
   });
 
   it("sources QUEUE_MIN_WIDTH from the queue-pane bounds", () => {

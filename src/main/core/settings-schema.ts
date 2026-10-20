@@ -20,7 +20,7 @@ import {
   parseUtcMs,
 } from "@shared/timestamps";
 import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
-import { isPositiveIntegerSetting, isRatioSetting } from "@shared/settings-validation";
+import { isPositiveIntegerSetting } from "@shared/settings-validation";
 import { CARD_STATUSES, THEME_PREFERENCES } from "@shared/app-shell";
 import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
 import { FORMAT_VERSIONS } from "./format-versions";
@@ -106,26 +106,6 @@ function promptsIssue(value: unknown): string | null {
     promptIssue(prompts.slug as string, ["{title}"], "Slug prompt");
 }
 
-function retryPolicyIssue(value: unknown): string | null {
-  const policy = asRecord(value);
-  if (policy === null) return "Retry policy must be a set of numbers.";
-  const issue = positiveInteger("Retry max retries", policy.maxRetries) ??
-    positiveInteger("Retry initial delay", policy.initialDelayMs) ??
-    positiveInteger("Retry max delay", policy.maxDelayMs) ??
-    (typeof policy.jitterRatio === "number" && isRatioSetting(policy.jitterRatio) ? null : "Retry jitter ratio must be between 0 and 1.");
-  if (issue !== null) return issue;
-  return (policy.maxDelayMs as number) < (policy.initialDelayMs as number)
-    ? "Retry max delay must be greater than or equal to retry initial delay."
-    : null;
-}
-
-function timeoutsIssue(value: unknown): string | null {
-  const timeouts = asRecord(value);
-  if (timeouts === null) return "Timeouts must be a set of numbers.";
-  return positiveInteger("Transcription timeout", timeouts.transcriptionMs) ??
-    positiveInteger("Metadata timeout", timeouts.metadataMs);
-}
-
 // The declared set keys also own the shape boundary and unknown-key filtering.
 const SETTINGS_SETS = {
   language: (value) => (value === "system" || isLanguage(value) ? null : "Language must be System or a supported language."),
@@ -147,8 +127,6 @@ const SETTINGS_SETS = {
   "gemini.thinking.metadata": text("Metadata thinking"),
   concurrencyLimit: positive("Concurrency limit"),
   prompts: promptsIssue,
-  retryPolicy: retryPolicyIssue,
-  timeouts: timeoutsIssue,
   checkUpdatesAtLaunch: (value) => (typeof value === "boolean" ? null : "Check for updates at launch must be on or off."),
 } satisfies Record<keyof MumblerSettings, SetValidator>;
 const SETTINGS_SET_KEYS = Object.keys(SETTINGS_SETS) as (keyof MumblerSettings)[];
@@ -593,16 +571,6 @@ export function createDefaultSettings(): MumblerSettings {
       slug:
         "Create a short English URL slug for the title. Translate the meaning into English; don't romanize words from another language. Names keep their usual English spelling. Lowercase a–z, digits, and hyphens only. No leading or trailing hyphen. Aim for 3–6 words.\n\n<title>\n{title}\n</title>",
     },
-    retryPolicy: {
-      maxRetries: 3,
-      initialDelayMs: 1000,
-      maxDelayMs: 16000,
-      jitterRatio: 0.2,
-    },
-    timeouts: {
-      transcriptionMs: 30 * 60 * 1000,
-      metadataMs: 5 * 60 * 1000,
-    },
     // Managed audio tools default to a non-blocking update check on launch.
     // Nothing auto-downloads: a missing required tool opens the Audio Tools
     // surface for the user to install it.
@@ -841,12 +809,6 @@ export function buildSettingsDraft(
     structuredPrompt: settings.prompts.structured,
     titlePrompt: settings.prompts.title,
     slugPrompt: settings.prompts.slug,
-    retryMaxRetries: settings.retryPolicy.maxRetries,
-    retryInitialDelayMs: settings.retryPolicy.initialDelayMs,
-    retryMaxDelayMs: settings.retryPolicy.maxDelayMs,
-    retryJitterRatio: settings.retryPolicy.jitterRatio,
-    transcriptionTimeoutMs: settings.timeouts.transcriptionMs,
-    metadataTimeoutMs: settings.timeouts.metadataMs,
   };
 }
 
@@ -901,16 +863,6 @@ export function applySettingsDraft(
       structured: multiline(draft.structuredPrompt),
       title: multiline(draft.titlePrompt),
       slug: multiline(draft.slugPrompt),
-    },
-    retryPolicy: {
-      maxRetries: draft.retryMaxRetries,
-      initialDelayMs: draft.retryInitialDelayMs,
-      maxDelayMs: draft.retryMaxDelayMs,
-      jitterRatio: draft.retryJitterRatio,
-    },
-    timeouts: {
-      transcriptionMs: draft.transcriptionTimeoutMs,
-      metadataMs: draft.metadataTimeoutMs,
     },
   };
   for (const key of SETTINGS_SET_KEYS) {

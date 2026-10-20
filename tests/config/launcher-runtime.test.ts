@@ -73,3 +73,21 @@ describe("launcher process identity", () => {
     }
   });
 });
+
+// The launchers find the running app by its product name, which the packaged
+// bundle and executable take from electron-builder.yml.
+describe("the launchers' app identity", () => {
+  it("names the app as packaging does", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const productName = /^productName:\s*(.+)$/m.exec(readFileSync(join(REPO_ROOT, "electron-builder.yml"), "utf8"))?.[1]?.trim();
+    expect(productName).toBeTruthy();
+    const scripts = join(REPO_ROOT, "scripts");
+    const identities = readdirSync(scripts).filter((name) => /\.(command|ps1)$/.test(name)).flatMap((name) =>
+      [...readFileSync(join(scripts, name), "utf8").matchAll(/electron"?,?\s+"([^"]+)"[,\s]+"([^"]+)"/g)].map((match) => [name, match[1], match[2]]));
+    expect(identities.length, "every launcher passes the identity").toBeGreaterThanOrEqual(6);
+    for (const [name, label, executable] of identities) {
+      expect([label, executable], name).toEqual([productName, productName]);
+    }
+  });
+});

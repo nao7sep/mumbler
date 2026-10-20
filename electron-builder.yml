@@ -17,25 +17,21 @@ files:
   - "!**/*.d.mts"
   - "!**/*.d.cts"
 
-# Tahoe "Liquid Glass" icon: the liquid-glass-icon tool deploys build/Assets.car (committed in
-# company/assets) here. macOS 26 reads CFBundleIconName below → this catalog; older macOS reads
-# CFBundleIconFile → build/icon.icns. Building does NOT need Xcode — the Assets.car is prebuilt.
+# Tahoe "Liquid Glass" icon: the liquid-glass-icon tool deploys a prebuilt build/Assets.car
+# here. macOS 26 reads CFBundleIconName below → this catalog; older macOS reads
+# CFBundleIconFile → build/icon.icns. Building does NOT need Xcode.
 extraResources:
   - from: build/Assets.car
     to: Assets.car
   - from: LICENSE
     to: LICENSE.txt
-  - from: node_modules/electron/dist/LICENSE
-    to: electron/LICENSE
-  - from: node_modules/electron/dist/LICENSES.chromium.html
-    to: electron/LICENSES.chromium.html
 
 mac:
   category: public.app-category.productivity
   icon: build/icon.icns
   extendInfo:
     CFBundleIconName: broadcast-mic-soundwaves
-    # The interface languages (src/shared/i18n/languages.ts), so AppKit offers
+    # The interface languages, checked against the app's own list by a test, so AppKit offers
     # its own menu items (Services, Emoji & Symbols, Start Dictation) in them.
     CFBundleLocalizations:
       - en

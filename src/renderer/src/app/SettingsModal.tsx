@@ -63,16 +63,15 @@ function ModelField({ label, hint, value, thinking, onChange }: {
   );
 }
 
-// The Settings tabs: the four small sections share General, and the old AI
-// section splits by concern — provider setup (key, models, concurrency), the
-// prompt texts, and the retry/timeout pipeline knobs.
-const SETTINGS_TABS = ["general", "ai", "prompts", "pipeline"] as const;
+// The Settings tabs: the four small sections share General, and the AI
+// settings split by concern — provider setup (key, models, concurrency) and
+// the prompt texts.
+const SETTINGS_TABS = ["general", "ai", "prompts"] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 const SETTINGS_TAB_LABELS: Record<SettingsTab, MessageKey> = {
   general: "settings.tabGeneral",
   ai: "settings.tabAi",
   prompts: "settings.tabPrompts",
-  pipeline: "settings.tabPipeline",
 };
 
 /** The language's System entry: the language it resolves to now, named in the
@@ -599,98 +598,6 @@ export function SettingsModal({
                   >
                     {t("settings.resetPrompts")}
                   </button>
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <div className="app-tabpanel" {...settingsTablist.getPanelProps("pipeline")} hidden={activeTab !== "pipeline"}>
-            <section className="settings-section">
-              <div className="settings-number-grid">
-                <div>
-                  <label className="field">
-                    <span>{t("settings.maxRetries")}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={draft.retryMaxRetries}
-                      {...numberFieldProps("retryMaxRetries")}
-                      onChange={(event) => onChange({ ...draft, retryMaxRetries: Number.parseInt(event.target.value, 10) })}
-                    />
-                  </label>
-                  <p className="field-hint">{t("settings.maxRetriesHint")}</p>
-                </div>
-                <div>
-                  <label className="field">
-                    <span>{t("settings.initialRetryDelay")}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={draft.retryInitialDelayMs}
-                      {...numberFieldProps("retryInitialDelayMs")}
-                      onChange={(event) => onChange({ ...draft, retryInitialDelayMs: Number.parseInt(event.target.value, 10) })}
-                    />
-                  </label>
-                  <p className="field-hint">{t("settings.initialRetryDelayHint")}</p>
-                </div>
-                <div>
-                  <label className="field">
-                    <span>{t("settings.maxRetryDelay")}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={draft.retryMaxDelayMs}
-                      {...numberFieldProps("retryMaxDelayMs")}
-                      onChange={(event) => onChange({ ...draft, retryMaxDelayMs: Number.parseInt(event.target.value, 10) })}
-                    />
-                  </label>
-                  <p className="field-hint">{t("settings.maxRetryDelayHint")}</p>
-                </div>
-                <div>
-                  <label className="field">
-                    <span>{t("settings.retryJitter")}</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={draft.retryJitterRatio}
-                      {...numberFieldProps("retryJitterRatio")}
-                      onChange={(event) => onChange({ ...draft, retryJitterRatio: Number.parseFloat(event.target.value) })}
-                    />
-                  </label>
-                  <p className="field-hint">{t("settings.retryJitterHint")}</p>
-                </div>
-                <div>
-                  <label className="field">
-                    <span>{t("settings.transcriptionTimeout")}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1000}
-                      value={draft.transcriptionTimeoutMs}
-                      {...numberFieldProps("transcriptionTimeoutMs")}
-                      onChange={(event) => onChange({ ...draft, transcriptionTimeoutMs: Number.parseInt(event.target.value, 10) })}
-                    />
-                  </label>
-                  <p className="field-hint">{t("settings.transcriptionTimeoutHint")}</p>
-                </div>
-                <div>
-                  <label className="field">
-                    <span>{t("settings.metadataTimeout")}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1000}
-                      value={draft.metadataTimeoutMs}
-                      {...numberFieldProps("metadataTimeoutMs")}
-                      onChange={(event) => onChange({ ...draft, metadataTimeoutMs: Number.parseInt(event.target.value, 10) })}
-                    />
-                  </label>
-                  <p className="field-hint">{t("settings.metadataTimeoutHint")}</p>
                 </div>
               </div>
             </section>

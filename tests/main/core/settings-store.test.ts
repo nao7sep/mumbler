@@ -570,15 +570,15 @@ describe("settings store", () => {
     await writeFile(settingsPath(), JSON.stringify({
       formatVersion: 1,
       prompts: { structured: "custom" },
-      retryPolicy: { maxRetries: 5 },
-      timeouts: { transcriptionMs: 10 },
+      skipIntervalSec: 0,
+      previewSnippetSeconds: "ten",
       theme: "sepia",
     }));
     const store = createSettingsStore(settingsPath(), dir, (key) => warnings.push(key));
     const { value: loaded, unusable } = await store.load();
     expect(loaded).toEqual(createDefaultSettings());
-    expect(warnings).toEqual(["theme", "prompts", "retryPolicy", "timeouts"]);
-    expect(unusable).toEqual(["prompts", "retryPolicy", "timeouts", "theme"]);
+    expect(warnings).toEqual(["theme", "skipIntervalSec", "previewSnippetSeconds", "prompts"]);
+    expect(unusable).toEqual(["prompts", "skipIntervalSec", "previewSnippetSeconds", "theme"]);
 
     // A save that does not come from the Settings window keeps them as written.
     await store.save({ ...loaded, concurrencyLimit: 5 });
@@ -586,8 +586,8 @@ describe("settings store", () => {
       formatVersion: 1,
       concurrencyLimit: 5,
       prompts: { structured: "custom" },
-      retryPolicy: { maxRetries: 5 },
-      timeouts: { transcriptionMs: 10 },
+      skipIntervalSec: 0,
+      previewSnippetSeconds: "ten",
       theme: "sepia",
     });
 
@@ -674,7 +674,6 @@ describe("settings store", () => {
     ["prompts", { structured: "No placeholder", title: "{transcript}", slug: "{title}" }],
     ["prompts", { structured: "{transcript}", title: "No placeholder", slug: "{title}" }],
     ["prompts", { structured: "{transcript}", title: "{structured}", slug: "No placeholder" }],
-    ["retryPolicy", { maxRetries: 3, initialDelayMs: 5000, maxDelayMs: 1000, jitterRatio: 0.2 }],
   ])("reads %s %j, which Save refuses, as its built-in", async (key, value) => {
     const warnings: string[] = [];
     await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, [key]: value }));

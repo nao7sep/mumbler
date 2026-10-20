@@ -246,8 +246,7 @@ describe("validation helpers", () => {
   });
 });
 
-// Names as recorders, phones and apps write them (company research
-// recording-file-names), read by the built-in patterns.
+// Names as recorders, phones and apps write them, read by the built-in patterns.
 describe("the built-in timestamp patterns", () => {
   it.each([
     ["191010_1010", "2019-10-10 10:10:00"], // Sony

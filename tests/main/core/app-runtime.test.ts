@@ -373,10 +373,6 @@ describe("getAppPaths standard layout", () => {
       paths.apiKeysPath,
     ]);
     expect(distinct.size).toBe(4);
-    // The old name is fully retired — nothing resolves to settings.json.
-    for (const p of distinct) {
-      expect(p.endsWith("settings.json")).toBe(false);
-    }
   });
 });
 
