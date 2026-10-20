@@ -1,6 +1,5 @@
 import { BrowserWindow, Menu, nativeTheme } from "electron";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import { WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH, WINDOW_DEFAULT_HEIGHT, WINDOW_DEFAULT_WIDTH } from "@shared/layout";
 import { configureWindowMinimum } from "./window-minimum";
@@ -13,7 +12,6 @@ import { buildContextMenuTemplate } from "./app-menu";
 
 export { isAllowedExternalUrl } from "./external-url";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Production Content-Security-Policy (defense-in-depth on top of context
 // isolation + sandbox). Applied only to the packaged build, not the dev server,
@@ -78,7 +76,7 @@ export function buildWindowOptions(): Electron.BrowserWindowConstructorOptions {
     titleBarStyle: "default",
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.cjs"),
+      preload: join(import.meta.dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -142,7 +140,7 @@ export async function loadRendererPage(
     window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
       callback({ responseHeaders: withContentSecurityPolicy(details.responseHeaders) });
     });
-    await window.loadFile(join(__dirname, "../renderer", page));
+    await window.loadFile(join(import.meta.dirname, "../renderer", page));
   }
 }
 

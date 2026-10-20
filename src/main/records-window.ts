@@ -1,6 +1,5 @@
 import { BrowserWindow, nativeTheme } from "electron";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import { APP_SHELL_EVENTS } from "@shared/app-shell";
 import { RECORDS_WINDOW_MIN_HEIGHT, RECORDS_WINDOW_MIN_WIDTH } from "@shared/layout";
@@ -11,7 +10,6 @@ import { loadRendererPage } from "./window";
 import { configureWindowMinimum } from "./window-minimum";
 import { createWindowWithUsablePersistedBounds } from "./window-state-recovery";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // The records window shows records.sqlite3. It is a durable secondary window
 // with its own placement (window-conventions, Placement), and there is only
@@ -34,7 +32,7 @@ export function buildRecordsWindowOptions(title: string): Electron.BrowserWindow
     backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.cjs"),
+      preload: join(import.meta.dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
