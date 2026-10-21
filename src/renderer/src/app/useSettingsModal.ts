@@ -79,7 +79,9 @@ export function useSettingsModal({
   async function handlePickSettingsOutputDirectory(): Promise<void> {
     setIsPickingSettingsOutputDirectory(true);
     try {
-      const nextPath = await window.mumbler.pickOutputDirectory();
+      const nextPath = await window.mumbler.pickOutputDirectory(
+        settingsDraft?.outputDirectory, settingsDraft?.literalOutputDirectory,
+      );
       if (nextPath !== null) {
         setSettingsDraft((current) =>
           current === null
@@ -102,7 +104,9 @@ export function useSettingsModal({
   async function handlePickSettingsBackupDirectory(): Promise<void> {
     setIsPickingSettingsBackupDirectory(true);
     try {
-      const nextPath = await window.mumbler.pickOutputDirectory();
+      const nextPath = await window.mumbler.pickBackupDirectory(
+        settingsDraft?.backupDirectory, settingsDraft?.literalBackupDirectory,
+      );
       if (nextPath !== null) {
         setSettingsDraft((current) =>
           current === null

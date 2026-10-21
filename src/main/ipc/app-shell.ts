@@ -242,13 +242,23 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     return runtime.cancelCardProcessing(cardId);
   });
 
-  handle(APP_SHELL_CHANNELS.pickOutputDirectory, (event) => {
+  handle(APP_SHELL_CHANNELS.pickOutputDirectory, (event, directory?: string, literalDirectory?: string) => {
+    if (directory !== undefined) assertString(directory, "directory");
+    if (literalDirectory !== undefined) assertString(literalDirectory, "literalDirectory");
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window === null) {
       throw new Error("Choose output directory requires an active window.");
     }
 
-    return runtime.pickOutputDirectory(window);
+    return runtime.pickOutputDirectory(window, directory, literalDirectory);
+  });
+
+  handle(APP_SHELL_CHANNELS.pickBackupDirectory, (event, directory?: string, literalDirectory?: string) => {
+    if (directory !== undefined) assertString(directory, "directory");
+    if (literalDirectory !== undefined) assertString(literalDirectory, "literalDirectory");
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window === null) throw new Error("Choose Recordings directory requires an active window.");
+    return runtime.pickBackupDirectory(window, directory, literalDirectory);
   });
 
   handle(APP_SHELL_CHANNELS.chooseOriginalsDirectory, (event) => {

@@ -812,19 +812,24 @@ export function buildSettingsDraft(
   };
 }
 
+export function resolveSettingsDirectory(
+  value: string,
+  literal: string | undefined,
+  homeDirectory: string = homedir(),
+): string | null {
+  if (value.trim().length === 0) return null;
+  // A picker and an unchanged stored reference have already been resolved.
+  // Only newly authored text accepts expressions; trimming a literal filename
+  // would also change which directory the user selected.
+  if (value === literal && isAbsolute(value)) return value;
+  return resolvePathFromHome(value, homeDirectory);
+}
+
 export function applySettingsDraft(
   current: MumblerSettings,
   draft: SettingsDraft,
   homeDirectory: string = homedir(),
 ): MumblerSettings {
-  const directory = (value: string, literal: string | undefined): string | null => {
-    if (value.trim().length === 0) return null;
-    // A picker and an unchanged stored reference have already been resolved.
-    // Only newly authored text accepts expressions; trimming a literal filename
-    // would also change which directory the user selected.
-    if (value === literal && isAbsolute(value)) return value;
-    return resolvePathFromHome(value, homeDirectory);
-  };
   const next: MumblerSettings = {
     ...current,
     language: normalizeLanguagePreference(draft.language),
@@ -833,8 +838,8 @@ export function applySettingsDraft(
     // Free text; blank means the built-in default stack.
     uiFontFamily: singleLine(draft.uiFontFamily),
     // Files
-    outputDirectory: directory(draft.outputDirectory, draft.literalOutputDirectory),
-    backupDirectory: directory(draft.backupDirectory, draft.literalBackupDirectory),
+    outputDirectory: resolveSettingsDirectory(draft.outputDirectory, draft.literalOutputDirectory, homeDirectory),
+    backupDirectory: resolveSettingsDirectory(draft.backupDirectory, draft.literalBackupDirectory, homeDirectory),
     // Import
     defaultTimezone: singleLine(draft.defaultTimezone),
     displayTimezone: singleLine(draft.displayTimezone),

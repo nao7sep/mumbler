@@ -30,7 +30,7 @@ const RUNTIME_METHODS = [
   "getSnapshot", "dismissFirstRunSetup", "getSettingsDraft", "getDefaultPrompts",
   "openImportDialog", "importDroppedPaths", "updatePendingImportDrafts", "confirmPendingImports",
   "selectCard", "duplicateCard", "updateCardTrim", "getCardMediaSource", "generateCardStep",
-  "cancelCardProcessing", "pickOutputDirectory", "openOutputDirectory", "saveSettingsDraft",
+  "cancelCardProcessing", "pickOutputDirectory", "pickBackupDirectory", "openOutputDirectory", "saveSettingsDraft",
   "setGeminiApiKey", "clearGeminiApiKey", "chooseOutputDirectory", "saveCard", "removeCard",
   "reportRendererError", "reportRendererDiagnostic", "dismissAppWideError", "resetState",
   "cancelPendingImports", "provisionTool", "cancelToolProvision", "checkTools", "cancelToolCheck",
@@ -142,19 +142,31 @@ describe("the app-shell IPC boundary", () => {
     },
   );
 
-  it.each(["openImportDialog", "pickOutputDirectory", "chooseOutputDirectory"] as const)(
+  it.each(["openImportDialog", "pickOutputDirectory", "pickBackupDirectory", "chooseOutputDirectory"] as const)(
     "gives %s the window that asked, and refuses when the sender has none",
     async (channel) => {
       const window = { id: 1 };
       electron.window = window;
       await invoke(APP_SHELL_CHANNELS[channel]);
-      expect(runtime[channel]).toHaveBeenCalledExactlyOnceWith(window);
+      expect(runtime[channel]).toHaveBeenCalledExactlyOnceWith(
+        ...(["pickOutputDirectory", "pickBackupDirectory"].includes(channel) ? [window, undefined, undefined] : [window]),
+      );
 
       electron.window = null;
       await expect(invoke(APP_SHELL_CHANNELS[channel])).rejects.toThrow(/requires an active window/);
       expect(runtime[channel]).toHaveBeenCalledOnce();
     },
   );
+
+  it.each(["pickOutputDirectory", "pickBackupDirectory"] as const)("carries and validates %s draft hints", async (channel) => {
+    const window = { id: 1 };
+    electron.window = window;
+    await invoke(APP_SHELL_CHANNELS[channel], "~/draft", "/previous/$LITERAL");
+    expect(runtime[channel]).toHaveBeenCalledExactlyOnceWith(window, "~/draft", "/previous/$LITERAL");
+    await expect(invoke(APP_SHELL_CHANNELS[channel], 1)).rejects.toThrow(/directory must be a string/);
+    await expect(invoke(APP_SHELL_CHANNELS[channel], "draft", {})).rejects.toThrow(/literalDirectory must be a string/);
+    expect(runtime[channel]).toHaveBeenCalledOnce();
+  });
 
   it("opens the records window through main's window owner", async () => {
     windows.openRecords.mockClear();

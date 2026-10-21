@@ -1,5 +1,5 @@
 import { access, link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { dialog, shell } from "electron";
 
@@ -325,6 +325,39 @@ afterEach(async () => {
 });
 
 describe("first-run setup and user-owned destinations", () => {
+  it.each([
+    ["pickOutputDirectory", "outputDirectory", "defaultOutputDirectory", "dialog.chooseOutputFolder"],
+    ["pickBackupDirectory", "backupDirectory", "defaultBackupDirectory", "settings.backupDirectory"],
+  ] as const)("initializes %s from current intent without saving", async (method, field, defaultField, title) => {
+    const owner = {} as never;
+    const saved = join(root, "saved", field);
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), [field]: saved });
+    const before = await savedSettings();
+    const selected = join(root, "$MUMBLER_PICKER_PART", "%MUMBLER_PICKER_PART%", "selected ");
+    const picker = vi.mocked(dialog.showOpenDialog);
+    const check = async (value: string | undefined, literal: string | undefined, expected: string) => {
+      picker.mockResolvedValueOnce({ canceled: false, filePaths: [selected] });
+      expect(await runtime[method](owner, value, literal)).toBe(selected);
+      expect(picker).toHaveBeenLastCalledWith(owner, {
+        title: runtime.translator().t(title), defaultPath: expected, properties: ["openDirectory", "createDirectory"],
+      });
+      expect(await savedSettings()).toEqual(before);
+    };
+    vi.stubEnv("MUMBLER_PICKER_PART", "expanded");
+    try {
+      await check(undefined, undefined, saved);
+      await check("~/typed", saved, join(homedir(), "typed"));
+      await check("$MUMBLER_PICKER_PART/relative", saved, join(homedir(), "expanded", "relative"));
+      await check(selected, selected, selected);
+      await check("", saved, runtime.getSettingsDraft()[defaultField]);
+      picker.mockResolvedValueOnce({ canceled: true, filePaths: [selected] });
+      expect(await runtime[method](owner, saved, saved)).toBeNull();
+      picker.mockResolvedValueOnce({ canceled: false, filePaths: [] });
+      expect(await runtime[method](owner, saved, saved)).toBeNull();
+      expect(await savedSettings()).toEqual(before);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("keeps dismissed setup consumed in later window snapshots without writing skipped choices", async () => {
     expect(runtime.getSnapshot().firstRun).toBe(true);
     runtime.dismissFirstRunSetup();

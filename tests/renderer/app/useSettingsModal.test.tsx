@@ -12,6 +12,7 @@ let root: Root | null = null;
 let state: ReturnType<typeof useSettingsModal>;
 const saveSettingsDraft = vi.fn<MumblerShellApi["saveSettingsDraft"]>();
 const pickOutputDirectory = vi.fn<MumblerShellApi["pickOutputDirectory"]>();
+const pickBackupDirectory = vi.fn<MumblerShellApi["pickBackupDirectory"]>();
 const initial = () => buildSettingsDraft(createDefaultSettings(), "", "", true);
 let opened = initial;
 let unsaved: { report: () => string[]; discard: () => void } | null = null;
@@ -22,6 +23,7 @@ function Harness() { state = useSettingsModal({ onSnapshotUpdate: vi.fn(), onErr
 beforeEach(async () => {
   saveSettingsDraft.mockReset();
   pickOutputDirectory.mockReset();
+  pickBackupDirectory.mockReset();
   clearGeminiApiKey.mockReset();
   onNotice.mockReset();
   onLastingNotice.mockReset();
@@ -34,6 +36,7 @@ beforeEach(async () => {
       getDefaultPrompts: vi.fn(async () => createDefaultSettings().prompts),
       saveSettingsDraft,
       pickOutputDirectory,
+      pickBackupDirectory,
       clearGeminiApiKey,
       onUnsavedDrafts: (report, discard) => { unsaved = { report, discard }; return () => { unsaved = null; }; },
     } satisfies Partial<MumblerShellApi>,
@@ -83,6 +86,30 @@ describe("a quit or window close", () => {
 });
 
 describe("picked Settings directories", () => {
+  it.each([
+    ["outputDirectory", "literalOutputDirectory", pickOutputDirectory, "handlePickSettingsOutputDirectory"],
+    ["backupDirectory", "literalBackupDirectory", pickBackupDirectory, "handlePickSettingsBackupDirectory"],
+  ] as const)("uses the unsaved %s for repeated Browse and leaves Cancel unchanged", async (field, literal, picker, action) => {
+    await act(async () => state.handleOpenSettings());
+    await act(async () => state.setSettingsDraft((draft) => draft && { ...draft, [field]: "~/typed-folder" }));
+    const picked = join(parse(process.cwd()).root, "chosen", "$LITERAL");
+    picker.mockResolvedValueOnce(picked).mockResolvedValueOnce(null);
+    await act(async () => state[action]());
+    expect(picker).toHaveBeenNthCalledWith(1, "~/typed-folder", "");
+    expect(state.settingsDraft).toMatchObject({ [field]: picked, [literal]: picked });
+    const beforeCancel = state.settingsDraft;
+    await act(async () => state[action]());
+    expect(picker).toHaveBeenNthCalledWith(2, picked, picked);
+    expect(state.settingsDraft).toBe(beforeCancel);
+    expect(state.isSettingsDirty).toBe(true);
+    expect(saveSettingsDraft).not.toHaveBeenCalled();
+    expect(field === "outputDirectory" ? pickBackupDirectory : pickOutputDirectory).not.toHaveBeenCalled();
+    await act(async () => state.handleRequestCloseSettings());
+    expect(state.showDiscardConfirm).toBe(true);
+    await act(async () => state.handleConfirmDiscardSettings());
+    expect(saveSettingsDraft).not.toHaveBeenCalled();
+  });
+
   it("saves both picker results as literal paths even when their names contain environment syntax", async () => {
     const home = join(parse(process.cwd()).root, "Users", "test");
     const output = join(home, "$MUMBLER_TEST_PICKED", "Exports");
@@ -90,7 +117,8 @@ describe("picked Settings directories", () => {
     vi.stubEnv("MUMBLER_TEST_PICKED", "redirected");
     try {
       await act(async () => state.handleOpenSettings());
-      pickOutputDirectory.mockResolvedValueOnce(output).mockResolvedValueOnce(originals);
+      pickOutputDirectory.mockResolvedValueOnce(output);
+      pickBackupDirectory.mockResolvedValueOnce(originals);
       await act(async () => state.handlePickSettingsOutputDirectory());
       await act(async () => state.handlePickSettingsBackupDirectory());
       await act(async () => state.handleSaveSettings());

@@ -83,8 +83,10 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.generateCardStep, cardId, target) as Promise<AppSnapshot>,
   cancelCardProcessing: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelCardProcessing, cardId) as Promise<AppSnapshot>,
-  pickOutputDirectory: () =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.pickOutputDirectory) as Promise<string | null>,
+  pickOutputDirectory: (directory?: string, literalDirectory?: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.pickOutputDirectory, directory, literalDirectory) as Promise<string | null>,
+  pickBackupDirectory: (directory?: string, literalDirectory?: string) =>
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.pickBackupDirectory, directory, literalDirectory) as Promise<string | null>,
   openOutputDirectory: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.openOutputDirectory) as Promise<void>,
   openExternal: (url: string) =>

@@ -22,6 +22,7 @@ export const APP_SHELL_CHANNELS = {
   generateCardStep: "app-shell:generate-card-step",
   cancelCardProcessing: "app-shell:cancel-card-processing",
   pickOutputDirectory: "app-shell:pick-output-directory",
+  pickBackupDirectory: "app-shell:pick-backup-directory",
   openOutputDirectory: "app-shell:open-output-directory",
   openExternal: "app-shell:open-external",
   saveSettingsDraft: "app-shell:save-settings-draft",
@@ -650,7 +651,8 @@ export interface MumblerShellApi {
   cancelCardWaveformPeaks(cardId: string): Promise<void>;
   generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot>;
   cancelCardProcessing(cardId: string): Promise<AppSnapshot>;
-  pickOutputDirectory(): Promise<string | null>;
+  pickOutputDirectory(directory?: string, literalDirectory?: string): Promise<string | null>;
+  pickBackupDirectory(directory?: string, literalDirectory?: string): Promise<string | null>;
   openOutputDirectory(): Promise<void>;
   openExternal(url: string): Promise<void>;
   saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot>;

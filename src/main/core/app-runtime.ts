@@ -89,7 +89,7 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
-import { applySettingsDraft, buildSettingsDraft, createDefaultSettings, importTimezone, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type QueueStore, type SettingsStore } from "./settings-schema";
+import { resolveSettingsDirectory, applySettingsDraft, buildSettingsDraft, createDefaultSettings, importTimezone, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type QueueStore, type SettingsStore } from "./settings-schema";
 import {
   clampQueueWidth,
   clampRecordsListWidth,
@@ -1584,12 +1584,14 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  async pickOutputDirectory(window: BrowserWindow): Promise<string | null> {
+  async pickOutputDirectory(window: BrowserWindow, directory?: string, literalDirectory?: string): Promise<string | null> {
     this.ensureReady();
 
     const result = await dialog.showOpenDialog(window, {
       title: this.translator().t("dialog.chooseOutputFolder"),
-      defaultPath: this.runtime.settings!.outputDirectory ?? this.runtime.paths!.outputDir,
+      defaultPath: directory === undefined
+        ? this.runtime.settings!.outputDirectory ?? this.runtime.paths!.outputDir
+        : resolveSettingsDirectory(directory, literalDirectory) ?? this.runtime.paths!.outputDir,
       properties: ["openDirectory", "createDirectory"],
     });
 
@@ -1598,6 +1600,18 @@ export class ApplicationRuntime {
     }
 
     return result.filePaths[0] ?? null;
+  }
+
+  async pickBackupDirectory(window: BrowserWindow, directory?: string, literalDirectory?: string): Promise<string | null> {
+    this.ensureReady();
+    const result = await dialog.showOpenDialog(window, {
+      title: this.translator().t("settings.backupDirectory"),
+      defaultPath: directory === undefined
+        ? this.runtime.settings!.backupDirectory ?? this.runtime.paths!.originalsDir
+        : resolveSettingsDirectory(directory, literalDirectory) ?? this.runtime.paths!.originalsDir,
+      properties: ["openDirectory", "createDirectory"],
+    });
+    return result.canceled ? null : result.filePaths[0] ?? null;
   }
 
   async openOutputDirectory(): Promise<void> {
