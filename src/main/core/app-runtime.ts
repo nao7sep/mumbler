@@ -1431,7 +1431,9 @@ export class ApplicationRuntime {
   // file joins the run already going, unless that run was stopped: a player that
   // closes and reopens at once (React's development double mount, or a quick
   // switch away and back) gets a fresh run rather than the stopped one's error.
-  async getCardWaveformPeaks(cardId: string): Promise<Float32Array> {
+  // A run stopped because its player closed or Mumbler is quitting answers null:
+  // that is the stop working, not a failure to record.
+  async getCardWaveformPeaks(cardId: string): Promise<Float32Array | null> {
     this.ensureReady();
     const filePath = this.resolveCardSourcePath(cardId);
     if (filePath === null) throw new OperationError("Card media source no longer exists.");
@@ -1456,7 +1458,7 @@ export class ApplicationRuntime {
     try {
       return await work.done;
     } catch (error: unknown) {
-      if (isCancelledError(error)) throw error;
+      if (isCancelledError(error)) return null;
       await this.runtime.logger.warn("waveform.failed", "Could not compute the recording's waveform.", {
         cardId, error: serializeError(error),
       });

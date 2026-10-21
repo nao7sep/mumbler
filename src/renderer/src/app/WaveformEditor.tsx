@@ -267,7 +267,8 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       .getCardWaveformPeaks(card.id)
       .then((data) => {
         settled = true;
-        if (cancelled) return;
+        // Null is a run stopped on its way out, as this player closes.
+        if (cancelled || data === null) return;
         setPeaks({ cardId: card.id, data });
         setWaveformState("drawn");
       })
