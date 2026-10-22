@@ -97,6 +97,26 @@ export function rollUpRole(statuses: DependencyStatus[]): StatusRole {
   );
 }
 
+// The standing state as it reads without operations still running: what the
+// roll-up showed before they began, and what it returns to when they end.
+export function rollUpRoleAtRest(statuses: DependencyStatus[]): StatusRole {
+  return rollUpRole(statuses.map((status) =>
+    status.transient.kind === "running" ? { ...status, role: baseRole(status.state, status.required) } : status));
+}
+
+// What the tools are doing, for the standing state outside Managed tools.
+// Installing a missing tool outranks replacing a present one, which outranks a
+// check; `checking` covers a check the app has asked for before any tool reports it.
+export type ToolsActivity = "installing" | "updating" | "checking";
+
+export function toolsActivity(statuses: DependencyStatus[], checking: boolean): ToolsActivity | null {
+  const running = statuses.flatMap((status) => (status.transient.kind === "running" ? [{ status, operation: status.transient.operation }] : []));
+  if (running.some(({ status, operation }) => operation === "provision" && status.state === "not-installed")) return "installing";
+  if (running.some(({ operation }) => operation === "provision")) return "updating";
+  if (checking || running.some(({ operation }) => operation === "check")) return "checking";
+  return null;
+}
+
 // Windows ffmpeg's identity: the immutable BtbN release tag
 // (`autobuild-2026-08-19-19-21`), stored in its sidecar and compared as a string.
 export const FFMPEG_BUILD_TAG = /^autobuild-(\d{4}-\d{2}-\d{2})-(\d{2})-(\d{2})$/;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DependencyStatus, ToolFacts, ToolTransient } from "@shared/app-shell";
-import { deriveStatus, rollUpRole } from "@shared/dependency-status";
+import { deriveStatus, rollUpRole, rollUpRoleAtRest, toolsActivity } from "@shared/dependency-status";
 import { message } from "@shared/i18n/translate";
 
 const idle: ToolTransient = { kind: "idle" };
@@ -139,5 +139,32 @@ describe("I6 — roll-up is the worst role", () => {
   it("is none for an all-quiet or empty set", () => {
     expect(rollUpRole([row("none"), row("none")])).toBe("none");
     expect(rollUpRole([])).toBe("none");
+  });
+});
+
+describe("what the tools are doing, for the standing state outside Managed tools", () => {
+  const provisioning: ToolTransient = { kind: "running", operation: "provision", percent: 40 };
+  const checkingRun: ToolTransient = { kind: "running", operation: "check", percent: null };
+  const missing = (transient: ToolTransient = idle) => derive(facts(), transient);
+  const present = (transient: ToolTransient = idle) => derive(installed({ desiredVersion: "8.2", lastCheckedAtUtc: 1 }), transient);
+
+  it("names an install, an update and a check, installing first", () => {
+    expect(toolsActivity([missing(provisioning)], false)).toBe("installing");
+    expect(toolsActivity([present(provisioning)], false)).toBe("updating");
+    expect(toolsActivity([present(checkingRun)], false)).toBe("checking");
+    expect(toolsActivity([present(provisioning), missing(provisioning)], false)).toBe("installing");
+    expect(toolsActivity([present(checkingRun), present(provisioning)], false)).toBe("updating");
+  });
+
+  it("counts a check the app asked for before any tool reports it, and is quiet otherwise", () => {
+    expect(toolsActivity([present()], true)).toBe("checking");
+    expect(toolsActivity([present(), missing()], false)).toBeNull();
+    expect(toolsActivity([missing({ kind: "failed", operation: "provision", error: message("tools.chipAttention") })], false)).toBeNull();
+  });
+
+  it("reads the roll-up at rest as it was before the work began", () => {
+    expect(rollUpRole([present(checkingRun)])).toBe("informational");
+    expect(rollUpRoleAtRest([present(checkingRun)])).toBe(rollUpRole([present()]));
+    expect(rollUpRoleAtRest([missing(provisioning)])).toBe(rollUpRole([missing()]));
   });
 });

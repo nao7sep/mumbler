@@ -10,16 +10,13 @@ import {
 
 import type {
   AppSnapshot,
-  DependencyStatus,
   GenerateTarget,
   MumblerCard,
   PendingImportReviewItem,
   SaveCardResult,
-  StatusRole,
   ToolName,
 } from "@shared/app-shell";
 import { DETAIL_MIN_WIDTH, QUEUE_WIDTH, WORKSPACE_GAP, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT } from "@shared/layout";
-import { rollUpRole } from "@shared/dependency-status";
 import {
   formatUtcForDisplay,
   getLocalTimestampError,
@@ -48,6 +45,7 @@ import {
 } from "./DecisionModals";
 import { AboutModal } from "./AboutModal";
 import { FirstRunSetupModal } from "./FirstRunSetupModal";
+import { ToolsChip } from "./ToolsChip";
 import { AudioToolsModal } from "./AudioToolsModal";
 import { ShortcutsHelpModal } from "./ShortcutsHelpModal";
 import { useImportFlow } from "./useImportFlow";
@@ -103,25 +101,6 @@ async function copyTextToClipboard(value: string): Promise<void> {
   if (!copied) {
     throw new Error("Clipboard is not available.");
   }
-}
-
-// The topbar dependency roll-up (managed-runtime-dependencies-conventions): a
-// single status message at the worst role present that opens the Audio Tools
-// surface. It is deliberately a tinted status pill, not a plain button — a missing
-// or outdated tool needs to read as a condition that wants attention.
-//
-// The informational state covers two different stories, and the chip can tell
-// them apart, so it does: a tool whose own version could not be read needs the
-// user to re-acquire it (the modal's Update), where a merely-unchecked one only
-// needs a check.
-function toolsChipMessage(role: StatusRole, dependencies: DependencyStatus[] | null): MessageKey {
-  if (role !== "informational") {
-    return "tools.chipAttention";
-  }
-  const unreadable = dependencies?.some(
-    (dep) => dep.state === "installed-unchecked" && dep.installedVersion === null,
-  );
-  return unreadable ? "tools.chipVersionUnreadable" : "tools.chipUpdatesUnchecked";
 }
 
 const COPIED: Record<GenerateTarget, MessageKey> = {
@@ -534,7 +513,6 @@ function LoadedShell({
   }, []);
 
   const dependencies = snapshot?.dependencies ?? null;
-  const toolsRollUp = dependencies ? rollUpRole(dependencies) : "none";
 
   // Blocking-first-run (managed-runtime-dependencies-conventions): a required tool
   // that is missing opens the Audio Tools modal once as an instruction — regardless
@@ -1071,16 +1049,12 @@ function LoadedShell({
           <h1>Mumbler</h1>
         </div>
         <div className="topbar__meta">
-          {toolsRollUp !== "none" ? (
-            <button
-              type="button"
-              className={`tools-chip tools-chip--${toolsRollUp}`}
-              onClick={() => setShowAudioTools(true)}
-              title={t("tools.openTitle")}
-            >
-              {t(toolsChipMessage(toolsRollUp, dependencies))}
-            </button>
-          ) : null}
+          <ToolsChip
+            dependencies={dependencies}
+            checking={isCheckingTools}
+            viewOpen={showAudioTools || showSetup}
+            onOpen={() => setShowAudioTools(true)}
+          />
           <div className="app-menu-anchor">
             <Menu
               open={isMenuOpen}
