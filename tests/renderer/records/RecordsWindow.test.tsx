@@ -41,7 +41,7 @@ const readRecordSources = vi.fn<MumblerShellApi["readRecordSources"]>();
 const reportRendererDiagnostic = vi.fn<MumblerShellApi["reportRendererDiagnostic"]>();
 const getSettingsDraft = vi.fn<MumblerShellApi["getSettingsDraft"]>();
 const saveRecordsListWidth = vi.fn<MumblerShellApi["saveRecordsListWidth"]>();
-let recordsChanged: (() => void) | null = null;
+let recordsChanged: ((sourcesChanged: boolean) => void) | null = null;
 const interfaceListeners = new Set<() => void>();
 const onRecordsChanged = vi.fn<MumblerShellApi["onRecordsChanged"]>((listener) => {
   recordsChanged = listener;
@@ -157,12 +157,25 @@ const press = async (key: string) => {
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
   });
 };
-const signal = async () => {
-  await act(async () => recordsChanged!());
+const signal = async (sourcesChanged = true) => {
+  await act(async () => recordsChanged!(sourcesChanged));
 };
 const cursorOf = (record: RecordSummary) => ({ time: record.time, kind: record.kind, id: record.id });
 
 describe("RecordsWindow", () => {
+  it("refreshes rows without rereading unchanged filter sources and keeps a coalesced source change", async () => {
+    await mount();
+    const initialSources = readRecordSources.mock.calls.length;
+    vi.useFakeTimers();
+    await signal(false);
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(readRecordSources).toHaveBeenCalledTimes(initialSources);
+    await signal(false);
+    await signal(true);
+    await signal(false);
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(readRecordSources).toHaveBeenCalledTimes(initialSources + 1);
+  });
   it("lists the records newest first, with nothing selected yet", async () => {
     await mount();
 

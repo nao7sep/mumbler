@@ -52,7 +52,7 @@ export interface SessionLogger extends AppLogger {
   close(): Promise<void>;
   // Called after each entry the database stored; an entry that went to the
   // fallback file is not in the database, so it calls nothing.
-  onStored(listener: () => void): void;
+  onStored(listener: (sourcesChanged: boolean) => void): void;
   // Masks this credential value in every entry written from now on.
   maskSecret(value: string): void;
 }
@@ -155,7 +155,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
   const reads = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>();
   let fallbackTail: Promise<void> = Promise.resolve();
   let termination: Promise<void> = Promise.resolve();
-  let storedListener: (() => void) | null = null;
+  let storedListener: ((sourcesChanged: boolean) => void) | null = null;
   const secrets = new Set<string>();
   const mask = (text: string | null): string | null => (text === null || secrets.size === 0 ? text : maskValues(text, secrets));
   const maskEntry = (entry: RecordEntry): RecordEntry => entry.kind === "log"
@@ -241,7 +241,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
       if (message.type === "written") {
         pending.get(message.id)?.resolve();
         pending.delete(message.id);
-        if (message.stored) storedListener?.();
+        if (message.stored) storedListener?.(message.sourcesChanged);
       } else if (message.type === "read") {
         const read = reads.get(message.id);
         reads.delete(message.id);

@@ -41,9 +41,9 @@ export function buildRecordsWindowOptions(title: string): Electron.BrowserWindow
 }
 
 // Tells the records window, when it is open, that a record was stored.
-export function notifyRecordsChanged(): void {
+export function notifyRecordsChanged(sourcesChanged: boolean): void {
   if (recordsWindow !== null && !recordsWindow.isDestroyed()) {
-    recordsWindow.webContents.send(APP_SHELL_EVENTS.recordsChanged);
+    recordsWindow.webContents.send(APP_SHELL_EVENTS.recordsChanged, sourcesChanged);
   }
 }
 

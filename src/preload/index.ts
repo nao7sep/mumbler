@@ -182,9 +182,9 @@ const api: MumblerBridgeApi = {
       ipcRenderer.removeListener(APP_SHELL_EVENTS.interfaceLanguageChanged, wrapped);
     };
   },
-  onRecordsChanged: (listener: () => void) => {
-    const wrapped = () => {
-      listener();
+  onRecordsChanged: (listener: (sourcesChanged: boolean) => void) => {
+    const wrapped = (_event: unknown, sourcesChanged: boolean) => {
+      listener(sourcesChanged);
     };
     ipcRenderer.on(APP_SHELL_EVENTS.recordsChanged, wrapped);
     return () => {

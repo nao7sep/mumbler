@@ -716,7 +716,7 @@ export interface MumblerShellApi {
   onDependenciesUpdated(listener: () => void): () => void;
   onInterfaceLanguageChanged(listener: () => void): () => void;
   // A record was stored in the records database.
-  onRecordsChanged(listener: () => void): () => void;
+  onRecordsChanged(listener: (sourcesChanged: boolean) => void): () => void;
   /** Registers what sends the window's unsent edits when a quit asks for them. */
   onFlushPendingEdits(flush: () => Promise<void>): () => void;
   /** Registers what reports, and what discards, a session-only draft when a

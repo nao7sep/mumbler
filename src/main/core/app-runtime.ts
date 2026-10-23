@@ -658,7 +658,7 @@ export class ApplicationRuntime {
   }
 
   // Called after each record the records database stores.
-  onRecordsChanged(callback: () => void): void {
+  onRecordsChanged(callback: (sourcesChanged: boolean) => void): void {
     this.runtime.logger.onStored(callback);
   }
 

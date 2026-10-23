@@ -12,6 +12,7 @@ import type {
 
 import { FORMAT_VERSIONS } from "./format-versions.ts";
 import { openVersionedDatabase } from "./sqlite-store.ts";
+import { RecordSourcesProjection } from "./record-sources.ts";
 
 // The records database (data-lifecycle-conventions, Records): one row per log
 // line or provider call, each carrying its session, its time and the card it
@@ -101,7 +102,7 @@ export type RecordsWorkerRequest =
 
 export type RecordsWorkerResponse =
   // `stored` is false when the entry went to the fallback file instead.
-  | { type: "written"; id: number; stored: boolean }
+  | { type: "written"; id: number; stored: boolean; sourcesChanged: boolean }
   | { type: "read"; id: number; ok: true; value: RecordsReadResults[RecordsRead["op"]] }
   | { type: "read"; id: number; ok: false; error: string }
   | { type: "closed" }
@@ -148,6 +149,8 @@ export function reportRecordsFailure(error: unknown, line?: string): void {
 }
 
 export class RecordsEngine {
+  private sources: RecordSourcesProjection | null = null;
+  sourcesChanged = false;
   private db: DatabaseSync | null = null;
   private opened = false;
   private readonly target: RecordsTarget;
@@ -164,6 +167,7 @@ export class RecordsEngine {
 
   // Whether the entry reached the database.
   write(entry: RecordEntry): boolean {
+    this.sourcesChanged = false;
     let db: DatabaseSync | undefined;
     let transactionOpen = false;
     try {
@@ -173,6 +177,7 @@ export class RecordsEngine {
       this.insert(db, entry);
       db.exec("COMMIT");
       transactionOpen = false;
+      this.sourcesChanged = this.sources!.add(entry.session, entry.cardId, entry.kind === "log" ? entry.time : entry.startedAt);
       return true;
     } catch (error: unknown) {
       if (transactionOpen) {
@@ -189,7 +194,7 @@ export class RecordsEngine {
     db.exec("BEGIN");
     try {
       const result = read.op === "page" ? readPage(db, read.query)
-        : read.op === "sources" ? readSources(db) : readDetail(db, read.kind, read.id);
+        : read.op === "sources" ? this.sources!.snapshot() : readDetail(db, read.kind, read.id);
       db.exec("COMMIT");
       return result;
     } catch (error) {
@@ -206,6 +211,7 @@ export class RecordsEngine {
     }
     this.db = null;
     this.opened = false;
+    this.sources = null;
   }
 
   private open(): DatabaseSync {
@@ -215,6 +221,16 @@ export class RecordsEngine {
     // A database in a newer format is left untouched: entries go to the
     // fallback file and reads fail, as for any database that cannot be opened.
     this.db = openVersionedDatabase(this.target.databasePath, FORMAT_VERSIONS.records, SCHEMA, (error) => this.report(recordsFailureText(error)));
+    this.db.exec("BEGIN");
+    try {
+      this.sources = readSources(this.db);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* Preserve the source read failure. */ }
+      try { this.db.close(); } catch { /* Preserve the source read failure. */ }
+      this.db = null;
+      throw error;
+    }
     return this.db;
   }
 
@@ -302,16 +318,16 @@ function readPage(db: DatabaseSync, query: RecordsQuery): RecordsPage {
   return { records: rows.slice(0, RECORDS_PAGE_SIZE), more: rows.length > RECORDS_PAGE_SIZE };
 }
 
-function readSources(db: DatabaseSync): RecordsReadResults["sources"] {
+function readSources(db: DatabaseSync): RecordSourcesProjection {
   const sessions = db.prepare(
     "SELECT session FROM logs UNION SELECT session FROM provider_calls ORDER BY session DESC",
   ).all() as { session: string }[];
   const cards = db.prepare(
     `SELECT card_id AS cardId, MAX(time) AS last FROM (
       SELECT card_id, time FROM logs UNION ALL SELECT card_id, started_at FROM provider_calls
-    ) WHERE card_id IS NOT NULL GROUP BY card_id ORDER BY last DESC`,
-  ).all() as { cardId: string }[];
-  return { sessions: sessions.map((row) => row.session), cardIds: cards.map((row) => row.cardId) };
+    ) WHERE card_id IS NOT NULL GROUP BY card_id ORDER BY last DESC, cardId ASC`,
+  ).all() as { cardId: string; last: string }[];
+  return new RecordSourcesProjection(sessions.map((row) => row.session), cards);
 }
 
 function readDetail(db: DatabaseSync, kind: RecordKind, id: number): RecordDetail | null {

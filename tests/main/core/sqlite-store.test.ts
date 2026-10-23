@@ -245,10 +245,11 @@ describe("SQLite engine admission at open", () => {
     expect(connect().prepare("SELECT name FROM sqlite_master").all()).toEqual([]);
   });
 
-  it("keeps multi-query sources in one read snapshot", () => {
+  it("initializes sources in one read snapshot and refreshes external changes only on reopen", () => {
     const engine = new RecordsEngine({ databasePath: file, fallbackPath: join(root, "fallback.log") }, vi.fn());
     engines.push(engine);
     engine.write(entry("first"));
+    engine.close();
     const db = connect();
     const prepare = DatabaseSync.prototype.prepare;
     let insert = true;
@@ -260,6 +261,34 @@ describe("SQLite engine admission at open", () => {
       return prepare.apply(this, args);
     });
     expect(engine.read({ op: "sources" })).toEqual({ sessions: ["session"], cardIds: [] });
+    expect(engine.read({ op: "sources" })).toEqual({ sessions: ["session"], cardIds: [] });
+    engine.close();
     expect(engine.read({ op: "sources" })).toEqual({ sessions: ["session", "new"], cardIds: ["new-card"] });
+  });
+
+  it("projects only committed log and provider sources without rescanning history", () => {
+    const engine = new RecordsEngine({ databasePath: file, fallbackPath: join(root, "fallback.log") }, vi.fn());
+    engines.push(engine);
+    engine.write({ ...entry("first"), cardId: "a" });
+    const prepare = vi.spyOn(DatabaseSync.prototype, "prepare");
+    engine.write({ ...entry("later"), cardId: "a", time: "2026-10-07T00:00:02.000Z" });
+    expect(engine.sourcesChanged).toBe(false);
+    engine.write({ kind: "provider-call", session: "session", startedAt: "2026-10-07T00:00:03.000Z", finishedAt: "2026-10-07T00:00:04.000Z", cardId: "b", step: null, attempt: null, provider: "gemini", operation: "test", endpoint: null, model: null, request: "{}", response: null, error: null });
+    expect(engine.sourcesChanged).toBe(true);
+    expect(engine.read({ op: "sources" })).toEqual({ sessions: ["session"], cardIds: ["b", "a"] });
+    engine.write({ ...entry("older"), cardId: "a" });
+    expect(engine.sourcesChanged).toBe(false);
+    engine.write({ ...entry("newest"), cardId: "a", time: "2026-10-07T00:00:05.000Z" });
+    expect(engine.sourcesChanged).toBe(true);
+    expect(engine.read({ op: "sources" })).toEqual({ sessions: ["session"], cardIds: ["a", "b"] });
+    expect(prepare.mock.calls.some(([sql]) => sql.includes("UNION"))).toBe(false);
+    const db = connect();
+    db.exec("CREATE TRIGGER refuse BEFORE INSERT ON logs BEGIN SELECT RAISE(FAIL, 'refused'); END");
+    expect(engine.write({ ...entry("refused"), session: "uncommitted", cardId: "c" })).toBe(false);
+    expect(engine.sourcesChanged).toBe(false);
+    const expected = { sessions: ["session"], cardIds: ["a", "b"] };
+    expect(engine.read({ op: "sources" })).toEqual(expected);
+    engine.close();
+    expect(engine.read({ op: "sources" })).toEqual(expected);
   });
 });
