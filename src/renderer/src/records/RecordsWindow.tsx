@@ -170,6 +170,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   const { t, locale } = useI18n();
   const [sources, setSources] = useState<RecordSources | null>(null);
   const [sourceReads, setSourceReads] = useState(0);
+  const [missingRecords, setMissingRecords] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [refreshRetrying, setRefreshRetrying] = useState(false);
   const refreshFailure = useRef(false);
@@ -220,6 +221,15 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
     }, SEARCH_DELAY_MS);
     return () => clearTimeout(timer);
   }, [searchText]);
+
+  useEffect(() => {
+    let active = true;
+    void shellApi.recordsMissing().then(
+      (missing) => { if (active && missing) setMissingRecords(true); },
+      (error: unknown) => reportRendererDiagnostic(error, "records health read failed"),
+    );
+    return () => { active = false; };
+  }, []);
 
   const failRefresh = useCallback((): void => {
     refreshFailure.current = true;
@@ -342,7 +352,8 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let sourcesDirty = false;
-    const unsubscribe = shellApi.onRecordsChanged((sourcesChanged) => {
+    const unsubscribe = shellApi.onRecordsChanged((sourcesChanged, missing) => {
+      if (missing) setMissingRecords(true);
       sourcesDirty ||= sourcesChanged;
       if (timer !== null || liveSuspended.current) return;
       timer = setTimeout(() => {
@@ -493,6 +504,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
       style={{ "--records-list-width": `${shownListWidth}px` } as CSSProperties}
     >
       <section className="panel records-list-pane" aria-label={t("records.title")}>
+        {missingRecords && <p className="records-note inline-error" role="status">{t("records.missing")}</p>}
         <div className="records-filters">
           <div className="field">
             <input

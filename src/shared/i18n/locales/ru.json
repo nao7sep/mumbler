@@ -580,6 +580,7 @@
   "records.step": "Шаг",
   "records.thisLaunch": "{time} (этот запуск)",
   "records.time": "Время",
+  "records.missing": "Некоторые записи могут отсутствовать.",
   "records.title": "Журнал",
   "diagnostic.endpointRequiresHttps": "Укажите HTTPS для удалённых провайдеров в настройках. HTTP разрешён только для провайдера на этом компьютере."
 }

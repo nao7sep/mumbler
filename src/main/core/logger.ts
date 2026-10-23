@@ -50,9 +50,9 @@ export interface SessionLogger extends AppLogger {
   readRecords<R extends RecordsRead>(read: R): Promise<RecordsReadResults[R["op"]]>;
   // Tries to drain and release the database within the optional logging bound.
   close(): Promise<void>;
-  // Called after each entry the database stored; an entry that went to the
-  // fallback file is not in the database, so it calls nothing.
-  onStored(listener: (sourcesChanged: boolean) => void): void;
+  recordsMissing(): boolean;
+  // Stored rows and sticky uncertainty about missing history share this signal.
+  onRecordsChanged(listener: (sourcesChanged: boolean, missingRecords: boolean) => void): void;
   // Masks this credential value in every entry written from now on.
   maskSecret(value: string): void;
 }
@@ -155,7 +155,13 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
   const reads = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>();
   let fallbackTail: Promise<void> = Promise.resolve();
   let termination: Promise<void> = Promise.resolve();
-  let storedListener: ((sourcesChanged: boolean) => void) | null = null;
+  let storedListener: ((sourcesChanged: boolean, missingRecords: boolean) => void) | null = null;
+  let missingRecords = false;
+  const markMissing = (): void => {
+    if (missingRecords) return;
+    missingRecords = true;
+    storedListener?.(false, true);
+  };
   const secrets = new Set<string>();
   const mask = (text: string | null): string | null => (text === null || secrets.size === 0 ? text : maskValues(text, secrets));
   const maskEntry = (entry: RecordEntry): RecordEntry => entry.kind === "log"
@@ -169,6 +175,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
       };
 
   const appendFallback = (entry: RecordEntry): Promise<void> => {
+    markMissing();
     const line = fallbackLine(entry);
     const append = async (): Promise<void> => {
       try {
@@ -241,7 +248,8 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
       if (message.type === "written") {
         pending.get(message.id)?.resolve();
         pending.delete(message.id);
-        if (message.stored) storedListener?.(message.sourcesChanged);
+        if (message.stored) storedListener?.(message.sourcesChanged, missingRecords);
+        else markMissing();
       } else if (message.type === "read") {
         const read = reads.get(message.id);
         reads.delete(message.id);
@@ -346,6 +354,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
 
   return {
     session,
+    recordsMissing: () => missingRecords,
     readRecords,
     debug: (op, message, details) => log("debug", op, message, details),
     info: (op, message, details) => log("info", op, message, details),
@@ -369,7 +378,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
         error: record.error === null || record.error === undefined ? null : toJson(serializeError(record.error)),
       }),
     close,
-    onStored: (listener) => {
+    onRecordsChanged: (listener) => {
       storedListener = listener;
     },
     maskSecret: (value) => {

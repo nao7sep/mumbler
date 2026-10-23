@@ -38,10 +38,11 @@ let root: Root | null = null;
 const readRecordsPage = vi.fn<MumblerShellApi["readRecordsPage"]>();
 const readRecordDetail = vi.fn<MumblerShellApi["readRecordDetail"]>();
 const readRecordSources = vi.fn<MumblerShellApi["readRecordSources"]>();
+const recordsMissing = vi.fn<MumblerShellApi["recordsMissing"]>();
 const reportRendererDiagnostic = vi.fn<MumblerShellApi["reportRendererDiagnostic"]>();
 const getSettingsDraft = vi.fn<MumblerShellApi["getSettingsDraft"]>();
 const saveRecordsListWidth = vi.fn<MumblerShellApi["saveRecordsListWidth"]>();
-let recordsChanged: ((sourcesChanged: boolean) => void) | null = null;
+let recordsChanged: ((sourcesChanged: boolean, missingRecords: boolean) => void) | null = null;
 const interfaceListeners = new Set<() => void>();
 const onRecordsChanged = vi.fn<MumblerShellApi["onRecordsChanged"]>((listener) => {
   recordsChanged = listener;
@@ -77,6 +78,8 @@ beforeEach(() => {
   readRecordSources.mockResolvedValue({
     currentSession: SESSION, displayTimezone: "UTC", sessions: [SESSION, "2026-10-01T08:00:00.000Z"], cards: [{ cardId: "card-1", name: "take.wav" }],
   });
+  recordsMissing.mockReset();
+  recordsMissing.mockResolvedValue(false);
   reportRendererDiagnostic.mockReset();
   reportRendererDiagnostic.mockResolvedValue();
   saveRecordsListWidth.mockReset();
@@ -104,7 +107,7 @@ beforeEach(() => {
   Object.defineProperty(window, "mumbler", {
     configurable: true,
     value: {
-      readRecordsPage, readRecordDetail, readRecordSources, reportRendererDiagnostic, saveRecordsListWidth, onRecordsChanged,
+      recordsMissing, readRecordsPage, readRecordDetail, readRecordSources, reportRendererDiagnostic, saveRecordsListWidth, onRecordsChanged,
       getSettingsDraft,
       getInterfaceLanguage: async () => ({ language: "en", locale: "en" }),
       getRecordsListWidth: async () => RECORDS_LIST_WIDTH.default,
@@ -157,12 +160,28 @@ const press = async (key: string) => {
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
   });
 };
-const signal = async (sourcesChanged = true) => {
-  await act(async () => recordsChanged!(sourcesChanged));
+const signal = async (sourcesChanged = true, missingRecords = false) => {
+  await act(async () => recordsChanged!(sourcesChanged, missingRecords));
 };
 const cursorOf = (record: RecordSummary) => ({ time: record.time, kind: record.kind, id: record.id });
 
 describe("RecordsWindow", () => {
+  it("shows initial missing-history health independently of read failures", async () => {
+    recordsMissing.mockResolvedValue(true);
+    readRecordSources.mockRejectedValue(new Error("unavailable"));
+    await mount();
+    expect(document.body.textContent).toContain("Some records may be missing.");
+  });
+
+  it("keeps health notices after subsequent successful writes even when live refresh is suspended", async () => {
+    readRecordSources.mockRejectedValue(new Error("unavailable"));
+    await mount();
+    await signal(false, true);
+    expect(document.body.textContent).toContain("Some records may be missing.");
+    await signal(false, false);
+    expect(document.body.textContent).toContain("Some records may be missing.");
+  });
+
   it("refreshes rows without rereading unchanged filter sources and keeps a coalesced source change", async () => {
     await mount();
     const initialSources = readRecordSources.mock.calls.length;

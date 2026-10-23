@@ -251,7 +251,7 @@ describe("createLogger", () => {
   it("calls its stored listener after each entry the database stores", async () => {
     const logger = open();
     const stored = vi.fn();
-    logger.onStored(stored);
+    logger.onRecordsChanged(stored);
     await logger.info("startup", "hello");
     expect(stored).toHaveBeenCalledOnce();
     await logger.providerCall({
@@ -262,15 +262,16 @@ describe("createLogger", () => {
     expect(stored).toHaveBeenCalledTimes(2);
   });
 
-  it("does not call its stored listener for an entry that went to the fallback file", async () => {
+  it("reports missing database history when an entry goes to the fallback file", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     try {
       const logger = open(true, { recordsPath: dir, logsDir });
       const stored = vi.fn();
-      logger.onStored(stored);
+      logger.onRecordsChanged(stored);
       await logger.info("startup", "kept anyway");
       await logger.close();
-      expect(stored).not.toHaveBeenCalled();
+      expect(stored).toHaveBeenCalledExactlyOnceWith(false, true);
+      expect(logger.recordsMissing()).toBe(true);
     } finally {
       stderr.mockRestore();
     }

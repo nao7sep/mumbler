@@ -657,9 +657,13 @@ export class ApplicationRuntime {
     this.onDependenciesChangedCallback = callback;
   }
 
-  // Called after each record the records database stores.
-  onRecordsChanged(callback: (sourcesChanged: boolean) => void): void {
-    this.runtime.logger.onStored(callback);
+  recordsMissing(): boolean {
+    return this.runtime.logger.recordsMissing();
+  }
+
+  // Called for stored records and changes in missing-history health.
+  onRecordsChanged(callback: (sourcesChanged: boolean, missingRecords: boolean) => void): void {
+    this.runtime.logger.onRecordsChanged(callback);
   }
 
   // Called by the ToolManager whenever dependency state changes (an operation's

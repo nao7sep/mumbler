@@ -572,6 +572,7 @@
   "records.step": "Paso",
   "records.thisLaunch": "{time} (este inicio)",
   "records.time": "Hora",
+  "records.missing": "Es posible que falten algunos registros.",
   "records.title": "Registros",
   "diagnostic.endpointRequiresHttps": "Use HTTPS para proveedores remotos en Ajustes. HTTP solo se permite para un proveedor en este equipo."
 }

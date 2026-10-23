@@ -83,6 +83,38 @@ afterEach(async () => {
 });
 
 describe("optional records lifetime", () => {
+  it("retains missing-history health after later successful writes", async () => {
+    const logger = open();
+    const changed = vi.fn();
+    logger.onRecordsChanged(changed);
+    expect(logger.recordsMissing()).toBe(false);
+    const first = logger.info("test", "missing");
+    const request = workers[0]!.requests[0]!;
+    workers[0]!.emit("message", { type: "written", id: "id" in request ? request.id : -1, stored: false, sourcesChanged: false });
+    await first;
+    expect(logger.recordsMissing()).toBe(true);
+    expect(changed).toHaveBeenLastCalledWith(false, true);
+    const second = logger.info("test", "stored");
+    const next = workers[0]!.requests[1]!;
+    workers[0]!.emit("message", { type: "written", id: "id" in next ? next.id : -1, stored: true, sourcesChanged: true });
+    await second;
+    expect(logger.recordsMissing()).toBe(true);
+    expect(changed).toHaveBeenLastCalledWith(true, true);
+  });
+
+  it("reports uncertain worker-exit history once while fallback writes continue", async () => {
+    const logger = open();
+    const changed = vi.fn();
+    logger.onRecordsChanged(changed);
+    const first = logger.info("test", "first");
+    workers[0]!.emit("exit", 1);
+    await first;
+    await logger.info("test", "second");
+    expect(fallback.completed).toEqual(["first", "second"]);
+    expect(logger.recordsMissing()).toBe(true);
+    expect(changed).toHaveBeenCalledExactlyOnceWith(false, true);
+  });
+
   it("releases a timed-out writer while keeping late fallback appends physically ordered", async () => {
     const firstGate = hold();
     fallback.held.set("first", firstGate.wait);

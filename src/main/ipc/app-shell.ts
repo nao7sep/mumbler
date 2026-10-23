@@ -374,6 +374,7 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     }
     return runtime.readRecordDetail(kind, id);
   });
+  handle(APP_SHELL_CHANNELS.recordsMissing, () => runtime.recordsMissing());
   handle(APP_SHELL_CHANNELS.readRecordSources, () => runtime.readRecordSources());
   handle(APP_SHELL_CHANNELS.getRecordsListWidth, () => runtime.recordsListWidth());
   handle(APP_SHELL_CHANNELS.saveRecordsListWidth, (_event, width: number) => {

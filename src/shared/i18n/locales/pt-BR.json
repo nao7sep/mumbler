@@ -572,6 +572,7 @@
   "records.step": "Etapa",
   "records.thisLaunch": "{time} (esta inicialização)",
   "records.time": "Horário",
+  "records.missing": "Alguns registros podem estar ausentes.",
   "records.title": "Registros",
   "diagnostic.endpointRequiresHttps": "Use HTTPS para provedores remotos nas configurações. HTTP só é permitido para um provedor neste computador."
 }

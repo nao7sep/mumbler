@@ -572,6 +572,7 @@
   "records.step": "Passaggio",
   "records.thisLaunch": "{time} (questo avvio)",
   "records.time": "Ora",
+  "records.missing": "Alcune voci del log potrebbero mancare.",
   "records.title": "Log",
   "diagnostic.endpointRequiresHttps": "Usa HTTPS per i provider remoti nelle impostazioni. HTTP è consentito solo per un provider su questo computer."
 }

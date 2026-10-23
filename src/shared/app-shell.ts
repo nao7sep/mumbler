@@ -49,6 +49,7 @@ export const APP_SHELL_CHANNELS = {
   openRecordsWindow: "app-shell:open-records-window",
   readRecordsPage: "app-shell:read-records-page",
   readRecordDetail: "app-shell:read-record-detail",
+  recordsMissing: "app-shell:records-missing",
   readRecordSources: "app-shell:read-record-sources",
   getRecordsListWidth: "app-shell:get-records-list-width",
   saveRecordsListWidth: "app-shell:save-records-list-width",
@@ -705,6 +706,7 @@ export interface MumblerShellApi {
   openRecordsWindow(): Promise<void>;
   readRecordsPage(query: RecordsQuery): Promise<RecordsPage>;
   readRecordDetail(kind: RecordKind, id: number): Promise<RecordDetail | null>;
+  recordsMissing(): Promise<boolean>;
   readRecordSources(): Promise<RecordSources>;
   // The records window's list pane width: the dragged intent, read at open and
   // saved when a drag ends; the saved width comes back clamped.
@@ -715,8 +717,8 @@ export interface MumblerShellApi {
   onPipelineProgressUpdated(listener: () => void): () => void;
   onDependenciesUpdated(listener: () => void): () => void;
   onInterfaceLanguageChanged(listener: () => void): () => void;
-  // A record was stored in the records database.
-  onRecordsChanged(listener: (sourcesChanged: boolean) => void): () => void;
+  // A record was stored or missing-history health changed.
+  onRecordsChanged(listener: (sourcesChanged: boolean, missingRecords: boolean) => void): () => void;
   /** Registers what sends the window's unsent edits when a quit asks for them. */
   onFlushPendingEdits(flush: () => Promise<void>): () => void;
   /** Registers what reports, and what discards, a session-only draft when a

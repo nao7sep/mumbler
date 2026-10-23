@@ -139,6 +139,7 @@ const api: MumblerBridgeApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.readRecordsPage, query) as Promise<RecordsPage>,
   readRecordDetail: (kind: RecordKind, id: number) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.readRecordDetail, kind, id) as Promise<RecordDetail | null>,
+  recordsMissing: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.recordsMissing) as Promise<boolean>,
   readRecordSources: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.readRecordSources) as Promise<RecordSources>,
   getRecordsListWidth: () =>
@@ -182,9 +183,9 @@ const api: MumblerBridgeApi = {
       ipcRenderer.removeListener(APP_SHELL_EVENTS.interfaceLanguageChanged, wrapped);
     };
   },
-  onRecordsChanged: (listener: (sourcesChanged: boolean) => void) => {
-    const wrapped = (_event: unknown, sourcesChanged: boolean) => {
-      listener(sourcesChanged);
+  onRecordsChanged: (listener: (sourcesChanged: boolean, missingRecords: boolean) => void) => {
+    const wrapped = (_event: unknown, sourcesChanged: boolean, missingRecords: boolean) => {
+      listener(sourcesChanged, missingRecords);
     };
     ipcRenderer.on(APP_SHELL_EVENTS.recordsChanged, wrapped);
     return () => {
