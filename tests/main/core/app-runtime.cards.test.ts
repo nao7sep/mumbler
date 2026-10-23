@@ -42,6 +42,10 @@ const unwritable = vi.hoisted(() => ({
 }));
 const secretReadGate = vi.hoisted(() => ({ held: null as { path: string; release: Promise<void>; entered: number } | null }));
 const directorySyncFault = vi.hoisted(() => ({ path: null as string | null }));
+const sourceChecks = vi.hoisted(() => ({
+  paths: new Set<string>(), calls: [] as string[], active: 0, maximum: 0,
+  held: null as Promise<void> | null, failure: null as Error | null,
+}));
 const catalogueGate = vi.hoisted(() => ({ held: null as Promise<void> | null, entered: 0 }));
 vi.mock("@main/i18n", async (original) => {
   const actual = await original<typeof import("@main/i18n")>();
@@ -62,6 +66,16 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    realpath: async (...args: Parameters<typeof actual.realpath>) => {
+      if (!sourceChecks.paths.has(String(args[0]))) return actual.realpath(...args);
+      sourceChecks.calls.push(String(args[0]));
+      sourceChecks.maximum = Math.max(sourceChecks.maximum, ++sourceChecks.active);
+      try {
+        await sourceChecks.held;
+        if (sourceChecks.failure !== null) throw sourceChecks.failure;
+        return await actual.realpath(...args);
+      } finally { sourceChecks.active -= 1; }
+    },
     open: async (...args: Parameters<typeof actual.open>) => {
       if (args[1] === "r" && String(args[0]) === directorySyncFault.path) throw Object.assign(new Error("directory sync failed"), { code: "EIO" });
       return actual.open(...args);
@@ -302,6 +316,11 @@ beforeEach(async () => {
   unwritable.held = null;
   secretReadGate.held = null;
   directorySyncFault.path = null;
+  sourceChecks.paths.clear();
+  sourceChecks.calls = [];
+  sourceChecks.active = sourceChecks.maximum = 0;
+  sourceChecks.held = null;
+  sourceChecks.failure = null;
   catalogueGate.held = null;
   catalogueGate.entered = 0;
   duringRefusedRm.run = null;
@@ -1773,6 +1792,58 @@ describe("working with a card", () => {
     if (retried.kind === "saved") expect(await readFile(retried.audioPath, "utf8")).toBe("audio for take.wav");
   });
 
+  it("checks a large retained queue incrementally while a source check is held", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    await runtime.shutdown();
+    const store = createQueueStore(join(home, "queue.json"));
+    const loaded = await store.load();
+    const saved = loaded.value.cards[0]!;
+    loaded.value.cards.push(...Array.from({ length: 256 }, (_, index) => ({
+      ...saved, id: `retained-${index}`, sourceFilePath: join(sourceDir, `missing-${index}.wav`),
+    })));
+    await store.save(loaded.value);
+    runtime = await ApplicationRuntime.initialize();
+    for (const entry of loaded.value.cards) sourceChecks.paths.add(entry.sourceFilePath);
+    let release!: () => void;
+    sourceChecks.held = new Promise<void>((resolve) => { release = resolve; });
+    const saving = runtime.saveCard(card.id, undefined, { removeAfterSave: false });
+    try {
+      await vi.waitFor(() => expect(sourceChecks.calls).toHaveLength(1));
+      expect(audioGate.entered).toBe(0);
+      release();
+      expect((await saving).kind).toBe("saved");
+      expect(sourceChecks.maximum).toBe(1);
+      expect(new Set(sourceChecks.calls).size).toBe(257);
+    } finally { release(); await saving.catch(() => undefined); }
+  });
+
+  it("stops at a protected input collision before inspecting later sources or preparing audio", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    const [pending] = await dropIn("later.wav");
+    const saved = cards(runtime.getSnapshot())[0];
+    const output = join(home, "output");
+    await mkdir(output, { recursive: true });
+    await link(card.sourceFilePath, join(output, `${formatUtcMarker(new Date(saved.timestamps.effectiveUtc))}-old-title.wav`));
+    sourceChecks.paths.add(card.sourceFilePath);
+    sourceChecks.paths.add(pending!.workingFilePath);
+    const result = await runtime.saveCard(card.id, "overwrite");
+    expect(result.kind).toBe("failed");
+    expect(sourceChecks.calls).toEqual([card.sourceFilePath]);
+    expect(audioGate.entered).toBe(0);
+  });
+
+  it("propagates a protected-source access failure before preparing audio", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    sourceChecks.paths.add(card.sourceFilePath);
+    sourceChecks.failure = Object.assign(new Error("source access denied"), { code: "EACCES" });
+    await expect(runtime.saveCard(card.id)).rejects.toThrow("source access denied");
+    expect(audioGate.entered).toBe(0);
+    expect(cards(runtime.getSnapshot())[0].status).toBe("Ready to Save");
+  });
+
   it("hands the card back as ready to save when a save stops at a conflict", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
@@ -1781,9 +1852,13 @@ describe("working with a card", () => {
     await transcribedOnDisk(copy.id);
 
     expect((await runtime.saveCard(card.id)).kind).toBe("saved");
+    const preparations = audioGate.entered;
+    const rewrites = tagWrites.calls.length;
     const result = await runtime.saveCard(copy.id);
 
     expect(result.kind).toBe("conflict");
+    expect(audioGate.entered).toBe(preparations);
+    expect(tagWrites.calls).toHaveLength(rewrites);
     expect(cards(result.snapshot)[0].status).toBe("Ready to Save");
   });
 

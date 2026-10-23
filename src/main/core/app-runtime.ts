@@ -2148,6 +2148,34 @@ export class ApplicationRuntime {
     if (outputDirectory === null) throw new OperationError("Choose a save folder before exporting a recording.");
     await mkdir(outputDirectory, { recursive: true });
 
+    const extension = extname(card.sourceFilePath);
+    const baseName = outputBaseName(card)!;
+    const initialTargets: SaveTargetPaths = {
+      audioPath: join(outputDirectory, `${baseName}${extension}`),
+      jsonPath: join(outputDirectory, `${baseName}.json`),
+      markdownPath: join(outputDirectory, `${baseName}.md`),
+    };
+
+    const conflictExists = await pathsConflict(initialTargets);
+    if (conflictExists && resolution === undefined) {
+      await logger.info("save.conflict", "Output path conflict detected, awaiting resolution.", {
+        cardId,
+        audioPath: initialTargets.audioPath,
+        jsonPath: initialTargets.jsonPath,
+        markdownPath: initialTargets.markdownPath,
+      });
+      return { kind: "conflict", ...initialTargets };
+    }
+
+    const targetPaths: SaveTargetPaths =
+      resolution === "suffix"
+        ? await buildUniqueSuffixedTargets(outputDirectory, baseName, extension)
+        : initialTargets;
+
+    if (!(await this.isSafeSaveLocation(targetPaths, card.sourceFilePath))) {
+      return { kind: "failed", message: message("error.saveOutputLocationUnsafe") };
+    }
+
     const trimmedAudio = await prepareAudioForTranscription({
       sourceFilePath: card.sourceFilePath,
       workingDir: this.runtime.paths!.workingDir,
@@ -2164,30 +2192,6 @@ export class ApplicationRuntime {
     try {
       stamped = await this.stampRecordingTime(card, trimmedAudio, signal);
       const finalAudio = stamped.audio;
-      const extension = extname(finalAudio.filePath) || extname(card.sourceFilePath);
-      const baseName = outputBaseName(card)!;
-      const initialTargets: SaveTargetPaths = {
-        audioPath: join(outputDirectory, `${baseName}${extension}`),
-        jsonPath: join(outputDirectory, `${baseName}.json`),
-        markdownPath: join(outputDirectory, `${baseName}.md`),
-      };
-
-      const conflictExists = await pathsConflict(initialTargets);
-      if (conflictExists && resolution === undefined) {
-        await logger.info("save.conflict", "Output path conflict detected, awaiting resolution.", {
-          cardId,
-          audioPath: initialTargets.audioPath,
-          jsonPath: initialTargets.jsonPath,
-          markdownPath: initialTargets.markdownPath,
-        });
-        return { kind: "conflict", ...initialTargets };
-      }
-
-      const targetPaths: SaveTargetPaths =
-        resolution === "suffix"
-          ? await buildUniqueSuffixedTargets(outputDirectory, baseName, extension)
-          : initialTargets;
-
       const finalProfile = await probeAudioProfile(finalAudio.filePath, signal);
       const finalDurationSec = computeFinalDuration(card, finalProfile.durationSec);
       await logger.debug("audio.probe-final", "Probed final audio profile before save.", {
@@ -2337,22 +2341,23 @@ export class ApplicationRuntime {
       ...state.cards.map((card) => card.sourceFilePath),
       ...state.pendingImports.flatMap((item) => [item.workingFilePath, item.originalSourcePath]),
     ]);
-    const sourceInfo = await Promise.all([...sources].map(async (path) => {
-      try { return { path: await realpath(path), info: await stat(path) }; }
+    const targetInfo = await Promise.all(Object.values(targets).map(async (target) => {
+      let info: Awaited<ReturnType<typeof stat>> | null = null;
+      try { info = await stat(target); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      return { path: join(output, basename(target)), info };
+    }));
+    // Only the three outputs are fixed in number. Visit retained sources one at
+    // a time so a large queue cannot flood the filesystem before a collision.
+    for (const path of sources) {
+      let source: { path: string; info: NonNullable<Awaited<ReturnType<typeof stat>>> };
+      try { source = { path: await realpath(path), info: await stat(path) }; }
       catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw error;
       }
-    }));
-    for (const target of Object.values(targets)) {
-      const canonical = join(output, basename(target));
-      let targetInfo: Awaited<ReturnType<typeof stat>> | null = null;
-      try { targetInfo = await stat(target); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      for (const source of sourceInfo) {
-        if (source !== null && (canonical === source.path || (targetInfo !== null &&
-            targetInfo.dev === source.info.dev && targetInfo.ino === source.info.ino))) return false;
-      }
+      if (targetInfo.some((target) => target.path === source.path || (target.info !== null &&
+          target.info.dev === source.info.dev && target.info.ino === source.info.ino))) return false;
     }
     return true;
   }
