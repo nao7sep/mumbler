@@ -662,8 +662,8 @@ export interface MumblerShellApi {
   getCardMediaSource(cardId: string): Promise<string>;
   // The loudest level in each hundredth of a second, for the player's waveform.
   // Null when the run was stopped before it finished.
-  getCardWaveformPeaks(cardId: string): Promise<Float32Array | null>;
-  cancelCardWaveformPeaks(cardId: string): Promise<void>;
+  getCardWaveformPeaks(cardId: string, requestId: string): Promise<Float32Array | null>;
+  cancelCardWaveformPeaks(requestId: string): Promise<void>;
   generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot>;
   cancelCardProcessing(cardId: string): Promise<AppSnapshot>;
   pickOutputDirectory(directory?: string, literalDirectory?: string): Promise<string | null>;

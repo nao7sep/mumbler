@@ -224,14 +224,15 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     return runtime.getCardMediaSource(cardId);
   });
 
-  handle(APP_SHELL_CHANNELS.getCardWaveformPeaks, (_event, cardId: string) => {
+  handle(APP_SHELL_CHANNELS.getCardWaveformPeaks, (_event, cardId: string, requestId: string) => {
     assertString(cardId, "cardId");
-    return runtime.getCardWaveformPeaks(cardId);
+    assertString(requestId, "requestId");
+    return runtime.getCardWaveformPeaks(cardId, requestId);
   });
 
-  handle(APP_SHELL_CHANNELS.cancelCardWaveformPeaks, (_event, cardId: string) => {
-    assertString(cardId, "cardId");
-    runtime.cancelCardWaveformPeaks(cardId);
+  handle(APP_SHELL_CHANNELS.cancelCardWaveformPeaks, (_event, requestId: string) => {
+    assertString(requestId, "requestId");
+    runtime.cancelCardWaveformPeaks(requestId);
   });
 
   handle(APP_SHELL_CHANNELS.generateCardStep, (_event, cardId: string, target: GenerateTarget) => {

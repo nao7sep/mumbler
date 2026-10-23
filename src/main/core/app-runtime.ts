@@ -4,6 +4,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, sep } from "nod
 import { homedir } from "node:os";
 
 import { nanoid } from "nanoid";
+import { WaveformCache } from "./waveform-cache";
 
 import {
   type CardTrim,
@@ -286,10 +287,8 @@ export class ApplicationRuntime {
   // Request numbers never repeat, so an entry removed and taken again cannot
   // hand a superseded analysis the number it started with.
   private readonly trimRequests = new Map<string, number>();
-  // Waveform summaries for the player, by working file, kept for the session
-  // while a card or pending import still uses the file, and the runs computing them.
-  private readonly waveformPeaks = new Map<string, Float32Array>();
-  private readonly waveformWork = new Map<string, { controller: AbortController; done: Promise<Float32Array>; waiting: number }>();
+  // Active players own memory; revisits use disposable on-disk summaries.
+  private waveformCache: WaveformCache | undefined;
   private lastTrimRequest = 0;
 
   private constructor(runtime: AppRuntimeState) {
@@ -1433,37 +1432,13 @@ export class ApplicationRuntime {
     return `mumbler-asset://media/${encodeURIComponent(cardId)}`;
   }
 
-  // The waveform summary the player draws (computeWaveformPeaks), computed once
-  // per working file and kept for the session. A second request for the same
-  // file joins the run already going, unless that run was stopped: a player that
-  // closes and reopens at once (React's development double mount, or a quick
-  // switch away and back) gets a fresh run rather than the stopped one's error.
-  // A run stopped because its player closed or Mumbler is quitting answers null:
-  // that is the stop working, not a failure to record.
-  async getCardWaveformPeaks(cardId: string): Promise<Float32Array | null> {
+  async getCardWaveformPeaks(cardId: string, requestId: string): Promise<Float32Array | null> {
     this.ensureReady();
     const filePath = this.resolveCardSourcePath(cardId);
     if (filePath === null) throw new OperationError("Card media source no longer exists.");
-    this.pruneWaveformPeaks();
-    const kept = this.waveformPeaks.get(filePath);
-    if (kept !== undefined) return kept;
-    let work = this.waveformWork.get(filePath);
-    if (work === undefined || work.controller.signal.aborted) {
-      const controller = new AbortController();
-      const done = computeWaveformPeaks(filePath, controller.signal)
-        .then((peaks) => {
-          this.waveformPeaks.set(filePath, peaks);
-          return peaks;
-        })
-        .finally(() => {
-          if (this.waveformWork.get(filePath)?.controller === controller) this.waveformWork.delete(filePath);
-        });
-      work = { controller, done, waiting: 0 };
-      this.waveformWork.set(filePath, work);
-    }
-    work.waiting += 1;
+    this.waveformCache ??= new WaveformCache(join(this.runtime.paths!.tempDir, "waveforms"), computeWaveformPeaks);
     try {
-      return await work.done;
+      return await this.waveformCache.acquire(filePath, requestId);
     } catch (error: unknown) {
       if (isCancelledError(error)) return null;
       await this.runtime.logger.warn("waveform.failed", "Could not compute the recording's waveform.", {
@@ -1473,25 +1448,9 @@ export class ApplicationRuntime {
     }
   }
 
-  // A player moved on before the waveform arrived. The run stops once no player
-  // is waiting for it any more.
-  cancelCardWaveformPeaks(cardId: string): void {
-    const filePath = this.resolveCardSourcePath(cardId);
-    const work = filePath === null ? undefined : this.waveformWork.get(filePath);
-    if (work === undefined) return;
-    work.waiting = Math.max(0, work.waiting - 1);
-    if (work.waiting === 0) work.controller.abort();
-  }
-
-  // A summary is dropped once no card or pending import uses its file.
-  private pruneWaveformPeaks(): void {
-    const used = new Set([
-      ...(this.runtime.state?.cards ?? []).map((card) => card.sourceFilePath),
-      ...(this.runtime.state?.pendingImports ?? []).map((item) => item.workingFilePath),
-    ]);
-    for (const filePath of this.waveformPeaks.keys()) {
-      if (!used.has(filePath)) this.waveformPeaks.delete(filePath);
-    }
+  // Release the acquisition even after its card has left the queue.
+  cancelCardWaveformPeaks(requestId: string): void {
+    this.waveformCache?.release(requestId);
   }
 
   // A card's working recording, or that of a pending import, which the review plays.
@@ -1970,10 +1929,7 @@ export class ApplicationRuntime {
   closeForQuit(details: Record<string, unknown> = {}): Promise<void> {
     this.closePromise ??= (async () => {
       // A waveform being drawn is display work: it stops, and its ffmpeg exits.
-      const waveforms = [...this.waveformWork.values()].map(({ controller, done }) => {
-        controller.abort();
-        return done.then(() => undefined, () => undefined);
-      });
+      const waveforms = this.waveformCache?.close() ?? Promise.resolve();
       let backups: Promise<void> = Promise.resolve();
       if (details.origin === "session-end") abandonBackupStore();
       else backups = closeBackupStore(BACKUP_QUIT_DRAIN_MS);
@@ -1981,7 +1937,7 @@ export class ApplicationRuntime {
         ...details,
         cardCount: this.runtime.state?.cards.length ?? 0,
       }).catch(() => undefined);
-      await Promise.all([backups, ...waveforms, this.runtime.logger.close()]);
+      await Promise.all([backups, waveforms, this.runtime.logger.close()]);
     })();
     return this.closePromise;
   }

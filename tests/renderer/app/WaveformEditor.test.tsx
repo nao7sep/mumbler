@@ -173,7 +173,7 @@ let root: Root | null = null;
 let container: HTMLDivElement;
 let onTrimCommit: Mock<(cardId: string, trim: CardTrim) => Promise<void>>;
 let getCardMediaSource: Mock<(cardId: string) => Promise<string>>;
-let getCardWaveformPeaks: Mock<(cardId: string) => Promise<Float32Array>>;
+let getCardWaveformPeaks: Mock<(cardId: string, requestId: string) => Promise<Float32Array>>;
 let cancelCardWaveformPeaks: Mock<(cardId: string) => Promise<void>>;
 let handle: React.RefObject<WaveformEditorHandle | null>;
 
@@ -795,7 +795,7 @@ describe("the waveform summary and streamed playback", () => {
     expect(options.media).toBeInstanceOf(HTMLAudioElement);
     expect(options.duration).toBe(300);
     expect(options.peaks).toHaveLength(1);
-    expect(getCardWaveformPeaks).toHaveBeenCalledExactlyOnceWith("card-1");
+    expect(getCardWaveformPeaks).toHaveBeenCalledExactlyOnceWith("card-1", expect.any(String));
   });
 
   it("draws a summary that arrives after the player in place, without rebuilding the player", async () => {
@@ -822,7 +822,15 @@ describe("the waveform summary and streamed playback", () => {
     getCardWaveformPeaks.mockImplementationOnce(() => new Promise<Float32Array>(() => undefined));
     await render();
     await render({ id: "card-2" });
-    expect(cancelCardWaveformPeaks).toHaveBeenCalledExactlyOnceWith("card-1");
+    expect(cancelCardWaveformPeaks).toHaveBeenCalledExactlyOnceWith(getCardWaveformPeaks.mock.calls[0]![1]);
+  });
+
+  it("releases a completed summary by its own handle when navigation opens another recording", async () => {
+    await render();
+    const requestId = getCardWaveformPeaks.mock.calls[0]![1];
+    await render({ id: "card-2" });
+    expect(cancelCardWaveformPeaks).toHaveBeenCalledExactlyOnceWith(requestId);
+    expect(getCardWaveformPeaks.mock.calls[1]![1]).not.toBe(requestId);
   });
 
   it("stops its audio element and lets go of the file when the player closes", async () => {

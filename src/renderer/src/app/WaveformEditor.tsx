@@ -260,20 +260,18 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
 
   useEffect(() => {
     let cancelled = false;
-    let settled = false;
+    const requestId = crypto.randomUUID();
     setPeaks(null);
     setWaveformState("drawing");
     void window.mumbler
-      .getCardWaveformPeaks(card.id)
+      .getCardWaveformPeaks(card.id, requestId)
       .then((data) => {
-        settled = true;
         // Null is a run stopped on its way out, as this player closes.
         if (cancelled || data === null) return;
         setPeaks({ cardId: card.id, data });
         setWaveformState("drawn");
       })
       .catch((error: unknown) => {
-        settled = true;
         if (cancelled) return;
         // Playback and trimming do not need the drawing, so only it is lost.
         presentFailure(error, message("player.waveformFailed"), "waveform summary failed");
@@ -281,7 +279,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       });
     return () => {
       cancelled = true;
-      if (!settled) void window.mumbler.cancelCardWaveformPeaks(card.id).catch(() => undefined);
+      void window.mumbler.cancelCardWaveformPeaks(requestId).catch(() => undefined);
     };
   }, [card.id]);
 

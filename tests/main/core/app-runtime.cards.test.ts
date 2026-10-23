@@ -1562,36 +1562,38 @@ describe("working with a card", () => {
     expect((await readdir(join(home, "output"))).sort()).toEqual([basename(`${stem}.json`), basename(`${stem}.md`), basename(`${stem}.wav`)]);
   });
 
-  it("computes a recording's waveform once, shares a run already going, and keeps it for the session", async () => {
+  it("shares a waveform run and reuses its disk summary after all players leave", async () => {
     const card = await confirmed();
-    const first = runtime.getCardWaveformPeaks(card.id);
-    const second = runtime.getCardWaveformPeaks(card.id);
+    const first = runtime.getCardWaveformPeaks(card.id, "first");
+    const second = runtime.getCardWaveformPeaks(card.id, "request-2");
     await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
     expect(waveforms.runs[0]!.path).toBe(card.sourceFilePath);
     waveforms.runs[0]!.settle(Float32Array.of(0.5));
     expect([...(await first)!]).toEqual([0.5]);
     expect([...(await second)!]).toEqual([0.5]);
-    expect([...(await runtime.getCardWaveformPeaks(card.id))!]).toEqual([0.5]);
+    runtime.cancelCardWaveformPeaks("first");
+    runtime.cancelCardWaveformPeaks("request-2");
+    expect([...(await runtime.getCardWaveformPeaks(card.id, "request-3"))!]).toEqual([0.5]);
     expect(waveforms.runs, "kept, not computed again").toHaveLength(1);
   });
 
   it("stops a waveform run the player no longer waits for, and computes it afresh next time", async () => {
     const card = await confirmed();
-    const waiting = runtime.getCardWaveformPeaks(card.id);
+    const waiting = runtime.getCardWaveformPeaks(card.id, "request-1");
     await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
-    runtime.cancelCardWaveformPeaks(card.id);
+    runtime.cancelCardWaveformPeaks("request-1");
     expect(await waiting, "a stopped run is not a failure").toBeNull();
     expect(waveforms.runs[0]!.signal?.aborted).toBe(true);
-    void runtime.getCardWaveformPeaks(card.id).catch(() => undefined);
+    void runtime.getCardWaveformPeaks(card.id, "request-2").catch(() => undefined);
     await vi.waitFor(() => expect(waveforms.runs).toHaveLength(2));
   });
 
   it("starts afresh rather than joining a stopped run, as a player that closes and reopens at once does", async () => {
     const card = await confirmed();
-    const first = runtime.getCardWaveformPeaks(card.id);
+    const first = runtime.getCardWaveformPeaks(card.id, "request-1");
     await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
-    runtime.cancelCardWaveformPeaks(card.id);
-    const second = runtime.getCardWaveformPeaks(card.id);
+    runtime.cancelCardWaveformPeaks("request-1");
+    const second = runtime.getCardWaveformPeaks(card.id, "request-2");
     await vi.waitFor(() => expect(waveforms.runs).toHaveLength(2));
     waveforms.runs[1]!.settle(Float32Array.of(0.25));
     expect([...(await second)!]).toEqual([0.25]);
@@ -1600,19 +1602,30 @@ describe("working with a card", () => {
 
   it("keeps a run going while another player still waits for it", async () => {
     const card = await confirmed();
-    const first = runtime.getCardWaveformPeaks(card.id);
-    const second = runtime.getCardWaveformPeaks(card.id);
+    const first = runtime.getCardWaveformPeaks(card.id, "request-1");
+    const second = runtime.getCardWaveformPeaks(card.id, "request-2");
     await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
-    runtime.cancelCardWaveformPeaks(card.id);
+    runtime.cancelCardWaveformPeaks("request-1");
     expect(waveforms.runs[0]!.signal?.aborted).toBe(false);
     waveforms.runs[0]!.settle(Float32Array.of(0.75));
     expect([...(await second)!]).toEqual([0.75]);
-    expect([...(await first)!]).toEqual([0.75]);
+    expect(await first).toBeNull();
+  });
+
+  it("releases a waveform acquisition after its card has been removed", async () => {
+    const card = await confirmed();
+    const waiting = runtime.getCardWaveformPeaks(card.id, "removed-card");
+    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    await runtime.removeCard(card.id);
+    expect(runtime.resolveCardSourcePath(card.id)).toBeNull();
+    runtime.cancelCardWaveformPeaks("removed-card");
+    expect(waveforms.runs[0]!.signal?.aborted).toBe(true);
+    expect(await waiting).toBeNull();
   });
 
   it("says the waveform could not be drawn when its run fails", async () => {
     const card = await confirmed();
-    const waiting = runtime.getCardWaveformPeaks(card.id);
+    const waiting = runtime.getCardWaveformPeaks(card.id, "request-1");
     await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
     waveforms.runs[0]!.fail(new Error("ffmpeg exited with code 1"));
     await expect(waiting).rejects.toThrow("The waveform could not be drawn.");
@@ -1620,7 +1633,7 @@ describe("working with a card", () => {
 
   it("stops a waveform being drawn when Mumbler quits", async () => {
     const card = await confirmed();
-    const waiting = runtime.getCardWaveformPeaks(card.id).catch((error: unknown) => error);
+    const waiting = runtime.getCardWaveformPeaks(card.id, "request-1").catch((error: unknown) => error);
     await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
     await runtime.shutdown();
     expect(waveforms.runs[0]!.signal?.aborted).toBe(true);
