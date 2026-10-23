@@ -34,23 +34,17 @@ vi.mock("node:child_process", async (importOriginal) => {
 //
 // These drive the REAL runTool path with stand-in tools that never exit on their
 // own, so what is under test is the bound and the signal rather than a mock of
-// them. Two stand-ins, because the polite and the stubborn case differ:
-// `sleeper` dies on SIGTERM (the normal tool), `stubborn` traps it.
+// them. Escalation of an ignored SIGTERM is covered by manager-subprocesses,
+// whose stubborn child signals readiness before the test starts cancellation.
 
 let sleeperScript = "";
-let stubbornScript = "";
 let directory = "";
 
 beforeAll(() => {
   const dir = mkdtempSync(join(tmpdir(), "mumbler-tool-"));
   directory = dir;
   sleeperScript = join(dir, "sleeper.cjs");
-  stubbornScript = join(dir, "stubborn.cjs");
   writeFileSync(sleeperScript, "setInterval(() => {}, 1_000);\n");
-  writeFileSync(
-    stubbornScript,
-    "process.on('SIGTERM', () => {});\nsetInterval(() => {}, 1_000);\n",
-  );
 });
 
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
@@ -81,14 +75,6 @@ describe("audio tools are bounded and cancellable", () => {
       /did not finish within/i,
     );
     expectProcessGone(child.pid);
-  });
-
-  // The reason the kill escalates: a tool that ignores SIGTERM would otherwise
-  // outlive the bound it was given, and the await would hang exactly as before.
-  it.skipIf(process.platform === "win32")("follows an ignored SIGTERM with SIGKILL", async () => {
-    await expect(runTool(process.execPath, [stubbornScript], { timeoutMs: 200, killEscalationMs: 50 })).rejects.toThrow(
-      /did not finish within/i,
-    );
   });
 
   it("answers a cancel with the pipeline's cancelled error, not a failure", async () => {
