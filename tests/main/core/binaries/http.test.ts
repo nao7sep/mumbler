@@ -129,6 +129,8 @@ describe("discarded response ownership", () => {
   });
 
   it("keeps normal text and download stream completion with their existing readers", async () => {
+    // This case checks body ownership, not elapsed time during a real disk write.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const cancel = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async () => responseAt(URL, new ReadableStream<Uint8Array>({
       start(controller) { controller.enqueue(new TextEncoder().encode("bytes")); controller.close(); },

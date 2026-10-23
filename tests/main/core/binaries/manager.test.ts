@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppLogger } from "@main/core/logger";
-import type { ToolName } from "@shared/app-shell";
+import type { ToolName, ToolTransient } from "@shared/app-shell";
 
 const { durabilityEvents } = vi.hoisted(() => ({
   durabilityEvents: [] as Array<{ kind: "file" | "directory"; path: string }>,
@@ -260,6 +260,82 @@ describe("installTool", () => {
     });
     await manager.installTool("ffmpeg");
     expect(seen).toBe("50");
+  });
+
+  it("emits changed rounded progress and completion while suppressing repeated percentages", async () => {
+    const manager = await makeManager();
+    const seen: ToolTransient[] = [];
+    notify.mockImplementation(() => {
+      seen.push(manager.listStatuses()[0]!.transient);
+    });
+    vi.mocked(downloadToFile).mockImplementationOnce(async (opts) => {
+      await writeFile(opts.destPath, "zip-bytes");
+      opts.onProgress?.(501, 1_000);
+      const afterFirst = notify.mock.calls.length;
+      opts.onProgress?.(509, 1_000);
+      expect(notify).toHaveBeenCalledTimes(afterFirst);
+      opts.onProgress?.(510, 1_000);
+      expect(notify).toHaveBeenCalledTimes(afterFirst + 1);
+      expect(seen.slice(-2)).toEqual([
+        { kind: "running", operation: "provision", percent: 50 },
+        { kind: "running", operation: "provision", percent: 51 },
+      ]);
+    });
+
+    try {
+      await manager.installTool("ffmpeg");
+      expect(seen[0]).toEqual({ kind: "running", operation: "provision", percent: null });
+      expect(seen.at(-1)).toEqual({ kind: "idle" });
+    } finally {
+      notify.mockReset();
+    }
+  });
+
+  it("emits a changed operation even when its progress is still unknown", async () => {
+    const manager = await makeManager();
+    let releaseCheck!: (value: typeof RESOLVED) => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    vi.mocked(resolveLatest).mockImplementationOnce(async () => {
+      markStarted();
+      return new Promise((resolve) => { releaseCheck = resolve; });
+    });
+    const checking = manager.checkTools();
+    await started;
+    try {
+      expect(manager.listStatuses()[0]!.transient).toEqual({ kind: "running", operation: "check", percent: null });
+      const beforeInstall = notify.mock.calls.length;
+      const installing = manager.installTool("ffmpeg");
+      expect(notify).toHaveBeenCalledTimes(beforeInstall + 1);
+      expect(manager.listStatuses()[0]!.transient).toEqual({ kind: "running", operation: "provision", percent: null });
+      await installing;
+    } finally {
+      releaseCheck(RESOLVED);
+      await checking;
+    }
+  });
+
+  it("emits the failure after progress without suppressing its error", async () => {
+    const manager = await makeManager();
+    const seen: ToolTransient[] = [];
+    notify.mockImplementation(() => {
+      seen.push(manager.listStatuses()[0]!.transient);
+    });
+    vi.mocked(downloadToFile).mockImplementationOnce(async (opts) => {
+      opts.onProgress?.(25, 100);
+      throw new Error("network down");
+    });
+
+    try {
+      await manager.installTool("ffmpeg");
+      expect(seen).toEqual([
+        { kind: "running", operation: "provision", percent: null },
+        { kind: "running", operation: "provision", percent: 25 },
+        { kind: "failed", operation: "provision", error: { key: "tools.provisionFailed", values: { tool: "ffmpeg" } } },
+      ]);
+    } finally {
+      notify.mockReset();
+    }
   });
 
   it("cancels an in-flight install without publishing or surfacing a failure", async () => {

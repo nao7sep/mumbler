@@ -1,6 +1,7 @@
 import { message } from "@shared/i18n/translate";
 import { access, chmod, constants, mkdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { nanoid } from "nanoid";
 
@@ -419,6 +420,7 @@ export class ToolManager {
   }
 
   private setTransient(name: ToolName, transient: ToolTransient): void {
+    if (isDeepStrictEqual(this.transient.get(name), transient)) return;
     this.transient.set(name, transient);
     this.deps.notify();
   }
