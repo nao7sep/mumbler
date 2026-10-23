@@ -21,7 +21,7 @@ vi.mock("@main/core/gemini-adapter", async (importOriginal) => {
 
 // The audio stage is replaced too, so a transcription run needs no ffmpeg: the
 // prepared audio is the source file itself.
-const { mockAnalyzeTrim } = vi.hoisted(() => ({ mockAnalyzeTrim: vi.fn() }));
+const { mockAnalyzeTrim, mockCleanup } = vi.hoisted(() => ({ mockAnalyzeTrim: vi.fn(), mockCleanup: vi.fn() }));
 vi.mock("@main/core/audio-tools", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@main/core/audio-tools")>();
   return {
@@ -31,7 +31,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
       filePath: params.sourceFilePath,
       mimeType: "audio/mp4",
       wasDerived: false,
-      cleanup: async () => undefined,
+      cleanup: mockCleanup,
     }),
   };
 });
@@ -129,9 +129,29 @@ function makeContext(card: MumblerCard, signal: AbortSignal): CardPipelineContex
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockCleanup.mockReset();
 });
 
 describe("executeCardPipeline", () => {
+  it("retains successful transcription and finishes metadata when derived cleanup and its logger fail", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mumbler-cleanup-"));
+    try {
+      const source = join(dir, "rec.m4a");
+      await writeFile(source, "audio");
+      mockTranscribe.mockResolvedValue({ text: "preserved words", modelVersion: "m", usageMetadata: null, transport: "inline" });
+      mockGenerateText.mockResolvedValue({ text: "result", modelVersion: "m", usageMetadata: null });
+      mockCleanup.mockRejectedValue(new Error("cleanup refused"));
+      const card = makeCard({ sourceFilePath: source, trimDecision: { kind: "not-needed" } as MumblerCard["trimDecision"] });
+      const ctx = makeContext(card, new AbortController().signal);
+      vi.mocked(ctx.logger.warn).mockRejectedValue(new Error("logger refused"));
+      await executeCardPipeline(card.id, "transcription", "generate", ctx);
+      expect(card.status).toBe("Ready to Save");
+      expect(card.transcription.text).toBe("preserved words");
+      expect(ctx.logger.warn).toHaveBeenCalledExactlyOnceWith("audio.cleanup-failed", expect.any(String), expect.any(Object));
+      expect(mockCleanup).toHaveBeenCalledOnce();
+      expect(mockTranscribe).toHaveBeenCalledOnce();
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
   it("saves the queue only for real changes when the trim was already analyzed", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mumbler-run-"));
     try {

@@ -7,7 +7,7 @@ import { nanoid } from "nanoid";
 
 import type { AudioProfile, CardTrim, TrimDecision, ToolName } from "@shared/app-shell";
 import { WAVEFORM_PEAKS_PER_SECOND } from "@shared/waveform";
-import { type AppLogger } from "./logger";
+import { serializeError, type AppLogger } from "./logger";
 import { CancelledError, isNodeAbortError } from "./cancellation";
 
 const execFileAsync = promisify(execFile);
@@ -261,6 +261,19 @@ export interface PreparedAudioInput {
   cleanup: () => Promise<void>;
 }
 
+/** Cleanup is secondary to processing/publication, including when logging fails. */
+export async function cleanupPreparedAudio(audio: Pick<PreparedAudioInput, "cleanup">, logger?: AppLogger): Promise<boolean> {
+  try {
+    await audio.cleanup();
+    return true;
+  } catch (error) {
+    try {
+      await logger?.warn("audio.cleanup-failed", "Could not remove derived audio; startup cleanup will retry.", { error: serializeError(error) });
+    } catch { /* Preserve the primary operation's outcome. */ }
+    return false;
+  }
+}
+
 // Shared import/export reader for container and first-audio-stream tags.
 export async function probeRecordingTags(filePath: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const { stdout } = await runTool(resolveFfprobePath(), [
@@ -279,6 +292,7 @@ export async function rewriteAudioTags(params: {
   sourceFilePath: string;
   workingDir: string;
   tagArgs: string[];
+  logger?: AppLogger;
   signal?: AbortSignal;
 }): Promise<PreparedAudioInput> {
   const derivedDir = join(params.workingDir, "derived");
@@ -295,7 +309,7 @@ export async function rewriteAudioTags(params: {
       outputPath,
     ], { timeoutMs: TRANSCODE_TIMEOUT_MS, signal: params.signal });
   } catch (error: unknown) {
-    await cleanupDerivedFile(outputPath);
+    await cleanupPreparedAudio({ cleanup: () => cleanupDerivedFile(outputPath) }, params.logger);
     throw error;
   }
   return {
@@ -465,7 +479,7 @@ export async function prepareAudioForTranscription(params: {
     // runTool rejects only after the child has actually settled. Until a
     // successful return transfers cleanup to the caller, preparation owns
     // these partial bytes. Best-effort removal preserves the primary result.
-    await cleanupDerivedFile(outputPath);
+    await cleanupPreparedAudio({ cleanup: () => cleanupDerivedFile(outputPath) }, params.logger);
     throw error;
   }
 
@@ -625,12 +639,8 @@ export function buildReencodeArgs(outputPath: string, audioProfile: AudioProfile
 }
 
 async function cleanupDerivedFile(filePath: string): Promise<void> {
-  try {
-    const { rm } = await import("node:fs/promises");
-    await rm(filePath, { force: true });
-  } catch {
-    return;
-  }
+  const { rm } = await import("node:fs/promises");
+  await rm(filePath, { force: true });
 }
 
 async function findStartBoundary(

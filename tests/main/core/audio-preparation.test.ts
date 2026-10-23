@@ -7,6 +7,14 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const observed = vi.hoisted(() => ({ spawned: undefined as ((child: ChildProcess) => void) | undefined }));
+const cleanupFault = vi.hoisted(() => ({ refused: false }));
+vi.mock("node:fs/promises", async (original) => {
+  const actual = await original<typeof import("node:fs/promises")>();
+  return { ...actual, rm: (...args: Parameters<typeof actual.rm>) => {
+    if (cleanupFault.refused && /[\\/]derived[\\/]/.test(String(args[0]))) return Promise.reject(new Error("removal refused"));
+    return actual.rm(...args);
+  } };
+});
 
 // Run the stand-in through real Node on every OS, preserving execFile's real
 // promise and child. Only executable selection and child observation differ.
@@ -36,6 +44,7 @@ let workingDir: string;
 let sourceFilePath: string;
 
 beforeEach(async () => {
+  cleanupFault.refused = false;
   directory = await mkdtemp(join(tmpdir(), "mumbler-preparation-owner-"));
   workingDir = join(directory, "working");
   sourceFilePath = join(directory, "recording.wav");
@@ -59,16 +68,20 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  cleanupFault.refused = false;
   observed.spawned = undefined;
   await rm(directory, { recursive: true, force: true });
 });
 
 describe("audio preparation owns unsuccessful derived files", () => {
   it.each([
-    ["stream-copy", "failure"], ["reencode", "failure"],
-    ["stream-copy", "cancel"], ["reencode", "cancel"],
-  ] as const)("cleans repeated %s outputs after %s while preserving the source and primary result", async (mode, result) => {
+    ["stream-copy", "failure", false], ["reencode", "failure", false],
+    ["stream-copy", "cancel", false], ["reencode", "cancel", false],
+    ["stream-copy", "failure", true], ["reencode", "cancel", true],
+  ] as const)("cleans repeated %s outputs after %s while preserving the primary result (cleanup refused: %s)", async (mode, result, refused) => {
+    cleanupFault.refused = refused;
     for (let attempt = 0; attempt < 2; attempt++) {
+      const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), providerCall: vi.fn() };
       const controller = new AbortController();
       let child: ChildProcess | undefined;
       let settled = false;
@@ -82,7 +95,7 @@ describe("audio preparation owns unsuccessful derived files", () => {
         sourceFilePath, workingDir,
         trim: { frontMarkerSec: 1, backMarkerSec: 2 },
         trimDecision: { kind: mode, chosenStartBoundarySec: 1, chosenEndBoundarySec: 2 } as TrimDecision,
-        durationSec: 3, audioProfile: null, signal: controller.signal,
+        durationSec: 3, audioProfile: null, signal: controller.signal, logger,
       }).then((prepared) => prepared, (error: unknown) => error).finally(() => { settled = true; });
       try {
         await ready;
@@ -98,7 +111,13 @@ describe("audio preparation owns unsuccessful derived files", () => {
           expect(error).toBeInstanceOf(Error);
           expect((error as Error).message).toContain("encoder failure sentinel");
         }
-        expect(await readdir(join(workingDir, "derived"))).toEqual(["other.wav"]);
+        if (refused) {
+          expect(await readdir(join(workingDir, "derived"))).toContain(outputPath.split(/[\\/]/).at(-1));
+          expect(logger.warn).toHaveBeenCalledExactlyOnceWith("audio.cleanup-failed", expect.any(String), expect.objectContaining({ error: expect.objectContaining({ message: "removal refused" }) }));
+        } else {
+          expect(await readdir(join(workingDir, "derived"))).toEqual(["other.wav"]);
+          expect(logger.warn).not.toHaveBeenCalled();
+        }
         expect(await readFile(sourceFilePath, "utf8")).toBe("original recording");
         expect(await readFile(join(workingDir, "derived", "other.wav"), "utf8")).toBe("another preparation's audio");
       } finally {

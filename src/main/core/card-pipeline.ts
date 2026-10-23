@@ -12,6 +12,7 @@ import { thinkingFor } from "@shared/ai-models";
 import type { AppLogger } from "./logger";
 import {
   analyzeTrimDecision,
+  cleanupPreparedAudio,
   prepareAudioForTranscription,
 } from "./audio-tools";
 import {
@@ -198,7 +199,7 @@ export async function executeCardPipeline(
           usage: transcriptionResult.usageMetadata,
         });
       } finally {
-        await preparedAudio.cleanup();
+        await cleanupPreparedAudio(preparedAudio, logger);
       }
 
       // Release the concurrency slot the moment transcription is done so other

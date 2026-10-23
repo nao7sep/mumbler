@@ -39,6 +39,7 @@ import {
   analyzeTrimDecision,
   computeWaveformPeaks,
   configureToolResolver,
+  cleanupPreparedAudio,
   prepareAudioForTranscription,
   probeAudioProfile,
   probeRecordingTags,
@@ -2267,14 +2268,10 @@ export class ApplicationRuntime {
       committed = { kind: "saved", ...targetPaths, warnings };
       return committed;
     } finally {
-      try {
-        if (stamped !== null && stamped.audio !== trimmedAudio) await stamped.audio.cleanup();
-        await trimmedAudio.cleanup();
-      }
-      catch (error) {
-        await logger.warn("save.prepared-audio-cleanup-failed", "Could not clean up prepared save audio.", {
-          cardId, error: serializeError(error),
-        });
+      let cleaned = true;
+      if (stamped !== null && stamped.audio !== trimmedAudio) cleaned = await cleanupPreparedAudio(stamped.audio, logger);
+      if (!await cleanupPreparedAudio(trimmedAudio, logger)) cleaned = false;
+      if (!cleaned) {
         committed?.warnings?.push(message("notice.saveCleanupFailed", { folder: pathValue(this.runtime.paths!.workingDir) }));
       }
     }
@@ -2301,7 +2298,7 @@ export class ApplicationRuntime {
     }
     let rewritten: PreparedAudioInput | null = null;
     try {
-      rewritten = await rewriteAudioTags({ sourceFilePath: audio.filePath, workingDir: this.runtime.paths!.workingDir, tagArgs, signal });
+      rewritten = await rewriteAudioTags({ sourceFilePath: audio.filePath, workingDir: this.runtime.paths!.workingDir, tagArgs, signal, logger: this.runtime.logger });
       const tags = await probeRecordingTags(rewritten.filePath, signal);
       if (carriesOnlyRecordingTime(recordingTimesFromTags(tags), utcMs, timezone)) return { audio: rewritten, warning: null };
       await this.runtime.logger.warn("save.time-mismatch", "The saved audio did not read back with its recording time.", {
@@ -2309,14 +2306,14 @@ export class ApplicationRuntime {
       });
     } catch (error: unknown) {
       if (isCancelledError(error)) {
-        await rewritten?.cleanup();
+        if (rewritten !== null) await cleanupPreparedAudio(rewritten, this.runtime.logger);
         throw error;
       }
       await this.runtime.logger.warn("save.time-write-failed", "Could not write the recording time into the saved audio.", {
         cardId: card.id, extension, error: serializeError(error),
       });
     }
-    await rewritten?.cleanup();
+    if (rewritten !== null) await cleanupPreparedAudio(rewritten, this.runtime.logger);
     return { audio, warning: notWritten };
   }
 
