@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import { FORMAT_VERSIONS } from "./format-versions.ts";
-import { openVersionedDatabase, type UpgradeDatabase } from "./sqlite-store.ts";
+import { openVersionedDatabase } from "./sqlite-store.ts";
 
 export type BackupEngineWarn = (message: string, details: Record<string, unknown>) => void;
 
@@ -22,12 +22,6 @@ CREATE TABLE IF NOT EXISTS backups (
 CREATE INDEX IF NOT EXISTS idx_backups_path_id ON backups (path, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_backups_path_session ON backups (path, session_id);
 `;
-
-// Format 1 had no sessions: its rows stay as earlier history, with a NULL
-// session_id, which the unique index lets repeat.
-const upgrade: UpgradeDatabase = (db, recorded) => {
-  if (recorded < 2) db.exec("ALTER TABLE backups ADD COLUMN session_id TEXT");
-};
 
 export class BackupStoreEngine {
   private db: DatabaseSync | null = null;
@@ -100,11 +94,11 @@ export class BackupStoreEngine {
     if (this.initialized) return this.db;
     this.initialized = true;
     try {
-      // A history in a newer format is left untouched, like any other that
+      // A history in an unsupported format is left untouched, like any other that
       // cannot be opened: recording stays off for the session.
       this.db = openVersionedDatabase(this.file, FORMAT_VERSIONS.backups, SCHEMA, (error) => {
         this.warnOnce("backup store: initialization cleanup failed", { file: this.file, error: errorInfo(error) });
-      }, upgrade);
+      });
     } catch (error: unknown) {
       this.warnOnce("backup store: could not open; recording disabled for this session", {
         file: this.file,

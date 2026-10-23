@@ -24,6 +24,7 @@ import {
   setBackupStoreWarn,
   type BackupWarn,
 } from "@main/core/backupStore";
+import { createDefaultSettings, createSettingsStore } from "@main/core/settings-schema";
 
 let root: string;
 let storeFilePath: string;
@@ -263,8 +264,8 @@ describe("record — format version", () => {
   });
 });
 
-describe("record — upgrading a history written before sessions", () => {
-  it("keeps every earlier row as history and records this session beside them", async () => {
+describe("record — unsupported history written before sessions", () => {
+  it("preserves its bytes, schema and rows and disables recording for the session", async () => {
     const file = join(root, "config.json");
     const old = new DatabaseSync(storeFilePath);
     old.exec(`CREATE TABLE backups (
@@ -277,17 +278,31 @@ describe("record — upgrading a history written before sessions", () => {
       const bytes = Buffer.from(value, "utf8");
       insert.run(file, bytes, createHash("sha256").update(bytes).digest("hex"), bytes.byteLength, "2026-10-01T00:00:00.000Z");
     }
+    const schema = old.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY name").all();
+    const rows = old.prepare("SELECT * FROM backups ORDER BY id").all();
     old.close();
+    const before = readFileSync(storeFilePath);
+    const warn = vi.fn<BackupWarn>();
+    setBackupStoreWarn(warn);
 
-    record(file, Buffer.from("two", "utf8"));
-    record(file, Buffer.from("three", "utf8"));
+    const settings = createSettingsStore(file, root);
+    await settings.save({ ...createDefaultSettings(), concurrencyLimit: 4 });
+    await settings.save({ ...createDefaultSettings(), concurrencyLimit: 5 });
     await closeBackupStore();
 
-    const rows = readRows(file);
-    expect(rows.map((row) => [row.session_id, text(row)])).toEqual([[null, "one"], [null, "two"], ["session-a", "three"]]);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ concurrencyLimit: 5 });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("recording disabled for this session"),
+      expect.objectContaining({ error: expect.stringContaining("is in format 1, which this build does not read") }),
+    );
+    expect(readFileSync(storeFilePath)).toEqual(before);
+    expect(readdirSync(root).sort()).toEqual(["backups.sqlite3", "config.json"]);
     const db = new DatabaseSync(storeFilePath);
     try {
-      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
+      expect(db.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY name").all()).toEqual(schema);
+      expect(db.prepare("SELECT * FROM backups ORDER BY id").all()).toEqual(rows);
     } finally {
       db.close();
     }
