@@ -41,6 +41,8 @@ interface UseImportFlowResult {
   pendingReviewDrafts: PendingImportReviewItem[];
   isDragActive: boolean;
   importResult: ImportResultNotice | null;
+  errorMessage: Message | null;
+  dismissReviewError: () => void;
   setPendingReviewDrafts: Dispatch<SetStateAction<PendingImportReviewItem[]>>;
   dismissImportResult: () => void;
   handleImportClick: () => Promise<void>;
@@ -65,11 +67,15 @@ export function useImportFlow({
   const [pendingReviewDrafts, updatePendingReviewDrafts] = useState<PendingImportReviewItem[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const [importResult, setImportResult] = useState<ImportResultNotice | null>(null);
+  const [errorMessage, setErrorMessage] = useState<Message | null>(null);
   // Claim submission synchronously: React's busy render follows the event, but
   // the native picker and the exact submitted intent already have one owner.
   const confirmingReviewRef = useRef(false);
   const setPendingReviewDrafts: Dispatch<SetStateAction<PendingImportReviewItem[]>> = (action) => {
-    if (!confirmingReviewRef.current) updatePendingReviewDrafts(action);
+    if (!confirmingReviewRef.current) {
+      setErrorMessage(null);
+      updatePendingReviewDrafts(action);
+    }
   };
   // The review edits still waiting out the debounce, and what sends them.
   const unsentDrafts = useRef<{ timer: number; send: () => Promise<void> } | null>(null);
@@ -217,6 +223,7 @@ export function useImportFlow({
   async function handleConfirmPendingImports(): Promise<void> {
     if (confirmingReviewRef.current) return;
     confirmingReviewRef.current = true;
+    setErrorMessage(null);
     const submittedDrafts = pendingReviewDrafts.map((item) => ({ ...item }));
     setIsConfirmingReview(true);
     try {
@@ -237,10 +244,7 @@ export function useImportFlow({
         });
       }
     } catch (error: unknown) {
-      onError(
-        "import-review-confirm",
-        presentFailure(error, message("error.reviewConfirm"), "import timestamp confirmation failed"),
-      );
+      setErrorMessage(presentFailure(error, message("error.reviewConfirm"), "import timestamp confirmation failed"));
     } finally {
       confirmingReviewRef.current = false;
       setIsConfirmingReview(false);
@@ -248,6 +252,7 @@ export function useImportFlow({
   }
 
   async function handleCancelPendingImports(): Promise<void> {
+    setErrorMessage(null);
     try {
       const nextSnapshot = await window.mumbler.cancelPendingImports(
         pendingReviewDrafts.map((item) => item.id),
@@ -256,10 +261,7 @@ export function useImportFlow({
       setPendingReviewDrafts([]);
     } catch (error: unknown) {
       // The drafts stay, so the review stays open for the retry the message offers.
-      onError(
-        "import-review-cancel",
-        presentFailure(error, message("error.reviewCancel"), "pending import cancellation failed"),
-      );
+      setErrorMessage(presentFailure(error, message("error.reviewCancel"), "pending import cancellation failed"));
     }
   }
 
@@ -355,6 +357,8 @@ export function useImportFlow({
     pendingReviewDrafts,
     isDragActive,
     importResult,
+    errorMessage,
+    dismissReviewError: () => setErrorMessage(null),
     setPendingReviewDrafts,
     dismissImportResult: () => setImportResult(null),
     handleImportClick,

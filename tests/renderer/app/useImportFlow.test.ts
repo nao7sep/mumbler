@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppSnapshot, PendingImportReviewItem } from "@shared/app-shell";
 
+import { TimestampReviewModal } from "@renderer/app/TimestampReviewModal";
 import { useImportFlow } from "@renderer/app/useImportFlow";
 import { createTranslator, message, type Message } from "@shared/i18n/translate";
 
@@ -447,7 +448,7 @@ describe("useImportFlow review cancel", () => {
         "data-drafts": String(flow.pendingReviewDrafts.length),
         onClick: () => void flow.handleCancelPendingImports(),
       },
-      "Cancel",
+      flow.errorMessage ? english.text(flow.errorMessage) : "Cancel",
     );
   }
 
@@ -476,7 +477,8 @@ describe("useImportFlow review cancel", () => {
     });
 
     expect(cancelPendingImports).toHaveBeenCalledWith(["pending-1"]);
-    expect(onError).toHaveBeenCalledWith("import-review-cancel", message("error.reviewCancel"));
+    expect(onError).not.toHaveBeenCalled();
+    expect(button?.textContent).toBe(english.text(message("error.reviewCancel")));
     expect(english.text(message("error.reviewCancel"))).toContain("The review remains open");
     expect(button?.dataset.drafts, "the review is still shown").toBe("1");
   });
@@ -715,5 +717,69 @@ describe("useImportFlow review ownership", () => {
     await act(async () => vi.advanceTimersByTime(250));
     expect(sent).toHaveBeenCalledTimes(2);
     expect(sent.mock.calls[1]![0]).toEqual([expect.objectContaining({ timezone: "Europe/Berlin" })]);
+  });
+});
+
+describe("timestamp review failures inside the modal", () => {
+  const item: PendingImportReviewItem = {
+    id: "pending-modal", originalFilename: "take.wav", importSource: "file-picker",
+    originalSourcePath: "/sources/take.wav", workingFilePath: "/working/take.wav", fileSizeBytes: 1,
+    localTimestampText: "2026-03-01 07:30:00", timezone: "Asia/Tokyo",
+    utcTimestampText: "2026-02-28 22:30:00", parseStatus: "parsed", timeCandidates: [],
+    copyToBackupOnConfirm: false, deleteOriginalOnConfirm: false, createdAtUtc: 1, updatedAtUtc: 1,
+  };
+  const snapshot = { state: { pendingImports: [item] } } as unknown as AppSnapshot;
+  let flow: ReturnType<typeof useImportFlow>;
+  const onError = vi.fn();
+  function MountedReview(): ReactElement | null {
+    flow = useImportFlow({ snapshot, onSnapshotUpdate: vi.fn(), onError });
+    return flow.pendingReviewDrafts.length === 0 ? null : React.createElement(TimestampReviewModal, {
+      items: flow.pendingReviewDrafts,
+      errorMessage: flow.errorMessage,
+      onDismissError: flow.dismissReviewError,
+      backupDirectoryLabel: null,
+      onChange: (updated) => flow.setPendingReviewDrafts((drafts) => drafts.map((draft) => draft.id === updated.id ? updated : draft)),
+      onApplyTimezoneToAll: vi.fn(), onSetDeleteOriginalForAll: vi.fn(), onSetCopyToBackupForAll: vi.fn(),
+      onConfirm: flow.handleConfirmPendingImports,
+      onCancel: flow.handleCancelPendingImports,
+      isSubmitting: flow.isConfirmingReview,
+    });
+  }
+
+  it.each([
+    ["Confirm", "error.reviewConfirm", "confirmPendingImports"],
+    ["Cancel", "error.reviewCancel", "cancelPendingImports"],
+  ] as const)("keeps %s failure visible with intact drafts and available retry", async (label, key, operation) => {
+    vi.useFakeTimers();
+    const failure = vi.fn().mockRejectedValue(new Error("HostileError SECRET_SENTINEL /internal/path"));
+    onError.mockReset();
+    Object.defineProperty(window, "mumbler", { configurable: true, value: {
+      [operation]: failure,
+      updatePendingImportDrafts: vi.fn().mockResolvedValue({}),
+      reportRendererDiagnostic: vi.fn().mockResolvedValue(undefined),
+      onFlushPendingEdits: () => () => undefined,
+    } });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(React.createElement(MountedReview)));
+    const button = () => [...document.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent === label)!;
+    await act(async () => button().click());
+    expect(document.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe(english.text(message(key)));
+    expect(document.body.textContent).not.toContain("SECRET_SENTINEL");
+    expect(onError).not.toHaveBeenCalled();
+    expect(flow!.pendingReviewDrafts).toEqual([item]);
+    expect(button().disabled).toBe(false);
+    await act(async () => button().click());
+    expect(failure).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[role="alert"]')).not.toBeNull();
+    // Dismissing the result leaves the review itself and its fields in place.
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="alert"] button')!.click());
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(flow!.pendingReviewDrafts).toEqual([item]);
+    await act(async () => button().click());
+    await act(async () => flow.setPendingReviewDrafts((drafts) => drafts.map((draft) => ({ ...draft, deleteOriginalOnConfirm: true }))));
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(flow!.pendingReviewDrafts[0]?.deleteOriginalOnConfirm).toBe(true);
   });
 });

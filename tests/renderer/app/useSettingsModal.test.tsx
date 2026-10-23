@@ -2,6 +2,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SettingsModal } from "@renderer/app/SettingsModal";
 import { useSettingsModal } from "@renderer/app/useSettingsModal";
 import { applySettingsDraft, buildSettingsDraft, createDefaultSettings } from "@main/core/settings-schema";
 import { join, parse } from "node:path";
@@ -18,6 +19,7 @@ let opened = initial;
 let unsaved: { report: () => string[]; discard: () => void } | null = null;
 const onNotice = vi.fn();
 const onLastingNotice = vi.fn();
+const setGeminiApiKey = vi.fn<MumblerShellApi["setGeminiApiKey"]>();
 const clearGeminiApiKey = vi.fn<MumblerShellApi["clearGeminiApiKey"]>();
 function Harness() { state = useSettingsModal({ onSnapshotUpdate: vi.fn(), onError: vi.fn(), onNotice, onLastingNotice }); return null; }
 beforeEach(async () => {
@@ -25,6 +27,7 @@ beforeEach(async () => {
   pickOutputDirectory.mockReset();
   pickBackupDirectory.mockReset();
   clearGeminiApiKey.mockReset();
+  setGeminiApiKey.mockReset();
   onNotice.mockReset();
   onLastingNotice.mockReset();
   saveSettingsDraft.mockResolvedValue({} as Awaited<ReturnType<MumblerShellApi["saveSettingsDraft"]>>);
@@ -38,6 +41,7 @@ beforeEach(async () => {
       pickOutputDirectory,
       pickBackupDirectory,
       clearGeminiApiKey,
+      setGeminiApiKey,
       onUnsavedDrafts: (report, discard) => { unsaved = { report, discard }; return () => { unsaved = null; }; },
     } satisfies Partial<MumblerShellApi>,
   });
@@ -144,5 +148,214 @@ describe("removing the stored API key", () => {
     await act(async () => state.handleClearGeminiApiKey());
     expect(onLastingNotice).toHaveBeenCalledWith(message("notice.apiKeyRemovedEnvRemains"));
     expect(onNotice).not.toHaveBeenCalled();
+  });
+});
+
+function pending<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((yes) => { resolve = yes; });
+  return { promise, resolve };
+}
+const keySnapshot = (hasGeminiApiKey = true) =>
+  ({ settingsSummary: { hasGeminiApiKey } }) as Awaited<ReturnType<MumblerShellApi["setGeminiApiKey"]>>;
+
+describe("Settings draft settlement", () => {
+  it("protects an unsaved key on modal close and quit, reporting only the Settings label", async () => {
+    await act(async () => state.handleOpenSettings());
+    await act(async () => state.setApiKeyInput(" draft secret "));
+    expect(state.isSettingsDirty).toBe(true);
+    expect(unsaved?.report()).toEqual(["settings"]);
+    await act(async () => state.handleRequestCloseSettings());
+    expect(state.showDiscardConfirm).toBe(true);
+    await act(async () => state.handleCancelDiscardSettings());
+    expect(state.apiKeyInput).toBe(" draft secret ");
+    await act(async () => unsaved?.discard());
+    expect(state.apiKeyInput).toBe("");
+    expect(state.settingsDraft).toBeNull();
+    expect(unsaved?.report()).toEqual([]);
+    expect(setGeminiApiKey).not.toHaveBeenCalled();
+  });
+
+  it("retains a failed key draft, then clears the exact submitted draft only on success", async () => {
+    setGeminiApiKey.mockRejectedValueOnce(new Error("Save failed")).mockResolvedValueOnce(keySnapshot());
+    await act(async () => state.handleOpenSettings());
+    await act(async () => state.setApiKeyInput(" submitted key "));
+    await act(async () => state.handleSetGeminiApiKey(state.apiKeyInput));
+    expect(state.apiKeyInput).toBe(" submitted key ");
+    expect(state.settingsErrorMessage).not.toBeNull();
+    await act(async () => state.handleSetGeminiApiKey(state.apiKeyInput));
+    expect(setGeminiApiKey).toHaveBeenLastCalledWith("submitted key");
+    expect(state.apiKeyInput).toBe("");
+    expect(state.settingsErrorMessage).toBeNull();
+    expect(state.isSettingsDirty).toBe(false);
+  });
+
+  it("keeps text typed during a key save and ignores repeated key actions until settlement", async () => {
+    const saving = pending<ReturnType<typeof keySnapshot>>();
+    setGeminiApiKey.mockReturnValueOnce(saving.promise);
+    await act(async () => state.handleOpenSettings());
+    await act(async () => state.setApiKeyInput("submitted"));
+    let operation!: Promise<void>;
+    await act(async () => {
+      operation = state.handleSetGeminiApiKey(state.apiKeyInput);
+      void state.handleSetGeminiApiKey(state.apiKeyInput);
+      void state.handleClearGeminiApiKey();
+    });
+    await act(async () => state.setApiKeyInput("newer key"));
+    await act(async () => { saving.resolve(keySnapshot()); await operation; });
+    expect(setGeminiApiKey).toHaveBeenCalledTimes(1);
+    expect(clearGeminiApiKey).not.toHaveBeenCalled();
+    expect(state.apiKeyInput).toBe("newer key");
+    expect(state.settingsDraft?.hasGeminiApiKey).toBe(true);
+    expect(state.isSettingsDirty).toBe(true);
+  });
+
+  it("keeps a key draft after ordinary Settings Save, without submitting the secret", async () => {
+    await act(async () => state.handleOpenSettings());
+    await act(async () => state.setApiKeyInput("unsaved secret"));
+    const submitted = state.settingsDraft;
+    await act(async () => state.handleSaveSettings());
+    expect(saveSettingsDraft).toHaveBeenCalledWith(submitted);
+    expect(JSON.stringify(saveSettingsDraft.mock.calls)).not.toContain("unsaved secret");
+    expect(setGeminiApiKey).not.toHaveBeenCalled();
+    expect(state.settingsDraft).toBe(submitted);
+    expect(state.apiKeyInput).toBe("unsaved secret");
+    expect(state.isSettingsDirty).toBe(true);
+    await act(async () => state.setApiKeyInput(""));
+    expect(state.isSettingsDirty).toBe(false);
+  });
+
+  it("keeps newer Settings edits and compares them against the completed save", async () => {
+    const saving = pending<ReturnType<typeof keySnapshot>>();
+    saveSettingsDraft.mockReturnValueOnce(saving.promise);
+    await act(async () => state.handleOpenSettings());
+    await act(async () => state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "submitted" }));
+    const submitted = state.settingsDraft;
+    let operation!: Promise<void>;
+    await act(async () => {
+      operation = state.handleSaveSettings();
+      void state.handleSaveSettings();
+    });
+    await act(async () => {
+      state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "newer" });
+      saving.resolve(keySnapshot());
+      await operation;
+    });
+    expect(saveSettingsDraft).toHaveBeenCalledTimes(1);
+    expect(saveSettingsDraft).toHaveBeenCalledWith(submitted);
+    expect(state.settingsDraft?.titlePrompt).toBe("newer");
+    expect(state.isSettingsDirty).toBe(true);
+    await act(async () => state.setSettingsDraft(submitted));
+    expect(state.isSettingsDirty).toBe(false);
+  });
+
+  it("preserves current key presence in the baseline when Settings finishes after key removal", async () => {
+    const saving = pending<ReturnType<typeof keySnapshot>>();
+    saveSettingsDraft.mockReturnValueOnce(saving.promise);
+    clearGeminiApiKey.mockResolvedValueOnce(keySnapshot(false));
+    await act(async () => state.handleOpenSettings());
+    await act(async () => state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "submitted" }));
+    let operation!: Promise<void>;
+    await act(async () => { operation = state.handleSaveSettings(); });
+    await act(async () => state.handleClearGeminiApiKey());
+    await act(async () => state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "newer" }));
+    await act(async () => { saving.resolve(keySnapshot()); await operation; });
+    expect(state.settingsDraft?.hasGeminiApiKey).toBe(false);
+    await act(async () => state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "submitted" }));
+    expect(state.isSettingsDirty).toBe(false);
+  });
+
+  it("keeps a key first typed while Settings Save was pending", async () => {
+    const saving = pending<ReturnType<typeof keySnapshot>>();
+    saveSettingsDraft.mockReturnValueOnce(saving.promise);
+    await act(async () => state.handleOpenSettings());
+    let operation!: Promise<void>;
+    await act(async () => { operation = state.handleSaveSettings(); });
+    await act(async () => {
+      state.setApiKeyInput("new secret");
+      saving.resolve(keySnapshot());
+      await operation;
+    });
+    expect(state.settingsDraft).not.toBeNull();
+    expect(state.apiKeyInput).toBe("new secret");
+    expect(setGeminiApiKey).not.toHaveBeenCalled();
+    expect(state.isSettingsDirty).toBe(true);
+  });
+
+  it("retains settings and secret drafts after a failed Settings Save and allows retry", async () => {
+    saveSettingsDraft.mockRejectedValueOnce(new Error("Save failed"));
+    await act(async () => state.handleOpenSettings());
+    await act(async () => {
+      state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "edited" });
+      state.setApiKeyInput("unsaved key");
+    });
+    await act(async () => state.handleSaveSettings());
+    expect(state.settingsDraft?.titlePrompt).toBe("edited");
+    expect(state.apiKeyInput).toBe("unsaved key");
+    expect(state.settingsErrorMessage).not.toBeNull();
+    expect(state.isSavingSettings).toBe(false);
+    expect(state.isSettingsDirty).toBe(true);
+    await act(async () => state.handleSaveSettings());
+    expect(saveSettingsDraft).toHaveBeenCalledTimes(2);
+    expect(state.settingsErrorMessage).toBeNull();
+    expect(state.apiKeyInput).toBe("unsaved key");
+  });
+
+  it("closes ordinary Settings Save when its submitted revision remains current", async () => {
+    await act(async () => state.handleOpenSettings());
+    await act(async () => state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "submitted" }));
+    await act(async () => state.handleSaveSettings());
+    expect(state.settingsDraft).toBeNull();
+    expect(state.isSettingsDirty).toBe(false);
+  });
+});
+
+function MountedSettings() {
+  const modal = useSettingsModal({ onSnapshotUpdate: vi.fn(), onError: vi.fn(), onNotice, onLastingNotice });
+  state = modal;
+  return modal.settingsDraft && React.createElement(SettingsModal, {
+    draft: modal.settingsDraft,
+    apiKeyInput: modal.apiKeyInput,
+    setApiKeyInput: modal.setApiKeyInput,
+    isDirty: modal.isSettingsDirty,
+    isSaving: modal.isSavingSettings,
+    isSavingApiKey: modal.isSavingApiKey,
+    isPickingOutputDirectory: false,
+    isPickingBackupDirectory: false,
+    errorMessage: modal.settingsErrorMessage,
+    onChange: modal.setSettingsDraft,
+    onClose: modal.handleRequestCloseSettings,
+    onSetApiKey: modal.handleSetGeminiApiKey,
+    onClearApiKey: modal.handleClearGeminiApiKey,
+    onPickOutputDirectory: vi.fn(), onPickBackupDirectory: vi.fn(),
+    onRestoreDefaultPrompts: modal.handleRestoreDefaultPrompts,
+    onSave: modal.handleSaveSettings,
+  });
+}
+
+describe("mounted Settings key input", () => {
+  it("retains failed input and shows newer input after an earlier key save succeeds", async () => {
+    setGeminiApiKey.mockRejectedValueOnce(new Error("Save failed"));
+    await act(async () => root?.render(React.createElement(MountedSettings)));
+    await act(async () => state.handleOpenSettings());
+    await act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+      .find((tab) => tab.textContent === "AI")!.click());
+    const field = () => document.querySelector<HTMLInputElement>('input[type="password"]')!;
+    const type = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field(), value);
+      field().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const saveKey = () => Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Save key")!;
+    await type("first key");
+    await act(async () => saveKey().click());
+    expect(field().value).toBe("first key");
+    const saving = pending<ReturnType<typeof keySnapshot>>();
+    setGeminiApiKey.mockReturnValueOnce(saving.promise);
+    await act(async () => saveKey().click());
+    await type("second key");
+    await act(async () => saving.resolve(keySnapshot()));
+    expect(field().value).toBe("second key");
+    expect(unsaved?.report()).toEqual(["settings"]);
   });
 });

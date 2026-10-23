@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
 
 import type { AppSnapshot, SettingsDraft } from "@shared/app-shell";
 import { presentFailure } from "./presentFailure";
@@ -14,6 +14,8 @@ interface UseSettingsModalOptions {
 
 interface UseSettingsModalResult {
   settingsDraft: SettingsDraft | null;
+  apiKeyInput: string;
+  setApiKeyInput: Dispatch<SetStateAction<string>>;
   isSettingsDirty: boolean;
   isLoadingSettings: boolean;
   isSavingSettings: boolean;
@@ -42,7 +44,25 @@ export function useSettingsModal({
   onNotice,
   onLastingNotice,
 }: UseSettingsModalOptions): UseSettingsModalResult {
-  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
+  const [settingsDraft, updateSettingsDraft] = useState<SettingsDraft | null>(null);
+  const [apiKeyInput, updateApiKeyInput] = useState("");
+  const [initialDraft, setInitialDraft] = useState<SettingsDraft | null>(null);
+  // Save completion can share a React batch with a field change. Update these
+  // refs at the change boundary so settlement sees even not-yet-rendered edits.
+  const currentDraftRef = useRef<SettingsDraft | null>(null);
+  const setSettingsDraft = useCallback<Dispatch<SetStateAction<SettingsDraft | null>>>((action) => {
+    const next = typeof action === "function" ? action(currentDraftRef.current) : action;
+    currentDraftRef.current = next;
+    updateSettingsDraft(next);
+  }, []);
+  const apiKeyInputRef = useRef("");
+  const setApiKeyInput = useCallback<Dispatch<SetStateAction<string>>>((action) => {
+    const next = typeof action === "function" ? action(apiKeyInputRef.current) : action;
+    apiKeyInputRef.current = next;
+    updateApiKeyInput(next);
+  }, []);
+  const savingSettingsRef = useRef(false);
+  const savingApiKeyRef = useRef(false);
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isSavingApiKey, setIsSavingApiKey] = useState(false);
@@ -50,24 +70,17 @@ export function useSettingsModal({
   const [isPickingSettingsBackupDirectory, setIsPickingSettingsBackupDirectory] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<Message | null>(null);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
-  const initialDraftRef = useRef<SettingsDraft | null>(null);
-
-  // Recomputes only when the draft object changes, not on every App re-render
-  // (App re-renders on each pipeline-progress snapshot while Settings is open).
-  // initialDraftRef is only reassigned together with settingsDraft (open/save).
-  const isSettingsDirty = useMemo(
-    () =>
-      settingsDraft !== null &&
-      JSON.stringify(settingsDraft) !== JSON.stringify(initialDraftRef.current),
-    [settingsDraft],
-  );
+  const isSettingsDirty = useMemo(() => settingsDraft !== null && (
+    apiKeyInput.length > 0 || JSON.stringify(settingsDraft) !== JSON.stringify(initialDraft)
+  ), [settingsDraft, initialDraft, apiKeyInput]);
 
   async function handleOpenSettings(): Promise<void> {
     setIsLoadingSettings(true);
     try {
       const draft = await window.mumbler.getSettingsDraft();
       setSettingsDraft(draft);
-      initialDraftRef.current = draft;
+      setInitialDraft(draft);
+      setApiKeyInput("");
       setSettingsErrorMessage(null);
     } catch (error: unknown) {
       onError(presentFailure(error, message("error.settingsLoad"), "settings load failed"));
@@ -127,22 +140,30 @@ export function useSettingsModal({
   }
 
   async function handleSaveSettings(): Promise<void> {
-    if (settingsDraft === null) {
+    const submittedDraft = currentDraftRef.current;
+    if (submittedDraft === null || savingSettingsRef.current) {
       return;
     }
 
+    savingSettingsRef.current = true;
     setIsSavingSettings(true);
     try {
-      const nextSnapshot = await window.mumbler.saveSettingsDraft(settingsDraft);
+      const nextSnapshot = await window.mumbler.saveSettingsDraft(submittedDraft);
       onSnapshotUpdate(nextSnapshot);
-      setSettingsDraft(null);
+      const currentDraft = currentDraftRef.current;
+      if (currentDraft === submittedDraft && apiKeyInputRef.current.length === 0) {
+        handleCloseSettings();
+      } else if (currentDraft !== null) {
+        // The completed save settles only its submitted revision. Further edits
+        // remain in the modal, compared with what was actually persisted.
+        setInitialDraft({ ...submittedDraft, hasGeminiApiKey: currentDraft.hasGeminiApiKey });
+      }
       setSettingsErrorMessage(null);
-      setShowDiscardConfirm(false);
-      initialDraftRef.current = null;
       onNotice(message("notice.settingsSaved"));
     } catch (error: unknown) {
       setSettingsErrorMessage(presentFailure(error, message("error.settingsSave"), "settings save failed"));
     } finally {
+      savingSettingsRef.current = false;
       setIsSavingSettings(false);
     }
   }
@@ -151,34 +172,37 @@ export function useSettingsModal({
   // through its own IPC to the dedicated 0600 secrets file, never bundled into the
   // settings-JSON Save. On success we reflect the new presence into both the live
   // draft and the dirty baseline, so the key action does not leave the form
-  // looking dirty and the password field can clear itself.
+  // looking dirty. The secret draft clears only after its own save succeeds.
   function applyHasKey(hasGeminiApiKey: boolean): void {
     setSettingsDraft((current) => (current === null ? current : { ...current, hasGeminiApiKey }));
-    if (initialDraftRef.current !== null) {
-      initialDraftRef.current = { ...initialDraftRef.current, hasGeminiApiKey };
-    }
+    setInitialDraft((current) => current === null ? current : { ...current, hasGeminiApiKey });
   }
 
   async function handleSetGeminiApiKey(apiKey: string): Promise<void> {
     const trimmed = apiKey.trim();
-    if (trimmed.length === 0) {
+    if (trimmed.length === 0 || savingApiKeyRef.current) {
       return;
     }
+    savingApiKeyRef.current = true;
     setIsSavingApiKey(true);
     try {
       const nextSnapshot = await window.mumbler.setGeminiApiKey(trimmed);
       onSnapshotUpdate(nextSnapshot);
       applyHasKey(nextSnapshot.settingsSummary?.hasGeminiApiKey ?? true);
+      setApiKeyInput((current) => current === apiKey ? "" : current);
       setSettingsErrorMessage(null);
       onNotice(message("notice.apiKeySaved"));
     } catch (error: unknown) {
       setSettingsErrorMessage(presentFailure(error, message("error.apiKeySave"), "Gemini API key save failed"));
     } finally {
+      savingApiKeyRef.current = false;
       setIsSavingApiKey(false);
     }
   }
 
   async function handleClearGeminiApiKey(): Promise<void> {
+    if (savingApiKeyRef.current) return;
+    savingApiKeyRef.current = true;
     setIsSavingApiKey(true);
     try {
       const nextSnapshot = await window.mumbler.clearGeminiApiKey();
@@ -196,6 +220,7 @@ export function useSettingsModal({
     } catch (error: unknown) {
       setSettingsErrorMessage(presentFailure(error, message("error.apiKeyRemove"), "Gemini API key removal failed"));
     } finally {
+      savingApiKeyRef.current = false;
       setIsSavingApiKey(false);
     }
   }
@@ -225,7 +250,8 @@ export function useSettingsModal({
     setSettingsDraft(null);
     setSettingsErrorMessage(null);
     setShowDiscardConfirm(false);
-    initialDraftRef.current = null;
+    setInitialDraft(null);
+    setApiKeyInput("");
   }
 
   // A user's quit or window close asks before it discards unsaved Settings
@@ -261,6 +287,8 @@ export function useSettingsModal({
 
   return {
     settingsDraft,
+    apiKeyInput,
+    setApiKeyInput,
     isSettingsDirty,
     isLoadingSettings,
     isSavingSettings,

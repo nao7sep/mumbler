@@ -12,9 +12,11 @@ import {
   recomputeUtcFromLocal,
 } from "@shared/timestamps";
 
+import type { Message } from "@shared/i18n/translate";
 import type { MessageKey } from "@shared/i18n/catalogues";
 
 import { chooseRecordingTime, foundTimes, usesOnlyFileDates } from "./import-rules";
+import { InlineError } from "./InlineResult";
 import { ModalShell } from "./modal/ModalShell";
 import { ShortenedValue } from "./ShortenedValue";
 import { useI18n } from "../i18n/I18nContext";
@@ -28,6 +30,8 @@ const TIME_SOURCE_LABELS: Record<PendingImportReviewItem["timeCandidates"][numbe
 
 export interface TimestampReviewModalProps {
   items: PendingImportReviewItem[];
+  errorMessage: Message | null;
+  onDismissError: () => void;
   defaultTimezone?: string;
   backupDirectoryLabel: string | null;
   onChange: (item: PendingImportReviewItem) => void;
@@ -41,6 +45,8 @@ export interface TimestampReviewModalProps {
 
 export function TimestampReviewModal({
   items,
+  errorMessage,
+  onDismissError,
   defaultTimezone,
   backupDirectoryLabel,
   onChange,
@@ -101,6 +107,7 @@ export function TimestampReviewModal({
         </>
       }
     >
+        {errorMessage ? <InlineError onDismiss={onDismissError}>{i18n.text(errorMessage)}</InlineError> : null}
         <div className="modal-toolbar">
           <div className="field modal-toolbar__field">
             <span id="bulk-timezone-label">{t("review.setAllZones")}</span>

@@ -92,6 +92,8 @@ function movedRow(rows: readonly string[], from: number, to: number): string[] {
 
 export function SettingsModal({
   draft,
+  apiKeyInput,
+  setApiKeyInput,
   isDirty,
   isSaving,
   isSavingApiKey,
@@ -110,6 +112,8 @@ export function SettingsModal({
   systemTheme = "light",
 }: {
   draft: SettingsDraft;
+  apiKeyInput: string;
+  setApiKeyInput: (value: string) => void;
   isDirty: boolean;
   isSaving: boolean;
   isSavingApiKey: boolean;
@@ -128,10 +132,6 @@ export function SettingsModal({
   systemLanguage?: Language;
   systemTheme?: "light" | "dark";
 }): ReactElement {
-  // The API key field is self-contained: its value is committed to the dedicated
-  // secrets file the moment "Save key" is pressed, never bundled into the main
-  // Settings Save. The raw key is held only in this local state until then.
-  const [apiKeyInput, setApiKeyInput] = useState("");
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const settingsTablist = useTablist<SettingsTab>({
     tabs: SETTINGS_TABS,
@@ -506,10 +506,7 @@ export function SettingsModal({
                     <button
                       type="button"
                       className="button button--ghost"
-                      onClick={() => {
-                        onSetApiKey(apiKeyInput);
-                        setApiKeyInput("");
-                      }}
+                      onClick={() => onSetApiKey(apiKeyInput)}
                       disabled={isSavingApiKey || apiKeyInput.trim().length === 0}
                     >
                       {isSavingApiKey ? t("common.saving") : t("settings.saveKey")}

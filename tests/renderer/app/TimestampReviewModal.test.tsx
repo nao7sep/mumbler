@@ -53,6 +53,8 @@ async function mountModal(
     root?.render(
       React.createElement(TimestampReviewModal, {
         items,
+        errorMessage: null,
+        onDismissError: vi.fn(),
         defaultTimezone: "Asia/Tokyo",
         backupDirectoryLabel: options.backupDirectoryLabel ?? "~/.mumbler/backups",
         onChange,

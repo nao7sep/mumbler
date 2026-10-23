@@ -1716,6 +1716,8 @@ function LoadedShell({
       {settingsModal.settingsDraft ? (
         <SettingsModal
           draft={settingsModal.settingsDraft}
+          apiKeyInput={settingsModal.apiKeyInput}
+          setApiKeyInput={settingsModal.setApiKeyInput}
           isDirty={settingsModal.isSettingsDirty}
           isSaving={settingsModal.isSavingSettings}
           isSavingApiKey={settingsModal.isSavingApiKey}
@@ -1745,6 +1747,8 @@ function LoadedShell({
       {importFlow.pendingReviewDrafts.length > 0 ? (
         <TimestampReviewModal
           items={importFlow.pendingReviewDrafts}
+          errorMessage={importFlow.errorMessage}
+          onDismissError={importFlow.dismissReviewError}
           defaultTimezone={snapshot?.settingsSummary?.importTimezone}
           onChange={(updatedItem) =>
             importFlow.setPendingReviewDrafts((current) =>

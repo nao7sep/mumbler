@@ -72,6 +72,7 @@ describe("SettingsModal results", () => {
 
     await act(async () => {
       root?.render(React.createElement(SettingsModal, {
+        apiKeyInput: "", setApiKeyInput: vi.fn(),
         draft: draft(),
         isDirty: true,
         isSaving: false,
@@ -112,6 +113,7 @@ describe("SettingsModal theme", () => {
 
     await act(async () => {
       root?.render(React.createElement(SettingsModal, {
+        apiKeyInput: "", setApiKeyInput: vi.fn(),
         draft: draft(),
         isDirty: false,
         isSaving: false,
@@ -151,6 +153,7 @@ describe("SettingsModal language and time zone", () => {
     root = createRoot(container);
     await act(async () => {
       root?.render(React.createElement(SettingsModal, {
+        apiKeyInput: "", setApiKeyInput: vi.fn(),
         draft: { ...draft(), ...overrides },
         isDirty: false,
         isSaving: false,
@@ -228,6 +231,7 @@ describe("SettingsModal folders", () => {
     root = createRoot(container);
     await act(async () => {
       root?.render(React.createElement(SettingsModal, {
+        apiKeyInput: "", setApiKeyInput: vi.fn(),
         draft: draft(), isDirty: false, isSaving: false, isSavingApiKey: false,
         isPickingOutputDirectory: false, isPickingBackupDirectory: false, errorMessage: null,
         onChange: vi.fn(), onClose: vi.fn(), onPickOutputDirectory: vi.fn(), onPickBackupDirectory: vi.fn(),
@@ -245,6 +249,7 @@ describe("SettingsModal AI tab", () => {
   function HeldSettings({ initial, onChange }: { initial: SettingsDraft; onChange: (draft: SettingsDraft) => void }) {
     const [held, setHeld] = React.useState(initial);
     return React.createElement(SettingsModal, {
+      apiKeyInput: "", setApiKeyInput: vi.fn(),
       draft: held,
       isDirty: false,
       isSaving: false,
@@ -269,6 +274,7 @@ describe("SettingsModal AI tab", () => {
     root = createRoot(container);
     await act(async () => {
       root?.render(held ? React.createElement(HeldSettings, { initial: value, onChange }) : React.createElement(SettingsModal, {
+        apiKeyInput: "", setApiKeyInput: vi.fn(),
         draft: value,
         isDirty: false,
         isSaving: false,
@@ -425,6 +431,7 @@ describe("SettingsModal timestamp patterns", () => {
     root = createRoot(container);
     await act(async () => {
       root?.render(React.createElement(SettingsModal, {
+        apiKeyInput: "", setApiKeyInput: vi.fn(),
         draft: { ...draft(), timestampPatterns }, isDirty: true, isSaving: false, isSavingApiKey: false,
         isPickingOutputDirectory: false, isPickingBackupDirectory: false, errorMessage: null,
         onChange, onClose: vi.fn(), onPickOutputDirectory: vi.fn(), onPickBackupDirectory: vi.fn(),
