@@ -13,12 +13,17 @@ import { openVersionedDatabase } from "@main/core/sqlite-store";
 const faults = vi.hoisted(() => ({
   beforePublish: null as (() => void) | null,
   unsupportedLink: false,
+  renameFailure: false,
   cleanupFailure: false,
 }));
 vi.mock("node:fs", async (original) => {
   const actual = await original<typeof import("node:fs")>();
   return {
     ...actual,
+    renameSync: (...args: Parameters<typeof actual.renameSync>) => {
+      if (faults.renameFailure) throw new Error("publication refused");
+      actual.renameSync(...args);
+    },
     linkSync: (...args: Parameters<typeof actual.linkSync>) => {
       const before = faults.beforePublish;
       faults.beforePublish = null;
@@ -55,6 +60,7 @@ function entry(message: string): LogEntry {
 beforeEach(async () => {
   faults.beforePublish = null;
   faults.unsupportedLink = false;
+  faults.renameFailure = false;
   faults.cleanupFailure = false;
   root = await mkdtemp(join(tmpdir(), "mumbler-sqlite-"));
   file = join(root, "store.sqlite3");
@@ -120,14 +126,16 @@ describe("SQLite creation and admission", () => {
     expect(db.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "delete" });
   });
 
-  it("opens the completed winner of overlapping first publication", () => {
+  it.each([false, true])("opens the completed first-publication winner (unsupported links: %s)", (fallback) => {
+    faults.unsupportedLink = fallback;
     faults.beforePublish = () => { open().exec("INSERT INTO facts VALUES ('winner')"); };
     const db = open();
     expect(db.prepare("SELECT value FROM facts").all()).toEqual([{ value: "winner" }]);
     expect(readdirSync(root).some((name) => name.startsWith(".mumbler-sqlite-"))).toBe(false);
   });
 
-  it("admits a newer first-publication winner without replacing it", () => {
+  it.each([false, true])("refuses a newer first-publication winner without replacing it (unsupported links: %s)", (fallback) => {
+    faults.unsupportedLink = fallback;
     faults.beforePublish = () => { open(2).exec("INSERT INTO facts VALUES ('future')"); };
     expect(() => open()).toThrow("newer than this build reads");
     const db = connect();
@@ -139,6 +147,18 @@ describe("SQLite creation and admission", () => {
   it("removes only private residue after failed new schema initialization", () => {
     expect(() => open(1, `${schema}; NOT VALID SQL`)).toThrow();
     expect(readdirSync(root)).toEqual([]);
+  });
+
+  it("leaves no canonical partial database when fallback publication fails, then reopens a complete store", () => {
+    faults.unsupportedLink = true;
+    faults.renameFailure = true;
+    expect(() => open()).toThrow("publication refused");
+    expect(readdirSync(root)).toEqual([]);
+    faults.renameFailure = false;
+    const db = open();
+    db.exec("INSERT INTO facts VALUES ('complete')");
+    expect(open().prepare("SELECT value FROM facts").all()).toEqual([{ value: "complete" }]);
+    expect(open().prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
   });
 
   it("rolls back failed schema application on an existing store", () => {

@@ -1,4 +1,4 @@
-import { closeSync, constants, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, rmSync } from "node:fs";
+import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -47,10 +47,16 @@ function createDatabase(file: string, formatVersion: number, schema: string, rep
     catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"].includes(code ?? "")) {
-        try { copyFileSync(stage, file, constants.COPYFILE_EXCL); }
-        catch (copyError) {
-          if ((copyError as NodeJS.ErrnoException).code !== "EEXIST") throw copyError;
+        // One worker owns this private store under the app's instance lock.
+        // Recheck for a completed winner, then publish the closed stage in one
+        // operation: copying here could expose a partial canonical database.
+        let present = true;
+        try { lstatSync(file); }
+        catch (statError) {
+          if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError;
+          present = false;
         }
+        if (!present) renameSync(stage, file);
       } else if (code !== "EEXIST") throw error;
     }
   } catch (error) { primary = error; }
