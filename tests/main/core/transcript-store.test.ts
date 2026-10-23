@@ -30,7 +30,7 @@ function card(id: string, transcription: string | null, structured: string | nul
 }
 
 async function files(): Promise<string[]> {
-  return (await readdir(dir).catch(() => [])).sort();
+  return (await readdir(dir).catch(() => [])).filter((name) => name !== ".json-staging").sort();
 }
 
 describe("TranscriptStore", () => {

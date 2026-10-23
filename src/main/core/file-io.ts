@@ -9,6 +9,7 @@ const lowercaseId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 8);
 
 import { formatUtcMarkerMs } from "@shared/timestamps";
 import { record } from "./backupStore";
+import { ensureJsonStagingDirectory } from "./json-staging";
 
 /**
  * Options for {@link writeJsonFile}, the single managed-text atomic-write choke point.
@@ -53,10 +54,10 @@ export async function readJsonFile<T>(filePath: string): Promise<T | undefined> 
   }
 }
 
-// The single managed-text atomic-write choke point. Atomic JSON write: temp file in the same directory ->
+// The single managed-text atomic-write choke point. Atomic JSON write: private staging under the target parent ->
 // fsync -> rename over the target -> fsync the parent dir. When `mode` is given (e.g. 0o600 for a secrets
-// file), the exclusive temp is created with that mode before any bytes are written. A replacement starts
-// with the existing target mode otherwise. The mode is ignored on platforms
+// file), the exclusive stage is created with that mode before any bytes are written. Other stages
+// begin owner-only and retain the replaced target mode at publication. The mode is ignored on platforms
 // where chmod is a no-op (Windows), matching the secrets convention's POSIX-only permission rule.
 //
 // The data-backup record fires strictly AFTER the rename lands (data-backup conventions). Recording before
@@ -72,7 +73,6 @@ export async function writeJsonFile(
 ): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
   const stem = basename(filePath, extname(filePath));
-  const tempPath = join(dirname(filePath), `${stem}-${nanoid(8)}.tmp`);
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
   // Unchanged bytes need no replacement or history entry. Still sync the
   // directory, because an earlier publication may have uncertain durability.
@@ -80,13 +80,11 @@ export async function writeJsonFile(
     await syncPublishedJson(filePath);
     return;
   }
+  const staging = await ensureJsonStagingDirectory(dirname(filePath));
+  const tempPath = join(staging, `${stem}-${nanoid(8)}.tmp`);
   let staged = false;
   try {
-    const mode = options.mode ?? await stat(filePath).then((value) => value.mode).catch((error: unknown) => {
-      if (isMissingFileError(error)) return undefined;
-      throw error;
-    });
-    const handle = await open(tempPath, "wx", mode);
+    const handle = await open(tempPath, "wx", options.mode ?? 0o600);
     staged = true;
     try {
       await handle.writeFile(bytes);

@@ -1,3 +1,5 @@
+import { cleanInterruptedJsonWrites } from "@main/core/json-staging";
+import type { AppPaths } from "@shared/app-shell";
 import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -207,7 +209,7 @@ describe("uniquePathInDirectory", () => {
 });
 
 describe("writeJsonFile", () => {
-  it("names its atomic-write temp file <stem>-<nanoid>.tmp in the target's own directory", async () => {
+  it("names its atomic-write stage inside the target parent's private staging directory", async () => {
     const target = join(dir, "config.json");
 
     await writeJsonFile(target, { hello: "world" });
@@ -216,7 +218,7 @@ describe("writeJsonFile", () => {
 
     const tempRenames = capturedRenames.filter((r) => r.destination === target);
     expect(tempRenames).toHaveLength(1);
-    expect(dirname(tempRenames[0]!.source)).toBe(dir);
+    expect(dirname(tempRenames[0]!.source)).toBe(join(dir, ".json-staging"));
     expect(basename(tempRenames[0]!.source)).toMatch(/^config-[\w-]{8}\.tmp$/);
   });
 });
@@ -360,17 +362,18 @@ it("preserves a failed publication and removes only its staged file", async () =
     await expect(writeJsonFile(target, { updated: true })).rejects.toBe(primary);
   } finally { faults.rename = null; }
   expect(await readFile(target, "utf8")).toBe("old");
-  expect(await readdir(dir)).toEqual(["config.json"]);
+  expect(await readdir(dir)).toEqual([".json-staging", "config.json"]);
 });
 
 
 it("does not remove or overwrite another writer's colliding staging file", async () => {
   faults.tempId = "collision";
-  const foreign = join(dir, "config-collision.tmp");
+  await mkdir(join(dir, ".json-staging"));
+  const foreign = join(dir, ".json-staging", "config-collision.tmp");
   await writeFile(foreign, "foreign bytes");
   await expect(writeJsonFile(join(dir, "config.json"), { updated: true })).rejects.toMatchObject({ code: "EEXIST" });
   expect(await readFile(foreign, "utf8")).toBe("foreign bytes");
-  expect(await readdir(dir)).toEqual(["config-collision.tmp"]);
+  expect(await readdir(join(dir, ".json-staging"))).toEqual(["config-collision.tmp"]);
 });
 
 it("cleanup failure does not replace the primary publication error", async () => {
@@ -379,6 +382,8 @@ it("cleanup failure does not replace the primary publication error", async () =>
   faults.rename = primary;
   try {
     await expect(writeJsonFile(join(dir, "config.json"), { updated: true })).rejects.toBe(primary);
-    expect(await readdir(dir)).toHaveLength(1);
+    expect(await readdir(join(dir, ".json-staging"))).toHaveLength(1);
   } finally { faults.cleanup = false; faults.rename = null; }
+  await cleanInterruptedJsonWrites({ homeDir: dir, transcriptsDir: join(dir, "transcripts"), binDir: join(dir, "bin") } as AppPaths);
+  expect(await readdir(join(dir, ".json-staging"))).toEqual([]);
 });

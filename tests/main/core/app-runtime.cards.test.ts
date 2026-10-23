@@ -2064,7 +2064,7 @@ describe("each card's text in its own file", () => {
       metadata: { structured: "## what it was about" },
     });
     expect(await readFile(join(home, "queue.json"), "utf8")).not.toContain("every word that was said");
-    const [file] = await readdir(join(home, "transcripts"));
+    const [file] = (await readdir(join(home, "transcripts"))).filter((name) => name.endsWith(".json"));
     expect(JSON.parse(await readFile(join(home, "transcripts", file), "utf8"))).toMatchObject({
       formatVersion: 1,
       cardId: card.id,
@@ -2076,11 +2076,12 @@ describe("each card's text in its own file", () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await withTextOnDisk(card);
-    expect(await readdir(join(home, "transcripts"))).toHaveLength(1);
+    expect((await readdir(join(home, "transcripts"))).filter((name) => name.endsWith(".json"))).toHaveLength(1);
 
     await runtime.removeCard(card.id);
 
-    expect(await readdir(join(home, "transcripts"))).toEqual([]);
+    expect(await readdir(join(home, "transcripts"))).toEqual([".json-staging"]);
+    expect(await readdir(join(home, "transcripts", ".json-staging"))).toEqual([]);
   });
 
   it("restores transcript and queue retry information when audio removal is refused", async () => {
@@ -2194,7 +2195,7 @@ describe("a store in a newer format", () => {
     await new TranscriptStore(join(home, "transcripts")).writeChanged([
       { ...card, transcription: { text: "words" } },
     ]);
-    const [file] = await readdir(join(home, "transcripts"));
+    const [file] = (await readdir(join(home, "transcripts"))).filter((name) => name.endsWith(".json"));
     const path = join(home, "transcripts", file);
     const newer = await makeNewer(path);
 
@@ -2747,7 +2748,7 @@ describe("the save a quit makes", () => {
 
     unwritable.refuses = () => false;
     expect(await runtime.saveForQuit()).toEqual([]);
-    const [file] = await readdir(join(home, "transcripts"));
+    const [file] = (await readdir(join(home, "transcripts"))).filter((name) => name.endsWith(".json"));
     expect(JSON.parse(await readFile(join(home, "transcripts", file!), "utf8"))).toMatchObject({
       cardId: card.id,
       transcription: "words not on disk yet",

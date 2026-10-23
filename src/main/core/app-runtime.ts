@@ -4,6 +4,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, sep } from "nod
 import { homedir } from "node:os";
 
 import { nanoid } from "nanoid";
+import { cleanInterruptedJsonWrites } from "./json-staging";
 import { getAppPaths } from "./app-paths";
 import { admitStorageRoot, type StorageAdmission } from "./storage-admission";
 import { WaveformCache } from "./waveform-cache";
@@ -359,6 +360,7 @@ export class ApplicationRuntime {
 
     try {
       await ensureDirectories(paths);
+      await cleanInterruptedJsonWrites(paths);
 
       // Authored settings with damaged content are set aside and the app starts on
       // the built-ins, leaving the work stores alone (store-recovery-conventions).

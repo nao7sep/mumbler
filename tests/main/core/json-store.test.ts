@@ -211,7 +211,7 @@ describe("JsonStore.preserveExistingFiles", () => {
     // And nothing leaked: exactly the canonical and the preserved copy remain.
     const remaining = await readdir(dir);
     expect(remaining.sort()).toEqual(
-      ["doc.json", ...preserved.map((p) => p.slice(dir.length + 1))].sort(),
+      [".json-staging", "doc.json", ...preserved.map((p) => p.slice(dir.length + 1))].sort(),
     );
   });
 });

@@ -99,7 +99,8 @@ describe("the sidecar", () => {
 
   it("leaves no staging file behind", async () => {
     await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000, join(binDir, "ffmpeg.exe"));
-    expect(await readdir(binDir)).toEqual(["ffmpeg.exe", "ffmpeg.json"]);
+    expect(await readdir(binDir)).toEqual([".json-staging", "ffmpeg.exe", "ffmpeg.json"]);
+    expect(await readdir(join(binDir, ".json-staging"))).toEqual([]);
   });
 
   it("is null when absent — a hand-placed binary is unversioned, never assumed current", async () => {
