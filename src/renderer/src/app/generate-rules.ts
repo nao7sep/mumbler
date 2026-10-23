@@ -1,4 +1,5 @@
 import type { GenerateTarget, MumblerCard, TrimDecision } from "@shared/app-shell";
+import { resolveGenerateStartStep } from "@shared/generate-rules";
 
 import type { MessageKey } from "@shared/i18n/catalogues";
 import { message, type Message, type Translator } from "@shared/i18n/translate";
@@ -167,11 +168,21 @@ export function getInvalidatedGenerateTargets(target: GenerateTarget): GenerateT
 }
 
 export function getGenerateConfirmBody(card: MumblerCard, target: GenerateTarget): Message | null {
-  const invalidated = getInvalidatedGenerateTargets(target)
+  const startStep = resolveGenerateStartStep(card, target);
+  const invalidated = getInvalidatedGenerateTargets(startStep)
     .filter((entry) => (getResultValue(card, entry) ?? "").trim().length > 0)
     .map((entry) => message(resultLabels[entry]));
   if (invalidated.length === 0) {
     return null;
   }
-  return message(GENERATE_CONFIRM_BODIES[target], { results: invalidated });
+  return message(GENERATE_CONFIRM_BODIES[startStep], { results: invalidated });
+}
+
+/** Consent belongs to the recording and results that were shown in the question. */
+export function sameGenerateInputs(before: MumblerCard, after: MumblerCard): boolean {
+  return before.id === after.id && before.updatedAtUtc === after.updatedAtUtc &&
+    before.trim.frontMarkerSec === after.trim.frontMarkerSec && before.trim.backMarkerSec === after.trim.backMarkerSec &&
+    before.transcription.text === after.transcription.text &&
+    before.metadata.structured === after.metadata.structured &&
+    before.metadata.title === after.metadata.title && before.metadata.slug === after.metadata.slug;
 }

@@ -78,6 +78,7 @@ import {
   getRemoveConfirmBody,
   getSaveDisabledReason,
   generateConfirmTitles,
+  sameGenerateInputs,
   trimDecisionReason,
 } from "./generate-rules";
 
@@ -332,6 +333,7 @@ function LoadedShell({
   });
   const [pendingGenerate, setPendingGenerate] = useState<{
     cardId: string;
+    card: MumblerCard;
     target: GenerateTarget;
     body: Message;
   } | null>(null);
@@ -733,6 +735,7 @@ function LoadedShell({
 
     setPendingGenerate({
       cardId: card.id,
+      card,
       target,
       body,
     });
@@ -742,6 +745,26 @@ function LoadedShell({
     const pending = pendingGenerate;
     if (pending === null) {
       return;
+    }
+
+    const currentSnapshot = snapshotRef.current;
+    const current = currentSnapshot?.state?.cards.find((card) => card.id === pending.cardId);
+    if (!current || isCardBusy(current) || activePipelineCards.includes(current.id) || getGenerateDisabledReason({
+      selectedCard: current,
+      hasGeminiKey: currentSnapshot?.settingsSummary?.hasGeminiApiKey ?? false,
+      providerEndpointAllowed: currentSnapshot?.settingsSummary?.providerEndpointAllowed,
+    }) !== null) {
+      setPendingGenerate(null);
+      return;
+    }
+    if (!sameGenerateInputs(pending.card, current)) {
+      // Keep the changed question open for a fresh confirmation. If no results
+      // remain to replace, the original consent no longer has work to protect.
+      const body = getGenerateConfirmBody(current, pending.target);
+      if (body !== null) {
+        setPendingGenerate({ ...pending, card: current, body });
+        return;
+      }
     }
 
     setPendingGenerate(null);

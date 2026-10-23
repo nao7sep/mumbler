@@ -549,31 +549,7 @@ export function clearCardResultsFromStep(
   return JSON.stringify([card.transcription, card.metadata]) !== before;
 }
 
-export function resolveGenerateStartStep(
-  card: MumblerCard,
-  target: PipelineStartStep,
-): PipelineStartStep {
-  return resolveEarliestRequiredStep(card, target);
-}
-
-function resolveEarliestRequiredStep(
-  card: MumblerCard,
-  target: PipelineStartStep,
-): PipelineStartStep {
-  if (target !== "transcription" && card.transcription.text === null) {
-    return "transcription";
-  }
-
-  if ((target === "title" || target === "slug") && card.metadata.structured === null) {
-    return "structured";
-  }
-
-  if (target === "slug" && card.metadata.title === null) {
-    return "title";
-  }
-
-  return target;
-}
+export { resolveGenerateStartStep } from "@shared/generate-rules";
 
 function renderPromptTemplate(
   template: string,
@@ -583,10 +559,7 @@ function renderPromptTemplate(
     title: string;
   },
 ): string {
-  return template
-    .replaceAll("{transcript}", values.transcript)
-    .replaceAll("{structured}", values.structured)
-    .replaceAll("{title}", values.title);
+  return template.replace(/\{(transcript|structured|title)\}/g, (_match, key: keyof typeof values) => values[key]);
 }
 
 export function sanitizeTitle(value: string): string {

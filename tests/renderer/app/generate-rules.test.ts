@@ -120,6 +120,13 @@ describe("getGenerateConfirmBody (the data-loss warning)", () => {
     );
   });
 
+  it("warns about every cleared result when a missing transcript moves generation earlier", () => {
+    const c = card({ structured: "s", title: "T", slug: "sl" });
+    expect(en(getGenerateConfirmBody(c, "slug"))).toBe(
+      "Generating the transcription will replace existing data for: Structured transcription, Title, Slug.",
+    );
+  });
+
   it("treats whitespace-only existing values as empty", () => {
     expect(en(getGenerateConfirmBody(card({ structured: "   " }), "transcription"))).toBeNull();
   });

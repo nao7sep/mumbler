@@ -227,6 +227,33 @@ describe("executeCardPipeline", () => {
     expect(ctx.releaseTranscriptionSlot).toHaveBeenCalledTimes(1);
   });
 
+  it("inserts prompt values literally without expanding dollars or tokens inside them", async () => {
+    const transcript = "words $& $$ $` $' {structured} {title}";
+    const structured = "outline $& $$ $` $' {title}";
+    const title = "title $& $$ {transcript}";
+    mockGenerateText
+      .mockResolvedValueOnce({ text: structured, modelVersion: "m", usageMetadata: null })
+      .mockResolvedValueOnce({ text: title, modelVersion: "m", usageMetadata: null })
+      .mockResolvedValueOnce({ text: "slug", modelVersion: "m", usageMetadata: null });
+    const card = makeCard({ transcription: { text: transcript } });
+    const ctx = makeContext(card, new AbortController().signal);
+    ctx.settings.prompts = {
+      ...ctx.settings.prompts,
+      structured: "T:{transcript}|S:{structured}|N:{title}",
+      title: "T:{transcript}|S:{structured}|N:{title}",
+      slug: "T:{transcript}|S:{structured}|N:{title}",
+    };
+
+    await executeCardPipeline(card.id, "structured", "generate", ctx);
+
+    expect(mockGenerateText.mock.calls.map(([params]) => params.prompt)).toEqual([
+      `T:${transcript}|S:|N:`,
+      `T:${transcript}|S:${structured}|N:`,
+      `T:${transcript}|S:${structured}|N:${title}`,
+    ]);
+    expect(card.status).toBe("Ready to Save");
+  });
+
   it("drops a result that arrives after a cancel took the card, leaving the card that replaced it untouched", async () => {
     let answer!: (value: { text: string; modelVersion: string; usageMetadata: null }) => void;
     mockGenerateText.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
