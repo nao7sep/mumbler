@@ -1,7 +1,8 @@
+import { recordingTimeDraft } from "@shared/review-timestamps";
 import type { PendingImportReviewItem, RecordingTimeCandidate } from "@shared/app-shell";
 import { isSupportedAudioImportName } from "@shared/audio-import";
 import { message, type Message } from "@shared/i18n/translate";
-import { formatUtcForDisplay, recomputeLocalFromUtc, recomputeUtcFromLocal } from "@shared/timestamps";
+import { parseUtcFromDisplay, recomputeLocalFromUtc, recomputeUtcFromLocal } from "@shared/timestamps";
 
 /** A found time as the item's zone shows it, or null when it cannot be shown there. */
 export function candidateLocalText(item: Pick<PendingImportReviewItem, "timezone">, candidate: RecordingTimeCandidate): string | null {
@@ -11,6 +12,8 @@ export function candidateLocalText(item: Pick<PendingImportReviewItem, "timezone
 }
 
 export interface FoundTime {
+  key: string;
+  utcMs: number | null;
   /** The time as the item's zone shows it. */
   localText: string;
   /** Where it was found, each once, in the order the review lists them. */
@@ -19,44 +22,40 @@ export interface FoundTime {
   candidate: RecordingTimeCandidate;
 }
 
-/** The found times as the review offers them: one per distinct time in the
- * item's zone, naming every source that found it, so agreeing sources share a
- * button and only disagreeing ones add another. */
+/** One choice per distinct instant or unresolved local time. Agreeing sources
+ * share a button; repeated wall-clock hours retain their separate instants. */
 export function foundTimes(item: Pick<PendingImportReviewItem, "timezone" | "timeCandidates">): FoundTime[] {
   const times = new Map<string, FoundTime>();
   for (const candidate of item.timeCandidates) {
     const localText = candidateLocalText(item, candidate);
     if (localText === null) continue;
-    const found = times.get(localText);
-    if (found === undefined) times.set(localText, { localText, sources: [candidate.source], candidate });
+    const utcMs = candidate.utcMs ?? recomputeUtcFromLocal(localText, item.timezone).utcMs;
+    const key = utcMs === null ? `local:${localText}` : `utc:${utcMs}`;
+    const found = times.get(key);
+    if (found === undefined) times.set(key, { key, utcMs, localText, sources: [candidate.source], candidate });
     else if (!found.sources.includes(candidate.source)) found.sources.push(candidate.source);
   }
   return [...times.values()];
+}
+
+export function isFoundTimeSelected(item: Pick<PendingImportReviewItem, "localTimestampText" | "utcTimestampText" | "timestampBasis" | "timezone">, found: FoundTime): boolean {
+  const utcMs = item.timestampBasis === "utc" ? parseUtcFromDisplay(item.utcTimestampText) : recomputeUtcFromLocal(item.localTimestampText, item.timezone).utcMs;
+  return found.utcMs === null ? found.localText === item.localTimestampText : found.utcMs === utcMs;
 }
 
 /** Whether the item's time is one only the file's own dates gave: copying or
  * syncing often changes them, so the review warns while such a time is chosen.
  * A file date that the name or a stored time agrees with shares their button,
  * and is not warned about. */
-export function usesOnlyFileDates(item: Pick<PendingImportReviewItem, "timezone" | "timeCandidates" | "localTimestampText">): boolean {
-  return foundTimes(item).some((found) => found.localText === item.localTimestampText
+export function usesOnlyFileDates(item: PendingImportReviewItem): boolean {
+  return foundTimes(item).some((found) => isFoundTimeSelected(item, found)
     && found.sources.every((source) => source === "file-created" || source === "file-modified"));
 }
 
-/** The review item with a found time chosen: an exact time keeps its instant
- * and shows it in the item's zone; a local one is read in that zone. */
+/** Choosing an exact time retains its UTC authority through review and confirmation. */
 export function chooseRecordingTime(item: PendingImportReviewItem, candidate: RecordingTimeCandidate): PendingImportReviewItem {
-  const localText = candidateLocalText(item, candidate);
-  if (localText === null) return item;
-  if (candidate.utcMs !== null) {
-    return { ...item, localTimestampText: localText, utcTimestampText: formatUtcForDisplay(candidate.utcMs) };
-  }
-  const utc = recomputeUtcFromLocal(localText, item.timezone);
-  return {
-    ...item,
-    localTimestampText: localText,
-    utcTimestampText: utc.error === null && utc.utcMs !== null ? formatUtcForDisplay(utc.utcMs) : item.utcTimestampText,
-  };
+  const draft = recordingTimeDraft(candidate, item.timezone);
+  return draft.localTimestampText === "" ? item : { ...item, ...draft };
 }
 
 // The pure decisions behind useImportFlow, lifted out of the hook so they are
@@ -149,6 +148,7 @@ export function reconcilePendingReviewDrafts(
       localTimestampText: draft.localTimestampText,
       timezone: draft.timezone,
       utcTimestampText: draft.utcTimestampText,
+      timestampBasis: draft.timestampBasis,
       copyToBackupOnConfirm: draft.copyToBackupOnConfirm,
       deleteOriginalOnConfirm: draft.deleteOriginalOnConfirm,
     };

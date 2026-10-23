@@ -211,13 +211,12 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
       tagWrites.readBack.set(params.sourceFilePath, written);
       return { filePath: params.sourceFilePath, mimeType: "audio/wav", wasDerived: false, cleanup: async () => undefined };
     },
-    probeAudioStreamTags: async () => ({}),
     computeWaveformPeaks: (path: string, signal?: AbortSignal) => new Promise<Float32Array>((resolve, reject) => {
       waveforms.runs.push({ path, signal, settle: resolve, fail: reject });
       signal?.addEventListener("abort", () => reject(new CancelledError("stopped")), { once: true });
     }),
-    probeContainerTags: async (path: string, signal?: AbortSignal) =>
-      tagWrites.readBack.get(path) ?? actual.probeContainerTags(path, signal),
+    probeRecordingTags: async (path: string, signal?: AbortSignal) =>
+      tagWrites.readBack.get(path) ?? actual.probeRecordingTags(path, signal),
     probeAudioProfile: async () => {
       probeGate.entered += 1;
       probeGate.onEnter?.();
@@ -847,6 +846,18 @@ describe("confirming what was dropped in", () => {
     expect(result.originalWarnings).toEqual([]);
     expect(await exists(pending.originalSourcePath)).toBe(false);
     expect(await readdir(originals), "filed under its settled UTC time alone").toEqual(["20260228-223000-utc.wav"]);
+  });
+
+  it("preserves an embedded Ogg instant through initial review, confirmation and reopen", async () => {
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "America/New_York" });
+    tagWrites.readBack.set(join(home, "working", "voice.ogg"), { date: "2026-11-01T01:30:00-05:00" });
+    const [pending] = await dropIn("voice.ogg");
+    expect(pending).toMatchObject({ timestampBasis: "utc", localTimestampText: "2026-11-01 01:30:00", utcTimestampText: "2026-11-01 06:30:00" });
+    const result = await runtime.confirmPendingImports([{ ...pending!, copyToBackupOnConfirm: false, deleteOriginalOnConfirm: false }]);
+    expect(cards(result.snapshot)[0].timestamps.confirmedUtc).toBe(Date.UTC(2026, 10, 1, 6, 30));
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+    expect(cards(runtime.getSnapshot())[0].timestamps.confirmedUtc).toBe(Date.UTC(2026, 10, 1, 6, 30));
   });
 
   it("turns each pending import into a card with the reviewed time, and selects the first", async () => {

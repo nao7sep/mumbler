@@ -487,7 +487,7 @@ describe("the recording time a save writes", () => {
             const tagArgs = times.recordingTimeWriteArgs(extname(source), utcMs, "Asia/Tokyo");
             if (tagArgs === null) { mismatches.push(`${basename(source)}: no place for a time`); continue; }
             const saved = await tools.rewriteAudioTags({ sourceFilePath: trimmed.filePath, workingDir: home, tagArgs });
-            const tags = { ...(await tools.probeAudioStreamTags(saved.filePath)), ...(await tools.probeContainerTags(saved.filePath)) };
+            const tags = await tools.probeRecordingTags(saved.filePath);
             if (!times.carriesOnlyRecordingTime(times.recordingTimesFromTags(tags), utcMs, "Asia/Tokyo")) {
               mismatches.push(`${basename(source)}, front trim ${frontMarkerSec ?? 0} s: ${JSON.stringify(tags)}`);
             }

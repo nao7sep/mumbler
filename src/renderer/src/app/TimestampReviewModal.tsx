@@ -15,7 +15,8 @@ import {
 import type { Message } from "@shared/i18n/translate";
 import type { MessageKey } from "@shared/i18n/catalogues";
 
-import { chooseRecordingTime, foundTimes, usesOnlyFileDates } from "./import-rules";
+import { changeReviewTimezone } from "@shared/review-timestamps";
+import { chooseRecordingTime, foundTimes, isFoundTimeSelected, usesOnlyFileDates } from "./import-rules";
 import { InlineError } from "./InlineResult";
 import { ModalShell } from "./modal/ModalShell";
 import { ShortenedValue } from "./ShortenedValue";
@@ -168,16 +169,17 @@ export function TimestampReviewModal({
                   <div className="review-row__times" role="group" aria-label={t("review.timesFound")}>
                     {times.map((found) => (
                       <button
-                        key={found.localText}
+                        key={found.key}
                         type="button"
                         className="button button--ghost button--compact"
                         disabled={isSubmitting}
-                        aria-pressed={item.localTimestampText === found.localText}
+                        aria-pressed={isFoundTimeSelected(item, found)}
                         onClick={() => onChange(chooseRecordingTime(item, found.candidate))}
                       >
                         {t("review.timeChoice", {
                           source: i18n.list(found.sources.map((source) => t(TIME_SOURCE_LABELS[source]))),
-                          time: found.localText,
+                          time: times.some((other) => other.key !== found.key && other.localText === found.localText) && found.utcMs !== null
+                            ? `${found.localText} (${formatUtcForDisplay(found.utcMs)} UTC)` : found.localText,
                         })}
                       </button>
                     ))}
@@ -197,6 +199,7 @@ export function TimestampReviewModal({
                         onChange({
                           ...item,
                           localTimestampText: nextValue,
+                          timestampBasis: "local",
                           utcTimestampText:
                             utcResult.error === null ? formatUtcForDisplay(utcResult.utcMs!) : item.utcTimestampText,
                         });
@@ -209,31 +212,7 @@ export function TimestampReviewModal({
                       disabled={isSubmitting}
                       value={item.timezone}
                       onChange={(event) => {
-                        const timezone = event.target.value;
-                        if (getLocalTimestampError(item.localTimestampText) === null) {
-                          const utcResult = recomputeUtcFromLocal(item.localTimestampText, timezone);
-                          onChange({
-                            ...item,
-                            timezone,
-                            utcTimestampText:
-                              utcResult.error === null ? formatUtcForDisplay(utcResult.utcMs!) : item.utcTimestampText,
-                          });
-                          return;
-                        }
-
-                        if (getUtcTimestampError(item.utcTimestampText) === null) {
-                          const utcMs = parseUtcFromDisplay(item.utcTimestampText)!;
-                          const localResult = recomputeLocalFromUtc(utcMs, timezone);
-                          onChange({
-                            ...item,
-                            timezone,
-                            localTimestampText:
-                              localResult.error === null ? localResult.localTimestampText : item.localTimestampText,
-                          });
-                          return;
-                        }
-
-                        onChange({ ...item, timezone });
+                        onChange(changeReviewTimezone(item, event.target.value));
                       }}
                     >
                       {timezoneOptions.map((tz) => (
@@ -258,6 +237,7 @@ export function TimestampReviewModal({
                           // editing — reformatting it mid-edit would yank the caret.
                           // Canonicalization happens at confirm (buildConfirmedTimestamps).
                           utcTimestampText: nextDisplay,
+                          timestampBasis: "utc",
                           localTimestampText:
                             localResult.error === null ? localResult.localTimestampText : item.localTimestampText,
                         });

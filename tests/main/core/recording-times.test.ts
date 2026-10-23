@@ -136,11 +136,16 @@ describe("the time the review starts with", () => {
     ["a name that disagrees with the stored time, which the name wins", [name, storedLocal, modified], "2026-10-14 15:30:12"],
     ["the first of several stored times", [storedLocal, storedExact], "2026-10-14 15:34:00"],
   ])("%s", (_case, candidates, expected) => {
-    expect(prefilledRecordingTime(candidates, "Asia/Tokyo")).toBe(expected);
+    expect(prefilledRecordingTime(candidates, "Asia/Tokyo").localTimestampText).toBe(expected);
   });
 
   it("never starts from a file date", () => {
-    expect(prefilledRecordingTime([modified, { ...modified, source: "file-created" }], "Asia/Tokyo")).toBe("");
+    expect(prefilledRecordingTime([modified, { ...modified, source: "file-created" }], "Asia/Tokyo").localTimestampText).toBe("");
+  });
+
+  it.each([5, 6])("prefills the exact repeated-hour instant at %s UTC", (hour) => {
+    const draft = prefilledRecordingTime([{ source: "embedded", utcMs: Date.UTC(2026, 10, 1, hour, 30), localText: null }], "America/New_York");
+    expect(draft).toEqual({ localTimestampText: "2026-11-01 01:30:00", utcTimestampText: `2026-11-01 0${hour}:30:00`, timestampBasis: "utc" });
   });
 });
 

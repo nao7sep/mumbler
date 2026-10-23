@@ -141,7 +141,7 @@ describe("reviewing what was imported", () => {
   });
 
   it("keeps the UTC time in step when the local time is edited", async () => {
-    await mountModal([makeItem()]);
+    await mountModal([makeItem({ timestampBasis: "utc" })]);
 
     await type(fields().local, "2026-03-01 09:00:00");
 
@@ -150,6 +150,7 @@ describe("reviewing what was imported", () => {
         id: "pending-1",
         localTimestampText: "2026-03-01 09:00:00",
         utcTimestampText: "2026-03-01 00:00:00",
+        timestampBasis: "local",
       }),
     );
   });
@@ -160,7 +161,7 @@ describe("reviewing what was imported", () => {
     await type(fields().utc, "2026-03-01 00:00:00");
 
     expect(onChange).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ utcTimestampText: "2026-03-01 00:00:00", localTimestampText: "2026-03-01 09:00:00" }),
+      expect.objectContaining({ utcTimestampText: "2026-03-01 00:00:00", localTimestampText: "2026-03-01 09:00:00", timestampBasis: "utc" }),
     );
   });
 
@@ -175,6 +176,23 @@ describe("reviewing what was imported", () => {
         localTimestampText: "2026-03-01 07:30:00",
       }),
     );
+  });
+
+  it("offers distinct repeated-hour instants and marks only the chosen instant", async () => {
+    await mountModal([makeItem({
+      timezone: "America/New_York", timestampBasis: "utc",
+      localTimestampText: "2026-11-01 01:30:00", utcTimestampText: "2026-11-01 06:30:00",
+      timeCandidates: [5, 6].map((hour) => ({ source: "embedded", utcMs: Date.UTC(2026, 10, 1, hour, 30), localText: null })),
+    })]);
+    const choices = [...document.querySelectorAll<HTMLButtonElement>(".review-row__times button")];
+    expect(choices).toHaveLength(2);
+    expect(choices[0]!.textContent).toContain("05:30:00 UTC");
+    expect(choices[1]!.textContent).toContain("06:30:00 UTC");
+    expect(choices.map((choice) => choice.getAttribute("aria-pressed"))).toEqual(["false", "true"]);
+    await act(async () => choices[0]!.click());
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ utcTimestampText: "2026-11-01 05:30:00", timestampBasis: "utc" }));
+    await type(fields().timezone, "UTC");
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ localTimestampText: "2026-11-01 06:30:00", utcTimestampText: "2026-11-01 06:30:00" }));
   });
 
   it("keeps the wall-clock time the user wrote when the zone changes, and moves the instant", async () => {

@@ -1,4 +1,5 @@
-import type { RecordingTimeCandidate } from "@shared/app-shell";
+import type { PendingImportReviewItem, RecordingTimeCandidate } from "@shared/app-shell";
+import { recordingTimeDraft } from "@shared/review-timestamps";
 import { getLocalTimestampError, recomputeLocalFromUtc } from "@shared/timestamps";
 
 // The recording times an audio file carries inside it, as ffprobe reports its
@@ -81,22 +82,19 @@ export function isPlausibleFileTime(ms: number, nowMs: number): boolean {
   return Number.isFinite(ms) && ms >= EARLIEST_FILE_TIME_MS && ms <= nowMs + FUTURE_SLACK_MS;
 }
 
-/** The local time the review starts with, in `timezone`: the file name's when
+/** The time draft the review starts with, in `timezone`: the file name's when
  * it has one, which every recorder but the iPad writes; otherwise the first
  * time stored inside the file; otherwise none. File dates are offered, never
  * chosen, since a copy or sync can change them. */
-export function prefilledRecordingTime(candidates: readonly RecordingTimeCandidate[], timezone: string): string {
+export function prefilledRecordingTime(candidates: readonly RecordingTimeCandidate[], timezone: string): Pick<PendingImportReviewItem, "localTimestampText" | "utcTimestampText" | "timestampBasis"> {
   const name = candidates.find((candidate) => candidate.source === "file-name");
-  if (name?.localText) return name.localText;
+  if (name?.localText) return recordingTimeDraft(name, timezone);
   for (const candidate of candidates) {
     if (candidate.source !== "embedded") continue;
-    if (candidate.localText !== null) return candidate.localText;
-    if (candidate.utcMs !== null) {
-      const local = recomputeLocalFromUtc(candidate.utcMs, timezone);
-      if (local.error === null) return local.localTimestampText;
-    }
+    const draft = recordingTimeDraft(candidate, timezone);
+    if (draft.localTimestampText !== "") return draft;
   }
-  return "";
+  return recordingTimeDraft(null, timezone);
 }
 
 // A saved recording carries its official start inside it: the chosen time

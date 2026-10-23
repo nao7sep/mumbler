@@ -10,6 +10,7 @@ import {
   foundTimes,
 } from "@renderer/app/import-rules";
 import { message } from "@shared/i18n/translate";
+import { changeReviewTimezone } from "@shared/review-timestamps";
 
 const item = (id: string, overrides: Partial<PendingImportReviewItem> = {}): PendingImportReviewItem => ({
   id,
@@ -199,6 +200,23 @@ describe("choosing a found recording time", () => {
 });
 
 describe("found times as the review offers them", () => {
+  it("keeps both instants in a repeated wall-clock hour and retains exact authority on zone changes", () => {
+    const pending = item("fold", { timezone: "America/New_York", timeCandidates: [
+      { source: "embedded", utcMs: Date.UTC(2026, 10, 1, 5, 30), localText: null },
+      { source: "embedded", utcMs: Date.UTC(2026, 10, 1, 6, 30), localText: null },
+    ] });
+    const times = foundTimes(pending);
+    expect(times).toHaveLength(2);
+    expect(times.map((time) => time.localText)).toEqual(["2026-11-01 01:30:00", "2026-11-01 01:30:00"]);
+    expect(times[0]!.key).not.toBe(times[1]!.key);
+    const chosen = chooseRecordingTime(pending, times[1]!.candidate);
+    expect(chosen).toMatchObject({ timestampBasis: "utc", utcTimestampText: "2026-11-01 06:30:00" });
+    expect(changeReviewTimezone(chosen, "UTC")).toMatchObject({ localTimestampText: "2026-11-01 06:30:00", utcTimestampText: "2026-11-01 06:30:00" });
+    const local = chooseRecordingTime(chosen, { source: "file-name", utcMs: null, localText: "2026-11-01 01:30:00" });
+    expect(local.timestampBasis).toBe("local");
+    expect(changeReviewTimezone(local, "UTC").utcTimestampText).toBe("2026-11-01 01:30:00");
+    expect(reconcilePendingReviewDrafts([chosen], [pending])[0]).toMatchObject({ timestampBasis: "utc", utcTimestampText: "2026-11-01 06:30:00" });
+  });
   it("merges an exact and a local time that name the same moment in the item's zone, keeping the first to choose", () => {
     const exact = { source: "embedded" as const, utcMs: Date.UTC(2026, 9, 14, 6, 30, 12), localText: null };
     const times = foundTimes({ timezone: "Asia/Tokyo", timeCandidates: [
@@ -206,7 +224,7 @@ describe("found times as the review offers them", () => {
       exact,
       { ...exact },
     ] });
-    expect(times).toEqual([{ localText: "2026-10-14 15:30:12", sources: ["file-name", "embedded"], candidate: { source: "file-name", utcMs: null, localText: "2026-10-14 15:30:12" } }]);
+    expect(times).toMatchObject([{ localText: "2026-10-14 15:30:12", sources: ["file-name", "embedded"], candidate: { source: "file-name", utcMs: null, localText: "2026-10-14 15:30:12" } }]);
   });
 
   it("splits the same exact time that two zones show differently", () => {

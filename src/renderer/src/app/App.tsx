@@ -17,13 +17,8 @@ import type {
   ToolName,
 } from "@shared/app-shell";
 import { DETAIL_MIN_WIDTH, QUEUE_WIDTH, WORKSPACE_GAP, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT } from "@shared/layout";
-import {
-  formatUtcForDisplay,
-  getLocalTimestampError,
-  getUtcTimestampError,
-  recomputeLocalFromUtc,
-  recomputeUtcFromLocal,
-} from "@shared/timestamps";
+import { formatUtcForDisplay } from "@shared/timestamps";
+import { changeReviewTimezone } from "@shared/review-timestamps";
 
 import { WaveformEditor, type WaveformEditorHandle } from "./WaveformEditor";
 import { HamburgerIcon } from "./Icon";
@@ -437,6 +432,7 @@ function LoadedShell({
         localTimestampText: item.localTimestampText,
         timezone: item.timezone,
         utcTimestampText: item.utcTimestampText,
+        timestampBasis: item.timestampBasis,
         deleteOriginalOnConfirm: item.deleteOriginalOnConfirm,
         copyToBackupOnConfirm: item.copyToBackupOnConfirm,
       });
@@ -1789,32 +1785,7 @@ function LoadedShell({
           }
           onApplyTimezoneToAll={(timezone) =>
             importFlow.setPendingReviewDrafts((current) =>
-              current.map((item) => {
-                const localError = getLocalTimestampError(item.localTimestampText);
-                const utcError = getUtcTimestampError(item.utcTimestampText);
-
-                if (localError === null) {
-                  const utcResult = recomputeUtcFromLocal(item.localTimestampText, timezone);
-                  return {
-                    ...item,
-                    timezone,
-                    utcTimestampText:
-                      utcResult.error === null ? formatUtcForDisplay(utcResult.utcMs!) : item.utcTimestampText,
-                  };
-                }
-
-                if (utcError === null) {
-                  const localResult = recomputeLocalFromUtc(item.utcTimestampText, timezone);
-                  return {
-                    ...item,
-                    timezone,
-                    localTimestampText:
-                      localResult.error === null ? localResult.localTimestampText : item.localTimestampText,
-                  };
-                }
-
-                return { ...item, timezone };
-              }),
+              current.map((item) => changeReviewTimezone(item, timezone)),
             )
           }
           onConfirm={() => void importFlow.handleConfirmPendingImports()}

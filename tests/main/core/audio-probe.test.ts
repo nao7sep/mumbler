@@ -24,7 +24,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, execFile };
 });
 
-import { analyzeTrimDecision, configureToolResolver, prepareAudioForTranscription, probeAudioProfile } from "@main/core/audio-tools";
+import { analyzeTrimDecision, configureToolResolver, prepareAudioForTranscription, probeAudioProfile, probeRecordingTags } from "@main/core/audio-tools";
 import type { TrimDecision } from "@shared/app-shell";
 
 // What the app believes about a recording — its format, how long it is, and
@@ -60,8 +60,9 @@ beforeAll(() => {
   writeFileSync(
     script,
     [
-      "const { readFileSync } = require('node:fs');",
+      "const { readFileSync, writeFileSync } = require('node:fs');",
       "const { join } = require('node:path');",
+      "writeFileSync(join(__dirname, 'probe-args.json'), JSON.stringify(process.argv.slice(2)));",
       "const wantsPackets = process.argv.some((arg) => arg.startsWith('packet='));",
       "process.stdout.write(readFileSync(join(__dirname, wantsPackets ? 'packets.json' : 'format.json'), 'utf8'));",
     ].join("\n"),
@@ -82,6 +83,19 @@ beforeAll(() => {
   ffprobePath = script;
   ffmpegPath = ffmpegScript;
   configureToolResolver((name) => (name === "ffmpeg" ? ffmpegPath : ffprobePath));
+});
+
+describe("recording tags", () => {
+  it("requests Ogg's first audio stream tags alongside container tags with container precedence", async () => {
+    answerWith("format", {
+      streams: [{ tags: { date: "2026-11-01T01:30:00-05:00", title: "stream" } }],
+      format: { tags: { title: "container" } },
+    });
+    expect(await probeRecordingTags("/recordings/voice.ogg")).toEqual({ date: "2026-11-01T01:30:00-05:00", title: "container" });
+    expect(JSON.parse(readFileSync(join(toolDir, "probe-args.json"), "utf8"))).toEqual([
+      "-v", "error", "-select_streams", "a:0", "-show_entries", "format_tags:stream_tags", "-of", "json", "/recordings/voice.ogg",
+    ]);
+  });
 });
 
 /** What the stand-in ffmpeg was asked to do on its last run. */

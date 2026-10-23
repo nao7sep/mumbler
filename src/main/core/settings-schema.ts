@@ -311,6 +311,7 @@ function cardDetailsIssue(card: Record<string, unknown>): string | null {
 function pendingImportIssue(item: unknown): string | null {
   const record = asRecord(item);
   if (record === null) return "a pending import is not an object";
+  if (record.timestampBasis !== undefined && record.timestampBasis !== "local" && record.timestampBasis !== "utc") return "a pending import's timestamp basis is unknown";
   if (record.sourceIdentity !== undefined) {
     const identity = asRecord(record.sourceIdentity);
     if (identity === null || ["dev", "ino", "size", "mtimeMs", "ctimeMs"].some((key) => typeof identity[key] !== "number" || !Number.isFinite(identity[key]))) {

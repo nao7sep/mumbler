@@ -261,43 +261,16 @@ export interface PreparedAudioInput {
   cleanup: () => Promise<void>;
 }
 
-// The container's own tags, as ffprobe reports them; recording-times.ts reads
-// the recording times among them.
-export async function probeContainerTags(
-  filePath: string,
-  signal?: AbortSignal,
-): Promise<Record<string, unknown>> {
+// Shared import/export reader for container and first-audio-stream tags.
+export async function probeRecordingTags(filePath: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
   const { stdout } = await runTool(resolveFfprobePath(), [
-    "-v",
-    "error",
-    "-show_entries",
-    "format_tags",
-    "-of",
-    "json",
-    filePath,
+    "-v", "error", "-select_streams", "a:0", "-show_entries",
+    "format_tags:stream_tags", "-of", "json", filePath,
   ], { timeoutMs: PROBE_TIMEOUT_MS, signal });
-  const tags = (JSON.parse(stdout) as { format?: { tags?: unknown } }).format?.tags;
-  return typeof tags === "object" && tags !== null ? (tags as Record<string, unknown>) : {};
-}
-
-// The first audio stream's own tags, where Ogg keeps its comments.
-export async function probeAudioStreamTags(
-  filePath: string,
-  signal?: AbortSignal,
-): Promise<Record<string, unknown>> {
-  const { stdout } = await runTool(resolveFfprobePath(), [
-    "-v",
-    "error",
-    "-select_streams",
-    "a:0",
-    "-show_entries",
-    "stream_tags",
-    "-of",
-    "json",
-    filePath,
-  ], { timeoutMs: PROBE_TIMEOUT_MS, signal });
-  const tags = (JSON.parse(stdout) as { streams?: Array<{ tags?: unknown }> }).streams?.[0]?.tags;
-  return typeof tags === "object" && tags !== null ? (tags as Record<string, unknown>) : {};
+  const data = JSON.parse(stdout) as { format?: { tags?: Record<string, unknown> }; streams?: Array<{ tags?: Record<string, unknown> }> };
+  // Container tags retain precedence when both owners supply the same key;
+  // Ogg recording comments live on its first audio stream.
+  return { ...data.streams?.[0]?.tags, ...data.format?.tags };
 }
 
 /** Re-packs `sourceFilePath`'s audio unchanged into the working folder, with

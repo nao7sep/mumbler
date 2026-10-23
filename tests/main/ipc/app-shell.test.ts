@@ -193,6 +193,7 @@ describe("the app-shell IPC boundary", () => {
     ["confirmPendingImports", [[draft({ localTimestampText: 1 })]], /localTimestampText must be a string/],
     ["confirmPendingImports", [[draft({ timezone: null })]], /timezone must be a string/],
     ["confirmPendingImports", [[draft({ utcTimestampText: false })]], /utcTimestampText must be a string/],
+    ["confirmPendingImports", [[draft({ timestampBasis: "unknown" })]], /timestampBasis must be local or utc/],
     ["confirmPendingImports", [[draft({ deleteOriginalOnConfirm: "yes" })]], /deleteOriginalOnConfirm must be a boolean/],
     ["confirmPendingImports", [[draft({ copyToBackupOnConfirm: 1 })]], /copyToBackupOnConfirm must be a boolean/],
     ["selectCard", [7], /cardId must be a string/],

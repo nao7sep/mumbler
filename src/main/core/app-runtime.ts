@@ -41,8 +41,7 @@ import {
   configureToolResolver,
   prepareAudioForTranscription,
   probeAudioProfile,
-  probeAudioStreamTags,
-  probeContainerTags,
+  probeRecordingTags,
   rewriteAudioTags,
   type PreparedAudioInput,
 } from "./audio-tools";
@@ -59,7 +58,7 @@ import { isCancelledError } from "./cancellation";
 import { ToolManager } from "./binaries/manager";
 import { createDefaultDependencies, createDependenciesStore, type DependenciesValue } from "./binaries/store";
 import {
-  formatUtcForDisplay,
+  parseUtcFromDisplay,
   SYSTEM_TIMEZONE,
   formatUtcMarker,
   getSystemTimezone,
@@ -1058,6 +1057,7 @@ export class ApplicationRuntime {
           merged.localTimestampText,
           merged.timezone,
           merged.utcTimestampText,
+          merged.timestampBasis,
         );
         return { pendingImport, merged, timestamps };
       });
@@ -2302,7 +2302,7 @@ export class ApplicationRuntime {
     let rewritten: PreparedAudioInput | null = null;
     try {
       rewritten = await rewriteAudioTags({ sourceFilePath: audio.filePath, workingDir: this.runtime.paths!.workingDir, tagArgs, signal });
-      const tags = { ...(await probeAudioStreamTags(rewritten.filePath, signal)), ...(await probeContainerTags(rewritten.filePath, signal)) };
+      const tags = await probeRecordingTags(rewritten.filePath, signal);
       if (carriesOnlyRecordingTime(recordingTimesFromTags(tags), utcMs, timezone)) return { audio: rewritten, warning: null };
       await this.runtime.logger.warn("save.time-mismatch", "The saved audio did not read back with its recording time.", {
         cardId: card.id, extension, tags,
@@ -2539,13 +2539,13 @@ export class ApplicationRuntime {
     // already imported.
     const importZone = importTimezone(settings);
     // Every time the recording offers, for the review to choose from: its file
-    // name, its container's tags and the file's own times, to the second.
+    // name, its container/audio-stream tags and the file's own times, to the second.
     const timeCandidates: RecordingTimeCandidate[] = [];
     if (parsed.localTimestampText.length > 0) {
       timeCandidates.push({ source: "file-name", utcMs: null, localText: parsed.localTimestampText });
     }
     try {
-      timeCandidates.push(...recordingTimesFromTags(await probeContainerTags(workingFilePath)));
+      timeCandidates.push(...recordingTimesFromTags(await probeRecordingTags(workingFilePath)));
     } catch (error: unknown) {
       // Missing tools or an unreadable container leave the other times.
       await this.runtime.logger.debug("import.tags", "Could not read the recording's embedded times.", {
@@ -2560,11 +2560,7 @@ export class ApplicationRuntime {
     if (isPlausibleFileTime(sourceStats.mtimeMs, now)) {
       timeCandidates.push({ source: "file-modified", utcMs: second(sourceStats.mtimeMs), localText: null });
     }
-    const localTimestampText = prefilledRecordingTime(timeCandidates, importZone);
-    const utcResult =
-      localTimestampText.length > 0
-        ? recomputeUtcFromLocal(localTimestampText, importZone)
-        : { utcMs: null, error: null };
+    const timestampDraft = prefilledRecordingTime(timeCandidates, importZone);
 
     const pendingImport: PendingImportReviewItem = {
       id: nanoid(),
@@ -2574,10 +2570,9 @@ export class ApplicationRuntime {
       sourceIdentity,
       workingFilePath,
       fileSizeBytes: sourceStats.size,
-      localTimestampText,
+      ...timestampDraft,
       timezone: importZone,
-      utcTimestampText: utcResult.error === null && utcResult.utcMs !== null ? formatUtcForDisplay(utcResult.utcMs) : "",
-      parseStatus: localTimestampText.length > 0 ? "parsed" : "manual-required",
+      parseStatus: timestampDraft.localTimestampText.length > 0 ? "parsed" : "manual-required",
       timeCandidates,
       // An imported original is moved into Recordings by default: copied, then
       // deleted once the copy is complete.
@@ -2830,13 +2825,14 @@ export function buildConfirmedTimestamps(
   localTimestampText: string,
   timezone: string,
   utcTimestampText: string,
+  timestampBasis: PendingImportReviewItem["timestampBasis"] = "local",
 ): MumblerCard["timestamps"] {
   if (!isValidTimezone(timezone)) {
     throw new OperationError(`Invalid timezone: ${timezone}`);
   }
 
   const localResult = recomputeUtcFromLocal(localTimestampText, timezone);
-  if (localResult.error === null) {
+  if (timestampBasis !== "utc" && localResult.error === null) {
     return {
       confirmedLocal: localTimestampText,
       confirmedUtc: localResult.utcMs!,
@@ -2849,18 +2845,14 @@ export function buildConfirmedTimestamps(
 
   const utcResult = recomputeLocalFromUtc(utcTimestampText, timezone);
   if (utcResult.error === null) {
-    const normalizedUtc = recomputeUtcFromLocal(utcResult.localTimestampText, timezone);
-    if (normalizedUtc.error !== null) {
-      throw new OperationError(createTranslator("en").t(normalizedUtc.error));
-    }
-
+    const utcMs = parseUtcFromDisplay(utcTimestampText)!;
     return {
       confirmedLocal: utcResult.localTimestampText,
-      confirmedUtc: normalizedUtc.utcMs!,
+      confirmedUtc: utcMs,
       timezone,
       frontTrimOffsetSec: 0,
       effectiveLocal: utcResult.localTimestampText,
-      effectiveUtc: normalizedUtc.utcMs!,
+      effectiveUtc: utcMs,
     };
   }
 
@@ -2887,6 +2879,7 @@ export function applyPendingImportDraft(
     localTimestampText: draft.localTimestampText,
     timezone: draft.timezone,
     utcTimestampText: draft.utcTimestampText,
+    timestampBasis: draft.timestampBasis,
   };
   const flags = {
     deleteOriginalOnConfirm: draft.deleteOriginalOnConfirm,

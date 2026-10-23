@@ -263,6 +263,8 @@ export interface PendingImportReviewItem {
   localTimestampText: string;
   timezone: string;
   utcTimestampText: string;
+  /** An exact candidate or UTC edit keeps its instant when the display zone changes. */
+  timestampBasis?: "local" | "utc";
   parseStatus: TimestampParseStatus;
   // Found when the recording was staged; facts of the file, never edited.
   timeCandidates: RecordingTimeCandidate[];

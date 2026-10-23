@@ -74,6 +74,9 @@ function assertPendingImportDrafts(value: unknown): asserts value is PendingImpo
     if (typeof obj.utcTimestampText !== "string") {
       throw new Error("Invalid IPC parameter: utcTimestampText must be a string.");
     }
+    if (obj.timestampBasis !== undefined && obj.timestampBasis !== "local" && obj.timestampBasis !== "utc") {
+      throw new Error("Invalid IPC parameter: timestampBasis must be local or utc.");
+    }
     if (typeof obj.deleteOriginalOnConfirm !== "boolean") {
       throw new Error("Invalid IPC parameter: deleteOriginalOnConfirm must be a boolean.");
     }

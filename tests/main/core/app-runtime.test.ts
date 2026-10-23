@@ -187,6 +187,15 @@ describe("applyPendingImportDraft", () => {
 });
 
 describe("buildConfirmedTimestamps", () => {
+  it.each(["05:30:00", "06:30:00"])("preserves the exact %s UTC instant in a repeated local hour", (clock) => {
+    const utc = `2026-11-01 ${clock}`;
+    const expected = Date.parse(`2026-11-01T${clock}Z`);
+    const result = buildConfirmedTimestamps("2026-11-01 01:30:00", "America/New_York", utc, "utc");
+    expect(result.confirmedUtc).toBe(expected);
+    expect(result.effectiveUtc).toBe(expected);
+    expect(result.confirmedLocal).toBe("2026-11-01 01:30:00");
+    expect(buildConfirmedTimestamps("", "America/New_York", utc).confirmedUtc).toBe(expected);
+  });
   it("derives confirmed and effective timestamps from a local timestamp", () => {
     const result = buildConfirmedTimestamps("2026-04-22 09:44:00", "Asia/Tokyo", "");
     // 09:44 JST is 00:44 UTC.
