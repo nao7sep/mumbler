@@ -32,6 +32,7 @@ import {
   toolFileName,
 } from "./registry";
 import { launchCheckDue, type DependenciesValue } from "./store";
+import { VerifiedArchives } from "./verified-archives";
 
 // Both audio tools are required for mumbler to function (ffprobe at import/probe
 // and trim analysis, ffmpeg at trim/save).
@@ -65,6 +66,7 @@ export class ToolManager {
   private factsQueue: Promise<void> = Promise.resolve();
   private acceptingWork = true;
   private readonly operations = new Set<Promise<void>>();
+  private readonly archives: VerifiedArchives;
 
   constructor(
     private readonly deps: {
@@ -78,6 +80,7 @@ export class ToolManager {
       notify: () => void;
     },
   ) {
+    this.archives = new VerifiedArchives(deps.tempDir);
     for (const name of TOOL_NAMES) {
       this.present.set(name, false);
       this.installedVersion.set(name, null);
@@ -228,23 +231,21 @@ export class ToolManager {
       // re-fetchable native executables, not user-authored managed text.
       const archivePath = join(this.deps.tempDir, `${name}-${token}.zip`);
       const stagedExe = join(this.deps.tempDir, `${name}-${token}${this.deps.platform === "win32" ? ".exe" : ".tmp"}`);
+      let sharedArchive: Awaited<ReturnType<VerifiedArchives["acquire"]>> | undefined;
 
       try {
-        await downloadToFile({
-          url: spec.downloadUrl,
-          destPath: archivePath,
-          maxBytes: TOOL_DOWNLOAD_MAX_BYTES,
-          signal,
-          onProgress: (received, total) => {
-            const percent = total > 0 ? Math.floor((received / total) * 100) : null;
-            this.setTransient(name, { kind: "running", operation: "provision", percent });
-          },
-        });
-        // Integrity gate: verify the downloaded archive before it becomes
-        // executable. A mismatch throws and aborts the install.
-        await verifySha256(archivePath, expected, signal);
+        const onProgress = (received: number, total: number): void => {
+          const percent = total > 0 ? Math.floor((received / total) * 100) : null;
+          this.setTransient(name, { kind: "running", operation: "provision", percent });
+        };
+        if (this.deps.platform === "win32") {
+          sharedArchive = await this.archives.acquire(spec.downloadUrl, expected, signal, onProgress);
+        } else {
+          await downloadToFile({ url: spec.downloadUrl, destPath: archivePath, maxBytes: TOOL_DOWNLOAD_MAX_BYTES, signal, onProgress });
+          await verifySha256(archivePath, expected, signal);
+        }
         await extractFileFromZip(
-          archivePath,
+          sharedArchive?.path ?? archivePath,
           spec.innerName,
           stagedExe,
           TOOL_EXTRACTED_MAX_BYTES,
@@ -286,7 +287,8 @@ export class ToolManager {
         published = true;
         await syncDirectory(this.deps.binDir);
       } finally {
-        await rm(archivePath, { force: true }).catch(() => undefined);
+        sharedArchive?.release();
+        if (this.deps.platform !== "win32") await rm(archivePath, { force: true }).catch(() => undefined);
         await rm(stagedExe, { force: true }).catch(() => undefined);
       }
 
