@@ -14,6 +14,7 @@ import {
 } from "./card-pipeline";
 import { type AppLogger } from "./logger";
 import { OperationError } from "./operation-error";
+import { MetadataAdmission } from "./metadata-admission";
 import {
   TranscriptionSlotPool,
   selectNextQueuedCard,
@@ -57,6 +58,9 @@ interface ActivePipelineRun {
 // belongs to the runtime's single persist path.
 export class PipelineCoordinator {
   private readonly transcriptionSlots = new TranscriptionSlotPool();
+  // Derive metadata parallelism from the existing preference while keeping its
+  // capacity independent of the transcription jobs that preference controls.
+  private readonly metadataAdmission = new MetadataAdmission(() => this.runtime.settings!.concurrencyLimit);
   private readonly activeRuns = new Map<string, ActivePipelineRun>();
   // In-flight pipeline promises, so shutdown can await them after aborting.
   private readonly activePipelines = new Set<Promise<void>>();
@@ -243,6 +247,7 @@ export class PipelineCoordinator {
         logger: this.runtime.logger,
         signal: controller.signal,
         apiKey,
+        runMetadataCall: (operation) => this.metadataAdmission.run(controller.signal, operation),
         persistState: () => this.hooks.persistState(),
         releaseTranscriptionSlot: () => this.releaseRunSlot(run),
         ownsCard: () => this.activeRuns.get(cardId) === run,
@@ -322,6 +327,7 @@ export class PipelineCoordinator {
 
     const settings = this.runtime.settings;
     const state = this.runtime.state;
+    this.metadataAdmission.drain();
 
     // Cards with an active run are excluded from selection: spawnCardPipeline
     // registers the run synchronously, but a card's status flips to "Transcribing"

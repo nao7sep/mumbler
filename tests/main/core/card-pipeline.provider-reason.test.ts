@@ -129,6 +129,7 @@ describe("provider reasons published by the pipeline", () => {
       releaseTranscriptionSlot: async () => undefined,
       ownsCard: () => true,
       trackWork: () => undefined,
+      runMetadataCall: (operation) => operation(),
     };
     fetchMock.mockResolvedValue(response(reason));
 

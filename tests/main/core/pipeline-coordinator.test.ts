@@ -10,11 +10,18 @@ const pipelineDeferreds = new Map<string, { resolve: () => void; promise: Promis
 // Provider work a stubbed run hands to the coordinator, as an upload the SDK
 // cannot abort is.
 const untrackedWork = new Map<string, Promise<unknown>>();
+const metadataWork = new Map<string, { promise: Promise<void>; resolve(): void }>();
+const metadataStarted: string[] = [];
 vi.mock("@main/core/card-pipeline", async (importOriginal) => {
   const original = await importOriginal<typeof import("@main/core/card-pipeline")>();
   return {
     ...original,
     executeCardPipeline: vi.fn(async (cardId: string, _step, _mode, ctx: import("@main/core/card-pipeline").CardPipelineContext) => {
+      const metadata = metadataWork.get(cardId);
+      if (metadata !== undefined) {
+        await ctx.runMetadataCall(() => { metadataStarted.push(cardId); return metadata.promise; });
+        return;
+      }
       let resolve!: () => void;
       const promise = new Promise<void>((r) => {
         resolve = r;
@@ -105,17 +112,41 @@ function harness(cards: MumblerCard[], concurrencyLimit = 1) {
 
 beforeEach(() => {
   pipelineDeferreds.clear();
+  metadataWork.clear();
+  metadataStarted.length = 0;
 });
 
 afterEach(async () => {
   const shutdowns = [...coordinators].map((coordinator) => coordinator.shutdown());
   for (const deferred of pipelineDeferreds.values()) deferred.resolve();
+  for (const deferred of metadataWork.values()) deferred.resolve();
   await Promise.all(shutdowns);
   coordinators.clear();
   pipelineDeferreds.clear();
 });
 
 describe("PipelineCoordinator.startOrEnqueue", () => {
+  it("bounds metadata separately from transcription and retains issued capacity after cancel", async () => {
+    for (const id of ["a", "b", "c"]) {
+      let resolve!: () => void;
+      const promise = new Promise<void>((done) => { resolve = done; });
+      metadataWork.set(id, { promise, resolve });
+    }
+    const { coordinator } = harness(["a", "b", "c", "transcribing"].map((id) => makeCard({ id })), 1);
+    for (const id of ["a", "b", "c"]) await coordinator.startOrEnqueue(id, "generate", "title");
+    await coordinator.startOrEnqueue("transcribing", "generate", "transcription");
+    await vi.waitFor(() => expect(metadataStarted).toEqual(["a"]));
+    expect(pipelineDeferreds.has("transcribing")).toBe(true);
+    expect(coordinator.detachAndAbort("b")).toBe(true);
+    expect(coordinator.detachAndAbort("a")).toBe(true);
+    await Promise.resolve();
+    expect(metadataStarted).toEqual(["a"]);
+    metadataWork.get("a")!.resolve();
+    await vi.waitFor(() => expect(metadataStarted).toEqual(["a", "c"]));
+    metadataWork.get("c")!.resolve();
+    await settle("transcribing");
+  });
+
   it("starts immediately when a transcription slot is free", async () => {
     const card = makeCard({ id: "a" });
     const { coordinator, persistState } = harness([card]);

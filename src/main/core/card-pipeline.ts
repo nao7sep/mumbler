@@ -50,6 +50,7 @@ export interface CardPipelineContext {
   // Provider work that may outlive the run's cancellation; the run's slot is
   // held until it settles.
   trackWork: (work: Promise<unknown>) => void;
+  runMetadataCall: <T>(operation: () => Promise<T>) => Promise<T>;
 }
 
 export type PipelineMode = "generate";
@@ -472,8 +473,9 @@ async function executeWithRetry<T>(params: {
     throwIfCancelled(ctx.signal);
     try {
       const callAttempt = attempt;
-      return await params.execute((call) =>
+      const execute = () => params.execute((call) =>
         logger.providerCall({ ...call, cardId: params.cardId, step: params.step, attempt: callAttempt }));
+      return await (params.step === "transcription" ? execute() : ctx.runMetadataCall(execute));
     } catch (error: unknown) {
       const retryable = isRetryableGeminiError(error);
       const exhausted = attempt >= GEMINI_ATTEMPTS;

@@ -90,6 +90,7 @@ function makeContext(card: MumblerCard, dir: string): CardPipelineContext {
     releaseTranscriptionSlot: vi.fn().mockResolvedValue(undefined),
     ownsCard: () => true,
     trackWork: () => undefined,
+    runMetadataCall: (operation) => operation(),
   };
 }
 

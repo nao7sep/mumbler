@@ -123,6 +123,7 @@ function makeContext(card: MumblerCard, signal: AbortSignal): CardPipelineContex
     releaseTranscriptionSlot: vi.fn().mockResolvedValue(undefined),
     ownsCard: () => true,
     trackWork: () => undefined,
+    runMetadataCall: (operation) => operation(),
   };
 }
 
@@ -143,9 +144,13 @@ describe("executeCardPipeline", () => {
 
       const fresh = makeCard({ sourceFilePath: source });
       const freshCtx = makeContext(fresh, new AbortController().signal);
+      const metadataAdmissions = vi.fn();
+      freshCtx.runMetadataCall = (operation) => { metadataAdmissions(); return operation(); };
       await executeCardPipeline(fresh.id, "transcription", "generate", freshCtx);
 
       expect(fresh.transcribedTrim, "the transcription records the trim it was made from").toEqual(fresh.trim);
+      expect(metadataAdmissions).toHaveBeenCalledTimes(3);
+      expect(mockTranscribe).toHaveBeenCalledOnce();
 
       const known = makeCard({ sourceFilePath: source, trimDecision: analyzed });
       const knownCtx = makeContext(known, new AbortController().signal);
