@@ -49,6 +49,7 @@ const ENGLISH: InterfaceLanguage = { language: "en", locale: "en" };
 export function RecordsApp(): ReactElement {
   const [language, setLanguage] = useState<InterfaceLanguage | null>(null);
   const [listWidth, setListWidth] = useState<number | null>(null);
+  const [uiFontFamily, setUiFontFamily] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +74,38 @@ export function RecordsApp(): ReactElement {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    let generation = 0;
+    const read = (): void => {
+      const request = ++generation;
+      void window.mumbler.getSettingsDraft().then(
+        (settings) => {
+          if (!cancelled && request === generation) setUiFontFamily(settings.uiFontFamily);
+        },
+        (error: unknown) => {
+          if (cancelled || request !== generation) return;
+          reportRendererDiagnostic(error, "records window font load failed");
+          if (!cancelled && request === generation) setUiFontFamily((current) => current ?? "");
+        },
+      );
+    };
+    read();
+    const unsubscribe = window.mumbler.onInterfaceLanguageChanged(read);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (uiFontFamily === null) return;
+    const family = uiFontFamily.trim();
+    const root = document.documentElement;
+    if (family) root.style.setProperty("--font-ui", family);
+    else root.style.removeProperty("--font-ui");
+  }, [uiFontFamily]);
+
   // The list pane opens at its saved width, so the first frame already has it.
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +123,7 @@ export function RecordsApp(): ReactElement {
     };
   }, []);
 
-  if (language === null || listWidth === null) {
+  if (language === null || listWidth === null || uiFontFamily === null) {
     return <main className="renderer-failure" role="status" aria-busy="true" />;
   }
 
@@ -136,6 +169,12 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   const { t, locale } = useI18n();
   const [sources, setSources] = useState<RecordSources | null>(null);
   const [sourceReads, setSourceReads] = useState(0);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [refreshRetrying, setRefreshRetrying] = useState(false);
+  const refreshFailure = useRef(false);
+  const retrying = useRef(false);
+  const retryRequest = useRef(0);
+  const sourceRequest = useRef(0);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [searchText, setSearchText] = useState("");
   const [list, setList] = useState<ListState>({ status: "loading" });
@@ -181,21 +220,39 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
     return () => clearTimeout(timer);
   }, [searchText]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void window.mumbler.readRecordSources().then(
+  const failRefresh = useCallback((): void => {
+    refreshFailure.current = true;
+    liveSuspended.current = true;
+    setRefreshFailed(true);
+  }, []);
+
+  const readSources = useCallback((): Promise<boolean> => {
+    const request = ++sourceRequest.current;
+    return window.mumbler.readRecordSources().then(
       (next) => {
-        if (!cancelled) setSources(next);
+        if (request !== sourceRequest.current) return false;
+        setSources(next);
+        return true;
       },
       (error: unknown) => {
-        liveSuspended.current = true;
+        if (request !== sourceRequest.current) return false;
+        failRefresh();
         reportRendererDiagnostic(error, "record sources read failed");
+        return false;
       },
     );
-    return () => {
-      cancelled = true;
-    };
-  }, [sourceReads]);
+  }, [failRefresh]);
+
+  useEffect(() => {
+    if (!retrying.current) void readSources();
+  }, [sourceReads, readSources]);
+
+  useEffect(() => () => {
+    ++listGeneration.current;
+    ++newestRequest.current;
+    ++retryRequest.current;
+    ++sourceRequest.current;
+  }, []);
 
   // A display zone saved in Settings arrives with the interface-change notice.
   useEffect(() => window.mumbler.onInterfaceLanguageChanged(() => setSourceReads((count) => count + 1)), []);
@@ -212,7 +269,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
     void window.mumbler.readRecordsPage({ ...filters, after: null }).then(
       (page) => {
         if (generation !== listGeneration.current || request !== newestRequest.current) return;
-        liveSuspended.current = false;
+        if (!refreshFailure.current && !retrying.current) liveSuspended.current = false;
         setList({ status: "ready", records: page.records, more: page.more, loadingMore: false, moreFailed: false });
       },
       (error: unknown) => {
@@ -228,30 +285,55 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   // recorded on settlement can sort anywhere in the old range by its start
   // time. Reusing old pages would skip such a call. Selection and detail are
   // independent of the loaded range, and earlier page cursors are invalidated.
-  const readNewest = useCallback((): void => {
+  const readNewest = useCallback((explicitRetry = false): Promise<boolean> => {
     const generation = listGeneration.current;
     const request = ++newestRequest.current;
-    void window.mumbler.readRecordsPage({ ...filtersRef.current, after: null }).then(
+    return window.mumbler.readRecordsPage({ ...filtersRef.current, after: null }).then(
       (page) => {
-        if (generation !== listGeneration.current || request !== newestRequest.current) return;
+        if (generation !== listGeneration.current || request !== newestRequest.current) return false;
         const scroll = scrollRef.current;
-        if (scroll !== null && !atTop(scroll)) {
+        if (!explicitRetry && scroll !== null && !atTop(scroll)) {
           newestPending.current = true;
-          return;
+          return false;
         }
         ++listGeneration.current;
         fetchingMore.current = false;
-        liveSuspended.current = false;
+        if (!refreshFailure.current && !retrying.current) liveSuspended.current = false;
         setList({ status: "ready", records: page.records, more: page.more, loadingMore: false, moreFailed: false });
+        return true;
       },
       (error: unknown) => {
-        if (generation !== listGeneration.current || request !== newestRequest.current) return;
-        liveSuspended.current = true;
+        if (generation !== listGeneration.current || request !== newestRequest.current) return false;
+        failRefresh();
         reportRendererDiagnostic(error, "records read failed");
         setList((current) => (current.status === "loading" ? { status: "failed" } : current));
+        return false;
       },
     );
-  }, []);
+  }, [failRefresh]);
+
+  const retryRefresh = (): void => {
+    if (retrying.current) return;
+    const request = ++retryRequest.current;
+    retrying.current = true;
+    liveSuspended.current = true;
+    setRefreshRetrying(true);
+    // The explicit retry owns both reads. Invalidate older pagination before
+    // replacing its range, and keep live updates paused until both have settled.
+    ++listGeneration.current;
+    fetchingMore.current = false;
+    newestPending.current = false;
+    void Promise.all([readSources(), readNewest(true)]).then(([sourcesRead, recordsRead]) => {
+      if (request !== retryRequest.current) return;
+      retrying.current = false;
+      setRefreshRetrying(false);
+      if (sourcesRead && recordsRead) {
+        refreshFailure.current = false;
+        setRefreshFailed(false);
+        liveSuspended.current = false;
+      }
+    });
+  };
 
   // A stored record reaches the list at once while it is scrolled to the top;
   // otherwise it waits until the list is back there, so the list never moves
@@ -262,6 +344,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
       if (timer !== null || liveSuspended.current) return;
       timer = setTimeout(() => {
         timer = null;
+        if (liveSuspended.current) return;
         setSourceReads((count) => count + 1);
         const scroll = scrollRef.current;
         if (scroll === null || atTop(scroll)) readNewest();
@@ -302,7 +385,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   // Loading more: composite-control-conventions, Integration Points. A failed
   // page is read again when the end is reached again.
   const loadMore = (): void => {
-    if (list.status !== "ready" || !list.more || fetchingMore.current) return;
+    if (refreshFailure.current || retrying.current || list.status !== "ready" || !list.more || fetchingMore.current) return;
     fetchingMore.current = true;
     const generation = listGeneration.current;
     setList((current) => (current.status === "ready" ? { ...current, loadingMore: true, moreFailed: false } : current));
@@ -310,7 +393,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
       (page) => {
         if (generation !== listGeneration.current) return;
         fetchingMore.current = false;
-        liveSuspended.current = false;
+        if (!refreshFailure.current && !retrying.current) liveSuspended.current = false;
         setList((current) =>
           current.status === "ready"
             ? { ...current, records: [...current.records, ...page.records], more: page.more, loadingMore: false }
@@ -339,7 +422,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   const onListScroll = (): void => {
     const scroll = scrollRef.current;
     if (scroll === null) return;
-    if (newestPending.current && atTop(scroll)) {
+    if (!liveSuspended.current && newestPending.current && atTop(scroll)) {
       newestPending.current = false;
       readNewest();
     }
@@ -373,7 +456,8 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.recordKey : undefined;
     const current = currentCompositeIndex({ ids: keys, focusedId: focused, selectedId: selectedKey });
     const firstOption = container?.querySelector<HTMLElement>("[data-record-key]");
-    const pageStep = container && firstOption?.offsetHeight ? Math.floor(container.clientHeight / firstOption.offsetHeight) : 8;
+    const viewport = scrollRef.current;
+    const pageStep = viewport && firstOption?.offsetHeight ? Math.floor(viewport.clientHeight / firstOption.offsetHeight) : 8;
     const target = nextIndex(direction, current, keys.length, pageStep);
     if (target < 0) return;
     const option = container?.querySelector<HTMLElement>(`[data-record-key="${CSS.escape(keys[target]!)}"]`);
@@ -454,8 +538,14 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
           aria-busy={list.status === "loading"}
           onScroll={onListScroll}
         >
+          {refreshFailed ? (
+            <div className="records-note inline-error" role="alert">
+              <p>{t("records.loadFailed")}</p>
+              <button type="button" onClick={retryRefresh} disabled={refreshRetrying}>{t("common.retry")}</button>
+            </div>
+          ) : null}
           {list.status === "failed" ? (
-            <p className="records-note inline-error" role="alert">{t("records.loadFailed")}</p>
+            refreshFailed ? null : <p className="records-note inline-error" role="alert">{t("records.loadFailed")}</p>
           ) : list.status === "loading" ? (
             <p className="records-note">{t("records.loading")}</p>
           ) : records.length === 0 ? (

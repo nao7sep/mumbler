@@ -4,7 +4,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RecordsWindow } from "@renderer/records/RecordsWindow";
+import { RecordsApp, RecordsWindow } from "@renderer/records/RecordsWindow";
 import type { MumblerShellApi } from "@shared/app-shell";
 import { RECORDS_DETAIL_MIN_WIDTH, RECORDS_GAP, RECORDS_LIST_WIDTH, RECORDS_PADDING } from "@shared/layout";
 import type { RecordDetail, RecordsPage, RecordsQuery, RecordSummary } from "@shared/records";
@@ -39,6 +39,7 @@ const readRecordsPage = vi.fn<MumblerShellApi["readRecordsPage"]>();
 const readRecordDetail = vi.fn<MumblerShellApi["readRecordDetail"]>();
 const readRecordSources = vi.fn<MumblerShellApi["readRecordSources"]>();
 const reportRendererDiagnostic = vi.fn<MumblerShellApi["reportRendererDiagnostic"]>();
+const getSettingsDraft = vi.fn<MumblerShellApi["getSettingsDraft"]>();
 const saveRecordsListWidth = vi.fn<MumblerShellApi["saveRecordsListWidth"]>();
 let recordsChanged: (() => void) | null = null;
 const interfaceListeners = new Set<() => void>();
@@ -80,6 +81,8 @@ beforeEach(() => {
   reportRendererDiagnostic.mockResolvedValue();
   saveRecordsListWidth.mockReset();
   saveRecordsListWidth.mockImplementation(async (width) => width);
+  getSettingsDraft.mockReset();
+  interfaceListeners.clear();
   onRecordsChanged.mockClear();
   recordsChanged = null;
   Object.assign(box, { scrollTop: 0, scrollHeight: 1000, clientHeight: 200, shellWidth: 2000 });
@@ -102,6 +105,9 @@ beforeEach(() => {
     configurable: true,
     value: {
       readRecordsPage, readRecordDetail, readRecordSources, reportRendererDiagnostic, saveRecordsListWidth, onRecordsChanged,
+      getSettingsDraft,
+      getInterfaceLanguage: async () => ({ language: "en", locale: "en" }),
+      getRecordsListWidth: async () => RECORDS_LIST_WIDTH.default,
       onInterfaceLanguageChanged: (listener: () => void) => { interfaceListeners.add(listener); return () => interfaceListeners.delete(listener); },
     } satisfies Partial<MumblerShellApi>,
   });
@@ -111,6 +117,7 @@ afterEach(async () => {
   if (root !== null) await act(async () => root?.unmount());
   root = null;
   document.body.innerHTML = "";
+  document.documentElement.style.removeProperty("--font-ui");
   vi.useRealTimers();
   vi.unstubAllGlobals();
   for (const name of ["scrollTop", "scrollHeight", "clientHeight", "clientWidth"]) {
@@ -210,6 +217,22 @@ describe("RecordsWindow", () => {
 
     expect(document.activeElement).toBe(options()[1]);
     expect(readRecordDetail).toHaveBeenLastCalledWith("log", 9);
+  });
+
+  it("pages by the visible viewport height rather than the full list height", async () => {
+    const records = Array.from({ length: 30 }, (_, index): RecordSummary => ({ ...line, id: index + 1 }));
+    readRecordsPage.mockResolvedValue({ records, more: false });
+    await mount();
+    const list = document.querySelector<HTMLElement>('[role="listbox"]')!;
+    Object.defineProperty(list, "clientHeight", { configurable: true, value: 1200 });
+    Object.defineProperty(options()[0]!, "offsetHeight", { configurable: true, value: 40 });
+    await act(async () => options()[0]!.focus());
+    await press("PageDown");
+    expect(document.activeElement).toBe(options()[5]);
+    await press("PageDown");
+    expect(document.activeElement).toBe(options()[10]);
+    await press("PageUp");
+    expect(document.activeElement).toBe(options()[5]);
   });
 
   it("reads again with each filter, and searches once typing pauses", async () => {
@@ -595,6 +618,83 @@ describe("RecordsWindow", () => {
     expect(options()).toHaveLength(2);
   });
 
+  it.each(["records", "sources"])("keeps ready rows and selection when a %s refresh fails, and retries both reads explicitly", async (failure) => {
+    await mount();
+    await act(async () => options()[1]!.click());
+    vi.useFakeTimers();
+    if (failure === "records") readRecordsPage.mockRejectedValueOnce(new Error("refresh failed"));
+    else readRecordSources.mockRejectedValueOnce(new Error("refresh failed"));
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(titles()).toEqual(["gemini models.generateContent", "pipeline.step"]);
+    expect(options()[1]!.getAttribute("aria-selected")).toBe("true");
+    expect(document.body.textContent).toContain("The records could not be read.");
+    const reads = readRecordsPage.mock.calls.length;
+    const sourceReads = readRecordSources.mock.calls.length;
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(readRecordsPage).toHaveBeenCalledTimes(reads);
+    expect(readRecordSources).toHaveBeenCalledTimes(sourceReads);
+
+    const retryPage = deferred<RecordsPage>();
+    const retrySources = deferred<Awaited<ReturnType<MumblerShellApi["readRecordSources"]>>>();
+    readRecordsPage.mockReturnValueOnce(retryPage.promise);
+    readRecordSources.mockReturnValueOnce(retrySources.promise);
+    const retry = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Retry")!;
+    await act(async () => retry.click());
+    expect(retry.disabled).toBe(true);
+    expect(readRecordsPage).toHaveBeenCalledTimes(reads + 1);
+    expect(readRecordSources).toHaveBeenCalledTimes(sourceReads + 1);
+    await act(async () => retryPage.resolve({ records: [newer, call, line], more: false }));
+    expect(document.body.textContent).toContain("The records could not be read.");
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(readRecordsPage).toHaveBeenCalledTimes(reads + 1);
+    await act(async () => retrySources.resolve({ currentSession: SESSION, displayTimezone: "UTC", sessions: [SESSION], cards: [] }));
+    expect(document.body.textContent).not.toContain("The records could not be read.");
+    expect(options()[2]!.getAttribute("aria-selected")).toBe("true");
+    expect(readRecordDetail).toHaveBeenCalledOnce();
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(readRecordsPage).toHaveBeenCalledTimes(reads + 2);
+  });
+
+  it("keeps refresh failure visible after an unsuccessful explicit retry without a retry loop", async () => {
+    await mount();
+    vi.useFakeTimers();
+    readRecordsPage.mockRejectedValueOnce(new Error("refresh failed"));
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    readRecordSources.mockRejectedValueOnce(new Error("sources still unavailable"));
+    const retry = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Retry")!;
+    await act(async () => retry.click());
+    expect(retry.disabled).toBe(false);
+    expect(document.body.textContent).toContain("The records could not be read.");
+    const reads = readRecordsPage.mock.calls.length;
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(readRecordsPage).toHaveBeenCalledTimes(reads);
+  });
+
+  it("ignores an obsolete refresh failure after a successful explicit retry", async () => {
+    await mount();
+    vi.useFakeTimers();
+    const obsolete = deferred<RecordsPage>();
+    readRecordsPage.mockReturnValueOnce(obsolete.promise);
+    readRecordSources.mockRejectedValueOnce(new Error("sources unavailable"));
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    const retry = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Retry")!;
+    await act(async () => retry.click());
+    expect(document.body.textContent).not.toContain("The records could not be read.");
+    await act(async () => obsolete.reject(new Error("obsolete refresh failed")));
+    expect(document.body.textContent).not.toContain("The records could not be read.");
+    const reads = readRecordsPage.mock.calls.length;
+    await signal();
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(readRecordsPage).toHaveBeenCalledTimes(reads + 1);
+  });
+
   it("stops listening for new records when it closes", async () => {
     await mount();
     expect(recordsChanged).not.toBeNull();
@@ -665,5 +765,52 @@ describe("RecordsWindow", () => {
     expect(document.body.textContent).toContain("The records could not be read.");
     expect(document.body.textContent).not.toContain("SQLITE_CORRUPT");
     expect(reportRendererDiagnostic).toHaveBeenCalled();
+  });
+});
+
+describe("RecordsApp preferences", () => {
+  it("keeps only the latest requested font and ignores pending reads after cleanup", async () => {
+    type Draft = Awaited<ReturnType<MumblerShellApi["getSettingsDraft"]>>;
+    const initial = deferred<Draft>();
+    const newer = deferred<Draft>();
+    const afterClose = deferred<Draft>();
+    getSettingsDraft.mockReturnValueOnce(initial.promise).mockReturnValueOnce(newer.promise).mockReturnValueOnce(afterClose.promise);
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(<RecordsApp />));
+    await act(async () => { for (const listener of interfaceListeners) listener(); });
+    await act(async () => newer.resolve({ uiFontFamily: "Newest Sans" } as Draft));
+    await act(async () => initial.resolve({ uiFontFamily: "Obsolete Sans" } as Draft));
+    expect(document.documentElement.style.getPropertyValue("--font-ui")).toBe("Newest Sans");
+    await act(async () => { for (const listener of interfaceListeners) listener(); });
+    await act(async () => root?.unmount());
+    root = null;
+    await act(async () => afterClose.resolve({ uiFontFamily: "Closed Sans" } as Draft));
+    expect(document.documentElement.style.getPropertyValue("--font-ui")).toBe("Newest Sans");
+  });
+
+  it("applies the saved UI family initially and rereads it on interface changes, including blank reset", async () => {
+    // This surface reads only the appearance field from the existing settings API.
+    const initial = deferred<Awaited<ReturnType<MumblerShellApi["getSettingsDraft"]>>>();
+    getSettingsDraft.mockReturnValueOnce(initial.promise);
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(<RecordsApp />));
+    expect(options()).toHaveLength(0);
+    expect(document.querySelector('[aria-busy="true"]')).not.toBeNull();
+    await act(async () => initial.resolve({ uiFontFamily: "  Example Sans, sans-serif  " } as Awaited<ReturnType<MumblerShellApi["getSettingsDraft"]>>));
+    expect(document.documentElement.style.getPropertyValue("--font-ui")).toBe("Example Sans, sans-serif");
+    expect(options()).toHaveLength(2);
+
+    getSettingsDraft.mockResolvedValue({ uiFontFamily: "Alternate Sans" } as Awaited<ReturnType<MumblerShellApi["getSettingsDraft"]>>);
+    await act(async () => { for (const listener of interfaceListeners) listener(); });
+    expect(document.documentElement.style.getPropertyValue("--font-ui")).toBe("Alternate Sans");
+
+    getSettingsDraft.mockResolvedValue({ uiFontFamily: "   " } as Awaited<ReturnType<MumblerShellApi["getSettingsDraft"]>>);
+    await act(async () => { for (const listener of interfaceListeners) listener(); });
+    expect(document.documentElement.style.getPropertyValue("--font-ui")).toBe("");
+    expect(getSettingsDraft).toHaveBeenCalledTimes(3);
   });
 });
