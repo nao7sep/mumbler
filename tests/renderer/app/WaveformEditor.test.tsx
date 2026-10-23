@@ -37,12 +37,12 @@ const wave = vi.hoisted(() => {
       ...subscriptions(),
       added: [] as Array<Record<string, unknown>>,
       addRegion: (options: Record<string, unknown>) => {
-        regions.added.push(options);
         const region = {
           ...options,
           setOptions: (next: Record<string, unknown>) => { Object.assign(region, next); },
           remove: () => regions.emit("region-removed", region),
         };
+        regions.added.push(region);
         return region;
       },
     };
@@ -178,14 +178,14 @@ let cancelCardWaveformPeaks: Mock<(cardId: string) => Promise<void>>;
 let handle: React.RefObject<WaveformEditorHandle | null>;
 
 /** Mounts the editor on `trim` and brings the player to the state after load. */
-async function mountEditor(options: { trim?: CardTrim; disabled?: boolean; ready?: boolean } = {}): Promise<void> {
+async function mountEditor(options: { trim?: CardTrim; durationSec?: number | null; disabled?: boolean; ready?: boolean } = {}): Promise<void> {
   handle = createRef<WaveformEditorHandle>();
   root = createRoot(container);
   await act(async () => {
     root?.render(
       React.createElement(WaveformEditor, {
         ref: handle,
-        card: { ...card, trim: options.trim ?? card.trim },
+        card: { ...card, trim: options.trim ?? card.trim, durationSec: options.durationSec === undefined ? card.durationSec : options.durationSec },
         previewSnippetSeconds: 10,
         skipIntervalSec: 5,
         disabled: options.disabled ?? false,
@@ -437,7 +437,35 @@ describe("setting the markers", () => {
   });
 });
 
+describe("nudging markers", () => {
+  it("nudges an unset back marker from the player's resolved duration", async () => {
+    wave.nextDuration = 425.5;
+    await mountEditor();
+    const nudge = container.querySelectorAll(".nudge-grid")[1]!.querySelector("button")!;
+    await act(async () => nudge.click());
+    expect(onTrimCommit).toHaveBeenCalledExactlyOnceWith("card-1", { frontMarkerSec: null, backMarkerSec: 424.5 });
+  });
+
+  it("leaves an unset back marker alone until a duration is available", async () => {
+    getCardWaveformPeaks.mockImplementationOnce(() => new Promise<Float32Array>(() => undefined));
+    await mountEditor({ durationSec: null, ready: false });
+    const nudge = container.querySelectorAll(".nudge-grid")[1]!.querySelectorAll("button")[2]!;
+    await act(async () => nudge.click());
+    expect(onTrimCommit).not.toHaveBeenCalled();
+  });
+});
+
 describe("listening back", () => {
+  it("keeps both previews inside a retained span shorter than the snippet", async () => {
+    await mountEditor({ trim: { frontMarkerSec: 30, backMarkerSec: 34 } });
+    await click("Play First 10s");
+    await click("Play Last 10s");
+    expect(wave.player.played).toEqual([
+      { startSec: 30, endSec: 34 },
+      { startSec: 30, endSec: 34 },
+    ]);
+  });
+
   it("plays the first seconds from the front marker, and the last seconds up to the back marker", async () => {
     await mountEditor({ trim: { frontMarkerSec: 30, backMarkerSec: 200 } });
 
@@ -506,6 +534,35 @@ describe("listening back", () => {
 });
 
 describe("dragging the kept range on the waveform", () => {
+  it("disables region resizing while busy and restores ignored geometry when reenabled", async () => {
+    const trim = { frontMarkerSec: 30, backMarkerSec: 200 };
+    await mountEditor({ trim });
+    const region = wave.regions.added[0]!;
+    const show = (disabled: boolean) => act(async () => {
+      root?.render(React.createElement(WaveformEditor, {
+        ref: handle, card: { ...card, trim }, previewSnippetSeconds: 10, skipIntervalSec: 5, disabled, onTrimCommit,
+      }));
+    });
+    await show(true);
+    expect(region).toMatchObject({ resize: false, resizeStart: false, resizeEnd: false });
+    region.start = 45;
+    region.end = 180;
+    await act(async () => {
+      wave.emit("region-update", region);
+      wave.emit("region-updated", region);
+    });
+    expect(onTrimCommit).not.toHaveBeenCalled();
+    expect(markerInput("front").value).toBe("0:30.0");
+    await show(false);
+    expect(region).toMatchObject({ start: 30, end: 200, resize: true, resizeStart: true, resizeEnd: true });
+    expect(wave.regions.added).toHaveLength(1);
+  });
+
+  it("creates a nonresizable region when opened while busy", async () => {
+    await mountEditor({ trim: { frontMarkerSec: 30, backMarkerSec: 200 }, disabled: true });
+    expect(wave.regions.added[0]).toMatchObject({ resize: false, resizeStart: false, resizeEnd: false });
+  });
+
   it("follows the drag in the fields, and saves it when the drag ends", async () => {
     await mountEditor({ trim: { frontMarkerSec: 30, backMarkerSec: 200 } });
     const dragged = { start: 45.04, end: 180.06 };

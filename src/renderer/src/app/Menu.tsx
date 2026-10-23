@@ -53,7 +53,8 @@ export function Menu({ open, onOpenChange, label, trigger, children, className }
 
   const items = (): HTMLElement[] =>
     contentRef.current
-      ? Array.from(contentRef.current.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+      ? Array.from(contentRef.current.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled):not([aria-disabled="true"])'))
+          .filter((item) => item.matches('button, input, select, textarea, a[href], [tabindex]') && !item.closest('[hidden], [inert]'))
       : [];
 
   const close = (focusTrigger = true) => {
@@ -64,7 +65,7 @@ export function Menu({ open, onOpenChange, label, trigger, children, className }
   // On open, move focus into the menu (first item).
   useEffect(() => {
     if (!open) return;
-    const id = requestAnimationFrame(() => items()[0]?.focus());
+    const id = requestAnimationFrame(() => (items()[0] ?? contentRef.current)?.focus());
     return () => cancelAnimationFrame(id);
   }, [open]);
 
@@ -81,6 +82,11 @@ export function Menu({ open, onOpenChange, label, trigger, children, className }
   }, [open, onOpenChange]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape" || e.key === "Tab") {
+      e.preventDefault();
+      close();
+      return;
+    }
     const all = items();
     if (all.length === 0) return;
     const current = Math.max(0, all.indexOf(document.activeElement as HTMLElement));
@@ -96,15 +102,12 @@ export function Menu({ open, onOpenChange, label, trigger, children, className }
     } else if (e.key === "End") {
       e.preventDefault();
       all[nextIndex("last", current, all.length)]?.focus();
-    } else if (e.key === "Escape" || e.key === "Tab") {
-      e.preventDefault();
-      close();
     } else if (e.key === "Enter" || e.key === " ") {
       // Enter/Space activate the focused item — but during an IME composition
       // Enter confirms the candidate and belongs to the input method, so bail.
       if (isComposingKeyboardEvent(composing.composingRef, e)) return;
       e.preventDefault();
-      (document.activeElement as HTMLElement | null)?.click();
+      all.find((item) => item === document.activeElement)?.click();
     } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
       // Type-ahead jumps by label, but a printable key typed mid-composition is
       // part of the candidate, not a jump target.
@@ -129,6 +132,7 @@ export function Menu({ open, onOpenChange, label, trigger, children, className }
         <div
           ref={contentRef}
           role="menu"
+          tabIndex={-1}
           aria-label={label}
           onKeyDown={onKeyDown}
           onCompositionStart={composing.handlers.onCompositionStart}

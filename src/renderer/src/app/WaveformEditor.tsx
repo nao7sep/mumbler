@@ -340,7 +340,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
         // if resolvedDurationSec doesn't change (already matches card.durationSec),
         // React skips the re-render and the sync effect never runs after WaveSurfer loads.
         if (duration > 0) {
-          syncRegionToTrim(regions, regionRef, draftTrimRef.current, duration, paletteRef.current.region);
+          syncRegionToTrim(regions, regionRef, draftTrimRef.current, duration, paletteRef.current.region, disabledRef.current);
         }
       }),
       waveSurfer.on("decode", (duration) => {
@@ -448,8 +448,8 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       return;
     }
 
-    syncRegionToTrim(regions, regionRef, draftTrim, durationSec, paletteRef.current.region);
-  }, [draftTrim.backMarkerSec, draftTrim.frontMarkerSec, resolvedDurationSec]);
+    syncRegionToTrim(regions, regionRef, draftTrim, durationSec, paletteRef.current.region, disabled);
+  }, [draftTrim.backMarkerSec, draftTrim.frontMarkerSec, resolvedDurationSec, disabled]);
 
   // Repaint the canvas and the keep-range when the theme's palette changes.
   useEffect(() => {
@@ -537,7 +537,8 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     if (disabledRef.current || cardIdRef.current !== card.id) return;
     try {
       const currentValue =
-        side === "front" ? draftTrim.frontMarkerSec ?? 0 : draftTrim.backMarkerSec ?? 0;
+        side === "front" ? draftTrim.frontMarkerSec ?? 0 : draftTrim.backMarkerSec ?? resolvedDurationSec;
+      if (currentValue === null) return;
       const nextValue = currentValue + deltaSec;
       const nextTrim =
         side === "front"
@@ -589,15 +590,11 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       return;
     }
 
-    const span = Math.min(previewSnippetSeconds, durationSec);
     const preservedStart = draftTrim.frontMarkerSec ?? 0;
     const preservedEnd = draftTrim.backMarkerSec ?? durationSec;
-    const startSec =
-      side === "first" ? preservedStart : Math.max(0, preservedEnd - span);
-    const endSec =
-      side === "first"
-        ? Math.min(durationSec, preservedStart + span)
-        : Math.min(durationSec, preservedEnd);
+    const span = Math.min(previewSnippetSeconds, preservedEnd - preservedStart);
+    const startSec = side === "first" ? preservedStart : preservedEnd - span;
+    const endSec = side === "first" ? preservedStart + span : preservedEnd;
 
     setActiveSnippet(side);
     await waveSurfer.play(startSec, endSec);
@@ -847,6 +844,7 @@ function syncRegionToTrim(
   trim: CardTrim,
   durationSec: number,
   regionColor: string,
+  disabled: boolean,
 ): void {
   const hasTrim = trim.frontMarkerSec !== null || trim.backMarkerSec !== null;
   const startSec = trim.frontMarkerSec ?? 0;
@@ -867,9 +865,9 @@ function syncRegionToTrim(
       start: startSec,
       end: endSec,
       drag: false,
-      resize: true,
-      resizeStart: true,
-      resizeEnd: true,
+      resize: !disabled,
+      resizeStart: !disabled,
+      resizeEnd: !disabled,
       color: regionColor,
     });
     return;
@@ -879,9 +877,9 @@ function syncRegionToTrim(
     start: startSec,
     end: endSec,
     drag: false,
-    resize: true,
-    resizeStart: true,
-    resizeEnd: true,
+    resize: !disabled,
+    resizeStart: !disabled,
+    resizeEnd: !disabled,
     color: regionColor,
   });
 }

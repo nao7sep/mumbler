@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
+import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactElement } from "react";
 
 /**
  * The vertical drag handle between an adjustable pane and the pane beside it:
@@ -34,6 +34,9 @@ export function PaneSplitter({
 }): ReactElement {
   // The width the keys moved to and not yet committed.
   const keyed = useRef<number | null>(null);
+  const finishDragRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => finishDragRef.current?.(), []);
 
   function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
     if (keyboardStep === undefined) return;
@@ -58,6 +61,9 @@ export function PaneSplitter({
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
     event.preventDefault();
+    finishDragRef.current?.();
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
     const startX = event.clientX;
     const startWidth = width;
     let latest = startWidth;
@@ -67,15 +73,22 @@ export function PaneSplitter({
       onResize(latest);
     };
     const up = (): void => {
+      if (finishDragRef.current !== up) return;
+      finishDragRef.current = null;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("blur", up);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
       onCommit(latest);
     };
 
+    finishDragRef.current = up;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    window.addEventListener("blur", up);
     // Keep the resize cursor and suppress text selection everywhere for the drag.
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";

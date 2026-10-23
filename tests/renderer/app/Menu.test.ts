@@ -12,7 +12,7 @@ let container: HTMLDivElement | null = null;
 
 // The Menu is controlled (open / onOpenChange), so the test owns the open state in
 // a tiny wrapper — the same way App.tsx does.
-function ControlledMenu(props: { onSelect: { a: () => void; b: () => void; c: () => void } }) {
+function ControlledMenu(props: { onSelect: { a: () => void; b: () => void; c: () => void }; disabled?: string[] }) {
   const [open, setOpen] = useState(false);
   return React.createElement(Menu, {
     open,
@@ -21,19 +21,19 @@ function ControlledMenu(props: { onSelect: { a: () => void; b: () => void; c: ()
     trigger: (triggerProps: Record<string, unknown>) =>
       React.createElement("button", { ...triggerProps, "data-testid": "trigger" }, "Open"),
     children: [
-      React.createElement(MenuItem, { onSelect: props.onSelect.a, key: "a", children: "Apple" }),
-      React.createElement(MenuItem, { onSelect: props.onSelect.b, key: "b", children: "Banana" }),
-      React.createElement(MenuItem, { onSelect: props.onSelect.c, key: "c", children: "Cherry" }),
+      React.createElement(MenuItem, { onSelect: props.onSelect.a, disabled: props.disabled?.includes("a"), key: "a", children: "Apple" }),
+      React.createElement(MenuItem, { onSelect: props.onSelect.b, disabled: props.disabled?.includes("b"), key: "b", children: "Banana" }),
+      React.createElement(MenuItem, { onSelect: props.onSelect.c, disabled: props.disabled?.includes("c"), key: "c", children: "Cherry" }),
     ],
   });
 }
 
-async function mountMenu(onSelect: { a: () => void; b: () => void; c: () => void }): Promise<void> {
+async function mountMenu(onSelect: { a: () => void; b: () => void; c: () => void }, disabled: string[] = []): Promise<void> {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(React.createElement(ControlledMenu, { onSelect }));
+    root!.render(React.createElement(ControlledMenu, { onSelect, disabled }));
   });
 }
 
@@ -109,6 +109,71 @@ describe("Menu", () => {
     expect(document.activeElement).toBe(items()[0]);
     await key(items()[0], "ArrowUp"); // stops at the first item
     expect(document.activeElement).toBe(items()[0]);
+  });
+
+  it("opens at the first enabled command and skips disabled ends and type-ahead targets", async () => {
+    const onSelect = { a: vi.fn(), b: vi.fn(), c: vi.fn() };
+    await mountMenu(onSelect, ["a", "c"]);
+    await click(trigger());
+    await flushOpenFocus();
+    expect(document.activeElement).toBe(items()[1]);
+    for (const name of ["Home", "End", "ArrowUp", "ArrowDown", "a", "c"]) {
+      await key(document.activeElement as HTMLElement, name);
+      expect(document.activeElement).toBe(items()[1]);
+    }
+    await key(items()[1], "Enter");
+    expect(onSelect.b).toHaveBeenCalledOnce();
+    expect(onSelect.a).not.toHaveBeenCalled();
+    expect(onSelect.c).not.toHaveBeenCalled();
+  });
+
+  it("excludes nonfocusable, hidden, inert and aria-disabled items from keyboard targets", async () => {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(React.createElement(Menu, {
+      open: true, onOpenChange: vi.fn(), label: "Test menu",
+      trigger: (props) => React.createElement("button", props, "Open"),
+      children: [
+        React.createElement("span", { role: "menuitem", key: "label" }, "Apple label"),
+        React.createElement("button", { role: "menuitem", "aria-disabled": true, key: "disabled" }, "Apple unavailable"),
+        React.createElement("button", { role: "menuitem", hidden: true, key: "hidden" }, "Apple hidden"),
+        React.createElement("div", { inert: true, key: "inert" }, React.createElement("button", { role: "menuitem" }, "Apple inert")),
+        React.createElement(MenuItem, { onSelect: vi.fn(), key: "enabled", children: "Banana" }),
+      ],
+    })));
+    await flushOpenFocus();
+    const enabled = items().at(-1)!;
+    expect(document.activeElement).toBe(enabled);
+    await key(enabled, "Home");
+    await key(enabled, "a");
+    expect(document.activeElement).toBe(enabled);
+  });
+
+  it("arrows past disabled commands in the middle", async () => {
+    await mountMenu({ a: vi.fn(), b: vi.fn(), c: vi.fn() }, ["b"]);
+    await click(trigger());
+    await flushOpenFocus();
+    await key(items()[0], "ArrowDown");
+    expect(document.activeElement).toBe(items()[2]);
+    await key(items()[2], "ArrowUp");
+    expect(document.activeElement).toBe(items()[0]);
+  });
+
+  it.each(["Escape", "Tab"])("keeps an all-disabled menu dismissible with %s", async (dismiss) => {
+    const onSelect = { a: vi.fn(), b: vi.fn(), c: vi.fn() };
+    await mountMenu(onSelect, ["a", "b", "c"]);
+    await click(trigger());
+    await flushOpenFocus();
+    expect(document.activeElement).toBe(menu());
+    for (const name of ["Home", "End", "ArrowUp", "ArrowDown", "a", "Enter", " "]) {
+      await key(menu()!, name);
+      expect(document.activeElement).toBe(menu());
+    }
+    expect(Object.values(onSelect).every((action) => action.mock.calls.length === 0)).toBe(true);
+    await key(menu()!, dismiss);
+    expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(trigger());
   });
 
   it("Escape closes the menu and returns focus to the trigger", async () => {
