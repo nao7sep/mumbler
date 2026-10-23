@@ -268,6 +268,46 @@ function objectOrNullIssue(owner: string, record: Record<string, unknown>, keys:
   return key === undefined ? null : `${owner} ${key} is not an object or null`;
 }
 
+function optionalNumbersIssue(owner: string, record: Record<string, unknown>, keys: readonly string[], minimum = -Infinity): string | null {
+  const key = keys.find((name) => record[name] != null &&
+    (typeof record[name] !== "number" || !Number.isFinite(record[name]) || record[name] < minimum));
+  return key === undefined ? null : `${owner} ${key} is not a valid number or null`;
+}
+
+function cardDetailsIssue(card: Record<string, unknown>): string | null {
+  const error = asRecord(card.lastError);
+  if (error !== null) {
+    if (typeof error.message !== "string") return "a card's error message is not text";
+    if (error.providerReason !== undefined && typeof error.providerReason !== "string") return "a card's provider reason is not text";
+    if (error.refused !== undefined && error.refused !== true) return "a card's refusal flag is invalid";
+    if (!["transcription", "structured", "title", "slug", "startup-recovery"].includes(error.failedStep as string)) return "a card's failed step is unknown";
+  }
+  if (card.audioProfile != null) {
+    const profile = asRecord(card.audioProfile);
+    if (profile === null) return "a card's audio profile is not an object or null";
+    for (const key of ["formatName", "codecName"]) {
+      if (profile[key] != null && typeof profile[key] !== "string") return `a card's audio ${key} is not text or null`;
+    }
+    const issue = optionalNumbersIssue("a card's audio", profile, ["bitRateKbps", "sampleRateHz", "channels"], 0);
+    if (issue !== null) return issue;
+  }
+  const trim = asRecord(card.trimDecision);
+  if (trim !== null) {
+    if (!["not-needed", "stream-copy", "reencode"].includes(trim.kind as string)) return "a card's trim decision is unknown";
+    if (trim.reason !== undefined && typeof trim.reason !== "string") return "a card's trim reason is not text";
+    const issue = optionalNumbersIssue("a card's trim decision", trim, ["toleranceSec", "requestedStartSec", "requestedEndSec", "searchStartFromSec", "searchStartToSec", "searchEndFromSec", "searchEndToSec", "chosenStartBoundarySec", "chosenEndBoundarySec"], 0) ??
+      optionalNumbersIssue("a card's trim decision", trim, ["startDeltaSec", "endDeltaSec"]);
+    if (issue !== null) return issue;
+  }
+  for (const role of ["transcription", "structured", "title", "slug"]) {
+    const info = asRecord((card.ai as Record<string, unknown>)[role]);
+    if (info === null) continue;
+    if (info.model !== undefined && typeof info.model !== "string") return "a card's AI model is not text";
+    if (info.provider !== undefined && info.provider !== "gemini") return "a card's AI provider is unknown";
+  }
+  return optionalNumbersIssue("a card's timestamps", card.timestamps as Record<string, unknown>, ["frontTrimOffsetSec"], 0);
+}
+
 function pendingImportIssue(item: unknown): string | null {
   const record = asRecord(item);
   if (record === null) return "a pending import is not an object";
@@ -311,6 +351,7 @@ function cardIssue(item: unknown): string | null {
   const label = ["title", "slug"].find((key) => metadata[key] !== null && typeof metadata[key] !== "string");
   return textIssue("a card's timestamps", card.timestamps as Record<string, unknown>, ["confirmedLocal", "effectiveLocal", "timezone"]) ??
     objectOrNullIssue("a card's ai", card.ai as Record<string, unknown>, ["transcription", "structured", "title", "slug"]) ??
+    cardDetailsIssue(card) ??
     (label === undefined ? null : `a card's metadata ${label} is not text or null`);
 }
 

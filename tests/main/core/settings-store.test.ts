@@ -191,6 +191,20 @@ describe("queue data store", () => {
     ["duplicate pending import identities", { pendingImports: [pending("p"), pending("p")] }],
     ["a card whose AI result is not an object", { cards: [{ ...card(), ai: { ...card().ai, title: "words" } }] }],
     ["a card whose title is not text", { cards: [{ ...card(), metadata: { title: 4, slug: null } }] }],
+    ["an object provider reason", { cards: [{ ...card(), lastError: { message: "failed", failedStep: "title", providerReason: { text: "unsafe" } } }] }],
+    ["a null provider reason", { cards: [{ ...card(), lastError: { message: "failed", failedStep: "title", providerReason: null } }] }],
+    ["an object error message", { cards: [{ ...card(), lastError: { message: {}, failedStep: "title" } }] }],
+    ["an unknown failed step", { cards: [{ ...card(), lastError: { message: "failed", failedStep: "other" } }] }],
+    ["an invalid refusal flag", { cards: [{ ...card(), lastError: { message: "failed", failedStep: "title", refused: "yes" } }] }],
+    ["an object audio format", { cards: [{ ...card(), audioProfile: { formatName: {} } }] }],
+    ["an array audio codec", { cards: [{ ...card(), audioProfile: { codecName: [] } }] }],
+    ["text audio channels", { cards: [{ ...card(), audioProfile: { channels: "two" } }] }],
+    ["negative audio sample rate", { cards: [{ ...card(), audioProfile: { sampleRateHz: -1 } }] }],
+    ["an object trim tolerance", { cards: [{ ...card(), trimDecision: { kind: "stream-copy", toleranceSec: {} } }] }],
+    ["an object trim reason", { cards: [{ ...card(), trimDecision: { kind: "reencode", reason: {} } }] }],
+    ["an unknown trim decision", { cards: [{ ...card(), trimDecision: { kind: "unknown" } }] }],
+    ["an object AI model", { cards: [{ ...card(), ai: { ...card().ai, title: { model: {} } } }] }],
+    ["an object front trim offset", { cards: [{ ...card(), timestamps: { ...card().timestamps, frontTrimOffsetSec: {} } }] }],
     ["a pending import whose delete choice is not true or false", {
       pendingImports: [{
         id: "p",
@@ -214,6 +228,21 @@ describe("queue data store", () => {
   it("reads absent lists as empty", async () => {
     await writeFile(queuePath(), JSON.stringify({ formatVersion: 1 }), "utf8");
     expect((await createQueueStore(queuePath()).load()).value).toEqual({ pendingImports: [], cards: [] });
+  });
+
+  it("retains usable nested details and absent optional error fields", async () => {
+    const saved = card({
+      audioProfile: { formatName: "ogg", codecName: "opus", bitRateKbps: null, sampleRateHz: 48000, channels: 2 },
+      lastError: { message: "failed", failedStep: "title", occurredAtUtc: 1234 },
+      ai: { ...card().ai, title: { provider: "gemini", model: "model", generatedAtUtc: 1234 } },
+    });
+    const raw = JSON.stringify({ formatVersion: 1, ...serializeQueue(stateWith([saved])) });
+    await writeFile(queuePath(), raw);
+    const { value } = await createQueueStore(queuePath()).load();
+    expect(value.cards[0].audioProfile).toEqual(saved.audioProfile);
+    expect(value.cards[0].lastError).toEqual(saved.lastError);
+    expect(value.cards[0].ai).toEqual(saved.ai);
+    expect(await readFile(queuePath(), "utf8")).toBe(raw);
   });
 
   it("refuses a finite-looking JSON trim number that overflows without rewriting it", async () => {
