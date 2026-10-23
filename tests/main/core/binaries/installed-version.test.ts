@@ -134,11 +134,9 @@ describe("the sidecar", () => {
 });
 
 describe("probing a binary that will not run", () => {
-  it("is null, not a version and not an exception", async () => {
+  it("preserves the execution failure for its diagnostic owner", async () => {
     const missing = join(binDir, "ffmpeg");
-    expect(
-      await readInstalledVersion("ffmpeg", missing, binDir, { kind: "probe", args: ["-version"] }),
-    ).toBeNull();
+    await expect(readInstalledVersion("ffmpeg", missing, binDir, { kind: "probe", args: ["-version"] })).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
 

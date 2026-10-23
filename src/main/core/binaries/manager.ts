@@ -1,5 +1,5 @@
 import { message } from "@shared/i18n/translate";
-import { access, chmod, constants, mkdir, rename, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -18,6 +18,7 @@ import { extractFileFromZip } from "./archive";
 import { downloadToFile, fetchText } from "./http";
 import {
   installedVersionSource,
+  probeToolVersion,
   readInstalledVersion,
   writeVersionSidecar,
 } from "./installed-version";
@@ -101,18 +102,29 @@ export class ToolManager {
   // "absent" and never reads as up to date, and the surface offers the re-acquire
   // that fixes it.
   private async readFromDisk(name: ToolName): Promise<void> {
-    const present = await this.fileExists(this.toolPath(name));
+    let present: boolean;
+    try { present = await this.fileExists(this.toolPath(name)); }
+    catch (error) {
+      await this.deps.logger.warn("tools.discovery-failed", "Could not inspect the installed audio tool.", {
+        tool: name, path: this.toolPath(name), error: serializeError(error),
+      });
+      return;
+    }
     this.present.set(name, present);
     if (!present) {
       this.installedVersion.set(name, null);
       return;
     }
-    const version = await readInstalledVersion(
-      name,
-      this.toolPath(name),
-      this.deps.binDir,
-      installedVersionSource(this.deps.platform),
-    );
+    let version: string | null;
+    try {
+      version = await readInstalledVersion(name, this.toolPath(name), this.deps.binDir, installedVersionSource(this.deps.platform));
+    } catch (error) {
+      this.installedVersion.set(name, null);
+      await this.deps.logger.warn("tools.version-unreadable", "Installed audio tool version could not be read.", {
+        tool: name, path: this.toolPath(name), error: serializeError(error),
+      });
+      return;
+    }
     this.installedVersion.set(name, version);
     if (version === null) {
       await this.deps.logger.warn(
@@ -186,6 +198,7 @@ export class ToolManager {
     const signal = AbortSignal.any([userController.signal, deadlineController.signal]);
     this.installControllers.set(name, userController);
     let published = false;
+    let stagedVersion: string | null = null;
     this.setTransient(name, { kind: "running", operation: "provision", percent: null });
     try {
       const resolved = await resolveLatest(this.deps.platform, this.deps.arch, signal);
@@ -214,7 +227,7 @@ export class ToolManager {
       // not recorded: temp/ and bin/ contain disposable acquisition files and
       // re-fetchable native executables, not user-authored managed text.
       const archivePath = join(this.deps.tempDir, `${name}-${token}.zip`);
-      const stagedExe = join(this.deps.tempDir, `${name}-${token}.tmp`);
+      const stagedExe = join(this.deps.tempDir, `${name}-${token}${this.deps.platform === "win32" ? ".exe" : ".tmp"}`);
 
       try {
         await downloadToFile({
@@ -262,6 +275,7 @@ export class ToolManager {
             });
           }
         }
+        stagedVersion = await probeToolVersion(name, stagedExe, signal);
         // Publish with a single rename so the final path is only ever the complete,
         // executable binary — never mid-extract.
         await syncFile(stagedExe);
@@ -283,10 +297,11 @@ export class ToolManager {
       if (installedVersionSource(this.deps.platform).kind === "sidecar") {
         await writeVersionSidecar(this.deps.binDir, name, resolved.version, Date.now(), this.toolPath(name), signal);
       }
-      await this.readFromDisk(name);
+      this.present.set(name, true);
+      this.installedVersion.set(name, installedVersionSource(this.deps.platform).kind === "sidecar" ? resolved.version : stagedVersion);
       signal.throwIfAborted();
-      // Only the upstream fact is persisted. What is now installed is read back
-      // from the binary, so an install has nothing to record about it.
+      // Installed identity comes from the staged probe or this release's sidecar;
+      // only the upstream fact belongs in the central dependency store.
       await this.mutateDependencies((value) => ({
         ...value,
         tools: {
@@ -315,7 +330,6 @@ export class ToolManager {
         this.setTransient(name, { kind: "idle" });
         return;
       }
-      const detail = error instanceof Error ? error.message : String(error);
       if (userController.signal.aborted && !published) {
         await this.deps.logger.info("tools.install-cancelled", "Cancelled audio tool install.", {
           tool: name,
@@ -329,7 +343,7 @@ export class ToolManager {
       // overlay, never the persisted facts. setTransient notifies the renderer.
       await this.deps.logger.warn("tools.install-failed", "Audio tool install failed.", {
         tool: name,
-        error: detail,
+        error: serializeError(error),
       });
       this.setTransient(name, {
         kind: "failed",
@@ -476,11 +490,11 @@ export class ToolManager {
 
   private async fileExists(path: string): Promise<boolean> {
     try {
-      await access(path, constants.F_OK);
       const info = await stat(path);
       return info.isFile() && info.size > 0;
-    } catch {
-      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
     }
   }
 }

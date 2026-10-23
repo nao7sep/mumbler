@@ -188,15 +188,15 @@ describe.skipIf(process.platform === "win32")("managed-tool subprocess settlemen
       { name: "ffmpeg", state: "installed-unchecked", installedVersion: null },
       { name: "ffprobe", state: "installed-unchecked", installedVersion: "8.2" },
     ]);
-    expect(logger.warn).toHaveBeenCalledWith("tools.version-unreadable", expect.any(String), { tool: "ffmpeg", path: tool });
+    expect(logger.warn).toHaveBeenCalledWith("tools.version-unreadable", expect.any(String), expect.objectContaining({ tool: "ffmpeg", path: tool, error: expect.objectContaining({ name: "ToolTimeoutError" }) }));
     expect(await readdir(binDir)).toEqual(["ffmpeg", "ffprobe"]);
   });
 
-  it("an ordinary failed version probe remains version unknown after the child exits", async () => {
+  it("an ordinary failed version probe preserves its cause after the child exits", async () => {
     const tool = join(binDir, "ffmpeg");
     await writeFile(tool, "process.stdout.write('ffmpeg version 8.2 Copyright\\n');\nprocess.exitCode = 1;\n");
 
-    expect(await readInstalledVersion("ffmpeg", tool, binDir, installedVersionSource("darwin"))).toBeNull();
+    await expect(readInstalledVersion("ffmpeg", tool, binDir, installedVersionSource("darwin"))).rejects.toMatchObject({ code: 1 });
 
     expectProcessGone(observed.children[0]!.child.pid!);
   });

@@ -104,9 +104,8 @@ export async function writeVersionSidecar(
   await writeJsonFile(target, payload, { record: false });
 }
 
-// The installed version of `name`, or null when it cannot be read — the binary will
-// not run, exits non-zero, prints something unrecognized, or its sidecar is missing
-// or in a format this build does not read (left as it is until the next install).
+// The installed version of `name`, or null for an absent/unusable sidecar.
+// Execution and access failures propagate to the manager's diagnostic owner.
 // Null is NOT "absent" and never reads as up to date: there is nothing to compare,
 // so the derivation holds the tool at installed-unchecked. Callers check presence
 // first; an absent tool has no version to read.
@@ -119,12 +118,15 @@ export async function readInstalledVersion(
   if (source.kind === "sidecar") {
     return readSidecar(binDir, name, toolPath);
   }
-  try {
-    const { stdout } = await runTool(toolPath, [...source.args], { timeoutMs: PROBE_TIMEOUT_MS });
-    return parseVersionBanner(name, stdout);
-  } catch {
-    return null;
-  }
+  return probeToolVersion(name, toolPath, undefined, source.args);
+}
+
+/** A successful process and recognizable banner establish staged viability. */
+export async function probeToolVersion(name: ToolName, toolPath: string, signal?: AbortSignal, args: readonly string[] = ["-version"]): Promise<string> {
+  const { stdout } = await runTool(toolPath, [...args], { timeoutMs: PROBE_TIMEOUT_MS, signal });
+  const version = parseVersionBanner(name, stdout);
+  if (version === null) throw new Error(`${name} did not report a recognizable version.`);
+  return version;
 }
 
 async function readSidecar(binDir: string, name: ToolName, toolPath: string): Promise<string | null> {
@@ -137,7 +139,8 @@ async function readSidecar(binDir: string, name: ToolName, toolPath: string): Pr
     if (typeof sidecar.version !== "string" || !FFMPEG_BUILD_TAG.test(sidecar.version)
       || typeof sidecar.binarySha256 !== "string" || !/^[a-f0-9]{64}$/.test(sidecar.binarySha256)) return null;
     return await sha256OfFile(toolPath, hashSignal()) === sidecar.binarySha256 ? sidecar.version : null;
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
   }
 }

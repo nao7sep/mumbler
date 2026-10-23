@@ -26,6 +26,11 @@ vi.mock("@main/core/binaries/installed-version", async (importOriginal) => {
   const { readFile } = await import("node:fs/promises");
   return {
     ...actual,
+    probeToolVersion: async (name: ToolName, path: string) => {
+      const version = actual.parseVersionBanner(name, await readFile(path, "utf8"));
+      if (version === null) throw new Error("Unrecognized fixture version");
+      return version;
+    },
     readInstalledVersion: async (name: ToolName, path: string) => actual.parseVersionBanner(name, await readFile(path, "utf8")),
   };
 });

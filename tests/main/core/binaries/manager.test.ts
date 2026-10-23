@@ -10,6 +10,14 @@ import type { ToolName, ToolTransient } from "@shared/app-shell";
 const { durabilityEvents } = vi.hoisted(() => ({
   durabilityEvents: [] as Array<{ kind: "file" | "directory"; path: string }>,
 }));
+const discoveryFault = vi.hoisted(() => ({ path: "" }));
+vi.mock("node:fs/promises", async (original) => {
+  const actual = await original<typeof import("node:fs/promises")>();
+  return { ...actual, stat: (...args: Parameters<typeof actual.stat>) => {
+    if (args[0] === discoveryFault.path) throw Object.assign(new Error("inspection refused"), { code: "EACCES" });
+    return actual.stat(...args);
+  } };
+});
 
 vi.mock("@main/core/file-io", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@main/core/file-io")>();
@@ -65,6 +73,12 @@ vi.mock("@main/core/binaries/installed-version", async (importOriginal) => {
   const { readFile } = await import("node:fs/promises");
   return {
     ...actual,
+    probeToolVersion: vi.fn(async (name: ToolName, toolPath: string, signal?: AbortSignal) => {
+      signal?.throwIfAborted();
+      const version = actual.parseVersionBanner(name, await readFile(toolPath, "utf8"));
+      if (version === null) throw new Error("unrecognized version");
+      return version;
+    }),
     readInstalledVersion: vi.fn(async (name: ToolName, toolPath: string, binDir: string, source: import("@main/core/binaries/installed-version").InstalledVersionSource) => {
       if (source.kind === "sidecar") return actual.readInstalledVersion(name, toolPath, binDir, source);
       try {
@@ -131,6 +145,7 @@ async function makeManager(platform = "darwin", logger = fakeLogger()): Promise<
 }
 
 beforeEach(async () => {
+  discoveryFault.path = "";
   dir = await mkdtemp(join(tmpdir(), "mumbler-mgr-"));
   binDir = join(dir, "bin");
   tempDir = join(dir, "temp");
@@ -159,6 +174,26 @@ afterEach(async () => {
 });
 
 describe("reconcile", () => {
+  it("records failed access distinctly from an absent tool without blocking the other tool", async () => {
+    const logger = fakeLogger();
+    const manager = await makeManager("darwin", logger);
+    discoveryFault.path = join(binDir, "ffmpeg");
+    await manager.reconcile();
+    expect(logger.warn).toHaveBeenCalledExactlyOnceWith("tools.discovery-failed", expect.any(String), expect.objectContaining({
+      tool: "ffmpeg", error: expect.objectContaining({ code: "EACCES", message: "inspection refused" }),
+    }));
+  });
+
+  it("keeps a present tool version unknown and records the exact probe failure once", async () => {
+    const logger = fakeLogger();
+    const manager = await makeManager("darwin", logger);
+    await mkdir(binDir, { recursive: true });
+    await writeFile(join(binDir, "ffmpeg"), banner("ffmpeg", "8.2"));
+    vi.mocked(installedVersion.readInstalledVersion).mockRejectedValueOnce(Object.assign(new Error("cannot launch"), { code: "ENOEXEC" }));
+    await manager.reconcile();
+    expect(manager.listStatuses()[0]).toMatchObject({ state: "installed-unchecked", installedVersion: null });
+    expect(logger.warn).toHaveBeenCalledExactlyOnceWith("tools.version-unreadable", expect.any(String), expect.objectContaining({ error: expect.objectContaining({ code: "ENOEXEC" }) }));
+  });
   it("derives presence AND the installed version from disk, not from persisted facts", async () => {
     const manager = await makeManager();
     await manager.reconcile();
@@ -210,6 +245,25 @@ describe("reconcile", () => {
 });
 
 describe("installTool", () => {
+  it.each(["darwin", "win32"])("retains the old %s executable when an integrity-valid stage cannot run", async (platform) => {
+    const logger = fakeLogger();
+    const manager = await makeManager(platform, logger);
+    await mkdir(binDir, { recursive: true });
+    const target = manager.toolPath("ffmpeg");
+    await writeFile(target, "existing working executable");
+    vi.mocked(installedVersion.probeToolVersion).mockImplementationOnce(async (_name, stage, signal) => {
+      expect(stage.endsWith(platform === "win32" ? ".exe" : ".tmp")).toBe(true);
+      expect(await readFile(target, "utf8")).toBe("existing working executable");
+      expect(signal).toBeInstanceOf(AbortSignal);
+      throw Object.assign(new Error("stage cannot launch"), { code: "ENOEXEC" });
+    });
+    await manager.installTool("ffmpeg");
+    expect(await readFile(target, "utf8")).toBe("existing working executable");
+    expect(await readdir(tempDir)).toEqual([]);
+    expect(manager.listStatuses()[0]!.transient.kind).toBe("failed");
+    expect(logger.warn).toHaveBeenCalledWith("tools.install-failed", expect.any(String), expect.objectContaining({ error: expect.objectContaining({ code: "ENOEXEC" }) }));
+  });
+
   it("publishes the binary and reads its version back off it as up-to-date", async () => {
     const manager = await makeManager();
     await manager.reconcile();
