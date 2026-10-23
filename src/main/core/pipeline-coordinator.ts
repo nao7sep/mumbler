@@ -31,8 +31,9 @@ export interface PipelineRuntimeView {
   logger: AppLogger;
 }
 
-// Persistence and secrets stay with the runtime: persistState carries the
-// normalize-then-notify invariant, and the API key never leaves its resolver.
+// The runtime owns persistence and secret storage/resolution: persistState
+// carries the normalize-then-notify invariant, and the resolved raw API key is
+// passed into pipeline execution.
 export interface PipelineHooks {
   persistState(): Promise<void>;
   resolveApiKey(): Promise<string | null>;

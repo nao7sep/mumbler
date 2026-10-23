@@ -71,9 +71,9 @@ function expectProcessGone(pid: number): void {
 
 describe("audio tools are bounded and cancellable", () => {
   // Driven through runTool with a short bound so the timeout path is proven in
-  // moments rather than at the shipped 60s/30min values. This bound is the ONLY
-  // protection the import and save paths have: they are IPC handlers with no
-  // controller, so there is nothing there to cancel with.
+  // moments rather than at the shipped 60s/30min values. The deadline also
+  // protects calls without a cancellation signal; saves have their own
+  // cancellation controller.
   it("kills a tool that never returns, and says the bound was hit", async () => {
     const pending = runTool(process.execPath, [sleeperScript], { timeoutMs: 200 });
     const child = spawnedChild();

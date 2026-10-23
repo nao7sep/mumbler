@@ -46,8 +46,8 @@ export class ToolTimeoutError extends Error {
 }
 
 /**
- * The one place this module spawns anything. Applies the bound and the caller's
- * cancellation signal, and translates an abort into the pipeline's own
+ * Runs a tool with collected output. Shares superviseTool's bound and caller
+ * cancellation with streamTool, translating an abort into the pipeline's own
  * CancelledError so a user's Cancel records the card as cancelled rather than
  * failed.
  */
@@ -472,7 +472,8 @@ export async function prepareAudioForTranscription(params: {
 
   const extension = extname(params.sourceFilePath) || ".audio";
   // not recorded: derived/ holds disposable audio binaries produced for the
-  // current pipeline; the durable decisions and text remain in queue.json.
+  // current pipeline; decisions remain in queue.json and transcript bodies in
+  // TranscriptStore.
   const outputPath = join(derivedDir, `${nanoid()}${extension}`);
 
   const streamCopy = params.trimDecision?.kind === "stream-copy" ? params.trimDecision : null;

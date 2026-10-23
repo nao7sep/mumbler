@@ -468,8 +468,8 @@ export type ToolName = "ffmpeg" | "ffprobe";
 // plus the two version facts (managed-runtime-dependencies-conventions, "Show").
 // There is no faulted state: a damaged file fails loudly when used and is fixed by
 // installing again, never tracked as a persisted fault. "Up to date" requires a
-// check that actually succeeded — with checks off, or before any check, a present
-// tool reads "installed-unchecked", never "up-to-date".
+// check that actually succeeded. Disabling checks retains known versions; a
+// present tool without sufficient version knowledge reads "installed-unchecked".
 export type DependencyState =
   | "not-installed"
   | "update-available"
@@ -505,7 +505,8 @@ export interface ToolFacts {
 
 // Transient, non-persisted status of an in-flight or just-failed operation. It
 // overlays the persisted state at render and never becomes a state — a failed
-// Provision leaves the tool Not installed, shown as an error only via this overlay.
+// Provision can retain an existing installed tool, with the error shown only via
+// this overlay.
 export type ToolTransient =
   | { kind: "idle" }
   | { kind: "running"; operation: ToolOperationKind; percent: number | null }

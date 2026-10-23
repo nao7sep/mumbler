@@ -134,7 +134,8 @@ const SETTINGS_SET_KEYS = Object.keys(SETTINGS_SETS) as (keyof MumblerSettings)[
 
 // What a settings file holds that this build cannot use (config-sets-conventions):
 // keys it does not know, as a newer Mumbler may write, and known sets whose value
-// fails their check. Both are kept as written, so a save never erases them.
+// fails their check. Unknown keys always stay; invalid known values are kept
+// until replaced by a valid value or a full Settings save.
 interface UnusableSets {
   unknown: Record<string, unknown>;
   invalid: Partial<Record<keyof MumblerSettings, unknown>>;
@@ -485,8 +486,8 @@ function serializeUtcInstants(value: unknown): unknown {
 }
 
 // The transcription and structured outline are written by TranscriptStore into
-// each card's own file, so queue.json stays small and its frequent saves record
-// small rows in the backup history.
+// each card's own file, so queue.json stays small. The queue is not recorded in
+// the backup history.
 export function serializeQueue(state: MumblerQueue): Record<string, unknown> {
   return serializeUtcInstants({
     ...state,

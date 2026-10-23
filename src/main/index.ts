@@ -216,10 +216,9 @@ async function bootstrap(): Promise<void> {
   followOsThemeChanges();
   await openMainWindow(runtime);
 
-  // The data backup is now write-through (data-backup conventions): every managed
-  // text save records itself into ~/.mumbler/backups.sqlite3 the instant its atomic
-  // rename lands (see backupStore + writeJsonFile's record hook). There is no
-  // startup scan to fire here — the retired ZIP engine's launch pass is gone.
+  // Settings saves enqueue asynchronous, best-effort history recording after
+  // their atomic rename. Other app stores are excluded from backup history,
+  // and there is no startup backup scan.
 
   const broadcastAppWideError = (): void => {
     for (const window of BrowserWindow.getAllWindows()) {
