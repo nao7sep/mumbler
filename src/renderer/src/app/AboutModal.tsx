@@ -1,3 +1,4 @@
+import { shellApi } from "@renderer/shell-api";
 import { useRef, useState, type ReactElement } from "react";
 
 import { ModalShell } from "./modal/ModalShell";
@@ -26,7 +27,7 @@ export function AboutModal({
   async function openLink(owner: "repo" | "issues", url: string): Promise<void> {
     const attempt = ++linkAttempts.current[owner];
     try {
-      await window.mumbler.openExternal(url);
+      await shellApi.openExternal(url);
       if (linkAttempts.current[owner] !== attempt) return;
       setLinkFailures((current) => ({ ...current, [owner]: undefined }));
     } catch (error) {

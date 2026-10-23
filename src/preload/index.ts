@@ -8,7 +8,7 @@ import {
   type ConfirmImportsResult,
   type GenerateTarget,
   type ImportOperationResult,
-  type MumblerShellApi,
+  type MumblerBridgeApi,
   type PendingImportReviewItem,
   type PromptTemplates,
   type RendererErrorReport,
@@ -41,7 +41,7 @@ ipcRenderer.on(APP_SHELL_EVENTS.discardUnsavedDrafts, () => {
   for (const owner of unsavedDrafts) owner.discard();
 });
 
-const api: MumblerShellApi = {
+const api: MumblerBridgeApi = {
   getInterfaceLanguage: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getInterfaceLanguage) as Promise<InterfaceLanguage>,
   getSnapshot: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.getSnapshot) as Promise<AppSnapshot>,

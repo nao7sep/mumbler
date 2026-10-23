@@ -1,3 +1,4 @@
+import { shellApi } from "@renderer/shell-api";
 import {
   forwardRef,
   useEffect,
@@ -231,7 +232,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     setIsLoadingMedia(true);
     setPlayerError(null);
 
-    void window.mumbler
+    void shellApi
       .getCardMediaSource(card.id)
       .then((nextMediaUrl) => {
         if (cancelled) {
@@ -263,7 +264,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     const requestId = crypto.randomUUID();
     setPeaks(null);
     setWaveformState("drawing");
-    void window.mumbler
+    void shellApi
       .getCardWaveformPeaks(card.id, requestId)
       .then((data) => {
         // Null is a run stopped on its way out, as this player closes.
@@ -279,7 +280,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
       });
     return () => {
       cancelled = true;
-      void window.mumbler.cancelCardWaveformPeaks(requestId).catch(() => undefined);
+      void shellApi.cancelCardWaveformPeaks(requestId).catch(() => undefined);
     };
   }, [card.id]);
 

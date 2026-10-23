@@ -1,10 +1,10 @@
 /// <reference types="vite/client" />
 
-import type { MumblerShellApi } from "@shared/app-shell";
+import type { MumblerBridgeApi } from "@shared/app-shell";
 
 declare global {
   interface Window {
-    mumbler: MumblerShellApi;
+    mumbler: MumblerBridgeApi;
   }
 }
 

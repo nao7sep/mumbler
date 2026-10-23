@@ -1,3 +1,4 @@
+import { HandledIpcError, shellApi } from "@renderer/shell-api";
 import type { Message } from "@shared/i18n/translate";
 
 /**
@@ -11,8 +12,9 @@ export function presentFailure(error: unknown, userMessage: Message, source: str
 }
 
 export function reportRendererDiagnostic(error: unknown, source: string): void {
+  if (error instanceof HandledIpcError) return;
   const diagnostic = describeRendererError(error);
-  const reporter = window.mumbler?.reportRendererDiagnostic;
+  const reporter = shellApi?.reportRendererDiagnostic;
   if (typeof reporter !== "function") {
     console.error("[Mumbler] Renderer diagnostic bridge is unavailable.", { source, diagnostic });
     return;

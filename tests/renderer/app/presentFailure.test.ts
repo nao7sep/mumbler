@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { presentFailure } from "@renderer/app/presentFailure";
 import { message } from "@shared/i18n/translate";
+import { IPC_FAILURE } from "@shared/ipc-result";
+import { HandledIpcError, shellApi } from "@renderer/shell-api";
 
 afterEach(() => {
   delete (window as unknown as { mumbler?: unknown }).mumbler;
@@ -12,6 +14,27 @@ afterEach(() => {
 });
 
 describe("presentFailure", () => {
+  it("presents a handled main-process failure without recording a second renderer diagnostic", async () => {
+    const reportRendererDiagnostic = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window, "mumbler", { configurable: true, value: {
+      saveCard: vi.fn().mockResolvedValue(JSON.parse(JSON.stringify(IPC_FAILURE))), reportRendererDiagnostic,
+    } });
+    const error = await shellApi.saveCard("card").catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HandledIpcError);
+    expect(presentFailure(error, message("error.saveRecording"), "save")).toEqual(message("error.saveRecording"));
+    expect(reportRendererDiagnostic).not.toHaveBeenCalled();
+  });
+
+  it("keeps successful results and synchronous unsubscribe functions unchanged", async () => {
+    const snapshot = { selectedCardId: "card" };
+    const unsubscribe = vi.fn();
+    Object.defineProperty(window, "mumbler", { configurable: true, value: {
+      getSnapshot: vi.fn().mockResolvedValue(snapshot), onPipelineProgressUpdated: vi.fn(() => unsubscribe),
+    } });
+    expect(await shellApi.getSnapshot()).toBe(snapshot);
+    expect(shellApi.onPipelineProgressUpdated(() => undefined)).toBe(unsubscribe);
+  });
+
   it("preserves diagnostic type and cause while returning authored presentation", () => {
     const reportRendererDiagnostic = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(window, "mumbler", { configurable: true, value: { reportRendererDiagnostic } });
@@ -35,7 +58,7 @@ describe("presentFailure", () => {
     Object.defineProperty(window, "mumbler", { configurable: true, value: { reportRendererDiagnostic } });
 
     presentFailure(new Error("original diagnostic"), message("error.saveRecording"), "test source");
-    await Promise.resolve();
+    await vi.waitFor(() => expect(consoleError).toHaveBeenCalled());
 
     expect(consoleError).toHaveBeenCalledWith(
       expect.stringContaining("could not be recorded"),

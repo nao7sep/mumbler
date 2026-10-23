@@ -1,3 +1,4 @@
+import { shellApi } from "@renderer/shell-api";
 import {
   useCallback,
   useEffect,
@@ -54,7 +55,7 @@ export function RecordsApp(): ReactElement {
   useEffect(() => {
     let cancelled = false;
     const read = (): void => {
-      void window.mumbler
+      void shellApi
         .getInterfaceLanguage()
         .then(async (resolved) => {
           const next = isLanguage(resolved?.language) ? resolved : ENGLISH;
@@ -67,7 +68,7 @@ export function RecordsApp(): ReactElement {
         });
     };
     read();
-    const unsubscribe = window.mumbler.onInterfaceLanguageChanged(read);
+    const unsubscribe = shellApi.onInterfaceLanguageChanged(read);
     return () => {
       cancelled = true;
       unsubscribe();
@@ -79,7 +80,7 @@ export function RecordsApp(): ReactElement {
     let generation = 0;
     const read = (): void => {
       const request = ++generation;
-      void window.mumbler.getSettingsDraft().then(
+      void shellApi.getSettingsDraft().then(
         (settings) => {
           if (!cancelled && request === generation) setUiFontFamily(settings.uiFontFamily);
         },
@@ -91,7 +92,7 @@ export function RecordsApp(): ReactElement {
       );
     };
     read();
-    const unsubscribe = window.mumbler.onInterfaceLanguageChanged(read);
+    const unsubscribe = shellApi.onInterfaceLanguageChanged(read);
     return () => {
       cancelled = true;
       unsubscribe();
@@ -109,7 +110,7 @@ export function RecordsApp(): ReactElement {
   // The list pane opens at its saved width, so the first frame already has it.
   useEffect(() => {
     let cancelled = false;
-    void window.mumbler.getRecordsListWidth().then(
+    void shellApi.getRecordsListWidth().then(
       (width) => {
         if (!cancelled) setListWidth(width);
       },
@@ -228,7 +229,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
 
   const readSources = useCallback((): Promise<boolean> => {
     const request = ++sourceRequest.current;
-    return window.mumbler.readRecordSources().then(
+    return shellApi.readRecordSources().then(
       (next) => {
         if (request !== sourceRequest.current) return false;
         setSources(next);
@@ -255,7 +256,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   }, []);
 
   // A display zone saved in Settings arrives with the interface-change notice.
-  useEffect(() => window.mumbler.onInterfaceLanguageChanged(() => setSourceReads((count) => count + 1)), []);
+  useEffect(() => shellApi.onInterfaceLanguageChanged(() => setSourceReads((count) => count + 1)), []);
 
   // A page applies only while the filters it was read for are still the
   // newest ones asked for.
@@ -266,7 +267,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
     fetchingMore.current = false;
     newestPending.current = false;
     setList({ status: "loading" });
-    void window.mumbler.readRecordsPage({ ...filters, after: null }).then(
+    void shellApi.readRecordsPage({ ...filters, after: null }).then(
       (page) => {
         if (generation !== listGeneration.current || request !== newestRequest.current) return;
         if (!refreshFailure.current && !retrying.current) liveSuspended.current = false;
@@ -288,7 +289,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   const readNewest = useCallback((explicitRetry = false): Promise<boolean> => {
     const generation = listGeneration.current;
     const request = ++newestRequest.current;
-    return window.mumbler.readRecordsPage({ ...filtersRef.current, after: null }).then(
+    return shellApi.readRecordsPage({ ...filtersRef.current, after: null }).then(
       (page) => {
         if (generation !== listGeneration.current || request !== newestRequest.current) return false;
         const scroll = scrollRef.current;
@@ -340,7 +341,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   // under the reader.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = window.mumbler.onRecordsChanged(() => {
+    const unsubscribe = shellApi.onRecordsChanged(() => {
       if (timer !== null || liveSuspended.current) return;
       timer = setTimeout(() => {
         timer = null;
@@ -366,7 +367,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
     }
     let cancelled = false;
     setDetail({ status: "loading" });
-    void window.mumbler.readRecordDetail(selected.kind, selected.id).then(
+    void shellApi.readRecordDetail(selected.kind, selected.id).then(
       (record) => {
         if (!cancelled) setDetail(record === null ? { status: "failed" } : { status: "ready", record });
       },
@@ -389,7 +390,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
     fetchingMore.current = true;
     const generation = listGeneration.current;
     setList((current) => (current.status === "ready" ? { ...current, loadingMore: true, moreFailed: false } : current));
-    void window.mumbler.readRecordsPage({ ...filters, after: cursorAfter(list.records) }).then(
+    void shellApi.readRecordsPage({ ...filters, after: cursorAfter(list.records) }).then(
       (page) => {
         if (generation !== listGeneration.current) return;
         fetchingMore.current = false;
@@ -472,7 +473,7 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   const commitListWidth = (width: number): void => {
     setListWidth(width);
     setDragWidth(null);
-    void window.mumbler.saveRecordsListWidth(width).then(setListWidth, (error: unknown) =>
+    void shellApi.saveRecordsListWidth(width).then(setListWidth, (error: unknown) =>
       reportRendererDiagnostic(error, "records list width save failed"),
     );
   };

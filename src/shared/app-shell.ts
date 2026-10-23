@@ -723,3 +723,10 @@ export interface MumblerShellApi {
    * user's quit or window close asks. */
   onUnsavedDrafts(report: () => UnsavedDraft[], discard: () => void): () => void;
 }
+
+/** Wire methods return plain failure values so Electron cannot strip ownership. */
+export type MumblerBridgeApi = {
+  [K in keyof MumblerShellApi]: MumblerShellApi[K] extends (...args: infer A) => Promise<infer R>
+    ? (...args: A) => Promise<import("./ipc-result").IpcResult<R>>
+    : MumblerShellApi[K];
+};
