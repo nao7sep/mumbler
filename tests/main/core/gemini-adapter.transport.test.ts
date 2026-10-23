@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The external-call surface (transport selection, timeout/abort normalization,
 // Files-API cleanup) is the most failure-prone path in the app. Mock the Gemini
@@ -70,6 +70,79 @@ beforeEach(() => {
   vi.clearAllMocks();
   deleteFile.mockResolvedValue(undefined);
   readFile.mockResolvedValue("YmFzZTY0");
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("provider transport protection", () => {
+  const textParams = { apiKey: "test-key", prompt: "hi", model: "gemini-test", timeoutMs: 1000 };
+
+  it("rejects remote HTTP for audio and text before creating the SDK client", async () => {
+    const endpoint = "http://provider.example/v1";
+
+    await expect(transcribeWithGemini({ ...baseParams(), endpoint })).rejects.toThrow("Use HTTPS");
+    await expect(generateTextWithGemini({ ...textParams, endpoint })).rejects.toThrow("Use HTTPS");
+
+    expect(createClient).not.toHaveBeenCalled();
+    expect(stat).not.toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it.each(["http://localhost:8080", "http://127.0.0.1:8080", "http://127.42.5.9:8080", "http://[::1]:8080"])(
+    "allows audio and text through the mocked SDK at loopback endpoint %s",
+    async (endpoint) => {
+      stat.mockResolvedValue({ size: SAFE - 1 });
+      generateContent.mockResolvedValue({ text: "result" });
+
+      expect((await transcribeWithGemini({ ...baseParams(), endpoint })).text).toBe("result");
+      expect((await generateTextWithGemini({ ...textParams, endpoint })).text).toBe("result");
+
+      expect(createClient).toHaveBeenCalledTimes(2);
+      expect(createClient.mock.calls.map(([options]) => options.httpOptions.baseUrl)).toEqual([endpoint, endpoint]);
+      expect(generateContent).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("refuses a remote HTTP upload URL before calling fetch", async () => {
+    const networkFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", networkFetch);
+    generateContent.mockResolvedValue({ text: "result" });
+    await generateTextWithGemini(textParams);
+    const protectedFetch = createClient.mock.calls[0]![0].httpOptions.fetch as typeof fetch;
+
+    await expect(protectedFetch("http://uploads.example/resumable?upload_id=fixture", {
+      method: "POST", headers: { "x-goog-api-key": "test-key" }, body: "audio bytes",
+    })).rejects.toThrow("require HTTPS");
+
+    expect(networkFetch).not.toHaveBeenCalled();
+  });
+
+  it("sends HTTPS requests with redirects disabled and preserves headers, signal and body", async () => {
+    const response = new Response("uploaded");
+    const networkFetch = vi.fn<typeof fetch>().mockResolvedValue(response);
+    vi.stubGlobal("fetch", networkFetch);
+    generateContent.mockResolvedValue({ text: "result" });
+    await generateTextWithGemini(textParams);
+    const protectedFetch = createClient.mock.calls[0]![0].httpOptions.fetch as typeof fetch;
+    const url = new URL("https://uploads.example/resumable?upload_id=fixture");
+    const headers = new Headers({ "x-goog-api-key": "test-key", "content-type": "audio/mp4" });
+    const signal = new AbortController().signal;
+    const body = new Uint8Array([0, 1, 255]);
+
+    expect(await protectedFetch(url, { method: "POST", headers, signal, body, redirect: "follow" })).toBe(response);
+
+    expect(networkFetch).toHaveBeenCalledExactlyOnceWith(url, {
+      method: "POST", headers, signal, body, redirect: "error",
+    });
+    const forwarded = networkFetch.mock.calls[0]![1]!;
+    expect(forwarded.headers).toBe(headers);
+    expect(forwarded.signal).toBe(signal);
+    expect(forwarded.body).toBe(body);
+  });
 });
 
 // A supported model's branch reaches every generation call, and nothing else does.
@@ -282,6 +355,8 @@ describe("SDK retries are disabled (single attempt under a 503)", () => {
 
     expect(generateContent).toHaveBeenCalledTimes(1);
     expect(createClient.mock.calls[0]?.[0].httpOptions).toEqual({
+      baseUrl: undefined,
+      fetch: expect.any(Function),
       timeout: 60_000,
       retryOptions: { attempts: 1 },
     });
@@ -296,6 +371,8 @@ describe("SDK retries are disabled (single attempt under a 503)", () => {
     expect(upload).toHaveBeenCalledTimes(1);
     expect(generateContent).not.toHaveBeenCalled();
     expect(createClient.mock.calls[0]?.[0].httpOptions).toEqual({
+      baseUrl: undefined,
+      fetch: expect.any(Function),
       timeout: 60_000,
       retryOptions: { attempts: 1 },
     });
@@ -314,6 +391,8 @@ describe("SDK retries are disabled (single attempt under a 503)", () => {
     });
 
     expect(createClient.mock.calls[0]?.[0].httpOptions).toEqual({
+      baseUrl: undefined,
+      fetch: expect.any(Function),
       timeout: 45_000,
       retryOptions: { attempts: 1 },
     });

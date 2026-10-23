@@ -563,5 +563,6 @@
   "records.step": "Schritt",
   "records.thisLaunch": "{time} (dieser Start)",
   "records.time": "Zeit",
-  "records.title": "Protokoll"
+  "records.title": "Protokoll",
+  "diagnostic.endpointRequiresHttps": "Verwenden Sie in den Einstellungen HTTPS für entfernte Anbieter. HTTP ist nur für einen Anbieter auf diesem Computer erlaubt."
 }

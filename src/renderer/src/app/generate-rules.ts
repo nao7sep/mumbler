@@ -51,9 +51,14 @@ export function trimDecisionReason(decision: TrimDecision | null): Message {
 export function getGenerateDisabledReason(params: {
   selectedCard: MumblerCard | null;
   hasGeminiKey: boolean;
+  providerEndpointAllowed?: boolean;
 }): Message | null {
   if (params.selectedCard === null) {
     return null;
+  }
+
+  if (params.providerEndpointAllowed === false) {
+    return message("diagnostic.endpointRequiresHttps");
   }
 
   if (!params.hasGeminiKey) {

@@ -555,5 +555,6 @@
   "records.step": "단계",
   "records.thisLaunch": "{time}(이번 실행)",
   "records.time": "시각",
-  "records.title": "로그"
+  "records.title": "로그",
+  "diagnostic.endpointRequiresHttps": "설정에서 원격 제공자에 HTTPS를 사용하세요. HTTP는 이 컴퓨터의 제공자에만 허용됩니다."
 }

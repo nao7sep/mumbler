@@ -571,5 +571,6 @@
   "records.step": "Étape",
   "records.thisLaunch": "{time} (ce lancement)",
   "records.time": "Heure",
-  "records.title": "Journal"
+  "records.title": "Journal",
+  "diagnostic.endpointRequiresHttps": "Utilisez HTTPS pour les fournisseurs distants dans les réglages. HTTP est autorisé uniquement pour un fournisseur sur cet ordinateur."
 }

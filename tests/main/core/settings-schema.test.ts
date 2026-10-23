@@ -168,6 +168,19 @@ describe("applySettingsDraft — theme", () => {
 });
 
 describe("applySettingsDraft — validation", () => {
+  it.each(["https://provider.example/v1", "http://localhost:8080/v1", "http://127.0.0.1:8080/v1", "http://[::1]:8080/v1"])("accepts the protected endpoint %s", (geminiEndpoint) => {
+    const result = applySettingsDraft(createDefaultSettings(), { ...freshDraft(), geminiEndpoint });
+    expect(result["gemini.endpoint"]).toBe(geminiEndpoint);
+    expect(summarizeSettings(result, OUT, BACKUP, true).providerEndpointAllowed).toBe(true);
+  });
+
+  it("rejects a remote HTTP draft without changing the existing settings", () => {
+    const current = createDefaultSettings();
+    const endpoint = current["gemini.endpoint"];
+    expect(() => applySettingsDraft(current, { ...freshDraft(), geminiEndpoint: "http://provider.example/v1" })).toThrow(/HTTPS/);
+    expect(current["gemini.endpoint"]).toBe(endpoint);
+  });
+
   it("rejects an unset leading environment reference instead of targeting the drive root", () => {
     const variableName = "MUMBLER_TEST_UNSET_OUTPUT";
     const previous = process.env[variableName];

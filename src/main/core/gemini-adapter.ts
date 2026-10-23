@@ -8,6 +8,7 @@ import {
   type GenerateContentResponse,
 } from "@google/genai";
 
+import { isAllowedProviderRequest, providerEndpointIssue } from "@shared/provider-endpoint";
 import { supportedModelConfig } from "@shared/model-branches";
 
 import { type AppLogger, type ProviderCallRecord } from "./logger";
@@ -43,6 +44,14 @@ function generationConfig(model: string, thinking: string | undefined, field?: s
 function singleAttemptHttpOptions(timeoutMs: number): { timeout: number; retryOptions: { attempts: number } } {
   return { timeout: timeoutMs, retryOptions: { attempts: 1 } };
 }
+
+// Check every SDK request, including resumable upload URLs, before credentials
+// or content leave the process. Redirects must not bypass that check.
+const protectedProviderFetch: typeof fetch = (input, init) => {
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  if (!isAllowedProviderRequest(url)) return Promise.reject(new Error("Provider requests require HTTPS outside loopback."));
+  return fetch(input, { ...init, redirect: "error" });
+};
 
 // The pipeline binds the card, step and attempt; the adapter supplies the rest.
 export type RecordProviderCall = (
@@ -126,9 +135,13 @@ export class GeminiTimeoutError extends Error {
 export async function transcribeWithGemini(
   params: GeminiAudioTranscriptionParams,
 ): Promise<GeminiRunResult> {
+  if (params.endpoint !== undefined) {
+    const issue = providerEndpointIssue(params.endpoint);
+    if (issue !== null) throw new GeminiResultError(issue, issue, true);
+  }
   const ai = new GoogleGenAI({
     apiKey: params.apiKey,
-    httpOptions: { baseUrl: params.endpoint, ...singleAttemptHttpOptions(params.timeoutMs) },
+    httpOptions: { baseUrl: params.endpoint, fetch: protectedProviderFetch, ...singleAttemptHttpOptions(params.timeoutMs) },
   });
   const record = callRecorder(params);
   const abortState = createGeminiAbortState(params.timeoutMs, params.signal);
@@ -284,9 +297,13 @@ async function deleteUploadedFile(
 export async function generateTextWithGemini(
   params: GeminiTextGenerationParams,
 ): Promise<Omit<GeminiRunResult, "transport">> {
+  if (params.endpoint !== undefined) {
+    const issue = providerEndpointIssue(params.endpoint);
+    if (issue !== null) throw new GeminiResultError(issue, issue, true);
+  }
   const ai = new GoogleGenAI({
     apiKey: params.apiKey,
-    httpOptions: { baseUrl: params.endpoint, ...singleAttemptHttpOptions(params.timeoutMs) },
+    httpOptions: { baseUrl: params.endpoint, fetch: protectedProviderFetch, ...singleAttemptHttpOptions(params.timeoutMs) },
   });
   const record = callRecorder(params);
   const abortState = createGeminiAbortState(params.timeoutMs, params.signal);

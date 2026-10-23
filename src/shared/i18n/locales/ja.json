@@ -555,5 +555,6 @@
   "records.step": "ステップ",
   "records.thisLaunch": "{time}（今回の起動）",
   "records.time": "時刻",
-  "records.title": "ログ"
+  "records.title": "ログ",
+  "diagnostic.endpointRequiresHttps": "設定でリモートプロバイダーに HTTPS を指定してください。HTTP はこのコンピューター上のプロバイダーにのみ使用できます。"
 }

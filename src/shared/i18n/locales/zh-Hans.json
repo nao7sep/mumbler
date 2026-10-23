@@ -555,5 +555,6 @@
   "records.step": "步骤",
   "records.thisLaunch": "{time}（本次启动）",
   "records.time": "时间",
-  "records.title": "日志"
+  "records.title": "日志",
+  "diagnostic.endpointRequiresHttps": "请在设置中为远程提供商使用 HTTPS。HTTP 仅适用于此计算机上的提供商。"
 }

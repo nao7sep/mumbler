@@ -22,6 +22,7 @@ const removeCard = vi.fn<MumblerShellApi["removeCard"]>();
 const reportRendererDiagnostic = vi.fn<MumblerShellApi["reportRendererDiagnostic"]>();
 let root: Root | null = null;
 let initialSnapshot: AppSnapshot;
+let pipelineChanged: (() => void) | undefined;
 
 class TestResizeObserver {
   observe(): void {}
@@ -97,6 +98,7 @@ function deferredSave() {
 beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>';
   initialSnapshot = snapshot();
+  pipelineChanged = undefined;
   saveCard.mockReset();
   removeCard.mockReset();
   reportRendererDiagnostic.mockReset().mockResolvedValue(undefined);
@@ -109,7 +111,7 @@ beforeEach(() => {
     saveCard, removeCard, reportRendererDiagnostic,
     onAppWideErrorChanged: () => unsubscribe,
     onDependenciesUpdated: () => unsubscribe,
-    onPipelineProgressUpdated: () => unsubscribe,
+    onPipelineProgressUpdated: (listener) => { pipelineChanged = listener; return unsubscribe; },
     onFlushPendingEdits: () => unsubscribe,
     onUnsavedDrafts: () => unsubscribe,
   } satisfies Partial<MumblerShellApi> });
@@ -205,5 +207,34 @@ describe("App saving a recording", () => {
     expect(document.querySelector(".queue-empty")?.textContent).toContain("Empty queue");
     expect(document.querySelector(".result-output")).toBeNull();
     expect(removeCard).not.toHaveBeenCalled();
+  });
+});
+
+describe("App generation readiness", () => {
+  it.each(["key", "endpoint"] as const)("disables individual generation and Retry when the %s is unavailable, including live changes", async (missing) => {
+    const card = readyCard();
+    card.status = "Error";
+    card.lastError = { message: "Previous attempt failed", failedStep: "title", occurredAtUtc: 0 };
+    initialSnapshot = snapshot([card]);
+    initialSnapshot.settingsSummary![missing === "key" ? "hasGeminiApiKey" : "providerEndpointAllowed"] = false;
+    await act(async () => root?.render(createElement(App)));
+    await act(async () => button("detail.tabTranscribe").click());
+    const generateButtons = () => [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .filter((node) => node.textContent === english.text(message("transcribe.generate")));
+    expect(generateButtons()).toHaveLength(4);
+    expect(generateButtons().every((node) => node.disabled)).toBe(true);
+    expect(button("common.retry").disabled).toBe(true);
+    if (missing === "endpoint") expect(document.body.textContent).toContain(english.text(message("diagnostic.endpointRequiresHttps")));
+
+    initialSnapshot = { ...initialSnapshot, settingsSummary: { ...initialSnapshot.settingsSummary!, hasGeminiApiKey: true, providerEndpointAllowed: true } };
+    await act(async () => pipelineChanged?.());
+    expect(generateButtons().every((node) => !node.disabled)).toBe(true);
+    expect(button("common.retry").disabled).toBe(false);
+    expect(document.body.textContent).not.toContain(english.text(message("diagnostic.endpointRequiresHttps")));
+
+    initialSnapshot = { ...initialSnapshot, settingsSummary: { ...initialSnapshot.settingsSummary!, hasGeminiApiKey: false } };
+    await act(async () => pipelineChanged?.());
+    expect(generateButtons().every((node) => node.disabled)).toBe(true);
+    expect(button("common.retry").disabled).toBe(true);
   });
 });

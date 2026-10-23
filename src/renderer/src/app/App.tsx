@@ -295,6 +295,14 @@ function LoadedShell({
     setNotifications(prev => clearPersistentOwner(prev, owner));
   }, []);
 
+  useEffect(() => {
+    if (snapshot?.settingsSummary?.providerEndpointAllowed === false) {
+      addPersistent("settings:provider-endpoint", message("diagnostic.endpointRequiresHttps"), "error");
+    } else {
+      clearPersistent("settings:provider-endpoint");
+    }
+  }, [snapshot?.settingsSummary?.providerEndpointAllowed, addPersistent, clearPersistent]);
+
   const dismissNotification = useCallback((id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
@@ -593,6 +601,7 @@ function LoadedShell({
   const generateDisabledReason = getGenerateDisabledReason({
     selectedCard,
     hasGeminiKey: snapshot?.settingsSummary?.hasGeminiApiKey ?? false,
+    providerEndpointAllowed: snapshot?.settingsSummary?.providerEndpointAllowed,
   });
   const saveDisabledReason = getSaveDisabledReason({
     selectedCard,
@@ -906,7 +915,7 @@ function LoadedShell({
         waveformEditorRef.current?.skipForward();
         return;
       case "transcribe-selected":
-        if (snapshot?.settingsSummary?.hasGeminiApiKey && !selectedCardIsBusy) {
+        if (generateDisabledReason === null && !selectedCardIsBusy) {
           executeGenerate(selectedCard.id, "slug");
         }
         return;
@@ -1287,7 +1296,7 @@ function LoadedShell({
               />
               <CardErrorDetail card={selectedCard} />
               {canRetryCard(selectedCard) ? (
-                <button type="button" className="button button--ghost" disabled={selectedCardIsBusy} onClick={() => handleRequestGenerate(selectedCard, selectedCard.lastError!.failedStep as GenerateTarget)}>{t("common.retry")}</button>
+                <button type="button" className="button button--ghost" disabled={selectedCardIsBusy || generateDisabledReason !== null} onClick={() => handleRequestGenerate(selectedCard, selectedCard.lastError!.failedStep as GenerateTarget)}>{t("common.retry")}</button>
               ) : null}
               <div className="detail-grid">
 
@@ -1496,7 +1505,7 @@ function LoadedShell({
                             type="button"
                             className="button button--ghost button--compact"
                             onClick={() => handleRequestGenerate(selectedCard, "transcription")}
-                            disabled={selectedCardIsBusy}
+                            disabled={selectedCardIsBusy || generateDisabledReason !== null}
                           >
                             {t("transcribe.generate")}
                           </button>
@@ -1526,7 +1535,7 @@ function LoadedShell({
                               type="button"
                               className="button button--ghost button--compact"
                               onClick={() => handleRequestGenerate(selectedCard, "structured")}
-                              disabled={selectedCardIsBusy}
+                              disabled={selectedCardIsBusy || generateDisabledReason !== null}
                             >
                               {t("transcribe.generate")}
                             </button>
@@ -1555,7 +1564,7 @@ function LoadedShell({
                               type="button"
                               className="button button--ghost button--compact"
                               onClick={() => handleRequestGenerate(selectedCard, "title")}
-                              disabled={selectedCardIsBusy}
+                              disabled={selectedCardIsBusy || generateDisabledReason !== null}
                             >
                               {t("transcribe.generate")}
                             </button>
@@ -1584,7 +1593,7 @@ function LoadedShell({
                               type="button"
                               className="button button--ghost button--compact"
                               onClick={() => handleRequestGenerate(selectedCard, "slug")}
-                              disabled={selectedCardIsBusy}
+                              disabled={selectedCardIsBusy || generateDisabledReason !== null}
                             >
                               {t("transcribe.generate")}
                             </button>

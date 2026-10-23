@@ -571,5 +571,6 @@
   "records.step": "Passaggio",
   "records.thisLaunch": "{time} (questo avvio)",
   "records.time": "Ora",
-  "records.title": "Log"
+  "records.title": "Log",
+  "diagnostic.endpointRequiresHttps": "Usa HTTPS per i provider remoti nelle impostazioni. HTTP è consentito solo per un provider su questo computer."
 }

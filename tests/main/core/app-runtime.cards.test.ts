@@ -1216,6 +1216,26 @@ describe("working with a card", () => {
     });
   });
 
+  it("preserves a saved remote HTTP endpoint and refuses generation before clearing results", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    await runtime.setGeminiApiKey("AIza-test-key");
+    await runtime.shutdown();
+    const path = join(home, "config.json");
+    const stored = JSON.parse(await readFile(path, "utf8"));
+    stored["gemini.endpoint"] = "http://provider.example/v1";
+    await writeFile(path, JSON.stringify(stored));
+    runtime = await ApplicationRuntime.initialize();
+    expect(runtime.getSettingsDraft().geminiEndpoint).toBe(stored["gemini.endpoint"]);
+    expect(runtime.getSnapshot().settingsSummary).toMatchObject({ hasGeminiApiKey: true, providerEndpointAllowed: false });
+    const before = cards(runtime.getSnapshot())[0];
+    await expect(runtime.generateCardStep(card.id, "title")).rejects.toThrow(/HTTPS/);
+    expect(cards(runtime.getSnapshot())[0]).toEqual(before);
+    expect(JSON.parse(await readFile(path, "utf8"))["gemini.endpoint"]).toBe(stored["gemini.endpoint"]);
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), geminiEndpoint: "https://provider.example/v1" });
+    expect(runtime.getSnapshot().settingsSummary?.providerEndpointAllowed).toBe(true);
+  });
+
   it("keeps the latest trim when an earlier one finishes analyzing after it", async () => {
     const card = await confirmed();
     let release!: () => void;

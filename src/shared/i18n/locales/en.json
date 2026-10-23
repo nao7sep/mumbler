@@ -563,5 +563,6 @@
   "setup.outputBody": "Mumbler saves exports here for you to move on, so the folder can stay empty.",
   "setup.recordingsBody": "Imported recordings are moved here, renamed by the time they were recorded, and kept for good. Mumbler never changes them again.",
   "setup.timezoneBody": "Recorders and phones often save the recording time without a time zone. Mumbler reads such times in this zone. It starts at this computer’s zone and stays as you set it, even when the computer’s zone changes.",
-  "setup.later": "You can change these choices later in Settings or Managed tools."
+  "setup.later": "You can change these choices later in Settings or Managed tools.",
+  "diagnostic.endpointRequiresHttps": "Use HTTPS for remote providers in Settings. HTTP is allowed only for a provider on this computer."
 }

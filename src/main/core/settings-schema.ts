@@ -24,6 +24,7 @@ import { isPositiveIntegerSetting } from "@shared/settings-validation";
 import { CARD_STATUSES, THEME_PREFERENCES } from "@shared/app-shell";
 import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
 import { FORMAT_VERSIONS } from "./format-versions";
+import { providerEndpointIssue } from "@shared/provider-endpoint";
 import { CorruptStateError, JsonStore, type LoadResult } from "./json-store";
 import { OperationError } from "./operation-error";
 import { resolvePathFromHome } from "./storage-root";
@@ -757,6 +758,7 @@ export function summarizeSettings(
     previewSnippetSeconds: settings.previewSnippetSeconds,
     // AI
     hasGeminiApiKey,
+    providerEndpointAllowed: providerEndpointIssue(settings["gemini.endpoint"]) === null,
     transcriptionModel: settings["gemini.transcription"],
     outlineModel: settings["gemini.outline"],
     metadataModel: settings["gemini.metadata"],
@@ -870,6 +872,8 @@ export function applySettingsDraft(
       slug: multiline(draft.slugPrompt),
     },
   };
+  const endpointProblem = providerEndpointIssue(next["gemini.endpoint"]);
+  if (endpointProblem !== null) throw new OperationError(endpointProblem);
   for (const key of SETTINGS_SET_KEYS) {
     const issue = SETTINGS_SETS[key](next[key]);
     if (issue !== null) throw new OperationError(issue);
