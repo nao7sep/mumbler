@@ -1,3 +1,5 @@
+import { cardMetadata } from "@shared/card-projection";
+import type { QueueMetadata } from "@shared/app-shell";
 import type {
   MumblerCard,
   MumblerSettings,
@@ -536,13 +538,10 @@ function serializeUtcInstants(value: unknown): unknown {
 // The transcription and structured outline are written by TranscriptStore into
 // each card's own file, so queue.json stays small. The queue is not recorded in
 // the backup history.
-export function serializeQueue(state: MumblerQueue): Record<string, unknown> {
+export function serializeQueue(state: MumblerQueue | QueueMetadata): Record<string, unknown> {
   return serializeUtcInstants({
     ...state,
-    cards: state.cards.map(({ transcription: _bodyInOwnFile, metadata, ...card }) => ({
-      ...card,
-      metadata: { title: metadata.title, slug: metadata.slug },
-    })),
+    cards: state.cards.map(cardMetadata),
   }) as Record<string, unknown>;
 }
 
@@ -760,7 +759,7 @@ export class QueueStore {
     return { ...loaded, value: normalizeQueue(loaded.value, (audioFilePath) => fileTimes.get(audioFilePath)!) };
   }
 
-  save(queue: MumblerQueue): Promise<void> {
+  save(queue: MumblerQueue | QueueMetadata): Promise<void> {
     return this.store.save(serializeQueue(queue));
   }
 

@@ -56,7 +56,7 @@ const FAILED_WHILE: Record<StoppedStep, MessageKey> = {
   "startup-recovery": "status.failedWhile.startupRecovery",
 };
 
-export function formatCardStatusMessage(card: MumblerCard): Message {
+export function formatCardStatusMessage(card: Pick<MumblerCard, "status" | "activeStep" | "lastError">): Message {
   switch (card.status) {
     case "Pending Review":
       return message("status.pendingReview");
@@ -85,7 +85,7 @@ export function formatCardStatusMessage(card: MumblerCard): Message {
 // What stopped a card, said in the reader's language. The main process records
 // its own English with the card for the log's sake (card.lastError.message);
 // the interface derives the sentence from the status and the step it stopped at.
-export function cardErrorMessage(card: MumblerCard): Message | null {
+export function cardErrorMessage(card: Pick<MumblerCard, "status" | "activeStep" | "lastError">): Message | null {
   if (card.lastError === null) return null;
   if (card.status === "Cancelled") return message("cardError.cancelled");
   switch (card.lastError.failedStep) {

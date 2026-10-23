@@ -1,3 +1,5 @@
+import { CardProjection } from "@shared/card-projection";
+import type { CardBody, ShellSnapshot } from "@shared/app-shell";
 import { app, BrowserWindow, dialog, shell } from "electron";
 import { mkdir, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
@@ -265,6 +267,7 @@ export class ApplicationRuntime {
   private onPipelineProgressCallback: (() => void) | null = null;
   private onLanguageChangedCallback: (() => void) | null = null;
   private onDependenciesChangedCallback: (() => void) | null = null;
+  private readonly cardProjection = new CardProjection();
   // Only short pending-state publications share this tail. External preparation
   // retains its own finite physical owner and cannot block unrelated reviews.
   private importCommitTail: Promise<void> = Promise.resolve();
@@ -749,6 +752,15 @@ export class ApplicationRuntime {
       sessions,
       cards: cardIds.map((cardId) => ({ cardId, name: names.get(cardId) ?? null })),
     };
+  }
+
+  projectSnapshot(snapshot: AppSnapshot): ShellSnapshot {
+    return this.cardProjection.snapshot(snapshot);
+  }
+
+  getCardBody(cardId: string): CardBody | null {
+    const card = this.runtime.state?.cards.find((entry) => entry.id === cardId);
+    return card ? this.cardProjection.body(card) : null;
   }
 
   getSnapshot(): AppSnapshot {
@@ -1891,21 +1903,21 @@ export class ApplicationRuntime {
     };
     const state = this.runtime.state;
     if (state !== null && queueStore !== null && transcriptStore !== null) {
-      const snapshot = structuredClone(state);
+      const snapshot = this.cardProjection.persistence(state);
       const request = ++this.persistenceRequest;
       const saveQueue = this.queueBehind;
       await this.enqueuePersistence(async () => {
         if (attemptId !== this.quitAttempt) return;
-        const transcriptsSaved = await attempt("transcripts", () => transcriptStore.writeChanged(snapshot.cards));
+        const transcriptsSaved = await attempt("transcripts", () => transcriptStore.writeChanged(snapshot.bodies));
         if (transcriptsSaved && saveQueue) {
-          await attempt("queue", () => queueStore.save(snapshot));
+          await attempt("queue", () => queueStore.save(snapshot.queue));
         }
         const packetSaved = failures.length === 0;
         this.queueBehind = !packetSaved || request !== this.persistenceRequest;
         await retrySettings();
         if (packetSaved && attemptId === this.quitAttempt) {
           // Cleanup of removed cards' files, not the user's work: logged only.
-          await transcriptStore.removeAbsent(snapshot.cards).catch((error: unknown) => {
+          await transcriptStore.removeAbsent(snapshot.bodies).catch((error: unknown) => {
             void logger.warn("quit.transcript-cleanup-failed", "Could not delete a removed card's text file.", {
               error: serializeError(error),
             }).catch(() => undefined);
@@ -2618,13 +2630,13 @@ export class ApplicationRuntime {
   // `this.runtime.state` (and its cards) across awaits and mutate it afterwards,
   // so swapping in a copy would detach their later writes from what is saved.
   private async persistState(): Promise<void> {
-    const snapshot = structuredClone(this.runtime.state!);
+    const snapshot = this.cardProjection.persistence(this.runtime.state!);
     const request = ++this.persistenceRequest;
     this.queueBehind = true;
     await this.enqueuePersistence(async () => {
       try {
-        await this.runtime.transcriptStore!.writeChanged(snapshot.cards);
-        await this.runtime.queueStore!.save(snapshot);
+        await this.runtime.transcriptStore!.writeChanged(snapshot.bodies);
+        await this.runtime.queueStore!.save(snapshot.queue);
       } catch (error: unknown) {
         this.queueBehind = true;
         if (error instanceof PublishedFileError && error.filePath === this.runtime.queueStore!.path) {
@@ -2640,7 +2652,7 @@ export class ApplicationRuntime {
       this.queueBehind = request !== this.persistenceRequest;
       // Error-handling-conventions: secondary failures cannot deny the queue commit.
       try {
-        await this.runtime.transcriptStore!.removeAbsent(snapshot.cards);
+        await this.runtime.transcriptStore!.removeAbsent(snapshot.bodies);
       } catch (error: unknown) {
         await this.runtime.logger.warn("queue.cleanup-transcripts", "Queue committed, but transcript cleanup failed.", {
           error: serializeError(error),

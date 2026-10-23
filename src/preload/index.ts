@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import {
   APP_SHELL_CHANNELS,
   APP_SHELL_EVENTS,
-  type AppSnapshot,
+  type ShellSnapshot as AppSnapshot,
   type CardTrim,
   type ConfirmImportsResult,
   type GenerateTarget,
@@ -44,6 +44,7 @@ ipcRenderer.on(APP_SHELL_EVENTS.discardUnsavedDrafts, () => {
 const api: MumblerBridgeApi = {
   getInterfaceLanguage: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getInterfaceLanguage) as Promise<InterfaceLanguage>,
+  getCardBody: (cardId) => ipcRenderer.invoke(APP_SHELL_CHANNELS.getCardBody, cardId),
   getSnapshot: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.getSnapshot) as Promise<AppSnapshot>,
   dismissFirstRunSetup: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.dismissFirstRunSetup) as Promise<void>,
   getSettingsDraft: () =>
@@ -51,12 +52,12 @@ const api: MumblerBridgeApi = {
   getDefaultPrompts: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getDefaultPrompts) as Promise<PromptTemplates>,
   openImportDialog: () =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.openImportDialog) as Promise<ImportOperationResult>,
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.openImportDialog) as Promise<ImportOperationResult<AppSnapshot>>,
   importDroppedPaths: (paths: string[]) =>
     ipcRenderer.invoke(
       APP_SHELL_CHANNELS.importDroppedPaths,
       paths,
-    ) as Promise<ImportOperationResult>,
+    ) as Promise<ImportOperationResult<AppSnapshot>>,
   updatePendingImportDrafts: (items: PendingImportReviewItem[]) =>
     ipcRenderer.invoke(
       APP_SHELL_CHANNELS.updatePendingImportDrafts,
@@ -66,7 +67,7 @@ const api: MumblerBridgeApi = {
     ipcRenderer.invoke(
       APP_SHELL_CHANNELS.confirmPendingImports,
       items,
-    ) as Promise<ConfirmImportsResult>,
+    ) as Promise<ConfirmImportsResult<AppSnapshot>>,
   selectCard: (cardId: string | null) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.selectCard, cardId) as Promise<AppSnapshot>,
   duplicateCard: (cardId: string) =>
@@ -108,7 +109,7 @@ const api: MumblerBridgeApi = {
   chooseOutputDirectory: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.chooseOutputDirectory) as Promise<AppSnapshot>,
   saveCard: (cardId: string, resolution?: SaveConflictResolution, options?: SaveCardOptions) =>
-    ipcRenderer.invoke(APP_SHELL_CHANNELS.saveCard, cardId, resolution, options) as Promise<SaveCardResult>,
+    ipcRenderer.invoke(APP_SHELL_CHANNELS.saveCard, cardId, resolution, options) as Promise<SaveCardResult<AppSnapshot>>,
   removeCard: (cardId: string) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.removeCard, cardId) as Promise<AppSnapshot>,
   reportRendererError: (report: RendererErrorReport) =>

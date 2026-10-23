@@ -1,3 +1,4 @@
+import { useCardBody } from "./useCardBody";
 import { HandledIpcError, shellApi } from "@renderer/shell-api";
 import { nanoid } from "nanoid";
 import {
@@ -10,7 +11,7 @@ import {
 } from "react";
 
 import type {
-  AppSnapshot,
+  ShellSnapshot as AppSnapshot,
   GenerateTarget,
   MumblerCard,
   PendingImportReviewItem,
@@ -307,7 +308,7 @@ function LoadedShell({
   const [cardActionErrors, setCardActionErrors] = useState<CardActionError[]>([]);
   const [pendingSaveConflict, setPendingSaveConflict] = useState<{
     cardId: string;
-    result: Extract<SaveCardResult, { kind: "conflict" }>;
+    result: Extract<SaveCardResult<AppSnapshot>, { kind: "conflict" }>;
   } | null>(null);
   const [saveConflictError, setSaveConflictError] = useState<Message | null>(null);
   const [pendingRemoveCardId, setPendingRemoveCardId] = useState<string | null>(null);
@@ -465,8 +466,9 @@ function LoadedShell({
         .getSnapshot()
         .then((nextSnapshot) => {
           if (prevSnapshot?.state?.cards) {
+            const previousCards = new Map(prevSnapshot.state.cards.map((card) => [card.id, card]));
             for (const card of nextSnapshot.state?.cards ?? []) {
-              const prevCard = prevSnapshot.state.cards.find((c) => c.id === card.id);
+              const prevCard = previousCards.get(card.id);
               if (prevCard && prevCard.status !== card.status) {
                 const notification = pipelineCompletionNotification(prevCard, card);
                 if (notification?.kind === "toast") {
@@ -598,13 +600,15 @@ function LoadedShell({
     };
   }, []);
 
-  const selectedCard =
+  const selectedSummary =
     snapshot?.state?.cards.find(
       (card) => card.id === snapshot.queueSummary?.selectedCardId,
     ) ?? null;
+  const selectedBody = useCardBody(selectedSummary, setSnapshot);
+  const selectedCard = selectedBody.card;
   const selectedCardIsBusy =
     selectedCard !== null &&
-    (activePipelineCards.includes(selectedCard.id) || isCardBusy(selectedCard));
+    (!selectedBody.ready || activePipelineCards.includes(selectedCard.id) || isCardBusy(selectedCard));
   const generateDisabledReason = getGenerateDisabledReason({
     selectedCard,
     hasGeminiKey: snapshot?.settingsSummary?.hasGeminiApiKey ?? false,
@@ -753,7 +757,8 @@ function LoadedShell({
     }
 
     const currentSnapshot = snapshotRef.current;
-    const current = currentSnapshot?.state?.cards.find((card) => card.id === pending.cardId);
+    if (!selectedBody.ready) return;
+    const current = selectedCard?.id === pending.cardId ? selectedCard : null;
     if (!current || isCardBusy(current) || activePipelineCards.includes(current.id) || getGenerateDisabledReason({
       selectedCard: current,
       hasGeminiKey: currentSnapshot?.settingsSummary?.hasGeminiApiKey ?? false,
@@ -1322,6 +1327,10 @@ function LoadedShell({
                 results={cardActionErrors}
                 onDismiss={(operation) => clearCardActionError(selectedCard.id, operation)}
               />
+              {!selectedBody.ready ? <p role={selectedBody.error ? "alert" : "status"}>
+                {t(selectedBody.error ? "error.refreshRecordings" : "detail.loading")}
+                {selectedBody.error ? <button type="button" className="button button--ghost" onClick={selectedBody.retry}>{t("common.retry")}</button> : null}
+              </p> : null}
               <CardErrorDetail card={selectedCard} />
               {canRetryCard(selectedCard) ? (
                 <button type="button" className="button button--ghost" disabled={selectedCardIsBusy || generateDisabledReason !== null} onClick={() => handleRequestGenerate(selectedCard, selectedCard.lastError!.failedStep as GenerateTarget)}>{t("common.retry")}</button>
@@ -1844,6 +1853,7 @@ function LoadedShell({
           body={pendingGenerate.body}
           onCancel={() => setPendingGenerate(null)}
           onGenerate={handleConfirmGenerate}
+          disabled={!selectedBody.ready}
         />
       ) : null}
 

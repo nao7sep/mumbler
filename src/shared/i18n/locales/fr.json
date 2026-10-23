@@ -336,6 +336,7 @@
   "output.savedTo": "Enregistré dans {path}",
   "output.hint": "L’audio est enregistré avec son heure d’enregistrement inscrite à l’intérieur, avancée selon la coupe du début. Deux fichiers l’accompagnent\u00a0: un .json avec l’enregistrement complet (heures, coupe, transcription, texte structuré, titre, slug et modèles d’IA utilisés) et un .md avec le texte structuré sous un en-tête titre, slug et date, prêt pour une app de notes.",
   "detail.selectRecording": "Sélectionnez un enregistrement",
+  "detail.loading": "Chargement du texte de l’enregistrement…",
   "detail.noSelection": "Aucune sélection",
   "detail.noSelectionBody": "Importez des enregistrements pour commencer.",
   "import.imported": {

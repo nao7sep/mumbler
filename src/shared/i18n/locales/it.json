@@ -336,6 +336,7 @@
   "output.savedTo": "Salvato in {path}",
   "output.hint": "L’audio viene salvato con l’ora di registrazione scritta al suo interno, spostata in avanti dal taglio iniziale. Accanto ci sono due file: un .json con il record completo (orari, taglio, trascrizione, testo strutturato, titolo, slug e modelli di IA usati) e un .md con il testo strutturato sotto un’intestazione di titolo, slug e data, pronto per un’app di note.",
   "detail.selectRecording": "Seleziona una registrazione",
+  "detail.loading": "Caricamento del testo della registrazione…",
   "detail.noSelection": "Nessuna selezione",
   "detail.noSelectionBody": "Importa registrazioni per iniziare.",
   "import.imported": {

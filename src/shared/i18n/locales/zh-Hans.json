@@ -328,6 +328,7 @@
   "output.savedTo": "已保存到 {path}",
   "output.hint": "音频保存时会在文件内写入录音时间，并按开头裁剪的长度后移。旁边还有两个文件：.json 包含完整记录（时间、裁剪、转录、结构化文本、标题、slug 和所用的 AI 模型），.md 包含带标题、slug 和日期页眉的结构化文本，可直接用于笔记应用。",
   "detail.selectRecording": "请选择一个录音",
+  "detail.loading": "正在加载录音文本…",
   "detail.noSelection": "未选择",
   "detail.noSelectionBody": "导入录音即可开始。",
   "import.imported": {

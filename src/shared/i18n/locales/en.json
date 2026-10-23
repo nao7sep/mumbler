@@ -322,6 +322,7 @@
   "output.savedTo": "Saved to {path}",
   "output.hint": "The audio is saved with its recording time written inside it, moved forward by any front trim. Two files go beside it: a .json with the full record (times, trim, transcript, structured text, title, slug and the AI models used), and a .md with the structured text under a title, slug and date header, ready for a notes app.",
   "detail.selectRecording": "Select a recording",
+  "detail.loading": "Loading recording text…",
   "detail.noSelection": "No selection",
   "detail.noSelectionBody": "Import recordings to get started.",
   "import.imported": {

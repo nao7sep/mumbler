@@ -92,11 +92,13 @@ export function GenerateConfirmModal({
   body,
   onCancel,
   onGenerate,
+  disabled = false,
 }: {
   title: MessageKey;
   body: Message;
   onCancel: () => void;
   onGenerate: () => void;
+  disabled?: boolean;
 }): ReactElement {
   const { t, text } = useI18n();
   return (
@@ -105,7 +107,7 @@ export function GenerateConfirmModal({
       body={text(body)}
       actions={[
         { label: t("common.cancel"), onClick: onCancel },
-        { label: t("transcribe.generate"), variant: "danger", onClick: onGenerate },
+        { label: t("transcribe.generate"), variant: "danger", onClick: onGenerate, disabled },
       ]}
       onRequestClose={onCancel}
     />

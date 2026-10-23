@@ -336,6 +336,7 @@
   "output.savedTo": "Guardado en {path}",
   "output.hint": "El audio se guarda con la hora de grabación escrita dentro, adelantada según el recorte inicial. A su lado van dos archivos: un .json con el registro completo (horas, recorte, transcripción, texto estructurado, título, slug y los modelos de IA usados) y un .md con el texto estructurado bajo un encabezado de título, slug y fecha, listo para una app de notas.",
   "detail.selectRecording": "Selecciona una grabación",
+  "detail.loading": "Cargando el texto de la grabación…",
   "detail.noSelection": "Sin selección",
   "detail.noSelectionBody": "Importa grabaciones para empezar.",
   "import.imported": {

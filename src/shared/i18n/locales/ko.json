@@ -328,6 +328,7 @@
   "output.savedTo": "{path}에 저장했습니다",
   "output.hint": "오디오는 녹음 시각을 안에 기록한 채 저장되며, 앞부분을 자른 만큼 뒤로 옮겨집니다. 옆에는 두 파일이 함께 저장됩니다. .json에는 전체 기록(시각, 자르기, 전사, 구조화된 텍스트, 제목, 슬러그, 사용한 AI 모델)이, .md에는 제목·슬러그·날짜 머리글 아래 구조화된 텍스트가 들어 있어 메모 앱에서 바로 쓸 수 있습니다.",
   "detail.selectRecording": "녹음을 선택하십시오",
+  "detail.loading": "녹음 텍스트 불러오는 중…",
   "detail.noSelection": "선택 항목 없음",
   "detail.noSelectionBody": "녹음을 가져와 시작하십시오.",
   "import.imported": {

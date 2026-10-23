@@ -4,7 +4,6 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { MumblerCard } from "@shared/app-shell";
 import { NewerFormatError } from "@main/core/format-versions";
 import { CorruptStateError, UnreadableStoreError } from "@main/core/json-store";
 import { TranscriptStore } from "@main/core/transcript-store";
@@ -21,12 +20,8 @@ afterEach(async () => {
   await rm(join(dir, ".."), { recursive: true, force: true });
 });
 
-function card(id: string, transcription: string | null, structured: string | null = null): MumblerCard {
-  return {
-    id,
-    transcription: { text: transcription },
-    metadata: { structured, title: null, slug: null },
-  } as MumblerCard;
+function card(cardId: string, transcription: string | null, structured: string | null = null) {
+  return { cardId, transcription, structured };
 }
 
 async function files(): Promise<string[]> {
@@ -62,10 +57,10 @@ describe("TranscriptStore", () => {
     expect(await store.writeChanged([take])).toBe(1);
     const stringify = vi.spyOn(JSON, "stringify");
     expect(await store.writeChanged([take]), "an unchanged save writes nothing").toBe(0);
-    expect(stringify.mock.calls.filter(([value]) => value?.cardId === take.id)).toHaveLength(0);
+    expect(stringify.mock.calls.filter(([value]) => value?.cardId === take.cardId)).toHaveLength(0);
     stringify.mockRestore();
     expect(write).toHaveBeenCalledTimes(1);
-    take.metadata.structured = "## better outline";
+    take.structured = "## better outline";
     expect(await store.writeChanged([take])).toBe(1);
     expect(write).toHaveBeenCalledTimes(2);
 
@@ -76,7 +71,7 @@ describe("TranscriptStore", () => {
       transcription: "the words",
       structured: "## better outline",
     });
-    expect((await new TranscriptStore(dir).open([take.id])).get(take.id)).toEqual({
+    expect((await new TranscriptStore(dir).open([take.cardId])).get(take.cardId)).toEqual({
       transcription: "the words",
       structured: "## better outline",
     });
@@ -97,13 +92,13 @@ describe("TranscriptStore", () => {
     const store = new TranscriptStore(dir);
     const take = card("take", "old words");
     await store.writeChanged([take]);
-    take.transcription.text = "new words";
+    take.transcription = "new words";
     const write = vi.spyOn(fileIo, "writeJsonFile").mockRejectedValueOnce(new Error("disk unavailable"));
     await expect(store.writeChanged([take])).rejects.toThrow("disk unavailable");
-    expect((await new TranscriptStore(dir).open([take.id])).get(take.id)?.transcription).toBe("old words");
+    expect((await new TranscriptStore(dir).open([take.cardId])).get(take.cardId)?.transcription).toBe("old words");
     expect(await store.writeChanged([take])).toBe(1);
     expect(write).toHaveBeenCalledTimes(2);
-    expect((await new TranscriptStore(dir).open([take.id])).get(take.id)?.transcription).toBe("new words");
+    expect((await new TranscriptStore(dir).open([take.cardId])).get(take.cardId)?.transcription).toBe("new words");
   });
 
   it("writes nothing for a card without text", async () => {
@@ -119,21 +114,21 @@ describe("TranscriptStore", () => {
     await store.writeChanged([take]);
     if (reopen) {
       store = new TranscriptStore(dir);
-      await store.open([take.id]);
+      await store.open([take.cardId]);
     }
-    take.transcription.text = null;
-    take.metadata.structured = null;
+    take.transcription = null;
+    take.structured = null;
 
     const written = await store.writeChanged([take]);
     // Quit or failed cleanup may leave the transcript file in place. Its
     // primary write must already say that the retained card has no text.
-    expect((await new TranscriptStore(dir).open([take.id])).get(take.id)).toEqual({ transcription: null, structured: null });
+    expect((await new TranscriptStore(dir).open([take.cardId])).get(take.cardId)).toEqual({ transcription: null, structured: null });
     expect(written).toBe(1);
     expect(await store.writeChanged([take])).toBe(0);
 
     await store.removeAbsent([take]);
     expect(await files()).toEqual([]);
-    expect((await new TranscriptStore(dir).open([take.id])).size).toBe(0);
+    expect((await new TranscriptStore(dir).open([take.cardId])).size).toBe(0);
   });
 
   it("deletes the file of a card that is gone or has lost its text", async () => {
@@ -143,7 +138,7 @@ describe("TranscriptStore", () => {
     const removed = card("removed", "removed words");
     await store.writeChanged([kept, cleared, removed]);
 
-    cleared.transcription.text = null;
+    cleared.transcription = null;
     await store.removeAbsent([kept, cleared]);
 
     const reopened = await new TranscriptStore(dir).open(["kept", "cleared", "removed"]);

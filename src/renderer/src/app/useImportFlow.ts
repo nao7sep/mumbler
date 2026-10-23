@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import type {
-  AppSnapshot,
+  ShellSnapshot as AppSnapshot,
   ImportOperationResult,
   PendingImportReviewItem,
 } from "@shared/app-shell";

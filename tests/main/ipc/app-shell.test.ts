@@ -1,3 +1,5 @@
+import { CardProjection } from "@shared/card-projection";
+import type { AppSnapshot, MumblerCard } from "@shared/app-shell";
 import { IPC_FAILURE } from "@shared/ipc-result";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -28,7 +30,7 @@ const { registerAppShellIpc } = await import("@main/ipc/app-shell");
 const { OperationError } = await import("@main/core/operation-error");
 
 const RUNTIME_METHODS = [
-  "getSnapshot", "dismissFirstRunSetup", "getSettingsDraft", "getDefaultPrompts",
+  "getCardBody", "getSnapshot", "dismissFirstRunSetup", "getSettingsDraft", "getDefaultPrompts",
   "openImportDialog", "importDroppedPaths", "updatePendingImportDrafts", "confirmPendingImports",
   "selectCard", "duplicateCard", "updateCardTrim", "getCardMediaSource", "generateCardStep",
   "cancelCardProcessing", "pickOutputDirectory", "pickBackupDirectory", "openOutputDirectory", "saveSettingsDraft",
@@ -74,7 +76,8 @@ beforeEach(() => {
   electron.openExternal.mockClear();
   logger.debug.mockClear();
   logger.error.mockClear();
-  runtime = Object.fromEntries(RUNTIME_METHODS.map((name) => [name, vi.fn(async () => `${name} result`)]));
+  runtime = Object.fromEntries(RUNTIME_METHODS.map((name) => [name, vi.fn(async () => ({ result: name, snapshot: { result: name } }))]));
+  runtime.projectSnapshot = vi.fn((value) => value);
   runtime.currentLogger = vi.fn(() => logger);
   registerAppShellIpc(runtime as never, windows);
 });
@@ -87,6 +90,7 @@ describe("the app-shell IPC boundary", () => {
   // Each row: the channel, the runtime method it must reach, and the arguments
   // the renderer sends, which must arrive unchanged.
   it.each([
+    ["getCardBody", "getCardBody", ["card-1"]],
     ["getSnapshot", "getSnapshot", []],
     ["dismissFirstRunSetup", "dismissFirstRunSetup", []],
     ["getSettingsDraft", "getSettingsDraft", []],
@@ -132,7 +136,7 @@ describe("the app-shell IPC boundary", () => {
   ] as const)("carries %s to the runtime and answers with its result", async (channel, method, args) => {
     const result = await invoke(APP_SHELL_CHANNELS[channel], ...args);
     expect(runtime[method]).toHaveBeenCalledExactlyOnceWith(...args);
-    expect(result).toBe(`${method} result`);
+    expect(result).toEqual({ result: method, snapshot: { result: method } });
   });
 
   it.each([[undefined], [null], ["keep"], [{}], [{ removeAfterSave: "no" }]])(
@@ -255,4 +259,31 @@ describe("the app-shell IPC boundary", () => {
     expect(reply).not.toContain("SENTINEL");
     expect(logger.error).toHaveBeenCalledOnce();
   });
+});
+
+
+it.each([
+  ["getSnapshot", [], false], ["selectCard", ["selected"], false],
+  ["updateCardTrim", ["selected", { frontMarkerSec: 1, backMarkerSec: null }], false],
+  ["generateCardStep", ["selected", "title"], false], ["checkTools", [], false],
+  ["importDroppedPaths", [["/recording.wav"]], true], ["saveCard", ["selected"], true],
+] as const)("keeps all text bodies out of the actual %s bridge result", async (method, args, nested) => {
+  const projection = new CardProjection();
+  const cards = ["selected", "unselected"].map((id) => ({ id,
+    transcription: { text: `${id} transcript`.repeat(100_000) },
+    metadata: { structured: `${id} outline`.repeat(100_000), title: id, slug: id },
+  } as MumblerCard));
+  const snapshot = { state: { cards, pendingImports: [] }, queueSummary: { selectedCardId: "selected" } } as unknown as AppSnapshot;
+  runtime[method].mockResolvedValue(nested ? { snapshot, kind: "saved" } : snapshot);
+  runtime.projectSnapshot.mockImplementation((value: AppSnapshot) => projection.snapshot(value));
+  runtime.getCardBody.mockImplementation((id: string) => projection.body(cards.find((card) => card.id === id)!));
+  const result = await invoke(APP_SHELL_CHANNELS[method], ...args);
+  expect(JSON.stringify(result).length).toBeLessThan(1000);
+  const shell = (nested ? (result as { snapshot: unknown }).snapshot : result) as ReturnType<CardProjection["snapshot"]>;
+  expect(shell.state!.cards).toHaveLength(2);
+  expect(shell.state!.cards[0]).not.toHaveProperty("transcription");
+  expect(shell.state!.cards[0].metadata).not.toHaveProperty("structured");
+  const body = await invoke(APP_SHELL_CHANNELS.getCardBody, "selected");
+  expect(body).toMatchObject({ cardId: "selected", revision: shell.state!.cards[0].bodyRevision, transcription: cards[0].transcription.text });
+  expect(JSON.stringify(body)).not.toContain("unselected transcript");
 });
