@@ -66,8 +66,9 @@ function parse(path: string, raw: unknown, cardId: string): CardTranscript {
 // format is checked once, when open() reads it; writes and removals touch only
 // files this session read or wrote, so they do not re-read them.
 export class TranscriptStore {
-  // What each card's file holds on disk, as serialized text; absent means no file.
-  private readonly onDisk = new Map<string, string>();
+  // Retained text values from each card's last successful write or read;
+  // absent means no file. Each snapshot is owned here, separate from callers.
+  private readonly onDisk = new Map<string, Readonly<CardTranscript>>();
   private queue: Promise<void> = Promise.resolve();
 
   constructor(private readonly directory: string) {}
@@ -119,7 +120,7 @@ export class TranscriptStore {
       if (raw === undefined) continue;
       const transcript = parse(path, raw, cardId);
       transcripts.set(cardId, transcript);
-      this.onDisk.set(cardId, JSON.stringify(serialize(cardId, transcript)));
+      this.onDisk.set(cardId, { ...transcript });
     }
     return transcripts;
   }
@@ -134,13 +135,12 @@ export class TranscriptStore {
         // may fail or never run, so old text must already be gone on reopen.
         // A fresh empty card still needs no file.
         if (isEmpty(transcript) && !this.onDisk.has(cardId)) continue;
-        const value = serialize(cardId, transcript);
-        const text = JSON.stringify(value);
-        if (this.onDisk.get(cardId) === text) continue;
+        const previous = this.onDisk.get(cardId);
+        if (previous?.transcription === transcript.transcription && previous.structured === transcript.structured) continue;
         // Not recorded in the backup history: transcripts are derived from the
         // recording (data-backup-conventions; developer decision).
-        await writeJsonFile(this.pathFor(cardId), value);
-        this.onDisk.set(cardId, text);
+        await writeJsonFile(this.pathFor(cardId), serialize(cardId, transcript));
+        this.onDisk.set(cardId, transcript);
         written += 1;
       }
       return written;

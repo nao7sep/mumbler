@@ -2,12 +2,13 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MumblerCard } from "@shared/app-shell";
 import { NewerFormatError } from "@main/core/format-versions";
 import { CorruptStateError, UnreadableStoreError } from "@main/core/json-store";
 import { TranscriptStore } from "@main/core/transcript-store";
+import * as fileIo from "@main/core/file-io";
 
 let dir: string;
 
@@ -16,6 +17,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await rm(join(dir, ".."), { recursive: true, force: true });
 });
 
@@ -53,13 +55,19 @@ describe("TranscriptStore", () => {
   });
 
   it("writes a card's text once, and again only when it changes", async () => {
+    const write = vi.spyOn(fileIo, "writeJsonFile");
     const store = new TranscriptStore(dir);
     const take = card("take", "the words", "## outline");
 
     expect(await store.writeChanged([take])).toBe(1);
+    const stringify = vi.spyOn(JSON, "stringify");
     expect(await store.writeChanged([take]), "an unchanged save writes nothing").toBe(0);
+    expect(stringify.mock.calls.filter(([value]) => value?.cardId === take.id)).toHaveLength(0);
+    stringify.mockRestore();
+    expect(write).toHaveBeenCalledTimes(1);
     take.metadata.structured = "## better outline";
     expect(await store.writeChanged([take])).toBe(1);
+    expect(write).toHaveBeenCalledTimes(2);
 
     const [name] = await files();
     expect(JSON.parse(await readFile(join(dir, name), "utf8"))).toEqual({
@@ -68,6 +76,34 @@ describe("TranscriptStore", () => {
       transcription: "the words",
       structured: "## better outline",
     });
+    expect((await new TranscriptStore(dir).open([take.id])).get(take.id)).toEqual({
+      transcription: "the words",
+      structured: "## better outline",
+    });
+  });
+
+  it("keeps the disk snapshot separate from mutable text returned by open", async () => {
+    await new TranscriptStore(dir).writeChanged([card("take", "old words", "old outline")]);
+    const store = new TranscriptStore(dir);
+    const loaded = (await store.open(["take"])).get("take")!;
+    loaded.transcription = "new words";
+    loaded.structured = "new outline";
+
+    expect(await store.writeChanged([card("take", loaded.transcription, loaded.structured)])).toBe(1);
+    expect((await new TranscriptStore(dir).open(["take"])).get("take")).toEqual(loaded);
+  });
+
+  it("does not treat a failed body write as persisted when retrying the same text", async () => {
+    const store = new TranscriptStore(dir);
+    const take = card("take", "old words");
+    await store.writeChanged([take]);
+    take.transcription.text = "new words";
+    const write = vi.spyOn(fileIo, "writeJsonFile").mockRejectedValueOnce(new Error("disk unavailable"));
+    await expect(store.writeChanged([take])).rejects.toThrow("disk unavailable");
+    expect((await new TranscriptStore(dir).open([take.id])).get(take.id)?.transcription).toBe("old words");
+    expect(await store.writeChanged([take])).toBe(1);
+    expect(write).toHaveBeenCalledTimes(2);
+    expect((await new TranscriptStore(dir).open([take.id])).get(take.id)?.transcription).toBe("new words");
   });
 
   it("writes nothing for a card without text", async () => {
