@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 
 import {
@@ -11,7 +12,8 @@ import {
 import { isAllowedProviderRequest, providerEndpointIssue } from "@shared/provider-endpoint";
 import { supportedModelConfig } from "@shared/model-branches";
 
-import { type AppLogger, type ProviderCallRecord } from "./logger";
+import { serializeError, type AppLogger, type ProviderCallRecord } from "./logger";
+import { reportRecordsFailure } from "./records-engine";
 import { CancelledError } from "./cancellation";
 
 // Inline audio travels as base64 (4 bytes per 3) in a request of at most 20,000,000 bytes that also carries the prompt.
@@ -188,12 +190,14 @@ export async function transcribeWithGemini(
       // The upload ignores an abort signal, so the caller stops waiting at the
       // operation deadline or on Cancel. SDK chunk deadlines are per request;
       // physical upload work retains capacity and any late file is deleted.
-      const uploading = ai.files.upload(upload);
-      params.trackWork?.(uploading);
       // Record the physical SDK outcome even if the caller stops waiting. The
       // race also leaves optional record I/O behind on Cancel; capacity follows
-      // the raw upload above, rather than waiting for its diagnostic record.
-      const recordedUpload = record("files.upload", null, upload, () => uploading);
+      // the raw upload, rather than waiting for its diagnostic record.
+      const recordedUpload = record("files.upload", null, upload, () => {
+        const uploading = ai.files.upload(upload);
+        params.trackWork?.(uploading);
+        return uploading;
+      });
       const uploadedFile = await untilAborted(recordedUpload, abortState.signal, (late) => {
         if (late.name) void deleteUploadedFile(ai, late.name, record, params.logger);
       });
@@ -238,29 +242,43 @@ type CallRecorder = <T>(operation: string, model: string | null, request: unknow
 
 // Wraps one SDK call so its request, its answer or failure, and its timing are
 // recorded (data-lifecycle-conventions, Records).
-function callRecorder(params: { endpoint?: string; recordCall?: RecordProviderCall }): CallRecorder {
+function callRecorder(params: { apiKey: string; endpoint?: string; recordCall?: RecordProviderCall }): CallRecorder {
   return async (operation, model, request, call) => {
     const startedAt = new Date().toISOString();
-    const write = (response: unknown, error: unknown): Promise<void> =>
-      params.recordCall?.({
-        provider: "gemini",
-        operation,
-        endpoint: params.endpoint ?? null,
-        model,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        request,
-        response,
-        error,
-      }) ?? Promise.resolve();
+    const callId = randomUUID();
+    const write = async (phase: "started" | "finished", response: unknown, error: unknown): Promise<void> => {
+      try {
+        await params.recordCall?.({
+          callId,
+          phase,
+          provider: "gemini",
+          operation,
+          endpoint: params.endpoint ?? null,
+          model,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          request,
+          response,
+          error,
+        });
+      } catch (failure) {
+        // Diagnostic failure cannot replace the SDK outcome. Preserve the cause
+        // through the final sink while masking the credential known here.
+        const text = JSON.stringify(serializeError(failure));
+        reportRecordsFailure(params.apiKey.length === 0 ? text : text.replaceAll(params.apiKey, "[REDACTED]"));
+      }
+    };
+    // Enqueue before invoking the SDK, without waiting on optional diagnostic
+    // I/O. This is local intent, never evidence of receipt or billing.
+    void write("started", null, null);
     let response: Awaited<ReturnType<typeof call>>;
     try {
       response = await call();
     } catch (error: unknown) {
-      await write(null, error);
+      await write("finished", null, error);
       throw error;
     }
-    await write(response, null);
+    await write("finished", response, null);
     return response;
   };
 }

@@ -83,6 +83,8 @@ describe("the physical upload's provider record", () => {
     }).catch((error: unknown) => error);
     try {
       await uploadEntered.promise;
+      expect(calls.filter((call) => call.phase === "started")).toHaveLength(1);
+      expect(calls.filter((call) => call.phase === "finished")).toHaveLength(0);
       if (exit === "cancel") controller.abort();
       else await vi.advanceTimersByTimeAsync(1000);
       expect(await run).toBeInstanceOf(exit === "cancel" ? CancelledError : GeminiTimeoutError);
@@ -90,7 +92,7 @@ describe("the physical upload's provider record", () => {
       finishUpload.resolve();
       const actualOutcome = await physical.catch((error: unknown) => error);
       if (outcome === "success") await deleted.promise;
-      const uploadCalls = calls.filter((call) => call.operation === "files.upload");
+      const uploadCalls = calls.filter((call) => call.operation === "files.upload" && call.phase === "finished");
       expect(uploadCalls).toHaveLength(1);
       if (outcome === "success") {
         expect(uploadCalls[0]).toMatchObject({ response: uploadedFile, error: null });
@@ -134,7 +136,7 @@ describe("the physical upload's provider record", () => {
       signal: controller.signal,
       recordCall: async (call) => {
         calls.push(call);
-        if (call.operation === "files.upload") {
+        if (call.operation === "files.upload" && call.phase === "finished") {
           writingRecord.resolve();
           await finishRecord.promise;
         }
@@ -153,7 +155,7 @@ describe("the physical upload's provider record", () => {
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(callerSettled).toBe(true);
       expect(await run).toBeInstanceOf(CancelledError);
-      expect(calls.find((call) => call.operation === "files.upload")).toMatchObject({ response: uploadedFile, error: null });
+      expect(calls.find((call) => call.operation === "files.upload" && call.phase === "finished")).toMatchObject({ response: uploadedFile, error: null });
       finishRecord.resolve();
       await deleted.promise;
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/models/"))).toBe(false);

@@ -50,6 +50,28 @@ async function fallbackLines(): Promise<Record<string, unknown>[]> {
 const ISO_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 describe("createLogger", () => {
+  it("stores masked attempt intent separately from its correlated completed provider record", async () => {
+    const logger = open();
+    logger.maskSecret("fixture-secret");
+    const call = {
+      callId: "call-1", provider: "gemini", operation: "models.generateContent", endpoint: null,
+      model: "model", cardId: "card", step: "title", attempt: 1,
+      startedAt: "2026-10-02T00:00:00.000Z", finishedAt: "2026-10-02T00:00:01.000Z",
+      request: { prompt: "fixture-secret content" }, response: null, error: null,
+    };
+    await logger.providerCall({ ...call, phase: "started" });
+    await logger.providerCall({ ...call, phase: "finished", response: { text: "answer" } });
+    await logger.close();
+    const intent = rows("logs")[0]!;
+    expect(intent.op).toBe("provider.attempt-started");
+    const details = JSON.parse(intent.details as string);
+    expect(details).toMatchObject({ callId: "call-1", cardId: "card", request: { prompt: "[REDACTED] content" } });
+    expect(details).not.toHaveProperty("finishedAt");
+    expect(details).not.toHaveProperty("response");
+    expect(rows("provider_calls")).toHaveLength(1);
+    expect(JSON.parse(rows("provider_calls")[0]!.request as string)).toEqual({ callId: "call-1", request: { prompt: "[REDACTED] content" } });
+  });
+
   it("writes each line as a row of one session, with its time and card", async () => {
     const logger = open();
     await logger.info("startup", "hello");

@@ -21,6 +21,8 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 // One call to an outside provider, recorded whole (data-lifecycle-conventions,
 // Records). `error` is the raw failure; the logger serializes it.
 export interface ProviderCallRecord {
+  callId?: string;
+  phase?: "started" | "finished";
   provider: string;
   operation: string;
   endpoint: string | null;
@@ -360,8 +362,13 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
     info: (op, message, details) => log("info", op, message, details),
     warn: (op, message, details) => log("warn", op, message, details),
     error: (op, message, error, details) => log("error", op, message, details, error),
-    providerCall: (record) =>
-      writeEntry({
+    providerCall: (record) => record.phase === "started"
+      ? log("info", "provider.attempt-started", "Provider attempt started.", {
+          callId: record.callId, provider: record.provider, operation: record.operation,
+          endpoint: record.endpoint, model: record.model, cardId: record.cardId,
+          step: record.step, attempt: record.attempt, startedAt: record.startedAt, request: record.request,
+        })
+      : writeEntry({
         kind: "provider-call",
         session,
         startedAt: record.startedAt,
@@ -373,7 +380,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
         operation: record.operation,
         endpoint: record.endpoint,
         model: record.model,
-        request: toJson(record.request) ?? "null",
+        request: toJson(record.callId === undefined ? record.request : { callId: record.callId, request: record.request }) ?? "null",
         response: toJson(record.response),
         error: record.error === null || record.error === undefined ? null : toJson(serializeError(record.error)),
       }),

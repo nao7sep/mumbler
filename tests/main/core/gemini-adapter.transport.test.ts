@@ -1,3 +1,4 @@
+import type { RecordProviderCall } from "@main/core/gemini-adapter";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The external-call surface (transport selection, timeout/abort normalization,
@@ -432,6 +433,44 @@ describe("generateTextWithGemini", () => {
 });
 
 describe("every provider call is recorded whole", () => {
+  it("enqueues a correlated attempt before a held SDK call without waiting for the diagnostic sink", async () => {
+    let finish!: (value: { text: string }) => void;
+    let finishRecord!: () => void;
+    const heldRecord = new Promise<void>((resolve) => { finishRecord = resolve; });
+    const calls: Array<Parameters<RecordProviderCall>[0]> = [];
+    const recordCall: RecordProviderCall = async (call) => {
+      calls.push(call);
+      if (call.phase === "started") await heldRecord;
+    };
+    generateContent.mockImplementation(() => {
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ phase: "started", response: null, error: null });
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    const run = generateTextWithGemini({ apiKey: "fixture-secret", prompt: "title", model: "unknown", timeoutMs: 10_000, recordCall });
+    try {
+      expect(calls).toHaveLength(1);
+      finish({ text: "result" });
+      expect((await run).text).toBe("result");
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toMatchObject({ phase: "finished", callId: calls[0]!.callId, startedAt: calls[0]!.startedAt, response: { text: "result" } });
+    } finally { finishRecord(); }
+  });
+
+  it("keeps SDK success and failure when diagnostic writes reject", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const recordCall = vi.fn().mockRejectedValue(new Error("fixture-secret sink failure"));
+    try {
+      generateContent.mockResolvedValue({ text: "result" });
+      const params = { apiKey: "fixture-secret", prompt: "title", model: "unknown", timeoutMs: 1000, recordCall };
+      expect((await generateTextWithGemini(params)).text).toBe("result");
+      const failure = new Error("provider failed");
+      generateContent.mockRejectedValue(failure);
+      await expect(generateTextWithGemini(params)).rejects.toBe(failure);
+      expect(stderr.mock.calls.map(([text]) => String(text)).join("")).not.toContain("fixture-secret");
+    } finally { stderr.mockRestore(); }
+  });
+
   it("records the inline request with the audio file named instead of its bytes, and the response as returned", async () => {
     stat.mockResolvedValue({ size: 1234 });
     const response = { text: "hi", modelVersion: "v1", usageMetadata: { totalTokenCount: 5 } };
@@ -440,7 +479,7 @@ describe("every provider call is recorded whole", () => {
 
     await transcribeWithGemini({ ...baseParams(), endpoint: "https://proxy.example", recordCall });
 
-    expect(recordCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    expect(recordCall).toHaveBeenLastCalledWith(expect.objectContaining({
       provider: "gemini",
       operation: "models.generateContent",
       endpoint: "https://proxy.example",
@@ -481,9 +520,9 @@ describe("every provider call is recorded whole", () => {
     const recordCall = vi.fn().mockResolvedValue(undefined);
 
     await transcribeWithGemini({ ...baseParams(), recordCall });
-    await vi.waitFor(() => expect(recordCall).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(recordCall).toHaveBeenCalledTimes(6));
 
-    expect(recordCall.mock.calls.map(([call]) => call.operation)).toEqual([
+    expect(recordCall.mock.calls.filter(([call]) => call.phase === "finished").map(([call]) => call.operation)).toEqual([
       "files.upload",
       "models.generateContent",
       "files.delete",
@@ -499,7 +538,7 @@ describe("every provider call is recorded whole", () => {
       apiKey: "k", prompt: "title", model: "unknown", timeoutMs: 1000, recordCall,
     })).rejects.toBe(failure);
 
-    expect(recordCall).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    expect(recordCall).toHaveBeenLastCalledWith(expect.objectContaining({
       request: { model: "unknown", contents: [{ role: "user", parts: [{ text: "title" }] }], config: {} },
       response: null,
       error: failure,
