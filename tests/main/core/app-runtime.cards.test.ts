@@ -960,6 +960,57 @@ describe("confirming what was dropped in", () => {
     expect(await exists(pending.workingFilePath), "the app's own copy stays").toBe(true);
   });
 
+  it.each([
+    [false, "replacement"], [true, "replacement"],
+    [false, "identical replacement"], [true, "identical replacement"],
+    [false, "rewrite"], [true, "rewrite"],
+  ] as const)("preserves a changed source during review (archive=%s, %s)", async (copyToBackupOnConfirm, change) => {
+    const archive = join(home, "Recordings");
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: archive });
+    const [pending] = await dropIn("changed.wav");
+    const original = await readFile(pending.workingFilePath, "utf8");
+    if (change !== "rewrite") await rename(pending.originalSourcePath, `${pending.originalSourcePath}.previous`);
+    const replacement = change === "identical replacement" ? original : "newer source recording";
+    await writeFile(pending.originalSourcePath, replacement);
+    const { snapshot, originalWarnings } = await runtime.confirmPendingImports([
+      review(pending, { copyToBackupOnConfirm, deleteOriginalOnConfirm: true }),
+    ]);
+    expect(originalWarnings.length).toBeGreaterThan(0);
+    expect(await readFile(pending.originalSourcePath, "utf8")).toBe(replacement);
+    expect(await readFile(cards(snapshot)[0]!.sourceFilePath, "utf8")).toBe(original);
+    expect(await readdir(archive).catch(() => [])).toEqual([]);
+  });
+
+  it.each([false, true])("keeps an archived recording when importing it again (directory alias=%s)", async (alias) => {
+    const archive = join(home, "Recordings");
+    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: archive });
+    const [first] = await dropIn("take.wav");
+    await runtime.confirmPendingImports([review(first, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true })]);
+    const archivedPath = join(archive, "20260228-223000-utc.wav");
+    const aliasPath = join(home, "recordings-alias");
+    if (alias) await symlink(archive, aliasPath, process.platform === "win32" ? "junction" : "dir");
+    await runtime.importDroppedPaths([alias ? join(aliasPath, basename(archivedPath)) : archivedPath]);
+    const pending = runtime.getSnapshot().state!.pendingImports[0]!;
+    const { originalWarnings } = await runtime.confirmPendingImports([review(pending, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true })]);
+    expect(originalWarnings).toEqual([]);
+    expect(await readFile(archivedPath, "utf8")).toBe("audio for take.wav");
+    expect(await readdir(archive)).toEqual(["20260228-223000-utc.wav"]);
+  });
+
+  it("preserves sources from an older pending review without identity evidence", async () => {
+    const [pending] = await dropIn("old-review.wav");
+    await runtime.shutdown();
+    const path = join(home, "queue.json");
+    const saved = JSON.parse(await readFile(path, "utf8"));
+    delete saved.pendingImports[0].sourceIdentity;
+    await writeFile(path, JSON.stringify(saved));
+    runtime = await ApplicationRuntime.initialize();
+    const { originalWarnings } = await runtime.confirmPendingImports([review(pending, { deleteOriginalOnConfirm: true })]);
+    expect(originalWarnings).toHaveLength(1);
+    expect(await exists(pending.originalSourcePath)).toBe(true);
+    expect(cards(runtime.getSnapshot())).toHaveLength(1);
+  });
+
   it("keeps the original when the backup it was told to make could not be written", async () => {
     const [pending] = await dropIn("take.wav");
     // A file where the backup directory should be: the copy cannot be made.

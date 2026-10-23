@@ -1,9 +1,9 @@
-import { access, copyFile, link, mkdir, mkdtemp, open, readdir, rm, stat, unlink } from "node:fs/promises";
-import { constants as fsConstants, createReadStream } from "node:fs";
+import { link, mkdir, mkdtemp, open, readdir, rm, stat, unlink } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { extname, join } from "node:path";
 
-import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
-import { fileExists, formatError, isMissingFileError, keepSourceTimesAndMode, syncDirectory, uniquePathInDirectory } from "./file-io";
+import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem, SourceFileIdentity } from "@shared/app-shell";
+import { fileExists, formatError, isMissingFileError, syncDirectory, sameFileBytes, uniquePathInDirectory } from "./file-io";
 
 import { sha256OfFile } from "./binaries/integrity";
 import { type AppLogger, serializeError } from "./logger";
@@ -16,7 +16,25 @@ export interface WorkingReconciliationResult {
   retainedDerivedFiles: number;
 }
 
-export async function deleteImportedSource(sourcePath: string): Promise<void> {
+export function sourceFileIdentity(info: SourceFileIdentity): SourceFileIdentity {
+  const { dev, ino, size, mtimeMs, ctimeMs } = info;
+  return { dev, ino, size, mtimeMs, ctimeMs };
+}
+
+function sameSourceIdentity(left: SourceFileIdentity, right: SourceFileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
+    left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
+}
+
+export async function assertImportedSourceUnchanged(sourcePath: string, expectedCopy: string, expected: SourceFileIdentity | undefined): Promise<void> {
+  if (expected === undefined || !sameSourceIdentity(await stat(sourcePath), expected) ||
+      !(await sameFileBytes(sourcePath, expectedCopy)) || !sameSourceIdentity(await stat(sourcePath), expected)) {
+    throw new Error("The source recording can no longer be verified as the imported file; it was left in place.");
+  }
+}
+
+export async function deleteImportedSource(sourcePath: string, expectedCopy: string, expected: SourceFileIdentity | undefined): Promise<void> {
+  await assertImportedSourceUnchanged(sourcePath, expectedCopy, expected);
   await unlink(sourcePath);
 }
 
@@ -24,28 +42,46 @@ export async function copyIntoWorking(
   sourcePath: string,
   workingDir: string,
   preferredName: string,
+  signal?: AbortSignal,
+  expectedSource?: SourceFileIdentity,
 ): Promise<string> {
   await mkdir(workingDir, { recursive: true });
   const workingFilePath = await uniquePathInDirectory(workingDir, preferredName);
-
+  let owned = false;
   try {
-    // Created exclusively, so a name taken after the directory scan fails
-    // rather than being overwritten, and that file is never removed below.
-    await copyFile(sourcePath, workingFilePath, fsConstants.COPYFILE_EXCL);
-    await keepSourceTimesAndMode(sourcePath, workingFilePath);
-    await access(workingFilePath, fsConstants.R_OK);
+    signal?.throwIfAborted();
+    const before = await stat(sourcePath);
+    if (expectedSource && !sameSourceIdentity(before, expectedSource)) throw new Error("The source recording changed before it could be copied.");
+    const handle = await open(workingFilePath, "wx", 0o600);
+    owned = true;
+    const stream = createReadStream(sourcePath, { signal });
+    stream.on("error", () => undefined);
+    let primary: unknown;
+    try {
+      await handle.writeFile(stream);
+      const after = await stat(sourcePath);
+      if (!sameSourceIdentity(before, after)) {
+        throw new Error("The source recording changed while it was being imported.");
+      }
+      await handle.utimes(before.atime, before.mtime);
+      await handle.chmod(before.mode);
+      await handle.sync();
+    } catch (error) { primary = error; }
+    finally {
+      stream.destroy();
+      try { await handle.close(); }
+      catch (error) {
+        if (primary !== undefined) throw new AggregateError([primary, error], "Working copy and close failed.", { cause: primary });
+        throw error;
+      }
+    }
+    if (primary !== undefined) throw primary;
+    await syncDirectory(workingDir);
+    return workingFilePath;
   } catch (error: unknown) {
-    // Best-effort removal of this call's own partial copy; the wrapped error
-    // below is the meaningful failure and is always thrown, so a failed cleanup
-    // is deliberately not surfaced on top of it.
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") await rm(workingFilePath, { force: true }).catch(() => undefined);
-    throw new Error(
-      `Failed to create a readable working copy for ${preferredName}: ${formatError(error)}`,
-      { cause: error },
-    );
+    if (owned) await rm(workingFilePath, { force: true }).catch(() => undefined);
+    throw new Error(`Failed to create a readable working copy for ${preferredName}: ${formatError(error)}`, { cause: error });
   }
-
-  return workingFilePath;
 }
 
 // Keep the descriptor writable through metadata and sync, including read-only

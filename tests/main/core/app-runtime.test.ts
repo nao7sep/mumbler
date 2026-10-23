@@ -511,13 +511,13 @@ describe("ApplicationRuntime confirmed import commit", () => {
   it("publishes the confirmed queue before deleting the original source", async () => {
     await withImport(async (runtime, item, queuePath) => {
       const deleteSource = workingFiles.deleteImportedSource;
-      const deletion = vi.spyOn(workingFiles, "deleteImportedSource").mockImplementation(async (file) => {
+      const deletion = vi.spyOn(workingFiles, "deleteImportedSource").mockImplementation(async (file, copy, identity) => {
         const committed = (await createQueueStore(queuePath).load()).value;
         expect(committed.pendingImports).toEqual([]);
         expect(committed.cards).toHaveLength(1);
         expect(committed.cards[0].sourceFilePath).toBe(item.workingFilePath);
         expect(await readFile(file, "utf8")).toBe("original recording");
-        await deleteSource(file);
+        await deleteSource(file, copy, identity);
       });
 
       const result = await runtime.confirmPendingImports([item]);

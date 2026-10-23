@@ -20,6 +20,8 @@ const backupFaults = vi.hoisted(() => ({
   publicFailure: null as Error | null,
   refuseStageCleanup: false,
   directoryFailure: null as string | null,
+  workingSyncFailure: false,
+  workingEvents: [] as string[],
   beforeCopy: null as ((target: string) => Promise<void>) | null,
 }));
 
@@ -38,7 +40,19 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     },
     open: async (...args: Parameters<typeof actual.open>) => {
       if (args[1] === "r" && String(args[0]) === backupFaults.directoryFailure) throw Object.assign(new Error("directory sync failed"), { code: "EIO" });
+      if (args[1] === "r" && basename(String(args[0])) === "working") backupFaults.workingEvents.push("directory");
+      if (args[1] === "wx" && basename(dirname(String(args[0]))) === "working") await backupFaults.beforeCopy?.(String(args[0]));
       const handle = await actual.open(...args);
+      if (args[1] === "wx" && basename(dirname(String(args[0]))) === "working") {
+        const sync = handle.sync.bind(handle);
+        const close = handle.close.bind(handle);
+        handle.sync = async () => {
+          backupFaults.workingEvents.push("file");
+          if (backupFaults.workingSyncFailure) throw Object.assign(new Error("working sync failed"), { code: "EIO" });
+          await sync();
+        };
+        handle.close = async () => { backupFaults.workingEvents.push("close"); await close(); };
+      }
       const stage = basename(String(args[0])) === "audio";
       if (stage && backupFaults.refuseStageCleanup) undeletable.add(dirname(String(args[0])));
       const failure = stage ? backupFaults.stageFailure : backupFaults.publicFailure;
@@ -64,6 +78,7 @@ const {
   copyIntoWorking,
   copyOriginalToBackup,
   deleteImportedSource,
+  sourceFileIdentity,
   listDerivedFiles,
   reconcileWorkingState,
 } = await import("@main/core/working-files");
@@ -157,6 +172,8 @@ beforeEach(async () => {
   backupFaults.publicFailure = null;
   backupFaults.refuseStageCleanup = false;
   backupFaults.directoryFailure = null;
+  backupFaults.workingSyncFailure = false;
+  backupFaults.workingEvents.length = 0;
   dir = await mkdtemp(join(tmpdir(), "mumbler-working-files-"));
 });
 
@@ -166,6 +183,38 @@ afterEach(async () => {
 });
 
 describe("working audio copies", () => {
+  it("syncs a read-only source copy before admitting its working path", async () => {
+    const source = join(dir, "readonly.wav");
+    await writeFile(source, "recording");
+    await chmod(source, 0o400);
+    try {
+      const copied = await copyIntoWorking(source, join(dir, "working"), "take.wav");
+      expect(await readFile(copied, "utf8")).toBe("recording");
+      expect(backupFaults.workingEvents).toEqual(["file", "close", "directory"]);
+    } finally { await chmod(source, 0o600); }
+  });
+
+  it.each(["file", "directory"])("preserves the source and removes only the owned copy after %s sync failure", async (where) => {
+    const source = join(dir, "source.wav");
+    const working = join(dir, "working");
+    await writeFile(source, "recording");
+    backupFaults.workingSyncFailure = where === "file";
+    backupFaults.directoryFailure = where === "directory" ? working : null;
+    await expect(copyIntoWorking(source, working, "take.wav")).rejects.toThrow(/sync failed/);
+    expect(await readFile(source, "utf8")).toBe("recording");
+    expect(await readdir(working)).toEqual([]);
+  });
+
+  it("rejects a source changed during copying and removes its owned working copy", async () => {
+    const source = join(dir, "source.wav");
+    const working = join(dir, "working");
+    await writeFile(source, "old");
+    backupFaults.beforeCopy = async () => { await writeFile(source, "replacement recording"); };
+    await expect(copyIntoWorking(source, working, "take.wav")).rejects.toThrow(/changed/);
+    expect(await readFile(source, "utf8")).toBe("replacement recording");
+    expect(await readdir(working)).toEqual([]);
+  });
+
   it("copies imported audio under a case-insensitively unique working path", async () => {
     const source = join(dir, "source.wav");
     const working = join(dir, "working");
@@ -397,7 +446,9 @@ describe("working audio copies", () => {
     const source = join(dir, "source.m4a");
     await writeFile(source, "audio", "utf8");
 
-    await deleteImportedSource(source);
+    const identity = sourceFileIdentity(await stat(source));
+    const copy = await copyIntoWorking(source, join(dir, "working"), "source.m4a");
+    await deleteImportedSource(source, copy, identity);
 
     await expect(access(source)).rejects.toThrow();
   });

@@ -243,11 +243,21 @@ export interface RecordingTimeCandidate {
   localText: string | null;
 }
 
+export interface SourceFileIdentity {
+  dev: number;
+  ino: number;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+}
+
 export interface PendingImportReviewItem {
   id: string;
   originalFilename: string;
   importSource: ImportSource;
   originalSourcePath: string;
+  /** Captured before copying; older pending reviews have no deletion evidence. */
+  sourceIdentity?: SourceFileIdentity;
   workingFilePath: string;
   fileSizeBytes: number;
   localTimestampText: string;

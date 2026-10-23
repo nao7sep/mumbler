@@ -75,7 +75,7 @@ import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-
 import { resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
 import { formatError, preserveAside, PublishedFileError } from "./file-io";
-import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState } from "./working-files";
+import { assertImportedSourceUnchanged, copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, sourceFileIdentity } from "./working-files";
 import {
   buildMarkdownContent,
   buildOutputPayload,
@@ -1161,15 +1161,18 @@ export class ApplicationRuntime {
     // import. A refused primary save leaves no copy to repeat on Retry.
     for (const { pendingImport, merged, timestamps } of reviewed) {
       let backupSucceeded = true;
+      let sourceIsArchive = false;
       const file = pendingImport.originalSourcePath;
       if (merged.copyToBackupOnConfirm) {
         try {
           // Named by its settled recording time alone (timestamp-conventions,
           // Filenames); the card keeps the original name.
           const archivedName = `${formatUtcMarker(new Date(timestamps.confirmedUtc))}${extname(file).toLowerCase()}`;
-          const filed = await copyOriginalToBackup(file, backupDir!, archivedName, this.runtime.logger);
-          // The same recording imported again is already safe there, so its
-          // source can still be deleted as asked.
+          await assertImportedSourceUnchanged(file, pendingImport.workingFilePath, pendingImport.sourceIdentity);
+          const filed = await copyOriginalToBackup(pendingImport.workingFilePath, backupDir!, archivedName, this.runtime.logger);
+          sourceIsArchive = await realpath(file) === await realpath(filed.path);
+          // Only an independent source entry can be removed after deduplication;
+          // the archive itself must survive reimport and path aliases.
           await this.runtime.logger.info("import.backup-original", filed.reused
             ? "The original was already in the Recordings folder; nothing was copied."
             : "Copied the original into the Recordings folder.", {
@@ -1192,7 +1195,7 @@ export class ApplicationRuntime {
         }
       }
 
-      if (merged.deleteOriginalOnConfirm) {
+      if (merged.deleteOriginalOnConfirm && !sourceIsArchive) {
         if (merged.copyToBackupOnConfirm && !backupSucceeded) {
           originalWarnings.push({
             sourcePath: file,
@@ -1204,7 +1207,7 @@ export class ApplicationRuntime {
             { originalSourcePath: pendingImport.originalSourcePath },
           );
         } else {
-          try { await deleteImportedSource(file); }
+          try { await deleteImportedSource(file, pendingImport.workingFilePath, pendingImport.sourceIdentity); }
           catch (error: unknown) {
             originalWarnings.push({ sourcePath: file, message: message("import.deleteFailed", { file: pathValue(file) }) });
             await this.runtime.logger.warn("import.delete-original", "Failed to delete original after confirm.", {
@@ -2515,7 +2518,8 @@ export class ApplicationRuntime {
     }
 
     const originalFilename = basename(sourcePath);
-    const workingFilePath = await copyIntoWorking(sourcePath, paths.workingDir, originalFilename);
+    const sourceIdentity = sourceFileIdentity(sourceStats);
+    const workingFilePath = await copyIntoWorking(sourcePath, paths.workingDir, originalFilename, undefined, sourceIdentity);
 
     await this.runtime.logger.debug("import.file", "Staged file to working storage.", {
       originalFilename,
@@ -2562,6 +2566,7 @@ export class ApplicationRuntime {
       originalFilename,
       importSource,
       originalSourcePath: sourcePath,
+      sourceIdentity,
       workingFilePath,
       fileSizeBytes: sourceStats.size,
       localTimestampText,

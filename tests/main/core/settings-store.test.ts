@@ -186,6 +186,8 @@ describe("queue data store", () => {
     ["an empty card identity", { cards: [card({ id: "" })] }],
     ["duplicate card identities", { cards: [card(), card()] }],
     ["an empty pending import identity", { pendingImports: [pending("")] }],
+    ["an invalid source identity", { pendingImports: [{ ...pending("p"), sourceIdentity: { dev: "disk", ino: 1, size: 1, mtimeMs: 1, ctimeMs: 1 } }] }],
+    ["a null source identity", { pendingImports: [{ ...pending("p"), sourceIdentity: null }] }],
     ["duplicate pending import identities", { pendingImports: [pending("p"), pending("p")] }],
     ["a card whose AI result is not an object", { cards: [{ ...card(), ai: { ...card().ai, title: "words" } }] }],
     ["a card whose title is not text", { cards: [{ ...card(), metadata: { title: 4, slug: null } }] }],

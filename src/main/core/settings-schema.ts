@@ -271,6 +271,12 @@ function objectOrNullIssue(owner: string, record: Record<string, unknown>, keys:
 function pendingImportIssue(item: unknown): string | null {
   const record = asRecord(item);
   if (record === null) return "a pending import is not an object";
+  if (record.sourceIdentity !== undefined) {
+    const identity = asRecord(record.sourceIdentity);
+    if (identity === null || ["dev", "ino", "size", "mtimeMs", "ctimeMs"].some((key) => typeof identity[key] !== "number" || !Number.isFinite(identity[key]))) {
+      return "a pending import's source identity is invalid";
+    }
+  }
   const flag = ["deleteOriginalOnConfirm", "copyToBackupOnConfirm"].find((key) => typeof record[key] !== "boolean");
   return textIssue("a pending import entry's", record, [
     "id",
