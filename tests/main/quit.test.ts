@@ -401,8 +401,11 @@ describe("the failed-save question", () => {
     expect(dialog.dismiss).toBe("cancel");
   });
 
-  it("says the save ran out of time when it did not finish", () => {
+  it("distinguishes an unfinished save from an unavailable draft check", () => {
     expect(quitFailureDialog(createTranslator("en"), "stalled").body).toContain("could not finish saving your work in time");
+    const unavailable = quitFailureDialog(createTranslator("en"), "drafts-unavailable");
+    expect(unavailable.body).toContain("could not check for unsaved Settings changes");
+    expect(unavailable.actions.map((action) => action.choice)).toEqual(["cancel", "retry", "quit-anyway"]);
   });
 
   it("speaks the interface language", () => {

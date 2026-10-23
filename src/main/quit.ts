@@ -16,8 +16,8 @@ export type QuitOrigin = "user" | "session-end";
 /** What the user chose after a failed save; "cancel" is also the dialog closed. */
 export type QuitChoice = "retry" | "quit-anyway" | "cancel";
 
-/** What could not be saved: the stores named, or a save that did not finish in time. */
-export type QuitFailure = readonly (QuitSaveFailure | "edits")[] | "stalled";
+/** What prevented quit: failed stores, a stalled save, or drafts that could not be checked. */
+export type QuitFailure = readonly (QuitSaveFailure | "edits")[] | "stalled" | "drafts-unavailable";
 
 export interface QuitSteps {
   /** A user's quit first: when app-owned work is still running, asks whether
@@ -260,7 +260,9 @@ export function quitFailureDialog(translator: Translator, failure: QuitFailure):
     language: translator.language,
     title: translator.t("quit.title"),
     bodyLabel: translator.t("quit.detailsLabel"),
-    body: failure === "stalled"
+    body: failure === "drafts-unavailable"
+      ? translator.t("quit.draftsUnavailableBody")
+      : failure === "stalled"
       ? translator.t("quit.stalledBody")
       // Joined as running prose ("the queue and the settings"), not as a list of names.
       : translator.t("quit.body", {

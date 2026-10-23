@@ -43,36 +43,41 @@ let quitController: QuitController | null = null;
 // on every platform (window-conventions), and the other windows go with it.
 let mainWindow: BrowserWindow | null = null;
 
-// Asks before a user's quit discards the window's session-only drafts, such as
-// unsaved Settings changes; true goes on. A window that does not answer in time
-// is taken to hold none, so it cannot hold the quit open. `cancelled` aborts
-// when a session end takes over while the window is still being asked: no
-// question opens after that, and false means nothing was discarded (the quit
-// goes on regardless).
+type DraftQuitChoice = "discard" | "cancel" | "retry" | "quit-anyway";
+
+// A failed query keeps the draft decision open. OS takeover cancels the query
+// or question and continues through the bounded session-end path.
 async function confirmDiscardDrafts(
   runtime: ApplicationRuntime,
   window: BrowserWindow | null,
-  shown: (question: OpenPlainDialog<"discard" | "cancel"> | null) => void,
+  shown: (question: OpenPlainDialog<DraftQuitChoice> | null) => void,
   cancelled: AbortSignal,
 ): Promise<boolean> {
-  const timeout = AbortSignal.any([AbortSignal.timeout(QUIT_BUDGETS.user.flush), cancelled]);
-  const drafts = await queryWindowDrafts(window, timeout);
-  if (cancelled.aborted) return false;
-  if (drafts.length === 0) return true;
-  const question = showPlainDialog(discardDraftsDialog(runtime.translator()));
-  shown(question);
-  try {
-    if ((await question.choice) !== "discard") return false;
-  } finally {
-    shown(null);
+  for (;;) {
+    const timeout = AbortSignal.any([AbortSignal.timeout(QUIT_BUDGETS.user.flush), cancelled]);
+    const result = await queryWindowDrafts(window, timeout);
+    if (cancelled.aborted) return false;
+    if (result.kind === "available" && result.drafts.length === 0) return true;
+    if (result.kind === "unavailable") {
+      void runtime.currentLogger().error("quit.drafts-unavailable", "Could not check the window's unsaved drafts.", result.error).catch(() => undefined);
+    }
+    const question: OpenPlainDialog<DraftQuitChoice> = result.kind === "unavailable"
+      ? showPlainDialog(quitFailureDialog(runtime.translator(), "drafts-unavailable"))
+      : showPlainDialog(discardDraftsDialog(runtime.translator()));
+    shown(question);
+    let choice: DraftQuitChoice;
+    try { choice = await question.choice; }
+    finally { shown(null); }
+    if (cancelled.aborted || choice === "cancel") return false;
+    if (choice === "retry") continue;
+    discardWindowDrafts(window);
+    return true;
   }
-  discardWindowDrafts(window);
-  return true;
 }
 
 function createQuit(runtime: ApplicationRuntime): QuitController {
   let question: OpenPlainDialog<"retry" | "quit-anyway" | "cancel"> | null = null;
-  let draftsQuestion: OpenPlainDialog<"discard" | "cancel"> | null = null;
+  let draftsQuestion: OpenPlainDialog<DraftQuitChoice> | null = null;
   let workQuestion: OpenPlainDialog<"quit" | "cancel"> | null = null;
   let draftsQuery = new AbortController();
   return createQuitController({

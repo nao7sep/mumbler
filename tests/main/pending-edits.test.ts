@@ -7,9 +7,12 @@ vi.mock("electron", () => ({ ipcMain: {
   on: (...args: Parameters<EventEmitter["on"]>) => bus.ipc!.on(...args),
   removeListener: (...args: Parameters<EventEmitter["removeListener"]>) => bus.ipc!.removeListener(...args),
 } }));
-import { flushWindowEdits } from "@main/pending-edits";
+import { flushWindowEdits, queryWindowDrafts } from "@main/pending-edits";
 
-afterEach(() => { expect(bus.ipc?.listenerCount(APP_SHELL_EVENTS.pendingEditsFlushed)).toBe(0); });
+afterEach(() => {
+  expect(bus.ipc?.listenerCount(APP_SHELL_EVENTS.pendingEditsFlushed)).toBe(0);
+  expect(bus.ipc?.listenerCount(APP_SHELL_EVENTS.unsavedDraftsReported)).toBe(0);
+});
 describe("pending edit acknowledgements", () => {
   function fixture() {
     bus.ipc = new EventEmitter();
@@ -46,5 +49,43 @@ describe("pending edit acknowledgements", () => {
     const work = flushWindowEdits(f.window, new AbortController().signal);
     f.contents.emit("destroyed");
     await expect(work).rejects.toThrow("closed before");
+  });
+
+  it("reports unavailable on cancellation and ignores its late reply during a fresh query", async () => {
+    const f = fixture();
+    const abort = new AbortController();
+    const first = queryWindowDrafts(f.window, abort.signal);
+    const oldId = f.contents.send.mock.calls[0]![1];
+    abort.abort();
+    expect(await first).toMatchObject({ kind: "unavailable" });
+    let settled = false;
+    const retry = queryWindowDrafts(f.window, new AbortController().signal).then((result) => { settled = true; return result; });
+    bus.ipc!.emit(APP_SHELL_EVENTS.unsavedDraftsReported, { sender: f.contents }, oldId, []);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    bus.ipc!.emit(APP_SHELL_EVENTS.unsavedDraftsReported, { sender: f.contents }, f.contents.send.mock.calls[1]![1], ["settings"]);
+    expect(await retry).toEqual({ kind: "available", drafts: ["settings"] });
+    expect(f.contents.listenerCount("destroyed")).toBe(0);
+  });
+
+  it.each(["send", "destroyed", "invalid"])("reports an unavailable draft check after %s failure", async (failure) => {
+    const f = fixture();
+    const error = new Error("send refused");
+    if (failure === "send") f.contents.send.mockImplementation(() => { throw error; });
+    const work = queryWindowDrafts(f.window, new AbortController().signal);
+    if (failure === "destroyed") f.contents.emit("destroyed");
+    if (failure === "invalid") bus.ipc!.emit(APP_SHELL_EVENTS.unsavedDraftsReported, { sender: f.contents }, f.contents.send.mock.calls[0]![1], {});
+    const result = await work;
+    expect(result.kind).toBe("unavailable");
+    if (failure === "send" && result.kind === "unavailable") expect(result.error).toBe(error);
+    expect(f.contents.listenerCount("destroyed")).toBe(0);
+  });
+
+  it("accepts an acknowledged empty report and a missing window", async () => {
+    const f = fixture();
+    const work = queryWindowDrafts(f.window, new AbortController().signal);
+    bus.ipc!.emit(APP_SHELL_EVENTS.unsavedDraftsReported, { sender: f.contents }, f.contents.send.mock.calls[0]![1], []);
+    expect(await work).toEqual({ kind: "available", drafts: [] });
+    expect(await queryWindowDrafts(null, new AbortController().signal)).toEqual({ kind: "available", drafts: [] });
   });
 });

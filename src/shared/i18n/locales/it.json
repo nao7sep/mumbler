@@ -63,6 +63,7 @@
   "quit.title": "Mumbler non è stato chiuso",
   "quit.detailsLabel": "Dettagli della chiusura",
   "quit.body": "Mumbler non è riuscito a salvare {items}. Riprova, oppure esci comunque perdendo ciò che non è stato possibile salvare.",
+  "quit.draftsUnavailableBody": "Mumbler non ha potuto verificare se ci sono modifiche non salvate nelle Impostazioni. Riprova oppure esci comunque; le eventuali modifiche non salvate andranno perse.",
   "quit.stalledBody": "Mumbler non è riuscito a completare in tempo il salvataggio del tuo lavoro. Riprova, oppure esci comunque perdendo ciò che potrebbe non essere stato salvato.",
   "quit.detail": "Apri il Log dal menu per vedere cosa è andato storto.",
   "quit.quitAnyway": "Esci comunque",

@@ -33,32 +33,39 @@ export function flushWindowEdits(window: BrowserWindow | null, signal: AbortSign
   });
 }
 
-/** The session-only drafts the window holds; none when it has no window, does
- * not answer before `signal` aborts, or is destroyed first. */
-export function queryWindowDrafts(window: BrowserWindow | null, signal: AbortSignal): Promise<UnsavedDraft[]> {
-  if (window === null || window.isDestroyed()) return Promise.resolve([]);
+export type DraftQueryResult = { kind: "available"; drafts: UnsavedDraft[] } | { kind: "unavailable"; error: unknown };
+
+/** Missing acknowledgement is unknown, never evidence that there are no drafts. */
+export function queryWindowDrafts(window: BrowserWindow | null, signal: AbortSignal): Promise<DraftQueryResult> {
+  if (window === null) return Promise.resolve({ kind: "available", drafts: [] });
+  if (window.isDestroyed()) return Promise.resolve({ kind: "unavailable", error: new Error("The window closed before its drafts could be checked.") });
   const contents = window.webContents;
   const request = ++nextRequest;
-  return new Promise<UnsavedDraft[]>((resolve) => {
-    const finish = (drafts: UnsavedDraft[]): void => {
+  return new Promise<DraftQueryResult>((resolve) => {
+    const finish = (result: DraftQueryResult): void => {
       ipcMain.removeListener(APP_SHELL_EVENTS.unsavedDraftsReported, replied);
       signal.removeEventListener("abort", aborted);
-      contents.removeListener("destroyed", aborted);
-      resolve(drafts);
+      contents.removeListener("destroyed", destroyed);
+      resolve(result);
     };
     const replied = (event: IpcMainEvent, id: unknown, drafts: unknown): void => {
       if (event.sender !== contents || id !== request) return;
-      finish(Array.isArray(drafts) ? drafts.filter((draft): draft is UnsavedDraft => draft === "settings") : []);
+      if (!Array.isArray(drafts) || drafts.some((draft) => draft !== "settings")) {
+        finish({ kind: "unavailable", error: new Error("The window returned an invalid drafts report.") });
+        return;
+      }
+      finish({ kind: "available", drafts });
     };
-    const aborted = (): void => finish([]);
+    const aborted = (): void => finish({ kind: "unavailable", error: new Error("The drafts check was cancelled or timed out.") });
+    const destroyed = (): void => finish({ kind: "unavailable", error: new Error("The window closed before reporting its drafts.") });
     ipcMain.on(APP_SHELL_EVENTS.unsavedDraftsReported, replied);
-    contents.once("destroyed", aborted);
+    contents.once("destroyed", destroyed);
     signal.addEventListener("abort", aborted, { once: true });
     if (signal.aborted) return aborted();
     try {
       contents.send(APP_SHELL_EVENTS.queryUnsavedDrafts, request);
-    } catch {
-      aborted();
+    } catch (error: unknown) {
+      finish({ kind: "unavailable", error });
     }
   });
 }

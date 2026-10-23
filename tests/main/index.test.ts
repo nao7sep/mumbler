@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   loggerErrors: [] as unknown[][],
   saveForQuit: () => Promise.resolve([]) as Promise<string[]>,
   quitChoice: "cancel" as "retry" | "quit-anyway" | "cancel",
+  holdQuitQuestion: false,
   questions: [] as unknown[],
   dependenciesWatched: false,
   flushSucceeded: true,
@@ -87,7 +88,7 @@ vi.mock("electron", () => ({
 
 
 const runtime = vi.hoisted(() => ({
-  currentLogger: () => ({ error: (...args: unknown[]) => { state.loggerErrors.push(args); }, warn: async () => undefined }),
+  currentLogger: () => ({ error: async (...args: unknown[]) => { state.loggerErrors.push(args); }, warn: async () => undefined }),
   themePreference: () => "system",
   translator: () => ({ t: (key: string) => key, language: "en" }),
   onLanguageChanged: vi.fn(),
@@ -119,6 +120,11 @@ vi.mock("@main/plain-dialog", () => ({
     state.questions.push(dialog);
     const drafts = dialog.actions.some((action) => action.choice === "discard");
     const work = dialog.actions.some((action) => action.choice === "quit");
+    if (!drafts && !work && state.holdQuitQuestion) {
+      let close!: () => void;
+      const choice = new Promise<string>((resolve) => { close = () => resolve("cancel"); });
+      return { choice, close };
+    }
     return { choice: Promise.resolve(work ? state.workChoice : drafts ? state.draftsChoice : state.quitChoice), close: vi.fn() };
   },
 }));
@@ -142,6 +148,7 @@ beforeEach(() => {
   state.loggerErrors.length = 0;
   state.saveForQuit = () => Promise.resolve([]);
   state.quitChoice = "cancel";
+  state.holdQuitQuestion = false;
   state.questions.length = 0;
   state.dependenciesWatched = false;
   state.flushSucceeded = true;
@@ -276,6 +283,58 @@ describe("quit", () => {
     await vi.waitFor(() => expect(state.exits).toEqual([0]));
     expect(mainWindow.discards).toBe(1);
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+  });
+
+  it.each(["cancel", "quit-anyway", "retry"] as const)("honors %s after the draft check times out", async (choice) => {
+    state.unsavedDrafts = ["settings"];
+    state.holdDraftsReply = true;
+    state.quitChoice = choice;
+    const timeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(timeout.signal);
+    const beforeQuit = await boot();
+    beforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.heldDraftsReplies).toHaveLength(1));
+    timeout.abort();
+    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    expect(state.questions[0]).toMatchObject({ body: "quit.draftsUnavailableBody" });
+    if (choice === "retry") {
+      await vi.waitFor(() => expect(state.heldDraftsReplies).toHaveLength(2));
+      state.heldDraftsReplies[0]!();
+      await Promise.resolve();
+      expect(state.questions).toHaveLength(1);
+      state.heldDraftsReplies[1]!();
+      await vi.waitFor(() => expect(state.questions).toHaveLength(2));
+      expect(state.questions[1]).toMatchObject({ title: "decision.discardTitle" });
+    }
+    if (choice === "quit-anyway") {
+      await vi.waitFor(() => expect(state.exits).toEqual([0]));
+      expect(mainWindow.discards).toBe(1);
+      expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+    } else {
+      expect(state.exits).toEqual([]);
+      expect(mainWindow.discards).toBe(0);
+      expect(runtime.saveForQuit).not.toHaveBeenCalled();
+    }
+    timeoutSpy.mockRestore();
+  });
+
+  it("dismisses an unavailable-drafts question on OS takeover without accepting discard", async () => {
+    state.unsavedDrafts = ["settings"];
+    state.holdDraftsReply = true;
+    state.holdQuitQuestion = true;
+    const timeout = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(timeout.signal);
+    const beforeQuit = await boot();
+    beforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(state.heldDraftsReplies).toHaveLength(1));
+    timeout.abort();
+    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    state.powerListeners.get("shutdown")!();
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    state.heldDraftsReplies[0]!();
+    expect(mainWindow.discards).toBe(0);
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+    expect(state.questions).toHaveLength(1);
   });
 
   it("keeps the Mac window open when the user keeps unsaved Settings changes", async () => {

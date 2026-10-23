@@ -53,6 +53,7 @@
   "quit.title": "Mumbler did not quit",
   "quit.detailsLabel": "Quit details",
   "quit.body": "Mumbler could not save {items}. Retry, or quit anyway and lose what could not be saved.",
+  "quit.draftsUnavailableBody": "Mumbler could not check for unsaved Settings changes. Retry, or quit anyway and lose any unsaved changes.",
   "quit.stalledBody": "Mumbler could not finish saving your work in time. Retry, or quit anyway and lose what may not have been saved.",
   "quit.detail": "Open Records from the menu to see what went wrong.",
   "quit.quitAnyway": "Quit Anyway",
