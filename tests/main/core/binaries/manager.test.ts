@@ -370,6 +370,33 @@ describe("installTool", () => {
     expect(await readdir(tempDir)).toEqual([]);
   });
 
+  it("quit closes admission and owns an aborted download through physical settlement", async () => {
+    const manager = await makeManager();
+    let signal: AbortSignal | undefined;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(downloadToFile).mockImplementationOnce(async (options) => {
+      signal = options.signal;
+      await held;
+      options.signal?.throwIfAborted();
+    });
+    const installing = manager.installTool("ffmpeg");
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    let drained = false;
+    const stopping = manager.pauseAndDrain().then(() => { drained = true; });
+    expect(signal!.aborted).toBe(true);
+    await expect(manager.installTool("ffprobe")).rejects.toThrow("stopping for quit");
+    await expect(manager.checkTools()).rejects.toThrow("stopping for quit");
+    expect(drained).toBe(false);
+    manager.resume();
+    await expect(manager.installTool("ffmpeg")).rejects.toThrow("already being installed");
+    release();
+    await Promise.all([installing, stopping]);
+    expect(await readdir(binDir)).toEqual([]);
+    await manager.installTool("ffmpeg");
+    expect(manager.listStatuses().find((status) => status.name === "ffmpeg")?.state).toBe("up-to-date");
+  });
+
   it("checks cancellation immediately before publishing", async () => {
     const manager = await makeManager();
     await manager.reconcile();
@@ -615,6 +642,31 @@ describe("checkTools", () => {
       expect(status.lastCheckedAtUtc).toBeNull();
       expect(status.transient).toEqual({ kind: "idle" });
     }
+  });
+
+  it("quit waits for a cancelled check's settlement and a resumed check gets fresh admission", async () => {
+    const manager = await makeManager();
+    let signal: AbortSignal | undefined;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(resolveLatest).mockImplementationOnce(async (_platform, _arch, operationSignal) => {
+      signal = operationSignal;
+      await held;
+      return RESOLVED as never;
+    });
+    const checking = manager.checkTools();
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    let drained = false;
+    const stopping = manager.pauseAndDrain().then(() => { drained = true; });
+    expect(signal!.aborted).toBe(true);
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release();
+    await Promise.all([checking, stopping]);
+    expect(manager.listStatuses().every((status) => status.lastCheckedAtUtc === null)).toBe(true);
+    manager.resume();
+    await manager.checkTools();
+    expect(manager.listStatuses().every((status) => status.lastCheckedAtUtc !== null)).toBe(true);
   });
 
   it("uses one save and applies no in-memory facts when that atomic save fails", async () => {

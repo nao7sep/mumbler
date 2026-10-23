@@ -1848,6 +1848,7 @@ export class ApplicationRuntime {
     await Promise.all([
       Promise.allSettled([...this.activeSaves.values()]),
       this.pipeline.shutdown(),
+      this.runtime.toolManager?.pauseAndDrain(),
       this.importTail,
       Promise.allSettled([...this.activeStateChanges]),
     ]);
@@ -1917,6 +1918,7 @@ export class ApplicationRuntime {
     this.quitSave = null;
     this.closing = false;
     this.settingsFailureBeforeQuit = undefined;
+    this.runtime.toolManager?.resume();
     await this.pipeline.resume();
     void this.runtime.logger.info("quit.cancelled", "Quit cancelled; Mumbler keeps running.").catch(() => undefined);
   }
@@ -1937,7 +1939,7 @@ export class ApplicationRuntime {
         ...details,
         cardCount: this.runtime.state?.cards.length ?? 0,
       }).catch(() => undefined);
-      await Promise.all([backups, waveforms, this.runtime.logger.close()]);
+      await Promise.all([backups, waveforms, this.runtime.toolManager?.pauseAndDrain(), this.runtime.logger.close()]);
     })();
     return this.closePromise;
   }

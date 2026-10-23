@@ -36,6 +36,8 @@ vi.mock("electron", () => ({
 vi.mock("@main/core/binaries/manager", () => ({
   ToolManager: class {
     async reconcile(): Promise<void> {}
+    async pauseAndDrain(): Promise<void> {}
+    resume(): void {}
     listStatuses(): [] {
       return [];
     }

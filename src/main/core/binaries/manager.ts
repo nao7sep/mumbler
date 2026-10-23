@@ -62,6 +62,8 @@ export class ToolManager {
   private readonly installControllers = new Map<ToolName, AbortController>();
   private checkController: AbortController | null = null;
   private factsQueue: Promise<void> = Promise.resolve();
+  private acceptingWork = true;
+  private readonly operations = new Set<Promise<void>>();
 
   constructor(
     private readonly deps: {
@@ -162,7 +164,12 @@ export class ToolManager {
   // publish it atomically. Install and Update are the same flow — a fresh verified
   // copy replaces whatever was there. A bad download is discarded, never kept, so
   // there is no broken-installed state to repair.
-  async installTool(name: ToolName): Promise<void> {
+  installTool(name: ToolName): Promise<void> {
+    if (!this.acceptingWork) return Promise.reject(new OperationError("Audio tools are stopping for quit."));
+    return this.track(this.runInstall(name));
+  }
+
+  private async runInstall(name: ToolName): Promise<void> {
     if (this.busy.has(name)) {
       throw new OperationError(`${name} is already being installed.`);
     }
@@ -352,7 +359,12 @@ export class ToolManager {
   // Check can show a transient "couldn't check" notice. When the attempt time
   // cannot be written, the automatic launch check skips, so it cannot repeat on
   // every launch, while the user's own Check goes ahead.
-  async checkTools(options: { automatic?: boolean } = {}): Promise<void> {
+  checkTools(options: { automatic?: boolean } = {}): Promise<void> {
+    if (!this.acceptingWork) return Promise.reject(new OperationError("Audio tools are stopping for quit."));
+    return this.track(this.runCheck(options));
+  }
+
+  private async runCheck(options: { automatic?: boolean }): Promise<void> {
     if (this.checkController !== null) {
       throw new OperationError("Audio tool updates are already being checked.");
     }
@@ -417,6 +429,26 @@ export class ToolManager {
     if (this.checkController !== null && !this.checkController.signal.aborted) {
       this.checkController.abort(new Error("Audio tool update check cancelled by user."));
     }
+  }
+
+  // Quit owns physical settlement even if its caller's budget expires. A
+  // cancelled quit reopens admission, but the existing per-operation guards
+  // continue protecting any work still unwinding.
+  async pauseAndDrain(): Promise<void> {
+    this.acceptingWork = false;
+    for (const name of this.installControllers.keys()) this.cancelInstall(name);
+    this.cancelCheck();
+    await Promise.allSettled([...this.operations]);
+  }
+
+  resume(): void {
+    this.acceptingWork = true;
+  }
+
+  private track(operation: Promise<void>): Promise<void> {
+    this.operations.add(operation);
+    void operation.finally(() => this.operations.delete(operation)).catch(() => undefined);
+    return operation;
   }
 
   private setTransient(name: ToolName, transient: ToolTransient): void {
