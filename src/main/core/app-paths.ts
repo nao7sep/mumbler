@@ -30,4 +30,3 @@ export function getAppPaths(): AppPaths {
     tempDir: join(homeDir, "temp"),
   };
 }
-
