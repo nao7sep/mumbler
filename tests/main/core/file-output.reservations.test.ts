@@ -10,6 +10,7 @@ const effects = vi.hoisted(() => ({
   beforeRename: null as ((target: string) => Promise<void>) | null,
   beforeWrite: null as ((target: string) => Promise<void>) | null,
   linkCode: null as string | null,
+  directoryFailure: null as string | null,
   staged: new Set<string>(),
 }));
 vi.mock("node:fs/promises", async (original) => {
@@ -25,6 +26,7 @@ vi.mock("node:fs/promises", async (original) => {
       return actual.link(source, target);
     },
     open: async (...args: Parameters<typeof actual.open>) => {
+      if (args[1] === "r" && String(args[0]) === effects.directoryFailure) throw Object.assign(new Error("directory sync failed"), { code: "EIO" });
       const handle = await actual.open(...args);
       const path = String(args[0]);
       const write = handle.writeFile.bind(handle);
@@ -54,6 +56,7 @@ beforeEach(async () => {
   effects.beforeRename = null;
   effects.beforeWrite = null;
   effects.linkCode = null;
+  effects.directoryFailure = null;
   effects.staged.clear();
 });
 afterEach(async () => {
@@ -97,6 +100,23 @@ async function expectCompleteWhileHeld(attempt: Promise<unknown>, held: { releas
 }
 
 describe("output publication reservations", () => {
+  it("reports completed outputs without claiming success when directory sync fails", async () => {
+    const output = targets("unsynced");
+    effects.directoryFailure = directory;
+    const failure = await save("unsynced", output).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(OutputPartialFailureError);
+    expect(failure).toMatchObject({ cause: { code: "EIO" }, files: [
+      { path: output.audioPath, status: "saved" },
+      { path: output.jsonPath, status: "saved" },
+      { path: output.markdownPath, status: "saved" },
+    ] });
+    expect(await readFile(source, "utf8")).toBe("AUDIO");
+    expect(await readFile(output.audioPath, "utf8")).toBe("AUDIO");
+    effects.directoryFailure = null;
+    await save("retry", output);
+    expect(await readFile(output.markdownPath, "utf8")).toBe("MD retry");
+  });
+
   it.each(["location", "rename"] as const)("publishes an unrelated group while the first %s effect is held", async (boundary) => {
     const firstTargets = targets("first");
     const entered = gate();
@@ -293,7 +313,7 @@ describe("output publication reservations", () => {
       held.release();
       await partial;
       await expect(first).rejects.toMatchObject({ primary: expect.any(CancelledError), files: [
-        { path: output.audioPath, status: "saved" }, { path: output.jsonPath, status: "failed" }, { path: output.markdownPath, status: "pending" },
+        { path: output.audioPath, status: "failed" }, { path: output.jsonPath, status: "pending" }, { path: output.markdownPath, status: "pending" },
       ] });
       await second;
       expect(await readFile(output.jsonPath, "utf8")).toBe("JSON second");

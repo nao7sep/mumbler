@@ -119,7 +119,11 @@ export async function copyOriginalToBackup(
   try {
     await mkdir(backupDir, { recursive: true });
     const existing = await alreadyFiled(sourcePath, backupDir, targetName);
-    if (existing !== null) return { path: existing, reused: true };
+    if (existing !== null) {
+      // An earlier copy may have published before its directory sync failed.
+      await syncDirectory(backupDir);
+      return { path: existing, reused: true };
+    }
     targetPath = await uniquePathInDirectory(backupDir, targetName);
     stageDir = await mkdtemp(join(backupDir, ".mumbler-backup-"));
     const stagePath = join(stageDir, "audio");

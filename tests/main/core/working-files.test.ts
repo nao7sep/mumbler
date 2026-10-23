@@ -19,6 +19,7 @@ const backupFaults = vi.hoisted(() => ({
   stageFailure: null as Error | null,
   publicFailure: null as Error | null,
   refuseStageCleanup: false,
+  directoryFailure: null as string | null,
   beforeCopy: null as ((target: string) => Promise<void>) | null,
 }));
 
@@ -36,6 +37,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       return actual.link(source, target);
     },
     open: async (...args: Parameters<typeof actual.open>) => {
+      if (args[1] === "r" && String(args[0]) === backupFaults.directoryFailure) throw Object.assign(new Error("directory sync failed"), { code: "EIO" });
       const handle = await actual.open(...args);
       const stage = basename(String(args[0])) === "audio";
       if (stage && backupFaults.refuseStageCleanup) undeletable.add(dirname(String(args[0])));
@@ -154,6 +156,7 @@ beforeEach(async () => {
   backupFaults.stageFailure = null;
   backupFaults.publicFailure = null;
   backupFaults.refuseStageCleanup = false;
+  backupFaults.directoryFailure = null;
   dir = await mkdtemp(join(tmpdir(), "mumbler-working-files-"));
 });
 
@@ -237,6 +240,19 @@ describe("working audio copies", () => {
 
     expect(again).toEqual({ path: suffixed.path, reused: true });
     expect((await readdir(backup)).filter((name) => !name.startsWith("."))).toHaveLength(2);
+  });
+
+  it("retries directory durability before accepting a previously published archive", async () => {
+    const source = join(dir, "take.wav");
+    const backup = join(dir, "backup");
+    await writeFile(source, "audio");
+    backupFaults.directoryFailure = backup;
+    await expect(copyOriginalToBackup(source, backup, "take.wav")).rejects.toThrow("directory sync failed");
+    expect(await readFile(join(backup, "take.wav"), "utf8")).toBe("audio");
+    await expect(copyOriginalToBackup(source, backup, "take.wav")).rejects.toThrow("directory sync failed");
+    backupFaults.directoryFailure = null;
+    expect(await copyOriginalToBackup(source, backup, "take.wav")).toEqual({ path: join(backup, "take.wav"), reused: true });
+    expect(await readFile(source, "utf8")).toBe("audio");
   });
 
   it("files a same-size recording with different bytes as a new one", async () => {

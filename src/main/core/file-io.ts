@@ -26,6 +26,19 @@ export interface WriteJsonOptions {
   record?: boolean;
 }
 
+/** Bytes are published, but their directory durability could not be established. */
+export class PublishedFileError extends Error {
+  constructor(readonly filePath: string, cause: unknown) {
+    super("File published, but directory sync failed.", { cause });
+    this.name = "PublishedFileError";
+  }
+}
+
+async function syncPublishedJson(filePath: string): Promise<void> {
+  try { await syncDirectory(dirname(filePath)); }
+  catch (error) { throw new PublishedFileError(filePath, error); }
+}
+
 // undefined means no file: JSON has no undefined, so a file holding the literal
 // null is told apart from a missing one and is read like any other wrong shape.
 export async function readJsonFile<T>(filePath: string): Promise<T | undefined> {
@@ -61,9 +74,10 @@ export async function writeJsonFile(
   const stem = basename(filePath, extname(filePath));
   const tempPath = join(dirname(filePath), `${stem}-${nanoid(8)}.tmp`);
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
-  // A write that changes nothing is skipped (content-lifecycle-conventions), so
-  // the file's modified time, its backups and sync see only real changes.
+  // Unchanged bytes need no replacement or history entry. Still sync the
+  // directory, because an earlier publication may have uncertain durability.
   if (await holdsBytes(filePath, bytes)) {
+    await syncPublishedJson(filePath);
     return;
   }
   let staged = false;
@@ -89,19 +103,16 @@ export async function writeJsonFile(
       await keepReplacedMode(filePath, tempPath);
     }
     await rename(tempPath, filePath);
-    await syncDirectory(dirname(filePath));
+    // Record the exact published bytes even if directory durability is uncertain;
+    // retrying identical bytes must not lose this settings-history entry.
+    if (options.record === true) record(filePath, bytes);
+    await syncPublishedJson(filePath);
   } catch (error) {
     // Best-effort removal of the half-written temp file; the original write error
     // is the meaningful one and is always rethrown below, so a failed cleanup is
     // deliberately not surfaced on top of it.
     if (staged) await rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
-  }
-  // After the rename: the file is exactly where it belongs, so record the bytes we just wrote. Best-effort —
-  // record() catches, logs once, and swallows every failure, so a backup problem can never break the save
-  // that already succeeded above.
-  if (options.record === true) {
-    record(filePath, bytes);
   }
 }
 
@@ -141,21 +152,31 @@ export async function sameFileBytes(leftPath: string, rightPath: string): Promis
   }
 }
 
-// Best-effort fsync of a directory so the rename above — the atomic-write commit
-// point — is itself durable across power loss. Opening a directory is not
-// supported on every platform (Windows throws), so failures are ignored while
-// platforms that support it get the stronger crash-durability guarantee.
+// Unsupported directory syncing is a platform limitation; an actual I/O failure
+// must reach the publication owner, which retains the source work for retry.
 export async function syncDirectory(directoryPath: string): Promise<void> {
+  let handle;
   try {
-    const handle = await open(directoryPath, "r");
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    // ignore
+    handle = await open(directoryPath, "r");
+  } catch (error) {
+    if (unsupportedDirectorySync(error)) return;
+    throw error;
   }
+  let primary: unknown;
+  try { await handle.sync(); }
+  catch (error) { if (!unsupportedDirectorySync(error)) primary = error; }
+  try { await handle.close(); }
+  catch (error) {
+    if (primary !== undefined) throw new AggregateError([primary, error], "Directory sync and close failed.", { cause: primary });
+    throw error;
+  }
+  if (primary !== undefined) throw primary;
+}
+
+function unsupportedDirectorySync(error: unknown): boolean {
+  const code = error !== null && typeof error === "object" ? (error as NodeJS.ErrnoException).code : undefined;
+  return code === "EINVAL" || code === "ENOTSUP" || code === "EOPNOTSUPP" || code === "ENOSYS"
+    || (process.platform === "win32" && (code === "EPERM" || code === "EACCES" || code === "EISDIR"));
 }
 
 // A replace keeps the replaced file's permission mode (content-lifecycle-conventions,

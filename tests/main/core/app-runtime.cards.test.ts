@@ -41,6 +41,7 @@ const unwritable = vi.hoisted(() => ({
   held: null as { path: string; release: Promise<void>; entered: number } | null,
 }));
 const secretReadGate = vi.hoisted(() => ({ held: null as { path: string; release: Promise<void>; entered: number } | null }));
+const directorySyncFault = vi.hoisted(() => ({ path: null as string | null }));
 const catalogueGate = vi.hoisted(() => ({ held: null as Promise<void> | null, entered: 0 }));
 vi.mock("@main/i18n", async (original) => {
   const actual = await original<typeof import("@main/i18n")>();
@@ -61,6 +62,10 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      if (args[1] === "r" && String(args[0]) === directorySyncFault.path) throw Object.assign(new Error("directory sync failed"), { code: "EIO" });
+      return actual.open(...args);
+    },
     readFile: async (...args: Parameters<typeof actual.readFile>) => {
       const held = secretReadGate.held;
       if (held !== null && held.path === String(args[0])) {
@@ -296,6 +301,7 @@ beforeEach(async () => {
   unwritable.refuses = () => false;
   unwritable.held = null;
   secretReadGate.held = null;
+  directorySyncFault.path = null;
   catalogueGate.held = null;
   catalogueGate.entered = 0;
   duringRefusedRm.run = null;
@@ -741,6 +747,27 @@ describe("the durable queue store", () => {
 });
 
 describe("confirming what was dropped in", () => {
+  it("keeps a published confirmation and both recordings when queue durability fails", async () => {
+    const [pending] = await dropIn("uncertain.wav");
+    const changed = vi.fn();
+    runtime.onPipelineProgress(changed);
+    directorySyncFault.path = home;
+    try {
+      await expect(runtime.confirmPendingImports([review(pending, { deleteOriginalOnConfirm: true })])).rejects.toThrow("directory sync failed");
+      const published = await createQueueStore(join(home, "queue.json")).load();
+      expect(published.value.pendingImports).toHaveLength(0);
+      expect(published.value.cards).toHaveLength(1);
+      expect(cards(runtime.getSnapshot()).map((card) => card.id)).toEqual(published.value.cards.map((card) => card.id));
+      expect(await exists(pending.originalSourcePath)).toBe(true);
+      expect(await exists(pending.workingFilePath)).toBe(true);
+      expect(changed).toHaveBeenCalled();
+    } finally { directorySyncFault.path = null; }
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+    expect(cards(runtime.getSnapshot())).toHaveLength(1);
+    expect(await exists(pending.originalSourcePath)).toBe(true);
+  });
+
   it("restores failed confirmation behind a newer surviving draft packet", async () => {
     const [first, survivor] = await dropIn("first.wav", "survivor.wav");
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(home, "originals") });
@@ -1214,6 +1241,20 @@ describe("working with a card", () => {
       status: "Ready to Save",
       metadata: { title: "Old title", slug: "old-title" },
     });
+  });
+
+  it("retains the card and working recording when published exports cannot be synced", async () => {
+    const card = await confirmed();
+    await transcribedOnDisk(card.id);
+    directorySyncFault.path = join(home, "output");
+    try {
+      const result = await runtime.saveCard(card.id, undefined, { removeAfterSave: true });
+      expect(result.kind).toBe("failed");
+      if (result.kind !== "failed") throw new Error("Expected an uncertain publication failure");
+      expect(result.files?.map((file) => file.status)).toEqual(["saved", "saved", "saved"]);
+      expect(cards(result.snapshot)[0]).toMatchObject({ id: card.id, status: "Ready to Save" });
+      expect(await exists(card.sourceFilePath)).toBe(true);
+    } finally { directorySyncFault.path = null; }
   });
 
   it("preserves a saved remote HTTP endpoint and refuses generation before clearing results", async () => {

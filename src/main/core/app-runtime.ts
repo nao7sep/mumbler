@@ -74,7 +74,7 @@ import { NewerFormatError } from "./format-versions";
 import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
-import { formatError, preserveAside } from "./file-io";
+import { formatError, preserveAside, PublishedFileError } from "./file-io";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState } from "./working-files";
 import {
   buildMarkdownContent,
@@ -1142,6 +1142,7 @@ export class ApplicationRuntime {
     try {
       await this.persistState();
     } catch (error: unknown) {
+      if (error instanceof PublishedFileError && error.filePath === this.runtime.queueStore!.path) throw error;
       const current = new Map(state.pendingImports.map((item) => [item.id, item]));
       const submitted = new Map(reviewed.map(({ pendingImport, merged }) => [pendingImport.id, merged]));
       state.pendingImports = previousPending.map((item) => current.get(item.id) ?? submitted.get(item.id) ?? item);
@@ -1249,6 +1250,7 @@ export class ApplicationRuntime {
     try {
       await this.persistState();
     } catch (error: unknown) {
+      if (error instanceof PublishedFileError && error.filePath === this.runtime.queueStore!.path) throw error;
       const current = new Map(state.pendingImports.map((item) => [item.id, item]));
       state.pendingImports = previousPending.map((item) => current.get(item.id) ?? item);
       // A concurrent draft packet may have committed the temporary removal.
@@ -2377,6 +2379,7 @@ export class ApplicationRuntime {
       await this.persistState();
       await rm(card.sourceFilePath, { force: true });
     } catch (error: unknown) {
+      if (error instanceof PublishedFileError && error.filePath === this.runtime.queueStore!.path) throw error;
       state.cards = [...state.cards, card].sort((left, right) =>
         left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
       );
@@ -2625,6 +2628,14 @@ export class ApplicationRuntime {
         await this.runtime.queueStore!.save(snapshot);
       } catch (error: unknown) {
         this.queueBehind = true;
+        if (error instanceof PublishedFileError && error.filePath === this.runtime.queueStore!.path) {
+          // The new queue is visible on disk. Keep it in memory for the next
+          // durability retry, but do not authorize source deletion or cleanup.
+          try { this.onPipelineProgressCallback?.(); }
+          catch (notificationError) {
+            await this.runtime.logger.warn("queue.progress", "Could not notify the window about a published queue with uncertain durability.", { error: serializeError(notificationError) });
+          }
+        }
         throw error;
       }
       this.queueBehind = request !== this.persistenceRequest;

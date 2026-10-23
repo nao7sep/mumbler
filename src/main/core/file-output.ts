@@ -54,9 +54,10 @@ export class OutputPartialFailureError extends AggregateError {
 }
 
 // Audio is streamed into a private stage, retaining copy mtime and ordinary mode.
-async function stageAudio(source: string, destination: string, signal?: AbortSignal): Promise<void> {
+async function stageAudio(source: string, destination: string, signal?: AbortSignal, onCreated?: () => void): Promise<void> {
   if (signal?.aborted) throw new CancelledError("Save cancelled.");
   const handle = await open(destination, "wx", 0o600);
+  onCreated?.();
   const stream = createReadStream(source, { signal });
   stream.on("error", () => undefined);
   let primary: unknown;
@@ -80,12 +81,12 @@ async function stageAudio(source: string, destination: string, signal?: AbortSig
 
 // Fresh names must remain exclusive even on volumes without hard links.
 // A failed copy can leave an incomplete target; it is reported, never rolled back.
-async function publishExclusive(source: string, destination: string): Promise<void> {
+async function publishExclusive(source: string, destination: string, signal: AbortSignal | undefined, onCreated: () => void): Promise<void> {
   try {
     try { await link(source, destination); }
     catch (error) {
       if (!HARD_LINK_UNSUPPORTED_CODES.has(errorCode(error) ?? "")) throw error;
-      await stageAudio(source, destination);
+      await stageAudio(source, destination, signal, onCreated);
     }
   } catch (error) {
     if (errorCode(error) === "EEXIST") throw new OutputConflictError(destination);
@@ -200,6 +201,7 @@ export async function finalizeOutputs(params: {
   const files: SaveOutputFile[] = members.map(({ path }) => ({ path, status: "pending" }));
   let primary: unknown;
   let current: SaveOutputFile | undefined;
+  let publicCopyCreated = false;
   const issues: OutputCleanupIssue[] = [];
   try {
     await stageAudio(params.sourceAudioPath, members[0]!.stage, params.signal);
@@ -235,7 +237,7 @@ export async function finalizeOutputs(params: {
           if (params.signal?.aborted) throw new CancelledError("Save cancelled.");
           await rename(member.stage, member.path);
         } else {
-          await publishExclusive(member.stage, member.path);
+          await publishExclusive(member.stage, member.path, params.signal, () => { publicCopyCreated = true; });
         }
         current.status = "saved";
       }
@@ -246,9 +248,13 @@ export async function finalizeOutputs(params: {
   }
   try { await rm(staging, { recursive: true, force: true }); }
   catch (error) { issues.push({ operation: "remove staging directory", path: staging, error }); }
-  await syncDirectory(directory);
+  try { await syncDirectory(directory); }
+  catch (error) {
+    if (primary === undefined) primary = error;
+    else issues.push({ operation: "sync output directory", path: directory, error });
+  }
   if (primary !== undefined) {
-    if (files.some((file) => file.status === "saved") || issues.length > 0 ||
+    if (publicCopyCreated || files.some((file) => file.status === "saved") || issues.length > 0 ||
         (current !== undefined && !isCancelledError(primary) && !(primary instanceof OutputConflictError)))
       throw new OutputPartialFailureError(primary, files, issues);
     if (isCancelledError(primary) || primary instanceof OutputConflictError || primary instanceof OutputLocationError) throw primary;

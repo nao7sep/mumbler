@@ -11,7 +11,7 @@ const { backupRecord, capturedRenames, writeEvents, stageModes, faults } = vi.ho
       events.push(`record:${path}`);
     }),
     capturedRenames: [] as Array<{ source: string; destination: string }>,
-    faults: { tempId: null as string | null, cleanup: false, rename: null as Error | null },
+    faults: { tempId: null as string | null, cleanup: false, rename: null as Error | null, directory: null as { path: string; code: string; phase?: "sync" | "close" | "both" } | null },
     writeEvents: events,
     stageModes: [] as Array<{ mode: number; size: number }>,
   };
@@ -32,6 +32,18 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return {
     ...actual,
     open: async (...args: Parameters<typeof actual.open>) => {
+      if (args[1] === "r" && String(args[0]) === faults.directory?.path) {
+        const fault = faults.directory;
+        const failure = () => Object.assign(new Error("directory sync unavailable"), { code: fault.code });
+        if (!fault.phase) throw failure();
+        return {
+          sync: async () => { if (fault.phase !== "close") throw failure(); },
+          close: async () => {
+            writeEvents.push("directory:close");
+            if (fault.phase !== "sync") throw failure();
+          },
+        } as Awaited<ReturnType<typeof actual.open>>;
+      }
       const handle = await actual.open(...args);
       if (args[1] === "wx") {
         const info = await handle.stat();
@@ -52,7 +64,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-const { fileExists, preserveAside, sameFileBytes, uniquePathInDirectory, writeJsonFile } = await import("@main/core/file-io");
+const { fileExists, preserveAside, sameFileBytes, uniquePathInDirectory, writeJsonFile, syncDirectory, PublishedFileError } = await import("@main/core/file-io");
 const { buildUniqueSuffixedTargets, pathsConflict } = await import("@main/core/file-output");
 
 let dir: string;
@@ -61,6 +73,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "mumbler-file-io-"));
   faults.tempId = null;
   faults.cleanup = false;
+  faults.directory = null;
   capturedRenames.length = 0;
   stageModes.length = 0;
   writeEvents.length = 0;
@@ -69,6 +82,36 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+describe("directory durability failures", () => {
+  it.each(["sync", "close", "both"] as const)("reports a directory %s failure and always closes the handle", async (phase) => {
+    faults.directory = { path: dir, code: "EIO", phase };
+    const failure = await syncDirectory(dir).catch((error: unknown) => error);
+    if (phase === "both") expect(failure).toMatchObject({ cause: { code: "EIO" }, errors: [{ code: "EIO" }, { code: "EIO" }] });
+    else expect(failure).toMatchObject({ code: "EIO" });
+    expect(writeEvents).toContain("directory:close");
+  });
+
+  it.each(["EIO", "ENOSPC"])("preserves published JSON and retries its durability after %s", async (code) => {
+    const path = join(dir, "config.json");
+    faults.directory = { path: dir, code };
+    const failure = await writeJsonFile(path, { value: "new" }, { record: true }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(PublishedFileError);
+    expect(failure).toMatchObject({ filePath: path, cause: { code } });
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ value: "new" });
+    expect(backupRecord).toHaveBeenCalledTimes(1);
+    await expect(writeJsonFile(path, { value: "new" }, { record: true })).rejects.toBeInstanceOf(PublishedFileError);
+    faults.directory = null;
+    await writeJsonFile(path, { value: "new" }, { record: true });
+    expect(capturedRenames).toHaveLength(1);
+    expect(backupRecord).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["EINVAL", "ENOTSUP", "ENOSYS"])("accepts the explicit unsupported directory operation %s", async (code) => {
+    faults.directory = { path: dir, code };
+    await expect(syncDirectory(dir)).resolves.toBeUndefined();
+  });
 });
 
 describe("file presence and its name-selection consumers", () => {
