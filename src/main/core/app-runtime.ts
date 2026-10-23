@@ -1,9 +1,11 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
-import { chmod, mkdir, readdir, realpath, rm, stat } from "node:fs/promises";
+import { mkdir, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { homedir } from "node:os";
 
 import { nanoid } from "nanoid";
+import { getAppPaths } from "./app-paths";
+import { admitStorageRoot, type StorageAdmission } from "./storage-admission";
 import { WaveformCache } from "./waveform-cache";
 
 import {
@@ -299,7 +301,7 @@ export class ApplicationRuntime {
     });
   }
 
-  static async initialize(): Promise<ApplicationRuntime> {
+  static async initialize(admission?: StorageAdmission): Promise<ApplicationRuntime> {
     const shellReadyAtUtc = Date.now();
 
     // Resolve the storage root first. An unusable MUMBLER_DATA_DIR override is a
@@ -309,18 +311,14 @@ export class ApplicationRuntime {
     // surfaces as a paths-less startup diagnostic rather than crashing the
     // process uncaught.
     let paths: AppPaths;
+    let firstRun: boolean;
     try {
-      paths = getAppPaths();
+      const admitted = admission ?? await admitStorageRoot(getAppPaths());
+      paths = admitted.paths;
+      firstRun = admitted.firstRun;
     } catch (error: unknown) {
-      // No usable storage root means no resolved records database either, so the
-      // diagnostic logger writes into the *default* root's; createLogger never
-      // throws (a failed write degrades to a text file, then stderr), so the
-      // failure is still recorded somewhere.
-      const fallbackRoot = join(homedir(), ".mumbler");
-      const logger = createLogger(
-        { recordsPath: join(fallbackRoot, "records.sqlite3"), logsDir: join(fallbackRoot, "logs") },
-        { debugEnabled: DEBUG_LOGGING_ENABLED },
-      );
+      // An unadmitted root must receive no diagnostics or fallback files.
+      const logger = createLogger(null, { debugEnabled: DEBUG_LOGGING_ENABLED });
       await logger.error("app.startup-failed", "Storage location could not be resolved.", error);
       await loadInterfaceCatalogue("system");
       return new ApplicationRuntime({
@@ -346,14 +344,7 @@ export class ApplicationRuntime {
       });
     }
 
-    // The session logger is a per-launch singleton: built once here, before any
-    // fallible startup step, and never rebuilt for the life of the launch — so a
-    // launch's records all carry one session (createLogger stamps it from the
-    // current time, so rebuilding it would fork a new session). It is created
-    // before ensureDirectories() deliberately: createLogger touches no filesystem
-    // until its first write, and that write creates the root it needs or degrades
-    // without throwing — so the logger is on hand to record a startup failure on
-    // the very path that could not create it.
+    // One logger owns this admitted launch and all its later diagnostics.
     const logger = createLogger(paths, { debugEnabled: DEBUG_LOGGING_ENABLED });
 
     // Point the write-through backup store's single failure log at this launch's session log. The store
@@ -367,13 +358,7 @@ export class ApplicationRuntime {
     const queueStore = createQueueStore(paths.queuePath);
 
     try {
-      // Detect first launch before ordinary startup creates diagnostic/cache files.
-      // Missing config alone is not enough: defaults-only users need no config.
-      const firstRun = await readdir(paths.homeDir).then((entries) => entries.length === 0, (error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return true;
-        throw error;
-      });
-      await ensureDirectories(paths, logger);
+      await ensureDirectories(paths);
 
       // Authored settings with damaged content are set aside and the app starts on
       // the built-ins, leaving the work stores alone (store-recovery-conventions).
@@ -565,10 +550,7 @@ export class ApplicationRuntime {
       void runtime.startToolMaintenance();
       return runtime;
     } catch (error: unknown) {
-      // Record the startup failure in the session log before surfacing it as a
-      // diagnostic. The logger was built before any fallible step, so it exists
-      // here even when the failure was ensureDirectories() itself — in which case
-      // the append simply degrades to stderr.
+      // Root admission already succeeded; later startup failures may use it.
       await logger.error("app.startup-failed", "Application runtime failed to start.", error);
       await loadInterfaceCatalogue("system");
       return new ApplicationRuntime({
@@ -914,7 +896,7 @@ export class ApplicationRuntime {
       });
       await transcriptStore.admitReset();
       await loadInterfaceCatalogue(settings.language);
-      await ensureDirectories(paths, this.runtime.logger);
+      await ensureDirectories(paths);
       // Preserve each store before the user-commanded reset returns to built-ins.
       const preservedSettingsFiles = moved(paths.settingsPath, await settingsStore.preserveExistingFiles());
       const preservedStateFiles = moved(paths.queuePath, await queueStore.preserveExistingFiles());
@@ -2701,31 +2683,7 @@ export class ApplicationRuntime {
 // getAppPaths' own use).
 export { resolveStorageRoot };
 
-export function getAppPaths(): AppPaths {
-  const homeDir = resolveStorageRoot(process.env.MUMBLER_DATA_DIR, homedir());
-  // The OS's own Documents folder, which follows a Windows or OneDrive
-  // redirection that `~/Documents` would miss. The output folder is an inbox
-  // the user empties, so the recordings kept for good sit beside it, never
-  // inside it.
-  const documents = app.getPath("documents");
-
-  return {
-    homeDir,
-    settingsPath: join(homeDir, "config.json"),
-    queuePath: join(homeDir, "queue.json"),
-    transcriptsDir: join(homeDir, "transcripts"),
-    layoutPath: join(homeDir, "layout.json"),
-    apiKeysPath: join(homeDir, "api-keys.json"),
-    recordsPath: join(homeDir, "records.sqlite3"),
-    logsDir: join(homeDir, "logs"),
-    workingDir: join(homeDir, "working"),
-    outputDir: join(documents, "Mumbler"),
-    originalsDir: join(documents, "Recordings"),
-    binDir: join(homeDir, "bin"),
-    dependenciesPath: join(homeDir, "dependencies.json"),
-    tempDir: join(homeDir, "temp"),
-  };
-}
+export { getAppPaths };
 
 function createLoggedSettingsStore(settingsPath: string, logger: AppLogger): SettingsStore {
   return createSettingsStore(settingsPath, homedir(), (key) => {
@@ -2743,35 +2701,7 @@ function makeApiKeyWarn(
   };
 }
 
-// Tightens the storage root to owner-only (0700) on POSIX, per the storage-path
-// conventions: created that way, and tightened at each launch when an existing
-// root is broader, because derived data and logs must never be readable by
-// accounts that cannot read their sources. Windows uses its own permission
-// model and is unaffected. mkdir's own `mode` is masked by umask and never
-// changes an *existing* directory's mode, so this always re-checks after
-// creation rather than relying on the mkdir call alone. A failure to tighten
-// is logged and never stops the app.
-async function secureRoot(rootDir: string, logger: AppLogger): Promise<void> {
-  if (process.platform === "win32") {
-    return;
-  }
-  try {
-    const info = await stat(rootDir);
-    if ((info.mode & 0o077) !== 0) {
-      await chmod(rootDir, 0o700);
-    }
-  } catch (error: unknown) {
-    await logger.warn(
-      "storage.root-permissions",
-      "Could not tighten the storage root to owner-only (0700).",
-      { rootDir, error: error instanceof Error ? error.message : String(error) },
-    );
-  }
-}
-
-async function ensureDirectories(paths: AppPaths, logger: AppLogger): Promise<void> {
-  await mkdir(paths.homeDir, { recursive: true, mode: 0o700 });
-  await secureRoot(paths.homeDir, logger);
+async function ensureDirectories(paths: AppPaths): Promise<void> {
   await mkdir(paths.workingDir, { recursive: true });
   await mkdir(paths.binDir, { recursive: true });
   // temp/ is disposable download staging: clear it on launch so a download

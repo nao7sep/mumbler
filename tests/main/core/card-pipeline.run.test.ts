@@ -90,6 +90,7 @@ function makeLogger(): AppLogger {
 function makePaths(): AppPaths {
   return {
     homeDir: "/tmp/.mumbler",
+    profileDir: "/tmp/.mumbler/electron",
     settingsPath: "/tmp/.mumbler/config.json",
     queuePath: "/tmp/.mumbler/queue.json",
     transcriptsDir: "/tmp/.mumbler/transcripts",

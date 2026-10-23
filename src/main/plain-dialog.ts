@@ -53,7 +53,8 @@ export function showPlainDialog<C extends string>(dialog: PlainDialog<C>): OpenP
     autoHideMenuBar: true,
     title: dialog.title,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#111814" : "#edf4ec",
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    // Plain dialogs also serve failed root admission and need no disk session.
+    webPreferences: { partition: "mumbler-dialog", contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   const choices = new Set<string>(dialog.actions.map((action) => action.choice));
 

@@ -141,10 +141,10 @@ function cardIdOf(details: unknown): string | null {
 // worker thread (logging-conventions, Where logs go); a write it cannot make
 // lands in this session's text file under logs/. A stalled optional record is
 // reported and releases its caller; its physical fallback remains ordered.
-export function createLogger(paths: LoggerPaths, options: LoggerOptions): SessionLogger {
+export function createLogger(paths: LoggerPaths | null, options: LoggerOptions): SessionLogger {
   const sessionStart = new Date();
   const session = sessionStart.toISOString();
-  const target: RecordsTarget = {
+  const target: RecordsTarget | null = paths === null ? null : {
     databasePath: paths.recordsPath,
     fallbackPath: join(paths.logsDir, `${formatUtcMarkerMs(sessionStart)}.log`),
   };
@@ -181,8 +181,8 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
     const line = fallbackLine(entry);
     const append = async (): Promise<void> => {
       try {
-        await mkdir(dirname(target.fallbackPath), { recursive: true });
-        await appendFile(target.fallbackPath, line, "utf8");
+        await mkdir(dirname(target!.fallbackPath), { recursive: true });
+        await appendFile(target!.fallbackPath, line, "utf8");
       } catch (error: unknown) {
         reportRecordsFailure(error, line);
       }
@@ -274,6 +274,11 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
   const writeEntry = (unmasked: RecordEntry): Promise<void> => {
     // Every sink, the database, the fallback file and stderr, takes this copy.
     const entry = maskEntry(unmasked);
+    if (target === null) {
+      markMissing();
+      writeRecordsReport(fallbackLine(entry));
+      return Promise.resolve();
+    }
     if (workerFailed || closing !== null) {
       return boundedWrite(appendFallback(entry), RECORD_TIMEOUT_MS, () =>
         reportRecordsFailure(new Error("Records fallback timed out; the entry may still be written."), fallbackLine(entry)));
@@ -292,7 +297,7 @@ export function createLogger(paths: LoggerPaths, options: LoggerOptions): Sessio
   };
 
   const readRecords = <R extends RecordsRead>(read: R): Promise<RecordsReadResults[R["op"]]> => {
-    if (workerFailed || closing !== null) {
+    if (target === null || workerFailed || closing !== null) {
       return Promise.reject(new Error("The records database could not be read."));
     }
     return new Promise((resolve, reject) => {

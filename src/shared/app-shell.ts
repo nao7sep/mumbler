@@ -319,6 +319,7 @@ export interface MumblerQueue {
 }
 
 export interface AppPaths {
+  profileDir: string;
   homeDir: string;
   settingsPath: string;
   queuePath: string;

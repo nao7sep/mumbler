@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   initializeFailure: null as Error | null,
+  storageFailure: null as Error | null,
+  startupOrder: [] as string[],
   windowLoadFailure: null as Error | null,
   dialogChoice: "close" as "restart" | "close",
   dialogFailure: null as Error | null,
@@ -65,7 +67,7 @@ vi.mock("electron", () => ({
   app: {
     setName: vi.fn(),
     getName: () => "Mumbler",
-    requestSingleInstanceLock: () => true,
+    requestSingleInstanceLock: () => { state.startupOrder.push("lock"); return true; },
     whenReady: () => Promise.resolve(),
     on: vi.fn(),
     exit: (code: number) => state.exits.push(code),
@@ -104,8 +106,17 @@ const runtime = vi.hoisted(() => ({
 
 vi.mock("@main/core/app-runtime", () => ({
   ApplicationRuntime: {
-    initialize: () => state.initializeFailure ? Promise.reject(state.initializeFailure) : Promise.resolve(runtime),
+    initialize: () => { state.startupOrder.push("runtime"); return state.initializeFailure ? Promise.reject(state.initializeFailure) : Promise.resolve(runtime); },
   },
+}));
+vi.mock("@main/core/app-paths", () => ({ getAppPaths: () => ({ homeDir: "/unused" }) }));
+vi.mock("@main/core/storage-admission", () => ({
+  admitStorageRoot: async (paths: unknown) => {
+    state.startupOrder.push("admit");
+    if (state.storageFailure) throw state.storageFailure;
+    return { paths, firstRun: true };
+  },
+  prepareFrameworkStorage: async () => { state.startupOrder.push("profile"); },
 }));
 vi.mock("@main/ipc/app-shell", () => ({ registerAppShellIpc: vi.fn() }));
 vi.mock("@main/app-menu", () => ({ installApplicationMenu: vi.fn() }));
@@ -139,6 +150,8 @@ vi.mock("@main/startup-failure-dialog", () => ({
 beforeEach(() => {
   vi.resetModules();
   state.initializeFailure = null;
+  state.storageFailure = null;
+  state.startupOrder.length = 0;
   state.windowLoadFailure = null;
   state.dialogChoice = "close";
   state.dialogFailure = null;
@@ -170,6 +183,20 @@ beforeEach(() => {
 });
 
 describe("main startup recovery", () => {
+  it("admits the instance and root before configuring the profile and starting the runtime", async () => {
+    await import("@main/index");
+    await vi.waitFor(() => expect(state.startupOrder).toEqual(["lock", "admit", "profile", "runtime"]));
+  });
+
+  it("shows terminal failure without configuring a profile or starting stores after root refusal", async () => {
+    state.storageFailure = new Error("Root is not private");
+    await import("@main/index");
+    await vi.waitFor(() => expect(state.dialogCalls).toBe(1));
+    expect(state.startupOrder).toEqual(["lock", "admit"]);
+    expect(state.loggerErrors).toEqual([]);
+    expect(state.exits).toEqual([1]);
+  });
+
   it("shows the authored terminal surface when runtime bootstrap rejects", async () => {
     state.initializeFailure = new Error("EACCES /private/tmp/mumbler-state.json");
     await import("@main/index");

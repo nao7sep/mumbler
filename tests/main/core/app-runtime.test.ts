@@ -14,7 +14,7 @@ import type { MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
 // under test never touch electron.
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...actual, rm: vi.fn(actual.rm) };
+  return { ...actual, rm: vi.fn(actual.rm), chmod: vi.fn(actual.chmod) };
 });
 
 vi.mock("electron", () => ({
@@ -1241,6 +1241,29 @@ describe("ApplicationRuntime confirmed import commit", () => {
         if (previousRoot === undefined) delete process.env.MUMBLER_DATA_DIR;
         else process.env.MUMBLER_DATA_DIR = previousRoot;
         await rm(root, { force: true, recursive: true });
+      }
+    });
+
+    it("refuses an unsecurable root without creating stores or fallback logs", async () => {
+      const root = await mkdtemp(join(tmpdir(), "mumbler-refused-root-"));
+      await chmod(root, 0o755);
+      const previousRoot = process.env.MUMBLER_DATA_DIR;
+      process.env.MUMBLER_DATA_DIR = root;
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      vi.mocked(chmod).mockRejectedValueOnce(Object.assign(new Error("chmod refused"), { code: "EPERM" }));
+      let runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>> | undefined;
+      try {
+        runtime = await ApplicationRuntime.initialize();
+        expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({ canReset: false });
+        expect(runtime.getSnapshot().paths).toBeNull();
+        await runtime.shutdown();
+        expect(await import("node:fs/promises").then(({ readdir }) => readdir(root))).toEqual([]);
+        expect(stderr.mock.calls.some(([text]) => String(text).includes("chmod refused"))).toBe(true);
+      } finally {
+        stderr.mockRestore();
+        if (previousRoot === undefined) delete process.env.MUMBLER_DATA_DIR;
+        else process.env.MUMBLER_DATA_DIR = previousRoot;
+        await rm(root, { recursive: true, force: true });
       }
     });
 

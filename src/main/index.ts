@@ -2,6 +2,8 @@ import { app, BrowserWindow, powerMonitor, protocol } from "electron";
 import { extname } from "node:path";
 
 import { APP_SHELL_EVENTS } from "@shared/app-shell";
+import { getAppPaths } from "./core/app-paths";
+import { admitStorageRoot, prepareFrameworkStorage, type StorageAdmission } from "./core/storage-admission";
 import { ApplicationRuntime } from "./core/app-runtime";
 import { registerAppShellIpc } from "./ipc/app-shell";
 import { createMainWindow } from "./window";
@@ -150,8 +152,8 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
   });
 }
 
-async function bootstrap(): Promise<void> {
-  const runtime = await ApplicationRuntime.initialize();
+async function bootstrap(admission: StorageAdmission): Promise<void> {
+  const runtime = await ApplicationRuntime.initialize(admission);
   runtimeForShutdown = runtime;
   quitController = createQuit(runtime);
   // A logout, restart or shutdown on macOS (and Linux) starts the session-end
@@ -309,7 +311,15 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(bootstrap).catch(handleBootstrapFailure);
+  // Top-level await keeps Electron's ready event behind asynchronous admission.
+  // The instance lock was acquired at its established location and stays held.
+  try {
+    const admission = await admitStorageRoot(getAppPaths());
+    await prepareFrameworkStorage(admission, app);
+    app.whenReady().then(() => bootstrap(admission)).catch(handleBootstrapFailure);
+  } catch (error) {
+    app.whenReady().then(() => handleBootstrapFailure(error));
+  }
 
   // Only an exit closes the main window, so this is the same end on every platform.
   app.on("window-all-closed", () => {
