@@ -4,6 +4,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, sep } from "nod
 import { homedir } from "node:os";
 
 import { nanoid } from "nanoid";
+import { ExternalFileOperations, type ExternalFileContext } from "./external-file-operations";
 import { cleanInterruptedJsonWrites } from "./json-staging";
 import { getAppPaths } from "./app-paths";
 import { admitStorageRoot, type StorageAdmission } from "./storage-admission";
@@ -264,10 +265,11 @@ export class ApplicationRuntime {
   private onPipelineProgressCallback: (() => void) | null = null;
   private onLanguageChangedCallback: (() => void) | null = null;
   private onDependenciesChangedCallback: (() => void) | null = null;
-  // Picker, drop, review confirm and review cancel all change the pending
-  // imports. Keep copy -> pending state -> persistence, and settling a review,
-  // ordered here; renderer disabling is presentation and cannot own data safety.
-  private importTail: Promise<void> = Promise.resolve();
+  // Only short pending-state publications share this tail. External preparation
+  // retains its own finite physical owner and cannot block unrelated reviews.
+  private importCommitTail: Promise<void> = Promise.resolve();
+  private readonly externalFiles = new ExternalFileOperations();
+  private readonly reviewedImports = new Set<string>();
   // Derive each settings intent from the last committed settings, and publish
   // its authority before another intent derives its replacement.
   private settingsTail: Promise<void> = Promise.resolve();
@@ -1011,7 +1013,9 @@ export class ApplicationRuntime {
     const current = state.pendingImports;
     state.pendingImports = current.map((authoritative) => {
       const draft = draftsById.get(authoritative.id);
-      return draft ? applyPendingImportDraft(authoritative, draft) : authoritative;
+      const next = draft ? applyPendingImportDraft(authoritative, draft) : authoritative;
+      if (this.reviewedImports.has(authoritative.id) && next !== authoritative) throw new OperationError("This import review is already being settled.");
+      return next;
     });
     // Equal drafts still retry a packet whose previous write failed.
     if (this.queueBehind || state.pendingImports.some((item, index) => item !== current[index])) {
@@ -1020,11 +1024,10 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  // Confirm and cancel run on the same serialized import boundary as the copies
-  // that create pending imports, and each settles only the imports the review
-  // showed: an import that arrives meanwhile stays pending for its own review.
+  // Per-review claims exclude overlapping confirm/cancel while preparation and
+  // optional original effects stay outside the short queue publication boundary.
   async confirmPendingImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult> {
-    return this.runImportExclusive(() => this.confirmReviewedImports(items));
+    return this.withReviewedImports(items.map((item) => item.id), () => this.confirmReviewedImports(items));
   }
 
   private async confirmReviewedImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult> {
@@ -1118,32 +1121,43 @@ export class ApplicationRuntime {
       });
     }
 
-    const confirmedIds = new Set(reviewed.map(({ pendingImport }) => pendingImport.id));
-    const previousPending = state.pendingImports;
-    const addedIds = new Set(cardsToAdd.map((card) => card.id));
-    for (const id of addedIds) this.confirmingCards.add(id);
-    state.pendingImports = state.pendingImports.filter((item) => !confirmedIds.has(item.id));
-    state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
-      left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
-    );
+    await this.commitImports(async () => {
+      const confirmedIds = new Set(reviewed.map(({ pendingImport }) => pendingImport.id));
+      const previousPending = state.pendingImports;
+      const addedIds = new Set(cardsToAdd.map((card) => card.id));
+      for (const id of addedIds) this.confirmingCards.add(id);
+      state.pendingImports = state.pendingImports.filter((item) => !confirmedIds.has(item.id));
+      state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
+        left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
+      );
 
-    try {
-      await this.persistState();
-    } catch (error: unknown) {
-      if (error instanceof PublishedFileError && error.filePath === this.runtime.queueStore!.path) throw error;
-      const current = new Map(state.pendingImports.map((item) => [item.id, item]));
-      const submitted = new Map(reviewed.map(({ pendingImport, merged }) => [pendingImport.id, merged]));
-      state.pendingImports = previousPending.map((item) => current.get(item.id) ?? submitted.get(item.id) ?? item);
-      state.cards = state.cards.filter((card) => !addedIds.has(card.id));
-      // A concurrent packet may contain the temporary conversion. Restore behind
-      // it, retaining newer drafts for the imports this confirmation did not own.
-      try { await this.persistState(); }
-      catch (restoreError: unknown) {
-        await this.runtime.logger.error("import.confirm-restore", "Confirmation failed and the retained review could not be saved; recordings and originals remain intact.", restoreError);
+      try {
+        await this.persistState();
+      } catch (error: unknown) {
+        if (error instanceof PublishedFileError && error.filePath === this.runtime.queueStore!.path) throw error;
+        const current = new Map(state.pendingImports.map((item) => [item.id, item]));
+        const submitted = new Map(reviewed.map(({ pendingImport, merged }) => [pendingImport.id, merged]));
+        state.pendingImports = previousPending.map((item) => current.get(item.id) ?? submitted.get(item.id) ?? item);
+        state.cards = state.cards.filter((card) => !addedIds.has(card.id));
+        // A concurrent packet may contain the temporary conversion. Restore behind
+        // it, retaining newer drafts for the imports this confirmation did not own.
+        try { await this.persistState(); }
+        catch (restoreError: unknown) {
+          await this.runtime.logger.error("import.confirm-restore", "Confirmation failed and the retained review could not be saved; recordings and originals remain intact.", restoreError);
+        }
+        throw error;
+      } finally {
+        for (const id of addedIds) this.confirmingCards.delete(id);
       }
-      throw error;
-    } finally {
-      for (const id of addedIds) this.confirmingCards.delete(id);
+    });
+    if (cardsToAdd.length > 0) {
+      try {
+        await this.persistSelectedCard(cardsToAdd[0].id);
+      } catch (error: unknown) {
+        await this.runtime.logger.warn("import.select-card", "Import committed, but selection was not saved.", {
+          error: serializeError(error),
+        });
+      }
     }
     // Original copies/deletions are optional consequences of the committed
     // import. A refused primary save leaves no copy to repeat on Retry.
@@ -1156,9 +1170,17 @@ export class ApplicationRuntime {
           // Named by its settled recording time alone (timestamp-conventions,
           // Filenames); the card keeps the original name.
           const archivedName = `${formatUtcMarker(new Date(timestamps.confirmedUtc))}${extname(file).toLowerCase()}`;
-          await assertImportedSourceUnchanged(file, pendingImport.workingFilePath, pendingImport.sourceIdentity);
-          const filed = await copyOriginalToBackup(pendingImport.workingFilePath, backupDir!, archivedName, this.runtime.logger);
-          sourceIsArchive = await realpath(file) === await realpath(filed.path);
+          const result = await this.externalFiles.run(async (context) => {
+            await claimImportSource(context, file, pendingImport.sourceIdentity);
+            await assertImportedSourceUnchanged(file, pendingImport.workingFilePath, pendingImport.sourceIdentity, context);
+            const filed = await copyOriginalToBackup(pendingImport.workingFilePath, backupDir!, archivedName, this.runtime.logger, context);
+            context.signal.throwIfAborted();
+            const sourceIsArchive = await realpath(file) === await realpath(filed.path);
+            context.signal.throwIfAborted();
+            return { filed, sourceIsArchive };
+          });
+          const { filed } = result;
+          sourceIsArchive = result.sourceIsArchive;
           // Only an independent source entry can be removed after deduplication;
           // the archive itself must survive reimport and path aliases.
           await this.runtime.logger.info("import.backup-original", filed.reused
@@ -1195,7 +1217,12 @@ export class ApplicationRuntime {
             { originalSourcePath: pendingImport.originalSourcePath },
           );
         } else {
-          try { await deleteImportedSource(file, pendingImport.workingFilePath, pendingImport.sourceIdentity); }
+          try {
+            await this.externalFiles.run(async (context) => {
+              await claimImportSource(context, file, pendingImport.sourceIdentity);
+              await deleteImportedSource(file, pendingImport.workingFilePath, pendingImport.sourceIdentity, context);
+            });
+          }
           catch (error: unknown) {
             originalWarnings.push({ sourcePath: file, message: message("import.deleteFailed", { file: pathValue(file) }) });
             await this.runtime.logger.warn("import.delete-original", "Failed to delete original after confirm.", {
@@ -1203,15 +1230,6 @@ export class ApplicationRuntime {
             });
           }
         }
-      }
-    }
-    if (cardsToAdd.length > 0) {
-      try {
-        await this.persistSelectedCard(cardsToAdd[0].id);
-      } catch (error: unknown) {
-        await this.runtime.logger.warn("import.select-card", "Import committed, but selection was not saved.", {
-          error: serializeError(error),
-        });
       }
     }
     await this.runtime.logger.info(
@@ -1224,33 +1242,35 @@ export class ApplicationRuntime {
   }
 
   async cancelPendingImports(ids: string[]): Promise<AppSnapshot> {
-    return this.runImportExclusive(() => this.cancelReviewedImports(ids));
+    return this.withReviewedImports(ids, () => this.cancelReviewedImports(ids));
   }
 
   private async cancelReviewedImports(ids: string[]): Promise<AppSnapshot> {
     this.ensureReady();
     const state = this.runtime.state!;
     const cancelIds = new Set(ids);
-    const previousPending = state.pendingImports;
     const cancelled = state.pendingImports.filter((item) => cancelIds.has(item.id));
+    await this.commitImports(async () => {
+      const previousPending = state.pendingImports;
 
-    state.pendingImports = state.pendingImports.filter((item) => !cancelIds.has(item.id));
-    // Keep every recording until the durable queue no longer references it.
-    // New imports and cancellation are serialized, but draft saves for the
-    // remaining imports can still run while this publication is pending.
-    try {
-      await this.persistState();
-    } catch (error: unknown) {
-      if (error instanceof PublishedFileError && error.filePath === this.runtime.queueStore!.path) throw error;
-      const current = new Map(state.pendingImports.map((item) => [item.id, item]));
-      state.pendingImports = previousPending.map((item) => current.get(item.id) ?? item);
-      // A concurrent draft packet may have committed the temporary removal.
-      // Publish the restored list after it, retaining newer surviving drafts.
-      try { await this.persistState(); } catch (restoreError: unknown) {
-        await this.runtime.logger.error("import.cancel-restore", "Cancellation failed and the retained review items could not be saved; working audio remains intact.", restoreError);
+      state.pendingImports = state.pendingImports.filter((item) => !cancelIds.has(item.id));
+      // Keep every recording until the durable queue no longer references it.
+      // New imports and cancellation are serialized, but draft saves for the
+      // remaining imports can still run while this publication is pending.
+      try {
+        await this.persistState();
+      } catch (error: unknown) {
+        if (error instanceof PublishedFileError && error.filePath === this.runtime.queueStore!.path) throw error;
+        const current = new Map(state.pendingImports.map((item) => [item.id, item]));
+        state.pendingImports = previousPending.map((item) => current.get(item.id) ?? item);
+        // A concurrent draft packet may have committed the temporary removal.
+        // Publish the restored list after it, retaining newer surviving drafts.
+        try { await this.persistState(); } catch (restoreError: unknown) {
+          await this.runtime.logger.error("import.cancel-restore", "Cancellation failed and the retained review items could not be saved; working audio remains intact.", restoreError);
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
     for (const pendingImport of cancelled) {
       try {
         await rm(pendingImport.workingFilePath, { force: true });
@@ -1837,7 +1857,8 @@ export class ApplicationRuntime {
       Promise.allSettled([...this.activeSaves.values()]),
       this.pipeline.shutdown(),
       this.runtime.toolManager?.pauseAndDrain(),
-      this.importTail,
+      this.externalFiles.cancelAndDrain(),
+      this.importCommitTail,
       Promise.allSettled([...this.activeStateChanges]),
     ]);
     if (attemptId !== this.quitAttempt) return [];
@@ -1907,6 +1928,7 @@ export class ApplicationRuntime {
     this.closing = false;
     this.settingsFailureBeforeQuit = undefined;
     this.runtime.toolManager?.resume();
+    this.externalFiles.resume();
     await this.pipeline.resume();
     void this.runtime.logger.info("quit.cancelled", "Quit cancelled; Mumbler keeps running.").catch(() => undefined);
   }
@@ -1927,7 +1949,7 @@ export class ApplicationRuntime {
         ...details,
         cardCount: this.runtime.state?.cards.length ?? 0,
       }).catch(() => undefined);
-      await Promise.all([backups, waveforms, this.runtime.toolManager?.pauseAndDrain(), this.runtime.logger.close()]);
+      await Promise.all([backups, waveforms, this.runtime.toolManager?.pauseAndDrain(), this.externalFiles.cancelAndDrain(), this.runtime.logger.close()]);
     })();
     return this.closePromise;
   }
@@ -2353,18 +2375,26 @@ export class ApplicationRuntime {
     sourcePaths: string[],
     importSource: ImportSource,
   ): Promise<ImportOperationResult> {
-    return this.runImportExclusive(() => this.importPathsExclusive(sourcePaths, importSource));
+    return this.runStateChange(() => this.importPathBatch(sourcePaths, importSource));
   }
 
-  // Runs one import-boundary operation after every earlier one has settled.
-  private runImportExclusive<T>(operation: () => Promise<T>): Promise<T> {
-    try { this.ensureAcceptingWork(); } catch (error: unknown) { return Promise.reject(error); }
-    const run = this.importTail.then(operation);
-    this.importTail = run.then(() => undefined, () => undefined);
+  private withReviewedImports<T>(ids: string[], operation: () => Promise<T>): Promise<T> {
+    this.ensureAcceptingWork();
+    if (ids.some((id) => this.reviewedImports.has(id))) throw new OperationError("This import review is already being settled.");
+    for (const id of ids) this.reviewedImports.add(id);
+    return this.runStateChange(operation).finally(() => {
+      for (const id of ids) this.reviewedImports.delete(id);
+    });
+  }
+
+  // Runs one short queue publication after every earlier one has settled.
+  private commitImports<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.importCommitTail.then(operation);
+    this.importCommitTail = run.then(() => undefined, () => undefined);
     return run;
   }
 
-  private runStateChange(operation: () => Promise<AppSnapshot>): Promise<AppSnapshot> {
+  private runStateChange<T>(operation: () => Promise<T>): Promise<T> {
     try { this.ensureAcceptingWork(); } catch (error: unknown) { return Promise.reject(error); }
     const run = operation();
     this.activeStateChanges.add(run);
@@ -2380,7 +2410,7 @@ export class ApplicationRuntime {
     if (this.closing) throw new OperationError("Mumbler is closing; new work cannot start.");
   }
 
-  private async importPathsExclusive(
+  private async importPathBatch(
     sourcePaths: string[],
     importSource: ImportSource,
   ): Promise<ImportOperationResult> {
@@ -2406,8 +2436,20 @@ export class ApplicationRuntime {
       }
       seenPaths.add(sourcePath);
       try {
-        await this.importSinglePath(sourcePath, importSource);
-        importedCount += 1;
+        const pending = await this.externalFiles.run((context) => this.prepareImport(sourcePath, importSource, context));
+        try {
+          await this.commitImports(async () => {
+            this.runtime.state!.pendingImports.push(pending);
+            await this.persistState();
+          });
+          importedCount += 1;
+        } catch (error) {
+          // Once state owns the copy, a failed queue save retains it for retry.
+          if (!this.runtime.state!.pendingImports.some((item) => item.id === pending.id)) {
+            await rm(pending.workingFilePath, { force: true });
+          }
+          throw error;
+        }
       } catch (error: unknown) {
         const kind = error instanceof ImportAdmissionError ? "invalid" : "failure";
         failedImports.push({
@@ -2435,7 +2477,6 @@ export class ApplicationRuntime {
     }
 
     if (importedCount > 0) {
-      await this.persistState();
       await this.runtime.logger.info("import.completed", "Imported files into pending review.", {
         importedCount,
         failedCount: failedImports.length,
@@ -2453,13 +2494,16 @@ export class ApplicationRuntime {
     };
   }
 
-  private async importSinglePath(sourcePath: string, importSource: ImportSource): Promise<void> {
+  private async prepareImport(sourcePath: string, importSource: ImportSource, context: ExternalFileContext): Promise<PendingImportReviewItem> {
     const paths = this.runtime.paths!;
     const settings = this.runtime.settings!;
     if (!isSupportedAudioImportName(sourcePath)) {
       throw new ImportAdmissionError("import.unsupportedType");
     }
+    context.signal.throwIfAborted();
     const sourceStats = await stat(sourcePath);
+    context.signal.throwIfAborted();
+    context.progress();
 
     if (!sourceStats.isFile()) {
       throw new ImportAdmissionError("import.notAFile");
@@ -2467,65 +2511,72 @@ export class ApplicationRuntime {
 
     const originalFilename = basename(sourcePath);
     const sourceIdentity = sourceFileIdentity(sourceStats);
-    const workingFilePath = await copyIntoWorking(sourcePath, paths.workingDir, originalFilename, undefined, sourceIdentity);
-
-    await this.runtime.logger.debug("import.file", "Staged file to working storage.", {
-      originalFilename,
-      fileSizeBytes: sourceStats.size,
-      importSource,
-    });
-
-    const filenameStem = basename(originalFilename, extname(originalFilename));
-    const parsed = parseTimestampFromFilename(filenameStem, settings.timestampPatterns);
-    // The zone the filename's local time is read in. Each card keeps its own zone
-    // from here on, so a later change of the setting never re-dates a recording
-    // already imported.
-    const importZone = importTimezone(settings);
-    // Every time the recording offers, for the review to choose from: its file
-    // name, its container/audio-stream tags and the file's own times, to the second.
-    const timeCandidates: RecordingTimeCandidate[] = [];
-    if (parsed.localTimestampText.length > 0) {
-      timeCandidates.push({ source: "file-name", utcMs: null, localText: parsed.localTimestampText });
-    }
+    await claimImportSource(context, sourcePath, sourceIdentity);
+    const workingFilePath = await copyIntoWorking(sourcePath, paths.workingDir, originalFilename, context.signal, sourceIdentity, context.progress);
     try {
-      timeCandidates.push(...recordingTimesFromTags(await probeRecordingTags(workingFilePath)));
-    } catch (error: unknown) {
-      // Missing tools or an unreadable container leave the other times.
-      await this.runtime.logger.debug("import.tags", "Could not read the recording's embedded times.", {
-        originalFilename, error: serializeError(error),
+
+      await this.runtime.logger.debug("import.file", "Staged file to working storage.", {
+        originalFilename,
+        fileSizeBytes: sourceStats.size,
+        importSource,
       });
-    }
-    const second = (ms: number) => Math.floor(ms / 1000) * 1000;
-    const now = Date.now();
-    if (sourceStats.birthtimeMs > 0 && isPlausibleFileTime(sourceStats.birthtimeMs, now)) {
-      timeCandidates.push({ source: "file-created", utcMs: second(sourceStats.birthtimeMs), localText: null });
-    }
-    if (isPlausibleFileTime(sourceStats.mtimeMs, now)) {
-      timeCandidates.push({ source: "file-modified", utcMs: second(sourceStats.mtimeMs), localText: null });
-    }
-    const timestampDraft = prefilledRecordingTime(timeCandidates, importZone);
 
-    const pendingImport: PendingImportReviewItem = {
-      id: nanoid(),
-      originalFilename,
-      importSource,
-      originalSourcePath: sourcePath,
-      sourceIdentity,
-      workingFilePath,
-      fileSizeBytes: sourceStats.size,
-      ...timestampDraft,
-      timezone: importZone,
-      parseStatus: timestampDraft.localTimestampText.length > 0 ? "parsed" : "manual-required",
-      timeCandidates,
-      // An imported original is moved into Recordings by default: copied, then
-      // deleted once the copy is complete.
-      deleteOriginalOnConfirm: true,
-      copyToBackupOnConfirm: true,
-      createdAtUtc: Date.now(),
-      updatedAtUtc: Date.now(),
-    };
+      const filenameStem = basename(originalFilename, extname(originalFilename));
+      const parsed = parseTimestampFromFilename(filenameStem, settings.timestampPatterns);
+      // The zone the filename's local time is read in. Each card keeps its own zone
+      // from here on, so a later change of the setting never re-dates a recording
+      // already imported.
+      const importZone = importTimezone(settings);
+      // Every time the recording offers, for the review to choose from: its file
+      // name, its container/audio-stream tags and the file's own times, to the second.
+      const timeCandidates: RecordingTimeCandidate[] = [];
+      if (parsed.localTimestampText.length > 0) {
+        timeCandidates.push({ source: "file-name", utcMs: null, localText: parsed.localTimestampText });
+      }
+      try {
+        timeCandidates.push(...recordingTimesFromTags(await probeRecordingTags(workingFilePath)));
+      } catch (error: unknown) {
+        // Missing tools or an unreadable container leave the other times.
+        await this.runtime.logger.debug("import.tags", "Could not read the recording's embedded times.", {
+          originalFilename, error: serializeError(error),
+        });
+      }
+      const second = (ms: number) => Math.floor(ms / 1000) * 1000;
+      const now = Date.now();
+      if (sourceStats.birthtimeMs > 0 && isPlausibleFileTime(sourceStats.birthtimeMs, now)) {
+        timeCandidates.push({ source: "file-created", utcMs: second(sourceStats.birthtimeMs), localText: null });
+      }
+      if (isPlausibleFileTime(sourceStats.mtimeMs, now)) {
+        timeCandidates.push({ source: "file-modified", utcMs: second(sourceStats.mtimeMs), localText: null });
+      }
+      const timestampDraft = prefilledRecordingTime(timeCandidates, importZone);
 
-    this.runtime.state!.pendingImports.push(pendingImport);
+      const pendingImport: PendingImportReviewItem = {
+        id: nanoid(),
+        originalFilename,
+        importSource,
+        originalSourcePath: sourcePath,
+        sourceIdentity,
+        workingFilePath,
+        fileSizeBytes: sourceStats.size,
+        ...timestampDraft,
+        timezone: importZone,
+        parseStatus: timestampDraft.localTimestampText.length > 0 ? "parsed" : "manual-required",
+        timeCandidates,
+        // An imported original is moved into Recordings by default: copied, then
+        // deleted once the copy is complete.
+        deleteOriginalOnConfirm: true,
+        copyToBackupOnConfirm: true,
+        createdAtUtc: Date.now(),
+        updatedAtUtc: Date.now(),
+      };
+
+      context.signal.throwIfAborted();
+      return pendingImport;
+    } catch (error) {
+      await rm(workingFilePath, { force: true });
+      throw error;
+    }
   }
 
   private ensureReady(): void {
@@ -2686,6 +2737,11 @@ export class ApplicationRuntime {
 export { resolveStorageRoot };
 
 export { getAppPaths };
+
+async function claimImportSource(context: ExternalFileContext, path: string, identity: PendingImportReviewItem["sourceIdentity"]): Promise<void> {
+  const key = identity !== undefined && identity.ino !== 0 ? `${identity.dev}:${identity.ino}` : await realpath(path);
+  context.claimSource(key);
+}
 
 function createLoggedSettingsStore(settingsPath: string, logger: AppLogger): SettingsStore {
   return createSettingsStore(settingsPath, homedir(), (key) => {

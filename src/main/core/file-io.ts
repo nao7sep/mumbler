@@ -9,6 +9,7 @@ const lowercaseId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 8);
 
 import { formatUtcMarkerMs } from "@shared/timestamps";
 import { record } from "./backupStore";
+import type { ExternalFileContext } from "./external-file-operations";
 import { ensureJsonStagingDirectory } from "./json-staging";
 
 /**
@@ -125,17 +126,22 @@ async function holdsBytes(filePath: string, bytes: Buffer): Promise<boolean> {
 
 // Whether two files hold the same bytes, compared a chunk at a time so a long
 // recording is never read into memory whole.
-export async function sameFileBytes(leftPath: string, rightPath: string): Promise<boolean> {
+export async function sameFileBytes(leftPath: string, rightPath: string, context?: ExternalFileContext): Promise<boolean> {
+  context?.signal.throwIfAborted();
   const left = await open(leftPath, "r");
   try {
+    context?.signal.throwIfAborted();
     const right = await open(rightPath, "r");
     try {
       if ((await left.stat()).size !== (await right.stat()).size) return false;
       const leftChunk = Buffer.alloc(1 << 20);
       const rightChunk = Buffer.alloc(1 << 20);
       for (let position = 0; ; ) {
+        context?.signal.throwIfAborted();
         const { bytesRead } = await left.read(leftChunk, 0, leftChunk.length, position);
         const { bytesRead: rightRead } = await right.read(rightChunk, 0, rightChunk.length, position);
+        context?.signal.throwIfAborted();
+        context?.progress();
         if (bytesRead !== rightRead || !leftChunk.subarray(0, bytesRead).equals(rightChunk.subarray(0, rightRead))) {
           return false;
         }

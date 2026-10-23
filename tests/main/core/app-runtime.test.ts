@@ -388,7 +388,7 @@ describe("getAppPaths standard layout", () => {
 });
 
 describe("ApplicationRuntime dropped-path import authority", () => {
-  it("accounts for complete batches and durably serializes overlapping deliveries", async () => {
+  it("accounts for complete batches and durably merges overlapping deliveries", async () => {
     const root = await mkdtemp(join(tmpdir(), "mumbler-runtime-import-"));
     const sourceDir = join(root, "sources");
     const firstAudio = join(sourceDir, "first.wav");
@@ -441,17 +441,14 @@ describe("ApplicationRuntime dropped-path import authority", () => {
       expect(overlapping.failedImports).toEqual([]);
 
       const pending = runtime.getSnapshot().state?.pendingImports ?? [];
-      expect(pending.map((item) => item.originalSourcePath)).toEqual([firstAudio, secondAudio]);
+      expect(pending.map((item) => item.originalSourcePath).sort()).toEqual([firstAudio, secondAudio].sort());
       expect(pending.every((item) => item.importSource === "drag-and-drop")).toBe(true);
       for (const item of pending) {
         expect((await stat(item.workingFilePath)).isFile()).toBe(true);
       }
 
       const persisted = await createQueueStore(join(process.env.MUMBLER_DATA_DIR, "queue.json")).load();
-      expect(persisted.value.pendingImports.map((item) => item.originalSourcePath)).toEqual([
-        firstAudio,
-        secondAudio,
-      ]);
+      expect(persisted.value.pendingImports.map((item) => item.originalSourcePath).sort()).toEqual([firstAudio, secondAudio].sort());
     } finally {
       await runtime?.shutdown();
       if (previousRoot === undefined) delete process.env.MUMBLER_DATA_DIR;
@@ -847,7 +844,8 @@ describe("ApplicationRuntime confirmed import commit", () => {
         await work;
         expect(await quit).toEqual([]);
         const saved = (await createQueueStore(queuePath).load()).value;
-        expect(kind === "import" ? saved.pendingImports.length : saved.cards.length).toBe(kind === "import" ? 1 : 2);
+        expect(kind === "import" ? saved.pendingImports.length : saved.cards.length).toBe(kind === "import" ? 0 : 2);
+        expect((await stat(card.sourceFilePath)).isFile()).toBe(true);
       } finally {
         held.release();
         await Promise.allSettled([work, ...(quit ? [quit] : [])]);

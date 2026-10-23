@@ -42,6 +42,7 @@ const unwritable = vi.hoisted(() => ({
 }));
 const secretReadGate = vi.hoisted(() => ({ held: null as { path: string; release: Promise<void>; entered: number } | null }));
 const directorySyncFault = vi.hoisted(() => ({ path: null as string | null }));
+const externalStatGate = vi.hoisted(() => ({ path: "", wait: null as Promise<void> | null, entered: null as (() => void) | null }));
 const sourceChecks = vi.hoisted(() => ({
   paths: new Set<string>(), calls: [] as string[], active: 0, maximum: 0,
   held: null as Promise<void> | null, failure: null as Error | null,
@@ -66,6 +67,13 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
+    stat: async (...args: Parameters<typeof actual.stat>) => {
+      if (String(args[0]) === externalStatGate.path) {
+        externalStatGate.entered?.();
+        await externalStatGate.wait;
+      }
+      return actual.stat(...args);
+    },
     realpath: async (...args: Parameters<typeof actual.realpath>) => {
       if (!sourceChecks.paths.has(String(args[0]))) return actual.realpath(...args);
       sourceChecks.calls.push(String(args[0]));
@@ -1134,6 +1142,40 @@ describe("confirming what was dropped in", () => {
     }
   });
 
+  it("times out a held source inspection without blocking another review or admitting its late result", async () => {
+    const [ready] = await dropIn("ready.wav");
+    const slow = join(sourceDir, "slow.wav");
+    await writeFile(slow, "slow source");
+    let release!: () => void;
+    externalStatGate.path = slow;
+    externalStatGate.wait = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { externalStatGate.entered = resolve; });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const importing = runtime.importDroppedPaths([slow]);
+    try {
+      await entered;
+      await runtime.cancelPendingImports([ready.id]);
+      expect(runtime.getSnapshot().state?.pendingImports).toEqual([]);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const result = await importing;
+      expect(result.importedCount).toBe(0);
+      expect(result.failedImports).toHaveLength(1);
+      release();
+      vi.useRealTimers();
+      await runtime.saveForQuit();
+      expect(runtime.getSnapshot().state?.pendingImports).toEqual([]);
+      expect(await readdir(join(home, "working"))).toEqual([]);
+      expect(await readFile(slow, "utf8")).toBe("slow source");
+    } finally {
+      release();
+      externalStatGate.path = "";
+      externalStatGate.wait = null;
+      externalStatGate.entered = null;
+      vi.useRealTimers();
+      await importing;
+    }
+  });
+
   it("keeps an import dropped in while the review is being confirmed", async () => {
     const [first] = await dropIn("first.wav");
     const laterPath = join(sourceDir, "later.wav");
@@ -1151,10 +1193,10 @@ describe("confirming what was dropped in", () => {
     const confirming = runtime.confirmPendingImports([review(first)]);
     await probing;
     const importing = runtime.importDroppedPaths([laterPath]);
-    // An import not ordered behind the confirm would have reached its source by
-    // the time the pending callbacks have run; this one waits for the confirm.
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(importStarts, "the import waits for the confirm to end").not.toContain(laterPath);
+    await importing;
+    expect(importStarts).toContain(laterPath);
+    expect(runtime.getSnapshot().state?.pendingImports.map((item) => item.originalFilename)).toContain("later.wav");
+    await expect(runtime.cancelPendingImports([first.id])).rejects.toThrow("already being settled");
     release();
     await Promise.all([confirming, importing]);
     expect(importStarts).toContain(laterPath);
