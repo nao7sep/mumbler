@@ -6,19 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MumblerCard } from "@shared/app-shell";
 
-const { syncedDirectories } = vi.hoisted(() => ({ syncedDirectories: [] as string[] }));
-
-vi.mock("@main/core/file-io", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@main/core/file-io")>();
-  return {
-    ...actual,
-    syncDirectory: vi.fn(async (path: string) => {
-      await actual.syncDirectory(path);
-      syncedDirectories.push(path);
-    }),
-  };
-});
-
 // The payload records the app's own version, injected at build as __APP_VERSION__
 // and mirrored into the test run by vitest.config.ts. Electron is still stubbed
 // because the module graph imports it, but its version is no longer consulted.
@@ -195,7 +182,6 @@ describe("finalizeOutputs", () => {
     dir = await mkdtemp(join(tmpdir(), "mumbler-out-"));
     sourceAudio = join(dir, "source.m4a");
     await writeFile(sourceAudio, "AUDIO-BYTES");
-    syncedDirectories.length = 0;
   });
 
   afterEach(async () => {
@@ -229,7 +215,6 @@ describe("finalizeOutputs", () => {
     expect(await readFile(t.jsonPath, "utf8")).toBe('{"k":1}');
     expect(await readFile(t.markdownPath, "utf8")).toBe("# md");
     expect(await leftoverTempsAndBackups()).toEqual([]);
-    expect(syncedDirectories).toEqual([dir]);
   });
 
   // A fixed time well in the past, so a copy that took the moment of copying fails.
@@ -399,6 +384,5 @@ describe("finalizeOutputs", () => {
     expect(await readFile(t.audioPath, "utf8")).toBe("AUDIO-BYTES");
     expect(await readFile(t.jsonPath, "utf8")).toBe("J");
     expect(await leftoverTempsAndBackups()).toEqual([]);
-    expect(syncedDirectories).toEqual([dir]);
   });
 });

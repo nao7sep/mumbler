@@ -297,7 +297,7 @@ describe("record — unsupported history written before sessions", () => {
       expect.objectContaining({ error: expect.stringContaining("is in format 1, which this build does not read") }),
     );
     expect(readFileSync(storeFilePath)).toEqual(before);
-    expect(readdirSync(root).sort()).toEqual([".json-staging", "backups.sqlite3", "config.json"]);
+    expect(readdirSync(root).sort()).toEqual(["backups.sqlite3", "config.json"]);
     const db = new DatabaseSync(storeFilePath);
     try {
       expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });

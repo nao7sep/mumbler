@@ -9,7 +9,7 @@ import type { DependencyStatus, ToolFacts, ToolName, ToolTransient } from "@shar
 import { deriveStatus } from "@shared/dependency-status";
 
 import { runTool, ToolTimeoutError } from "../audio-tools";
-import { syncDirectory, syncFile } from "../file-io";
+import { syncFile } from "../file-io";
 import { serializeError, type AppLogger } from "../logger";
 import type { JsonStore } from "../json-store";
 import { OperationError } from "../operation-error";
@@ -285,7 +285,6 @@ export class ToolManager {
         // its version record are re-downloadable, and this install rewrites both.
         await rename(stagedExe, this.toolPath(name));
         published = true;
-        await syncDirectory(this.deps.binDir);
       } finally {
         sharedArchive?.release();
         if (this.deps.platform !== "win32") await rm(archivePath, { force: true }).catch(() => undefined);

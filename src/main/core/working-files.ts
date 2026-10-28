@@ -5,7 +5,7 @@ import { basename, extname, join } from "node:path";
 import { nanoid } from "nanoid";
 import type { ExternalFileContext } from "./external-file-operations";
 import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem, SourceFileIdentity } from "@shared/app-shell";
-import { fileExists, formatError, isMissingFileError, syncDirectory, sameFileBytes, uniquePathInDirectory } from "./file-io";
+import { fileExists, formatError, isMissingFileError, sameFileBytes, uniquePathInDirectory } from "./file-io";
 
 import { sha256OfFile } from "./binaries/integrity";
 import { type AppLogger, serializeError } from "./logger";
@@ -92,7 +92,6 @@ export async function copyIntoWorking(
       }
     }
     if (primary !== undefined) throw primary;
-    await syncDirectory(workingDir);
     signal?.throwIfAborted();
     return workingFilePath;
   } catch (error: unknown) {
@@ -185,11 +184,7 @@ export async function copyOriginalToBackup(
     context?.signal.throwIfAborted();
     context?.progress();
     const existing = await alreadyFiled(sourcePath, backupDir, targetName, context);
-    if (existing !== null) {
-      // An earlier copy may have published before its directory sync failed.
-      await syncDirectory(backupDir);
-      return { path: existing, reused: true };
-    }
+    if (existing !== null) return { path: existing, reused: true };
     targetPath = await uniquePathInDirectory(backupDir, targetName);
     context?.signal.throwIfAborted();
     stageDir = await mkdtemp(join(backupDir, ".mumbler-backup-"));
@@ -203,7 +198,6 @@ export async function copyOriginalToBackup(
       if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
       await copyBackupFile(stagePath, targetPath, context);
     }
-    await syncDirectory(backupDir);
     context?.signal.throwIfAborted();
     return { path: targetPath, reused: false };
   } catch (error: unknown) {

@@ -25,7 +25,7 @@ function card(cardId: string, transcription: string | null, structured: string |
 }
 
 async function files(): Promise<string[]> {
-  return (await readdir(dir).catch(() => [])).filter((name) => name !== ".json-staging").sort();
+  return (await readdir(dir).catch(() => [])).sort();
 }
 
 describe("TranscriptStore", () => {

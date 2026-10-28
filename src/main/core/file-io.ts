@@ -10,7 +10,6 @@ const lowercaseId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 8);
 import { formatUtcMarkerMs } from "@shared/timestamps";
 import { record } from "./backupStore";
 import type { ExternalFileContext } from "./external-file-operations";
-import { ensureJsonStagingDirectory } from "./json-staging";
 
 /**
  * Options for {@link writeJsonFile}, the single managed-text atomic-write choke point.
@@ -28,19 +27,6 @@ export interface WriteJsonOptions {
   record?: boolean;
 }
 
-/** Bytes are published, but their directory durability could not be established. */
-export class PublishedFileError extends Error {
-  constructor(readonly filePath: string, cause: unknown) {
-    super("File published, but directory sync failed.", { cause });
-    this.name = "PublishedFileError";
-  }
-}
-
-async function syncPublishedJson(filePath: string): Promise<void> {
-  try { await syncDirectory(dirname(filePath)); }
-  catch (error) { throw new PublishedFileError(filePath, error); }
-}
-
 // undefined means no file: JSON has no undefined, so a file holding the literal
 // null is told apart from a missing one and is read like any other wrong shape.
 export async function readJsonFile<T>(filePath: string): Promise<T | undefined> {
@@ -55,11 +41,12 @@ export async function readJsonFile<T>(filePath: string): Promise<T | undefined> 
   }
 }
 
-// The single managed-text atomic-write choke point. Atomic JSON write: private staging under the target parent ->
-// fsync -> rename over the target -> fsync the parent dir. When `mode` is given (e.g. 0o600 for a secrets
-// file), the exclusive stage is created with that mode before any bytes are written. Other stages
-// begin owner-only and retain the replaced target mode at publication. The mode is ignored on platforms
-// where chmod is a no-op (Windows), matching the secrets convention's POSIX-only permission rule.
+// The single managed-text atomic-write choke point. Atomic JSON write: owner-only temp file beside the target ->
+// fsync -> rename over the target, and nothing more: a crash may lose the latest save but never leaves a
+// damaged file. When `mode` is given (e.g. 0o600 for a secrets file), the exclusive temp is created with that
+// mode before any bytes are written; otherwise it takes the replaced target's mode just before the rename.
+// The mode is ignored on platforms where chmod is a no-op (Windows), matching the secrets convention's
+// POSIX-only permission rule.
 //
 // The data-backup record fires strictly AFTER the rename lands (data-backup conventions). Recording before
 // the rename would risk a "backup of a save that never happened": if the rename then failed, the history
@@ -75,14 +62,10 @@ export async function writeJsonFile(
   await mkdir(dirname(filePath), { recursive: true });
   const stem = basename(filePath, extname(filePath));
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
-  // Unchanged bytes need no replacement or history entry. Still sync the
-  // directory, because an earlier publication may have uncertain durability.
-  if (await holdsBytes(filePath, bytes)) {
-    await syncPublishedJson(filePath);
-    return;
-  }
-  const staging = await ensureJsonStagingDirectory(dirname(filePath));
-  const tempPath = join(staging, `${stem}-${nanoid(8)}.tmp`);
+  // A write that changes nothing is skipped (content-lifecycle-conventions), so
+  // the file's modified time and its backups see only real changes.
+  if (await holdsBytes(filePath, bytes)) return;
+  const tempPath = join(dirname(filePath), `${stem}-${nanoid(8)}.tmp`);
   let staged = false;
   try {
     const handle = await open(tempPath, "wx", options.mode ?? 0o600);
@@ -102,10 +85,6 @@ export async function writeJsonFile(
       await keepReplacedMode(filePath, tempPath);
     }
     await rename(tempPath, filePath);
-    // Record the exact published bytes even if directory durability is uncertain;
-    // retrying identical bytes must not lose this settings-history entry.
-    if (options.record === true) record(filePath, bytes);
-    await syncPublishedJson(filePath);
   } catch (error) {
     // Best-effort removal of the half-written temp file; the original write error
     // is the meaningful one and is always rethrown below, so a failed cleanup is
@@ -113,6 +92,7 @@ export async function writeJsonFile(
     if (staged) await rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   }
+  if (options.record === true) record(filePath, bytes);
 }
 
 async function holdsBytes(filePath: string, bytes: Buffer): Promise<boolean> {
@@ -154,33 +134,6 @@ export async function sameFileBytes(leftPath: string, rightPath: string, context
   } finally {
     await left.close();
   }
-}
-
-// Unsupported directory syncing is a platform limitation; an actual I/O failure
-// must reach the publication owner, which retains the source work for retry.
-export async function syncDirectory(directoryPath: string): Promise<void> {
-  let handle;
-  try {
-    handle = await open(directoryPath, "r");
-  } catch (error) {
-    if (unsupportedDirectorySync(error)) return;
-    throw error;
-  }
-  let primary: unknown;
-  try { await handle.sync(); }
-  catch (error) { if (!unsupportedDirectorySync(error)) primary = error; }
-  try { await handle.close(); }
-  catch (error) {
-    if (primary !== undefined) throw new AggregateError([primary, error], "Directory sync and close failed.", { cause: primary });
-    throw error;
-  }
-  if (primary !== undefined) throw primary;
-}
-
-function unsupportedDirectorySync(error: unknown): boolean {
-  const code = error !== null && typeof error === "object" ? (error as NodeJS.ErrnoException).code : undefined;
-  return code === "EINVAL" || code === "ENOTSUP" || code === "EOPNOTSUPP" || code === "ENOSYS"
-    || (process.platform === "win32" && (code === "EPERM" || code === "EACCES" || code === "EISDIR"));
 }
 
 // A replace keeps the replaced file's permission mode (content-lifecycle-conventions,

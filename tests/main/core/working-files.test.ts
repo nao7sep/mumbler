@@ -20,7 +20,6 @@ const backupFaults = vi.hoisted(() => ({
   stageFailure: null as Error | null,
   publicFailure: null as Error | null,
   refuseStageCleanup: false,
-  directoryFailure: null as string | null,
   workingSyncFailure: false,
   workingEvents: [] as string[],
   beforeCopy: null as ((target: string) => Promise<void>) | null,
@@ -40,8 +39,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       return actual.link(source, target);
     },
     open: async (...args: Parameters<typeof actual.open>) => {
-      if (args[1] === "r" && String(args[0]) === backupFaults.directoryFailure) throw Object.assign(new Error("directory sync failed"), { code: "EIO" });
-      if (args[1] === "r" && basename(String(args[0])) === "working") backupFaults.workingEvents.push("directory");
       if (args[1] === "wx" && basename(dirname(String(args[0]))) === "working") await backupFaults.beforeCopy?.(String(args[0]));
       const handle = await actual.open(...args);
       if (args[1] === "wx" && basename(dirname(String(args[0]))) === "working") {
@@ -172,7 +169,6 @@ beforeEach(async () => {
   backupFaults.stageFailure = null;
   backupFaults.publicFailure = null;
   backupFaults.refuseStageCleanup = false;
-  backupFaults.directoryFailure = null;
   backupFaults.workingSyncFailure = false;
   backupFaults.workingEvents.length = 0;
   dir = await mkdtemp(join(tmpdir(), "mumbler-working-files-"));
@@ -191,16 +187,15 @@ describe("working audio copies", () => {
     try {
       const copied = await copyIntoWorking(source, join(dir, "working"), "take.wav");
       expect(await readFile(copied, "utf8")).toBe("recording");
-      expect(backupFaults.workingEvents).toEqual(["file", "close", "directory"]);
+      expect(backupFaults.workingEvents).toEqual(["file", "close"]);
     } finally { await chmod(source, 0o600); }
   });
 
-  it.each(["file", "directory"])("preserves the source and removes only the owned copy after %s sync failure", async (where) => {
+  it("preserves the source and removes only the owned copy after a file sync failure", async () => {
     const source = join(dir, "source.wav");
     const working = join(dir, "working");
     await writeFile(source, "recording");
-    backupFaults.workingSyncFailure = where === "file";
-    backupFaults.directoryFailure = where === "directory" ? working : null;
+    backupFaults.workingSyncFailure = true;
     await expect(copyIntoWorking(source, working, "take.wav")).rejects.toThrow(/sync failed/);
     expect(await readFile(source, "utf8")).toBe("recording");
     expect(await readdir(working)).toEqual([]);
@@ -316,19 +311,6 @@ describe("working audio copies", () => {
 
     expect(again).toEqual({ path: suffixed.path, reused: true });
     expect((await readdir(backup)).filter((name) => !name.startsWith("."))).toHaveLength(2);
-  });
-
-  it("retries directory durability before accepting a previously published archive", async () => {
-    const source = join(dir, "take.wav");
-    const backup = join(dir, "backup");
-    await writeFile(source, "audio");
-    backupFaults.directoryFailure = backup;
-    await expect(copyOriginalToBackup(source, backup, "take.wav")).rejects.toThrow("directory sync failed");
-    expect(await readFile(join(backup, "take.wav"), "utf8")).toBe("audio");
-    await expect(copyOriginalToBackup(source, backup, "take.wav")).rejects.toThrow("directory sync failed");
-    backupFaults.directoryFailure = null;
-    expect(await copyOriginalToBackup(source, backup, "take.wav")).toEqual({ path: join(backup, "take.wav"), reused: true });
-    expect(await readFile(source, "utf8")).toBe("audio");
   });
 
   it("files a same-size recording with different bytes as a new one", async () => {

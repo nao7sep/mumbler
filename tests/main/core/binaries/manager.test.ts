@@ -8,7 +8,7 @@ import type { AppLogger } from "@main/core/logger";
 import type { ToolName, ToolTransient } from "@shared/app-shell";
 
 const { durabilityEvents } = vi.hoisted(() => ({
-  durabilityEvents: [] as Array<{ kind: "file" | "directory"; path: string }>,
+  durabilityEvents: [] as Array<{ kind: "file"; path: string }>,
 }));
 const discoveryFault = vi.hoisted(() => ({ path: "" }));
 vi.mock("node:fs/promises", async (original) => {
@@ -26,10 +26,6 @@ vi.mock("@main/core/file-io", async (importOriginal) => {
     syncFile: vi.fn(async (path: string) => {
       await actual.syncFile(path);
       durabilityEvents.push({ kind: "file", path });
-    }),
-    syncDirectory: vi.fn(async (path: string) => {
-      await actual.syncDirectory(path);
-      durabilityEvents.push({ kind: "directory", path });
     }),
   };
 });
@@ -596,16 +592,15 @@ describe("installTool", () => {
     expect(ffmpeg?.state).toBe("up-to-date");
   });
 
-  it("syncs the staged executable and then the published bin directory", async () => {
+  it("syncs the staged executable before publishing it", async () => {
     const manager = await makeManager();
 
     await manager.installTool("ffmpeg");
 
-    expect(durabilityEvents).toHaveLength(2);
+    expect(durabilityEvents).toHaveLength(1);
     expect(durabilityEvents[0]).toMatchObject({ kind: "file" });
     expect(dirname(durabilityEvents[0]!.path)).toBe(tempDir);
     expect(basename(durabilityEvents[0]!.path)).toMatch(/^ffmpeg-[\w-]+\.tmp$/);
-    expect(durabilityEvents[1]).toEqual({ kind: "directory", path: binDir });
   });
 
   it("requests quarantine removal on the staged Mac binary before publication", async () => {

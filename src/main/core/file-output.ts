@@ -11,7 +11,6 @@ import {
   formatError,
   keepReplacedMode,
   sameFileBytes,
-  syncDirectory,
 } from "./file-io";
 import { FORMAT_VERSIONS } from "./format-versions";
 
@@ -248,11 +247,6 @@ export async function finalizeOutputs(params: {
   }
   try { await rm(staging, { recursive: true, force: true }); }
   catch (error) { issues.push({ operation: "remove staging directory", path: staging, error }); }
-  try { await syncDirectory(directory); }
-  catch (error) {
-    if (primary === undefined) primary = error;
-    else issues.push({ operation: "sync output directory", path: directory, error });
-  }
   if (primary !== undefined) {
     if (publicCopyCreated || files.some((file) => file.status === "saved") || issues.length > 0 ||
         (current !== undefined && !isCancelledError(primary) && !(primary instanceof OutputConflictError)))
