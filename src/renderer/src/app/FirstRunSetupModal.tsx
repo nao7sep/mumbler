@@ -1,4 +1,3 @@
-import { shellApi } from "@renderer/shell-api";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import type { AppSnapshot } from "@shared/app-shell";
 import { message, type Message } from "@shared/i18n/translate";
@@ -32,7 +31,7 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
   // used. A folder saves as soon as it is picked; a cancelled picker writes
   // nothing. Quit uses the ordinary settings-draft owner.
   const dirty = key.length > 0 || (step === 4 && timezone !== summary.defaultTimezone);
-  useEffect(() => shellApi.onUnsavedDrafts(
+  useEffect(() => window.mumbler.onUnsavedDrafts(
     () => dirty ? ["settings"] : [], () => { void finish(); },
   ), [dirty, onClose]);
 
@@ -40,7 +39,7 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
     setBusy(true);
     setError(null);
     try {
-      await shellApi.dismissFirstRunSetup();
+      await window.mumbler.dismissFirstRunSetup();
       onClose();
     } catch (cause) {
       setError(presentFailure(cause, message("error.settingsSave"), "setup dismissal failed"));
@@ -61,7 +60,7 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
     setBusy(true);
     setError(null);
     try {
-      onSnapshot(await shellApi.setGeminiApiKey(key));
+      onSnapshot(await window.mumbler.setGeminiApiKey(key));
       next();
     } catch (cause) {
       setError(presentFailure(cause, message("error.apiKeySave"), "setup key save failed"));
@@ -78,11 +77,11 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
   }
   // A picked folder is saved at once and the step stays open on it.
   const pickOutput = () => run(async () => {
-    const folder = await shellApi.pickOutputDirectory();
-    if (folder !== null) onSnapshot(await shellApi.saveSetupDirectory(folder));
+    const folder = await window.mumbler.pickOutputDirectory();
+    if (folder !== null) onSnapshot(await window.mumbler.saveSetupDirectory(folder));
   }, message("error.chooseOutputFolder"), "setup output folder save failed");
   const pickRecordings = () => run(async () => {
-    onSnapshot(await shellApi.chooseOriginalsDirectory());
+    onSnapshot(await window.mumbler.chooseOriginalsDirectory());
   }, message("error.chooseBackupFolder"), "setup recordings folder save failed");
   // Use These Folders saves each suggestion not already replaced by a pick. Each
   // save shows at once, so one that succeeded stays shown when the other fails,
@@ -93,7 +92,7 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
     try {
       if (summary.backupDirectory === null) {
         try {
-          onSnapshot(await shellApi.saveSetupRecordingsDirectory(summary.defaultBackupDirectory));
+          onSnapshot(await window.mumbler.saveSetupRecordingsDirectory(summary.defaultBackupDirectory));
         } catch (cause) {
           setError(presentFailure(cause, message("error.chooseBackupFolder"), "setup recordings folder save failed"));
           return;
@@ -101,7 +100,7 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
       }
       if (summary.outputDirectory === null) {
         try {
-          onSnapshot(await shellApi.saveSetupDirectory(summary.defaultOutputDirectory));
+          onSnapshot(await window.mumbler.saveSetupDirectory(summary.defaultOutputDirectory));
         } catch (cause) {
           setError(presentFailure(cause, message("error.chooseOutputFolder"), "setup output folder save failed"));
           return;
@@ -111,7 +110,7 @@ export function FirstRunSetupModal({ snapshot, tools, onSnapshot, onClose }: {
     } finally { setBusy(false); }
   }
   const useTimezone = () => run(async () => {
-    onSnapshot(await shellApi.saveSetupTimezone(timezone));
+    onSnapshot(await window.mumbler.saveSetupTimezone(timezone));
     await finish();
   }, message("error.settingsSave"), "setup time zone save failed");
   const title = t("setup.title", { step });

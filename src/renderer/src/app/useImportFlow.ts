@@ -1,4 +1,3 @@
-import { shellApi } from "@renderer/shell-api";
 import {
   useEffect,
   useRef,
@@ -107,7 +106,7 @@ export function useImportFlow({
 
     let sending: Promise<void> | null = null;
     const send = (): Promise<void> => {
-      sending ??= shellApi.updatePendingImportDrafts(pendingReviewDrafts).then(() => {
+      sending ??= window.mumbler.updatePendingImportDrafts(pendingReviewDrafts).then(() => {
         if (unsentDrafts.current?.send === send) unsentDrafts.current = null;
       }, (error: unknown) => {
         sending = null;
@@ -132,7 +131,7 @@ export function useImportFlow({
 
   // A quit sends the edits the debounce still holds, instead of dropping them
   // (unsaved-edits conventions, Quitting).
-  useEffect(() => shellApi.onFlushPendingEdits(async () => {
+  useEffect(() => window.mumbler.onFlushPendingEdits(async () => {
     const unsent = unsentDrafts.current;
     if (unsent === null) return;
     window.clearTimeout(unsent.timer);
@@ -207,7 +206,7 @@ export function useImportFlow({
   async function handleImportClick(): Promise<void> {
     setIsImporting(true);
     try {
-      const result = await shellApi.openImportDialog();
+      const result = await window.mumbler.openImportDialog();
       onSnapshotUpdate(result.snapshot);
       presentImportResult(result);
     } catch (error: unknown) {
@@ -229,11 +228,11 @@ export function useImportFlow({
     setIsConfirmingReview(true);
     try {
       if (submittedDrafts.some((item) => item.copyToBackupOnConfirm) && snapshot?.settingsSummary?.backupDirectory == null) {
-        const selected = await shellApi.chooseOriginalsDirectory();
+        const selected = await window.mumbler.chooseOriginalsDirectory();
         onSnapshotUpdate(selected);
         if (selected.settingsSummary?.backupDirectory == null) return;
       }
-      const result = await shellApi.confirmPendingImports(submittedDrafts);
+      const result = await window.mumbler.confirmPendingImports(submittedDrafts);
       onSnapshotUpdate(result.snapshot);
       // The recordings are in the queue; an original that was not backed up or
       // deleted as asked is a warning on that success, kept until dismissed.
@@ -255,7 +254,7 @@ export function useImportFlow({
   async function handleCancelPendingImports(): Promise<void> {
     setErrorMessage(null);
     try {
-      const nextSnapshot = await shellApi.cancelPendingImports(
+      const nextSnapshot = await window.mumbler.cancelPendingImports(
         pendingReviewDrafts.map((item) => item.id),
       );
       onSnapshotUpdate(nextSnapshot);
@@ -276,7 +275,7 @@ export function useImportFlow({
 
     setIsImporting(true);
     try {
-      const result = await shellApi.importDroppedPaths(paths);
+      const result = await window.mumbler.importDroppedPaths(paths);
       onSnapshotUpdate(result.snapshot);
       presentImportResult(result, unavailable);
     } catch (error: unknown) {
@@ -335,7 +334,7 @@ export function useImportFlow({
     }
 
     const admission = parseDroppedPaths(event.dataTransfer.files, (file) =>
-      shellApi.getPathForFile(file),
+      window.mumbler.getPathForFile(file),
       reportRendererDiagnostic,
     );
 

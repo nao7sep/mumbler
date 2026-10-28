@@ -1,4 +1,3 @@
-import { HandledIpcError, shellApi } from "@renderer/shell-api";
 import type { Message } from "@shared/i18n/translate";
 
 /**
@@ -11,10 +10,16 @@ export function presentFailure(error: unknown, userMessage: Message, source: str
   return userMessage;
 }
 
+// Electron rejects a failed invoke with this prefix. Main's IPC handler has
+// already recorded that failure, so the renderer does not record it again.
+export function isMainProcessFailure(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith("Error invoking remote method ");
+}
+
 export function reportRendererDiagnostic(error: unknown, source: string): void {
-  if (error instanceof HandledIpcError) return;
+  if (isMainProcessFailure(error)) return;
   const diagnostic = describeRendererError(error);
-  const reporter = shellApi?.reportRendererDiagnostic;
+  const reporter = window.mumbler?.reportRendererDiagnostic;
   if (typeof reporter !== "function") {
     console.error("[Mumbler] Renderer diagnostic bridge is unavailable.", { source, diagnostic });
     return;

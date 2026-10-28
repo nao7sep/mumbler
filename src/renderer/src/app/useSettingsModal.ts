@@ -1,4 +1,3 @@
-import { shellApi } from "@renderer/shell-api";
 import { useCallback, useEffect, useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
 
 import type { AppSnapshot, SettingsDraft } from "@shared/app-shell";
@@ -78,7 +77,7 @@ export function useSettingsModal({
   async function handleOpenSettings(): Promise<void> {
     setIsLoadingSettings(true);
     try {
-      const draft = await shellApi.getSettingsDraft();
+      const draft = await window.mumbler.getSettingsDraft();
       setSettingsDraft(draft);
       setInitialDraft(draft);
       setApiKeyInput("");
@@ -93,7 +92,7 @@ export function useSettingsModal({
   async function handlePickSettingsOutputDirectory(): Promise<void> {
     setIsPickingSettingsOutputDirectory(true);
     try {
-      const nextPath = await shellApi.pickOutputDirectory(
+      const nextPath = await window.mumbler.pickOutputDirectory(
         settingsDraft?.outputDirectory, settingsDraft?.literalOutputDirectory,
       );
       if (nextPath !== null) {
@@ -118,7 +117,7 @@ export function useSettingsModal({
   async function handlePickSettingsBackupDirectory(): Promise<void> {
     setIsPickingSettingsBackupDirectory(true);
     try {
-      const nextPath = await shellApi.pickBackupDirectory(
+      const nextPath = await window.mumbler.pickBackupDirectory(
         settingsDraft?.backupDirectory, settingsDraft?.literalBackupDirectory,
       );
       if (nextPath !== null) {
@@ -149,7 +148,7 @@ export function useSettingsModal({
     savingSettingsRef.current = true;
     setIsSavingSettings(true);
     try {
-      const nextSnapshot = await shellApi.saveSettingsDraft(submittedDraft);
+      const nextSnapshot = await window.mumbler.saveSettingsDraft(submittedDraft);
       onSnapshotUpdate(nextSnapshot);
       const currentDraft = currentDraftRef.current;
       if (currentDraft === submittedDraft && apiKeyInputRef.current.length === 0) {
@@ -187,7 +186,7 @@ export function useSettingsModal({
     savingApiKeyRef.current = true;
     setIsSavingApiKey(true);
     try {
-      const nextSnapshot = await shellApi.setGeminiApiKey(trimmed);
+      const nextSnapshot = await window.mumbler.setGeminiApiKey(trimmed);
       onSnapshotUpdate(nextSnapshot);
       applyHasKey(nextSnapshot.settingsSummary?.hasGeminiApiKey ?? true);
       setApiKeyInput((current) => current === apiKey ? "" : current);
@@ -206,7 +205,7 @@ export function useSettingsModal({
     savingApiKeyRef.current = true;
     setIsSavingApiKey(true);
     try {
-      const nextSnapshot = await shellApi.clearGeminiApiKey();
+      const nextSnapshot = await window.mumbler.clearGeminiApiKey();
       onSnapshotUpdate(nextSnapshot);
       applyHasKey(nextSnapshot.settingsSummary?.hasGeminiApiKey ?? false);
       setSettingsErrorMessage(null);
@@ -230,7 +229,7 @@ export function useSettingsModal({
   // set equal to its built-in, and Cancel discards it with every other edit.
   async function handleRestoreDefaultPrompts(): Promise<void> {
     try {
-      const defaults = await shellApi.getDefaultPrompts();
+      const defaults = await window.mumbler.getDefaultPrompts();
       setSettingsDraft((current) =>
         current === null
           ? current
@@ -262,7 +261,7 @@ export function useSettingsModal({
   unsavedRef.current = isSettingsDirty;
   const closeRef = useRef(handleCloseSettings);
   closeRef.current = handleCloseSettings;
-  useEffect(() => shellApi.onUnsavedDrafts(
+  useEffect(() => window.mumbler.onUnsavedDrafts(
     () => (unsavedRef.current ? ["settings"] : []),
     () => closeRef.current(),
   ), []);

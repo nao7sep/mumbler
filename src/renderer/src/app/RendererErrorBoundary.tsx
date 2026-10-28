@@ -1,4 +1,3 @@
-import { HandledIpcError, shellApi } from "@renderer/shell-api";
 import React from "react";
 import { describeRendererError } from "./presentFailure";
 import { documentTranslator } from "../i18n/I18nContext";
@@ -9,11 +8,10 @@ export class RendererErrorBoundary extends React.Component<React.PropsWithChildr
   static getDerivedStateFromError() { return { failed: true }; }
 
   override componentDidCatch(error: unknown, info: React.ErrorInfo): void {
-    if (error instanceof HandledIpcError) return;
     const diagnostic = describeRendererError(error);
     const stack = [diagnostic.stack, info.componentStack].filter(Boolean).join("\n");
     try {
-      void shellApi.reportRendererError({
+      void window.mumbler.reportRendererError({
         ...diagnostic,
         source: "react error boundary",
         ...(stack ? { stack } : {}),

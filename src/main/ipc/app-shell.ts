@@ -1,5 +1,4 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
-import { IPC_FAILURE, type IpcResult } from "@shared/ipc-result";
 
 import {
   APP_SHELL_CHANNELS,
@@ -144,13 +143,13 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
   // any failure is logged in main before it propagates back to the renderer. An
   // expected, user-facing rejection (OperationError) is traced at debug —
   // developer-only — while anything unexpected is logged at error with full
-  // fidelity. A plain failure result crosses both Electron bridges intact;
-  // the renderer presents its authored operation message without logging again.
+  // fidelity. The error is always rethrown so the renderer still receives the
+  // rejection and can surface it to the user.
   const handle = <A extends unknown[], R>(
     channel: string,
     fn: (event: IpcMainInvokeEvent, ...args: A) => R | Promise<R>,
   ): void => {
-    ipcMain.handle(channel, async (event: IpcMainInvokeEvent, ...args: unknown[]): Promise<IpcResult<R>> => {
+    ipcMain.handle(channel, async (event: IpcMainInvokeEvent, ...args: unknown[]): Promise<R> => {
       try {
         return await fn(event, ...(args as A));
       } catch (error: unknown) {
@@ -163,7 +162,7 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
         } else {
           await logger.error("ipc.failed", "Unhandled failure in IPC handler.", error, { channel });
         }
-        return IPC_FAILURE;
+        throw error;
       }
     });
   };

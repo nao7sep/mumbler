@@ -1,4 +1,3 @@
-import { IPC_FAILURE } from "@shared/ipc-result";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { APP_SHELL_CHANNELS, type PendingImportReviewItem } from "@shared/app-shell";
@@ -154,7 +153,7 @@ describe("the app-shell IPC boundary", () => {
       );
 
       electron.window = null;
-      await expect(invoke(APP_SHELL_CHANNELS[channel])).resolves.toEqual(IPC_FAILURE);
+      await expect(invoke(APP_SHELL_CHANNELS[channel])).rejects.toThrow(/requires an active window/);
       expect(runtime[channel]).toHaveBeenCalledOnce();
     },
   );
@@ -164,8 +163,8 @@ describe("the app-shell IPC boundary", () => {
     electron.window = window;
     await invoke(APP_SHELL_CHANNELS[channel], "~/draft", "/previous/$LITERAL");
     expect(runtime[channel]).toHaveBeenCalledExactlyOnceWith(window, "~/draft", "/previous/$LITERAL");
-    await expect(invoke(APP_SHELL_CHANNELS[channel], 1)).resolves.toEqual(IPC_FAILURE);
-    await expect(invoke(APP_SHELL_CHANNELS[channel], "draft", {})).resolves.toEqual(IPC_FAILURE);
+    await expect(invoke(APP_SHELL_CHANNELS[channel], 1)).rejects.toThrow(/directory must be a string/);
+    await expect(invoke(APP_SHELL_CHANNELS[channel], "draft", {})).rejects.toThrow(/literalDirectory must be a string/);
     expect(runtime[channel]).toHaveBeenCalledOnce();
   });
 
@@ -178,8 +177,8 @@ describe("the app-shell IPC boundary", () => {
   it("opens an allowed external URL through the OS and refuses a local one", async () => {
     await invoke(APP_SHELL_CHANNELS.openExternal, "https://example.com");
     expect(electron.openExternal).toHaveBeenCalledExactlyOnceWith("https://example.com");
-    await expect(invoke(APP_SHELL_CHANNELS.openExternal, "file:///etc/passwd")).resolves.toEqual(IPC_FAILURE);
-    await expect(invoke(APP_SHELL_CHANNELS.openExternal, 7)).resolves.toEqual(IPC_FAILURE);
+    await expect(invoke(APP_SHELL_CHANNELS.openExternal, "file:///etc/passwd")).rejects.toThrow();
+    await expect(invoke(APP_SHELL_CHANNELS.openExternal, 7)).rejects.toThrow(/url must be a string/);
     expect(electron.openExternal).toHaveBeenCalledOnce();
   });
 
@@ -222,15 +221,14 @@ describe("the app-shell IPC boundary", () => {
     ["readRecordDetail", ["notice", 7], /kind must be a record kind/],
     ["readRecordDetail", ["log", "7"], /id must be an integer/],
     ["saveRecordsListWidth", ["420"], /width must be a finite number/],
-  ] as const)("refuses %s with a malformed argument, before the runtime", async (channel, args, expectedMessage) => {
-    await expect(invoke(APP_SHELL_CHANNELS[channel], ...args)).resolves.toEqual(IPC_FAILURE);
-    expect(logger.error).toHaveBeenLastCalledWith("ipc.failed", expect.any(String), expect.objectContaining({ message: expect.stringMatching(expectedMessage) }), { channel: APP_SHELL_CHANNELS[channel] });
+  ] as const)("refuses %s with a malformed argument, before the runtime", async (channel, args, message) => {
+    await expect(invoke(APP_SHELL_CHANNELS[channel], ...args)).rejects.toThrow(message);
     expect(runtime[channel]).not.toHaveBeenCalled();
   });
 
-  it("traces a rejection the user is meant to see, and returns a plain handled failure", async () => {
+  it("traces a rejection the user is meant to see, and still rejects", async () => {
     runtime.saveCard.mockRejectedValueOnce(new OperationError("That file already exists."));
-    await expect(invoke(APP_SHELL_CHANNELS.saveCard, "card-1")).resolves.toEqual(IPC_FAILURE);
+    await expect(invoke(APP_SHELL_CHANNELS.saveCard, "card-1")).rejects.toThrow("That file already exists.");
     expect(logger.debug).toHaveBeenCalledExactlyOnceWith("ipc.rejected", "IPC operation rejected.", {
       channel: APP_SHELL_CHANNELS.saveCard,
       reason: "That file already exists.",
@@ -238,21 +236,13 @@ describe("the app-shell IPC boundary", () => {
     expect(logger.error).not.toHaveBeenCalled();
   });
 
-  it("logs an unexpected failure with the error, and returns a plain handled failure", async () => {
+  it("logs an unexpected failure with the error, and still rejects", async () => {
     const failure = new Error("disk gone");
     runtime.resetState.mockRejectedValueOnce(failure);
-    await expect(invoke(APP_SHELL_CHANNELS.resetState)).resolves.toEqual(IPC_FAILURE);
+    await expect(invoke(APP_SHELL_CHANNELS.resetState)).rejects.toBe(failure);
     expect(logger.error).toHaveBeenCalledExactlyOnceWith("ipc.failed", "Unhandled failure in IPC handler.", failure, {
       channel: APP_SHELL_CHANNELS.resetState,
     });
     expect(logger.debug).not.toHaveBeenCalled();
-  });
-
-  it("keeps raw failure details out of the serialized reply", async () => {
-    runtime.resetState.mockRejectedValueOnce(new Error("PRIVATE_PATH_AND_API_KEY_SENTINEL"));
-    const reply = JSON.stringify(await invoke(APP_SHELL_CHANNELS.resetState));
-    expect(reply).toBe(JSON.stringify(IPC_FAILURE));
-    expect(reply).not.toContain("SENTINEL");
-    expect(logger.error).toHaveBeenCalledOnce();
   });
 });
