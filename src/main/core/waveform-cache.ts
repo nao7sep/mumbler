@@ -1,24 +1,19 @@
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-
-import { CancelledError } from "./cancellation";
-
 interface WaveformWork {
   controller: AbortController;
   done: Promise<Float32Array>;
   consumers: number;
 }
 
-/** Working recordings are immutable and have unique paths. Disk summaries live
- * only in the app's disposable temp tree; memory belongs to active players. */
+/** Players acquire a recording's summary by their own request id, so a player
+ * that goes away, even after its card was removed, releases it and the last one
+ * stops the decode. A summary is held only while a player uses it. */
 export class WaveformCache {
   private readonly byFile = new Map<string, WaveformWork>();
   private readonly requests = new Map<string, { work: WaveformWork; file: string }>();
   private readonly running = new Set<WaveformWork>();
   private closed = false;
 
-  constructor(private readonly directory: string, private readonly compute: (file: string, signal: AbortSignal) => Promise<Float32Array>) {}
+  constructor(private readonly compute: (file: string, signal: AbortSignal) => Promise<Float32Array>) {}
 
   async acquire(file: string, requestId: string): Promise<Float32Array | null> {
     if (this.closed) return null;
@@ -26,7 +21,7 @@ export class WaveformCache {
     let work = this.byFile.get(file);
     if (work === undefined) {
       const controller = new AbortController();
-      work = { controller, done: this.load(file, controller.signal), consumers: 0 };
+      work = { controller, done: this.compute(file, controller.signal), consumers: 0 };
       this.byFile.set(file, work);
       this.running.add(work);
       const owned = work;
@@ -58,27 +53,5 @@ export class WaveformCache {
     this.closed = true;
     for (const requestId of this.requests.keys()) this.release(requestId);
     await Promise.allSettled([...this.running].map((work) => work.done));
-  }
-
-  private async load(file: string, signal: AbortSignal): Promise<Float32Array> {
-    const cache = join(this.directory, `${createHash("sha256").update(file).digest("hex")}.f32`);
-    try {
-      const bytes = await readFile(cache, { signal });
-      if (bytes.byteLength % 4 === 0) {
-        const peaks = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-        if (peaks.every((peak) => Number.isFinite(peak) && peak >= 0 && peak <= 1)) return peaks;
-      }
-    } catch { /* Disposable cache misses or failures fall through to decoding. */ }
-    if (signal.aborted) throw new CancelledError();
-    const peaks = await this.compute(file, signal);
-    if (signal.aborted) throw new CancelledError();
-    const stage = `${cache}.${randomUUID()}`;
-    try {
-      await mkdir(this.directory, { recursive: true });
-      await writeFile(stage, Buffer.from(peaks.buffer, peaks.byteOffset, peaks.byteLength), { signal, mode: 0o600, flag: "wx" });
-      if (!signal.aborted) await rename(stage, cache);
-    } catch { /* The current player can still use its computed summary. */ }
-    finally { await rm(stage, { force: true }).catch(() => undefined); }
-    return peaks;
   }
 }

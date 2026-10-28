@@ -1525,7 +1525,7 @@ describe("working with a card", () => {
     expect((await readdir(join(home, "output"))).sort()).toEqual([basename(`${stem}.json`), basename(`${stem}.md`), basename(`${stem}.wav`)]);
   });
 
-  it("shares a waveform run and reuses its disk summary after all players leave", async () => {
+  it("shares a waveform run between players of one recording", async () => {
     const card = await confirmed();
     const first = runtime.getCardWaveformPeaks(card.id, "first");
     const second = runtime.getCardWaveformPeaks(card.id, "request-2");
@@ -1534,10 +1534,9 @@ describe("working with a card", () => {
     waveforms.runs[0]!.settle(Float32Array.of(0.5));
     expect([...(await first)!]).toEqual([0.5]);
     expect([...(await second)!]).toEqual([0.5]);
+    expect(waveforms.runs, "one run for both players").toHaveLength(1);
     runtime.cancelCardWaveformPeaks("first");
     runtime.cancelCardWaveformPeaks("request-2");
-    expect([...(await runtime.getCardWaveformPeaks(card.id, "request-3"))!]).toEqual([0.5]);
-    expect(waveforms.runs, "kept, not computed again").toHaveLength(1);
   });
 
   it("stops a waveform run the player no longer waits for, and computes it afresh next time", async () => {

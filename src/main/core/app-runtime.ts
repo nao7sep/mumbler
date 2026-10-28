@@ -1436,7 +1436,7 @@ export class ApplicationRuntime {
     this.ensureReady();
     const filePath = this.resolveCardSourcePath(cardId);
     if (filePath === null) throw new OperationError("Card media source no longer exists.");
-    this.waveformCache ??= new WaveformCache(join(this.runtime.paths!.tempDir, "waveforms"), computeWaveformPeaks);
+    this.waveformCache ??= new WaveformCache(computeWaveformPeaks);
     try {
       return await this.waveformCache.acquire(filePath, requestId);
     } catch (error: unknown) {
