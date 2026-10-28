@@ -647,7 +647,7 @@ export class ApplicationRuntime {
   }
 
   // Called for stored records and changes in missing-history health.
-  onRecordsChanged(callback: (sourcesChanged: boolean, missingRecords: boolean) => void): void {
+  onRecordsChanged(callback: (missingRecords: boolean) => void): void {
     this.runtime.logger.onRecordsChanged(callback);
   }
 

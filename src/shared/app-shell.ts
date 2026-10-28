@@ -745,7 +745,7 @@ export interface MumblerShellApi {
   onDependenciesUpdated(listener: () => void): () => void;
   onInterfaceLanguageChanged(listener: () => void): () => void;
   // A record was stored or missing-history health changed.
-  onRecordsChanged(listener: (sourcesChanged: boolean, missingRecords: boolean) => void): () => void;
+  onRecordsChanged(listener: (missingRecords: boolean) => void): () => void;
   /** Registers what sends the window's unsent edits when a quit asks for them. */
   onFlushPendingEdits(flush: () => Promise<void>): () => void;
   /** Registers what reports, and what discards, a session-only draft when a

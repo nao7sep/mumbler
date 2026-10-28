@@ -42,7 +42,7 @@ const recordsMissing = vi.fn<MumblerShellApi["recordsMissing"]>();
 const reportRendererDiagnostic = vi.fn<MumblerShellApi["reportRendererDiagnostic"]>();
 const getSettingsDraft = vi.fn<MumblerShellApi["getSettingsDraft"]>();
 const saveRecordsListWidth = vi.fn<MumblerShellApi["saveRecordsListWidth"]>();
-let recordsChanged: ((sourcesChanged: boolean, missingRecords: boolean) => void) | null = null;
+let recordsChanged: ((missingRecords: boolean) => void) | null = null;
 const interfaceListeners = new Set<() => void>();
 const onRecordsChanged = vi.fn<MumblerShellApi["onRecordsChanged"]>((listener) => {
   recordsChanged = listener;
@@ -160,8 +160,8 @@ const press = async (key: string) => {
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
   });
 };
-const signal = async (sourcesChanged = true, missingRecords = false) => {
-  await act(async () => recordsChanged!(sourcesChanged, missingRecords));
+const signal = async (missingRecords = false) => {
+  await act(async () => recordsChanged!(missingRecords));
 };
 const cursorOf = (record: RecordSummary) => ({ time: record.time, kind: record.kind, id: record.id });
 
@@ -176,25 +176,12 @@ describe("RecordsWindow", () => {
   it("keeps health notices after subsequent successful writes even when live refresh is suspended", async () => {
     readRecordSources.mockRejectedValue(new Error("unavailable"));
     await mount();
-    await signal(false, true);
+    await signal(true);
     expect(document.body.textContent).toContain("Some records may be missing.");
-    await signal(false, false);
+    await signal(false);
     expect(document.body.textContent).toContain("Some records may be missing.");
   });
 
-  it("refreshes rows without rereading unchanged filter sources and keeps a coalesced source change", async () => {
-    await mount();
-    const initialSources = readRecordSources.mock.calls.length;
-    vi.useFakeTimers();
-    await signal(false);
-    await act(async () => vi.advanceTimersByTime(1000));
-    expect(readRecordSources).toHaveBeenCalledTimes(initialSources);
-    await signal(false);
-    await signal(true);
-    await signal(false);
-    await act(async () => vi.advanceTimersByTime(1000));
-    expect(readRecordSources).toHaveBeenCalledTimes(initialSources + 1);
-  });
   it("lists the records newest first, with nothing selected yet", async () => {
     await mount();
 

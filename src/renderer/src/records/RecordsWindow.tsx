@@ -351,16 +351,13 @@ export function RecordsWindow({ initialListWidth }: { initialListWidth: number }
   // under the reader.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let sourcesDirty = false;
-    const unsubscribe = shellApi.onRecordsChanged((sourcesChanged, missing) => {
+    const unsubscribe = shellApi.onRecordsChanged((missing) => {
       if (missing) setMissingRecords(true);
-      sourcesDirty ||= sourcesChanged;
       if (timer !== null || liveSuspended.current) return;
       timer = setTimeout(() => {
         timer = null;
         if (liveSuspended.current) return;
-        if (sourcesDirty) setSourceReads((count) => count + 1);
-        sourcesDirty = false;
+        setSourceReads((count) => count + 1);
         const scroll = scrollRef.current;
         if (scroll === null || atTop(scroll)) readNewest();
         else newestPending.current = true;

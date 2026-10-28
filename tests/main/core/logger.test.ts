@@ -292,7 +292,7 @@ describe("createLogger", () => {
       logger.onRecordsChanged(stored);
       await logger.info("startup", "kept anyway");
       await logger.close();
-      expect(stored).toHaveBeenCalledExactlyOnceWith(false, true);
+      expect(stored).toHaveBeenCalledExactlyOnceWith(true);
       expect(logger.recordsMissing()).toBe(true);
     } finally {
       stderr.mockRestore();

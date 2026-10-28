@@ -54,7 +54,7 @@ export interface SessionLogger extends AppLogger {
   close(): Promise<void>;
   recordsMissing(): boolean;
   // Stored rows and sticky uncertainty about missing history share this signal.
-  onRecordsChanged(listener: (sourcesChanged: boolean, missingRecords: boolean) => void): void;
+  onRecordsChanged(listener: (missingRecords: boolean) => void): void;
   // Masks this credential value in every entry written from now on.
   maskSecret(value: string): void;
 }
@@ -157,12 +157,12 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
   const reads = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>();
   let fallbackTail: Promise<void> = Promise.resolve();
   let termination: Promise<void> = Promise.resolve();
-  let storedListener: ((sourcesChanged: boolean, missingRecords: boolean) => void) | null = null;
+  let storedListener: ((missingRecords: boolean) => void) | null = null;
   let missingRecords = false;
   const markMissing = (): void => {
     if (missingRecords) return;
     missingRecords = true;
-    storedListener?.(false, true);
+    storedListener?.(true);
   };
   const secrets = new Set<string>();
   const mask = (text: string | null): string | null => (text === null || secrets.size === 0 ? text : maskValues(text, secrets));
@@ -250,7 +250,7 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
       if (message.type === "written") {
         pending.get(message.id)?.resolve();
         pending.delete(message.id);
-        if (message.stored) storedListener?.(message.sourcesChanged, missingRecords);
+        if (message.stored) storedListener?.(missingRecords);
         else markMissing();
       } else if (message.type === "read") {
         const read = reads.get(message.id);

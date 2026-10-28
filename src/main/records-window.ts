@@ -41,9 +41,9 @@ export function buildRecordsWindowOptions(title: string): Electron.BrowserWindow
 }
 
 // Updates the open Records window after writes or health changes.
-export function notifyRecordsChanged(sourcesChanged: boolean, missingRecords: boolean): void {
+export function notifyRecordsChanged(missingRecords: boolean): void {
   if (recordsWindow !== null && !recordsWindow.isDestroyed()) {
-    recordsWindow.webContents.send(APP_SHELL_EVENTS.recordsChanged, sourcesChanged, missingRecords);
+    recordsWindow.webContents.send(APP_SHELL_EVENTS.recordsChanged, missingRecords);
   }
 }
 
