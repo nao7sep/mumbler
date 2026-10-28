@@ -145,7 +145,7 @@
   "settingsIssue.timestampPatternInvalid": "Шаблон времени {number} не является допустимым регулярным выражением.",
   "settingsIssue.skipIntervalSec": "Шаг перехода должен быть целым положительным числом.",
   "settingsIssue.previewSnippetSeconds": "Длительность фрагмента должна быть целым положительным числом.",
-  "settingsIssue.concurrencyLimit": "Число одновременных расшифровок должно быть целым положительным числом.",
+  "settingsIssue.concurrencyLimit": "Число одновременных расшифровок должно быть целым числом от 1 до 16.",
   "settings.themeSystem": "Как в системе ({theme})",
   "settings.themeLight": "Светлая",
   "settings.themeDark": "Тёмная",

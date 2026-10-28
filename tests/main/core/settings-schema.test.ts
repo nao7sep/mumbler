@@ -243,6 +243,12 @@ describe("applySettingsDraft — validation", () => {
     draft.concurrencyLimit = 0;
     expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow(/Concurrency/i);
   });
+
+  it("rejects more than 16 concurrent transcriptions", () => {
+    const draft = freshDraft();
+    draft.concurrencyLimit = 17;
+    expect(() => applySettingsDraft(createDefaultSettings(), draft)).toThrow(/Concurrency limit must be a whole number from 1 to 16/);
+  });
 });
 
 describe("Gemini model fields", () => {

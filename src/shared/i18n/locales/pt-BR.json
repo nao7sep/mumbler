@@ -142,7 +142,7 @@
   "settingsIssue.timestampPatternInvalid": "O padrão de data e hora {number} não é uma expressão regular válida.",
   "settingsIssue.skipIntervalSec": "O intervalo de salto deve ser um número inteiro positivo.",
   "settingsIssue.previewSnippetSeconds": "A duração da prévia deve ser um número inteiro positivo.",
-  "settingsIssue.concurrencyLimit": "O número de transcrições simultâneas deve ser um número inteiro positivo.",
+  "settingsIssue.concurrencyLimit": "O número de transcrições simultâneas deve ser um número inteiro de 1 a 16.",
   "settings.themeSystem": "Sistema ({theme})",
   "settings.themeLight": "Claro",
   "settings.themeDark": "Escuro",

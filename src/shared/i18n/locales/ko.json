@@ -136,7 +136,7 @@
   "settingsIssue.timestampPatternInvalid": "시간 패턴 {number}은(는) 올바른 정규식이 아닙니다.",
   "settingsIssue.skipIntervalSec": "건너뛰기 간격은 양의 정수여야 합니다.",
   "settingsIssue.previewSnippetSeconds": "미리 듣기 길이는 양의 정수여야 합니다.",
-  "settingsIssue.concurrencyLimit": "동시 전사 수는 양의 정수여야 합니다.",
+  "settingsIssue.concurrencyLimit": "동시 전사 수는 1 이상 16 이하의 정수여야 합니다.",
   "settings.themeSystem": "시스템({theme})",
   "settings.themeLight": "라이트",
   "settings.themeDark": "다크",

@@ -20,7 +20,7 @@ import {
   parseUtcMs,
 } from "@shared/timestamps";
 import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages";
-import { isPositiveIntegerSetting } from "@shared/settings-validation";
+import { CONCURRENCY_LIMIT_MAX, isConcurrencyLimitSetting, isPositiveIntegerSetting } from "@shared/settings-validation";
 import { CARD_STATUSES, THEME_PREFERENCES } from "@shared/app-shell";
 import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
 import { FORMAT_VERSIONS } from "./format-versions";
@@ -126,7 +126,7 @@ const SETTINGS_SETS = {
   "gemini.thinking.transcription": text("Transcription thinking"),
   "gemini.thinking.outline": text("Outline thinking"),
   "gemini.thinking.metadata": text("Metadata thinking"),
-  concurrencyLimit: positive("Concurrency limit"),
+  concurrencyLimit: (value) => (typeof value === "number" && isConcurrencyLimitSetting(value) ? null : `Concurrency limit must be a whole number from 1 to ${CONCURRENCY_LIMIT_MAX}.`),
   prompts: promptsIssue,
   checkUpdatesAtLaunch: (value) => (typeof value === "boolean" ? null : "Check for updates at launch must be on or off."),
 } satisfies Record<keyof MumblerSettings, SetValidator>;

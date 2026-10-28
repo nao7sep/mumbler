@@ -703,6 +703,7 @@ describe("settings store", () => {
     ["gemini.endpoint", "ftp://example.test"],
     ["gemini.endpoint", "https://user:secret@example.test"],
     ["gemini.outline", "  "],
+    ["concurrencyLimit", 17],
     ["prompts", { structured: "No placeholder", title: "{transcript}", slug: "{title}" }],
     ["prompts", { structured: "{transcript}", title: "No placeholder", slug: "{title}" }],
     ["prompts", { structured: "{transcript}", title: "{structured}", slug: "No placeholder" }],

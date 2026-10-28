@@ -11,6 +11,14 @@ export function isPositiveIntegerSetting(value: number): boolean {
   return Number.isInteger(value) && value > 0;
 }
 
+// The most transcriptions that may run at once (developer decision, matching
+// TapeBox's downloads).
+export const CONCURRENCY_LIMIT_MAX = 16;
+
+export function isConcurrencyLimitSetting(value: number): boolean {
+  return isPositiveIntegerSetting(value) && value <= CONCURRENCY_LIMIT_MAX;
+}
+
 
 export type NumericSettingField =
   | "skipIntervalSec"
@@ -33,7 +41,7 @@ export interface NumericSettingIssue {
 const NUMERIC_SETTING_RULES: NumericSettingRule[] = [
   { field: "skipIntervalSec", isValid: isPositiveIntegerSetting, issue: "settingsIssue.skipIntervalSec" },
   { field: "previewSnippetSeconds", isValid: isPositiveIntegerSetting, issue: "settingsIssue.previewSnippetSeconds" },
-  { field: "concurrencyLimit", isValid: isPositiveIntegerSetting, issue: "settingsIssue.concurrencyLimit" },
+  { field: "concurrencyLimit", isValid: isConcurrencyLimitSetting, issue: "settingsIssue.concurrencyLimit" },
 ];
 
 // One field-addressable issue per invalid numeric setting, in form order. The

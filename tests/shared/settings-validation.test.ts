@@ -66,7 +66,7 @@ describe("getSettingsNumberIssues", () => {
     const draft = validDraft();
     draft.concurrencyLimit = Number.NaN;
     expect(getSettingsNumberErrors(draft)).toEqual([
-      "Concurrent transcriptions must be a positive integer.",
+      "Concurrent transcriptions must be a whole number from 1 to 16.",
     ]);
   });
 
@@ -80,11 +80,21 @@ describe("getSettingsNumberIssues", () => {
     ]);
   });
 
+  it("accepts 1 to 16 concurrent transcriptions and flags 17", () => {
+    const draft = validDraft();
+    draft.concurrencyLimit = 16;
+    expect(getSettingsNumberErrors(draft)).toEqual([]);
+    draft.concurrencyLimit = 17;
+    expect(getSettingsNumberErrors(draft)).toEqual([
+      "Concurrent transcriptions must be a whole number from 1 to 16.",
+    ]);
+  });
+
   it("flags a fractional value in an integer field", () => {
     const draft = validDraft();
     draft.concurrencyLimit = 1.5;
     expect(getSettingsNumberErrors(draft)).toEqual([
-      "Concurrent transcriptions must be a positive integer.",
+      "Concurrent transcriptions must be a whole number from 1 to 16.",
     ]);
   });
 
@@ -94,7 +104,7 @@ describe("getSettingsNumberIssues", () => {
     draft.concurrencyLimit = Number.NaN;
     expect(getSettingsNumberErrors(draft)).toEqual([
       "Skip interval must be a positive integer.",
-      "Concurrent transcriptions must be a positive integer.",
+      "Concurrent transcriptions must be a whole number from 1 to 16.",
     ]);
   });
 });

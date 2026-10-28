@@ -142,7 +142,7 @@
   "settingsIssue.timestampPatternInvalid": "Lo schema di data e ora {number} non è un’espressione regolare valida.",
   "settingsIssue.skipIntervalSec": "L’intervallo di salto deve essere un numero intero positivo.",
   "settingsIssue.previewSnippetSeconds": "La durata dell’anteprima deve essere un numero intero positivo.",
-  "settingsIssue.concurrencyLimit": "Il numero di trascrizioni simultanee deve essere un numero intero positivo.",
+  "settingsIssue.concurrencyLimit": "Il numero di trascrizioni simultanee deve essere un numero intero da 1 a 16.",
   "settings.themeSystem": "Sistema ({theme})",
   "settings.themeLight": "Chiaro",
   "settings.themeDark": "Scuro",

@@ -139,7 +139,7 @@
   "settingsIssue.timestampPatternInvalid": "Zeitstempelmuster {number} ist kein gültiger regulärer Ausdruck.",
   "settingsIssue.skipIntervalSec": "Das Sprungintervall muss eine positive ganze Zahl sein.",
   "settingsIssue.previewSnippetSeconds": "Die Vorschaudauer muss eine positive ganze Zahl sein.",
-  "settingsIssue.concurrencyLimit": "Die Anzahl gleichzeitiger Transkriptionen muss eine positive ganze Zahl sein.",
+  "settingsIssue.concurrencyLimit": "Die Anzahl gleichzeitiger Transkriptionen muss eine ganze Zahl von 1 bis 16 sein.",
   "settings.themeSystem": "System ({theme})",
   "settings.themeLight": "Hell",
   "settings.themeDark": "Dunkel",

@@ -3,6 +3,7 @@ import { useMemo, useRef, useState, type ReactElement } from "react";
 import { THEME_PREFERENCES, type SettingsDraft } from "@shared/app-shell";
 import { rowFor, thinkingAfterModelEdit } from "@shared/ai-models";
 import {
+  CONCURRENCY_LIMIT_MAX,
   getSettingsNumberIssues,
   getTimestampPatternIssues,
   type NumericSettingField,
@@ -548,6 +549,7 @@ export function SettingsModal({
                   <input
                     type="number"
                     min={1}
+                    max={CONCURRENCY_LIMIT_MAX}
                     step={1}
                     value={draft.concurrencyLimit}
                     {...numberFieldProps("concurrencyLimit")}

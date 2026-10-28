@@ -136,7 +136,7 @@
   "settingsIssue.timestampPatternInvalid": "日時のパターン {number} は正しい正規表現ではありません。",
   "settingsIssue.skipIntervalSec": "スキップ間隔には正の整数を指定してください。",
   "settingsIssue.previewSnippetSeconds": "プレビューの長さには正の整数を指定してください。",
-  "settingsIssue.concurrencyLimit": "同時文字起こし数には正の整数を指定してください。",
+  "settingsIssue.concurrencyLimit": "同時文字起こし数には 1 から 16 までの整数を指定してください。",
   "settings.themeSystem": "システム（{theme}）",
   "settings.themeLight": "ライト",
   "settings.themeDark": "ダーク",

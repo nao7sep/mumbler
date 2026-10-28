@@ -129,7 +129,7 @@
   "settingsIssue.timestampPatternInvalid": "Timestamp pattern {number} is not a valid regular expression.",
   "settingsIssue.skipIntervalSec": "Skip interval must be a positive integer.",
   "settingsIssue.previewSnippetSeconds": "Preview duration must be a positive integer.",
-  "settingsIssue.concurrencyLimit": "Concurrent transcriptions must be a positive integer.",
+  "settingsIssue.concurrencyLimit": "Concurrent transcriptions must be a whole number from 1 to 16.",
   "settings.themeSystem": "System ({theme})",
   "settings.themeLight": "Light",
   "settings.themeDark": "Dark",

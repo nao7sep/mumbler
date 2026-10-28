@@ -142,7 +142,7 @@
   "settingsIssue.timestampPatternInvalid": "Le modèle d’horodatage {number} n’est pas une expression régulière valide.",
   "settingsIssue.skipIntervalSec": "L’intervalle de saut doit être un entier positif.",
   "settingsIssue.previewSnippetSeconds": "La durée d’aperçu doit être un entier positif.",
-  "settingsIssue.concurrencyLimit": "Le nombre de transcriptions simultanées doit être un entier positif.",
+  "settingsIssue.concurrencyLimit": "Le nombre de transcriptions simultanées doit être un entier de 1 à 16.",
   "settings.themeSystem": "Système ({theme})",
   "settings.themeLight": "Clair",
   "settings.themeDark": "Sombre",

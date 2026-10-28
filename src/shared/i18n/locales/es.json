@@ -142,7 +142,7 @@
   "settingsIssue.timestampPatternInvalid": "El patrón de marca de tiempo {number} no es una expresión regular válida.",
   "settingsIssue.skipIntervalSec": "El intervalo de salto debe ser un número entero positivo.",
   "settingsIssue.previewSnippetSeconds": "La duración de la vista previa debe ser un número entero positivo.",
-  "settingsIssue.concurrencyLimit": "El número de transcripciones simultáneas debe ser un número entero positivo.",
+  "settingsIssue.concurrencyLimit": "El número de transcripciones simultáneas debe ser un número entero de 1 a 16.",
   "settings.themeSystem": "Sistema ({theme})",
   "settings.themeLight": "Claro",
   "settings.themeDark": "Oscuro",
