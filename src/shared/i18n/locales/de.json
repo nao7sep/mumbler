@@ -63,7 +63,7 @@
   "quit.title": "Mumbler wurde nicht beendet",
   "quit.detailsLabel": "Details zum Beenden",
   "quit.body": "Mumbler konnte {items} nicht speichern. Versuchen Sie es erneut oder beenden Sie Mumbler trotzdem; was nicht gespeichert werden konnte, geht dann verloren.",
-  "quit.draftsUnavailableBody": "Mumbler konnte nicht prüfen, ob ungespeicherte Änderungen an den Einstellungen vorliegen. Versuchen Sie es erneut oder beenden Sie die App trotzdem. Dabei gehen ungespeicherte Änderungen verloren.",
+  "quit.draftsUnavailableBody": "Mumbler konnte nicht prüfen, ob ungespeicherte Änderungen an den Einstellungen vorliegen. Wenn Sie die App trotzdem beenden, gehen ungespeicherte Änderungen verloren.",
   "quit.stalledBody": "Mumbler konnte das Speichern Ihrer Arbeit nicht rechtzeitig abschließen. Versuchen Sie es erneut oder beenden Sie Mumbler trotzdem; was möglicherweise nicht gespeichert wurde, geht dann verloren.",
   "quit.detail": "Sehen Sie im Menü unter „Protokoll“ nach, was schiefgelaufen ist.",
   "quit.quitAnyway": "Trotzdem beenden",

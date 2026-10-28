@@ -63,7 +63,7 @@
   "quit.title": "Mumbler ne s’est pas fermé",
   "quit.detailsLabel": "Détails de la fermeture",
   "quit.body": "Mumbler n’a pas pu enregistrer {items}. Réessayez, ou quittez quand même en perdant ce qui n’a pas pu être enregistré.",
-  "quit.draftsUnavailableBody": "Mumbler n’a pas pu vérifier s’il y a des modifications non enregistrées dans les Réglages. Réessayez ou quittez quand même\u00a0; les modifications non enregistrées seront perdues.",
+  "quit.draftsUnavailableBody": "Mumbler n’a pas pu vérifier s’il y a des modifications non enregistrées dans les Réglages. Si vous quittez quand même, les modifications non enregistrées seront perdues.",
   "quit.stalledBody": "Mumbler n’a pas pu terminer à temps l’enregistrement de votre travail. Réessayez, ou quittez quand même en perdant ce qui n’a peut-être pas été enregistré.",
   "quit.detail": "Ouvrez le Journal depuis le menu pour voir ce qui s’est passé.",
   "quit.quitAnyway": "Quitter quand même",

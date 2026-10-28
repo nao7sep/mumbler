@@ -63,7 +63,7 @@
   "quit.title": "Mumbler 未退出",
   "quit.detailsLabel": "退出详情",
   "quit.body": "Mumbler 无法保存{items}。请重试，或仍然退出并丢失未能保存的内容。",
-  "quit.draftsUnavailableBody": "Mumbler 无法检查设置中是否有未保存的更改。请重试，或仍然退出并丢弃所有未保存的更改。",
+  "quit.draftsUnavailableBody": "Mumbler 无法检查设置中是否有未保存的更改。如果仍然退出，所有未保存的更改都将丢失。",
   "quit.stalledBody": "Mumbler 未能及时完成保存你的工作。请重试，或仍然退出并丢失可能未保存的内容。",
   "quit.detail": "请从菜单打开“日志”查看原因。",
   "quit.quitAnyway": "仍然退出",

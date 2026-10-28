@@ -47,34 +47,32 @@ let mainWindow: BrowserWindow | null = null;
 
 type DraftQuitChoice = "discard" | "cancel" | "retry" | "quit-anyway";
 
-// A failed query keeps the draft decision open. OS takeover cancels the query
-// or question and continues through the bounded session-end path.
+// A failed query asks whether to quit anyway; it never counts as no drafts. OS
+// takeover cancels the query or question and continues through the bounded
+// session-end path.
 async function confirmDiscardDrafts(
   runtime: ApplicationRuntime,
   window: BrowserWindow | null,
   shown: (question: OpenPlainDialog<DraftQuitChoice> | null) => void,
   cancelled: AbortSignal,
 ): Promise<boolean> {
-  for (;;) {
-    const timeout = AbortSignal.any([AbortSignal.timeout(QUIT_BUDGETS.user.flush), cancelled]);
-    const result = await queryWindowDrafts(window, timeout);
-    if (cancelled.aborted) return false;
-    if (result.kind === "available" && result.drafts.length === 0) return true;
-    if (result.kind === "unavailable") {
-      void runtime.currentLogger().error("quit.drafts-unavailable", "Could not check the window's unsaved drafts.", result.error).catch(() => undefined);
-    }
-    const question: OpenPlainDialog<DraftQuitChoice> = result.kind === "unavailable"
-      ? showPlainDialog(quitFailureDialog(runtime.translator(), "drafts-unavailable"))
-      : showPlainDialog(discardDraftsDialog(runtime.translator()));
-    shown(question);
-    let choice: DraftQuitChoice;
-    try { choice = await question.choice; }
-    finally { shown(null); }
-    if (cancelled.aborted || choice === "cancel") return false;
-    if (choice === "retry") continue;
-    discardWindowDrafts(window);
-    return true;
+  const timeout = AbortSignal.any([AbortSignal.timeout(QUIT_BUDGETS.user.flush), cancelled]);
+  const result = await queryWindowDrafts(window, timeout);
+  if (cancelled.aborted) return false;
+  if (result.kind === "available" && result.drafts.length === 0) return true;
+  if (result.kind === "unavailable") {
+    void runtime.currentLogger().error("quit.drafts-unavailable", "Could not check the window's unsaved drafts.", result.error).catch(() => undefined);
   }
+  const question: OpenPlainDialog<DraftQuitChoice> = result.kind === "unavailable"
+    ? showPlainDialog(quitFailureDialog(runtime.translator(), "drafts-unavailable"))
+    : showPlainDialog(discardDraftsDialog(runtime.translator()));
+  shown(question);
+  let choice: DraftQuitChoice;
+  try { choice = await question.choice; }
+  finally { shown(null); }
+  if (cancelled.aborted || choice === "cancel") return false;
+  discardWindowDrafts(window);
+  return true;
 }
 
 function createQuit(runtime: ApplicationRuntime): QuitController {

@@ -63,7 +63,7 @@
   "quit.title": "Mumblerは終了していません",
   "quit.detailsLabel": "終了の詳細",
   "quit.body": "Mumblerは{items}を保存できませんでした。再試行するか、保存できなかった内容を失っても終了するかを選んでください。",
-  "quit.draftsUnavailableBody": "設定に未保存の変更があるか確認できませんでした。再試行するか、未保存の変更を破棄して終了してください。",
+  "quit.draftsUnavailableBody": "設定に未保存の変更があるか確認できませんでした。このまま終了すると、未保存の変更は失われます。",
   "quit.stalledBody": "Mumblerは作業内容の保存を時間内に完了できませんでした。再試行するか、保存されていない可能性がある内容を失っても終了するかを選んでください。",
   "quit.detail": "メニューの「ログ」で原因を確認できます。",
   "quit.quitAnyway": "このまま終了",

@@ -63,7 +63,7 @@
   "quit.title": "Mumbler no se cerró",
   "quit.detailsLabel": "Detalles del cierre",
   "quit.body": "Mumbler no pudo guardar {items}. Reintenta o sal de todos modos y perderás lo que no se pudo guardar.",
-  "quit.draftsUnavailableBody": "Mumbler no pudo comprobar si hay cambios sin guardar en Configuración. Reintenta o sal de todos modos; los cambios sin guardar se perderán.",
+  "quit.draftsUnavailableBody": "Mumbler no pudo comprobar si hay cambios sin guardar en Configuración. Si sales de todos modos, los cambios sin guardar se perderán.",
   "quit.stalledBody": "Mumbler no pudo terminar de guardar tu trabajo a tiempo. Reintenta o sal de todos modos y perderás lo que quizá no se guardó.",
   "quit.detail": "Abre Registros desde el menú para ver qué falló.",
   "quit.quitAnyway": "Salir de todos modos",

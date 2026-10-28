@@ -270,12 +270,18 @@ export function quitFailureDialog(translator: Translator, failure: QuitFailure):
           .format(failure.map((store) => translator.t(FAILURE_NAMES[store]))),
       }),
     detail: translator.t("quit.detail"),
-    actions: [
-      { choice: "cancel", label: translator.t("common.cancel") },
-      { choice: "retry", label: translator.t("common.retry"), tone: "primary" },
-      { choice: "quit-anyway", label: translator.t("quit.quitAnyway"), tone: "danger" },
-    ],
-    focus: "retry",
+    // A window that did not report its drafts is unlikely to answer a retry.
+    actions: failure === "drafts-unavailable"
+      ? [
+        { choice: "cancel", label: translator.t("common.cancel") },
+        { choice: "quit-anyway", label: translator.t("quit.quitAnyway"), tone: "danger" },
+      ]
+      : [
+        { choice: "cancel", label: translator.t("common.cancel") },
+        { choice: "retry", label: translator.t("common.retry"), tone: "primary" },
+        { choice: "quit-anyway", label: translator.t("quit.quitAnyway"), tone: "danger" },
+      ],
+    focus: failure === "drafts-unavailable" ? "cancel" : "retry",
     dismiss: "cancel",
   };
 }

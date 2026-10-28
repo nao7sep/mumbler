@@ -405,7 +405,8 @@ describe("the failed-save question", () => {
     expect(quitFailureDialog(createTranslator("en"), "stalled").body).toContain("could not finish saving your work in time");
     const unavailable = quitFailureDialog(createTranslator("en"), "drafts-unavailable");
     expect(unavailable.body).toContain("could not check for unsaved Settings changes");
-    expect(unavailable.actions.map((action) => action.choice)).toEqual(["cancel", "retry", "quit-anyway"]);
+    expect(unavailable.actions.map((action) => action.choice)).toEqual(["cancel", "quit-anyway"]);
+    expect(unavailable.focus).toBe("cancel");
   });
 
   it("speaks the interface language", () => {

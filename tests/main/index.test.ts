@@ -312,7 +312,7 @@ describe("quit", () => {
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
   });
 
-  it.each(["cancel", "quit-anyway", "retry"] as const)("honors %s after the draft check times out", async (choice) => {
+  it.each(["cancel", "quit-anyway"] as const)("honors %s after the draft check times out", async (choice) => {
     state.unsavedDrafts = ["settings"];
     state.holdDraftsReply = true;
     state.quitChoice = choice;
@@ -324,15 +324,6 @@ describe("quit", () => {
     timeout.abort();
     await vi.waitFor(() => expect(state.questions).toHaveLength(1));
     expect(state.questions[0]).toMatchObject({ body: "quit.draftsUnavailableBody" });
-    if (choice === "retry") {
-      await vi.waitFor(() => expect(state.heldDraftsReplies).toHaveLength(2));
-      state.heldDraftsReplies[0]!();
-      await Promise.resolve();
-      expect(state.questions).toHaveLength(1);
-      state.heldDraftsReplies[1]!();
-      await vi.waitFor(() => expect(state.questions).toHaveLength(2));
-      expect(state.questions[1]).toMatchObject({ title: "decision.discardTitle" });
-    }
     if (choice === "quit-anyway") {
       await vi.waitFor(() => expect(state.exits).toEqual([0]));
       expect(mainWindow.discards).toBe(1);
