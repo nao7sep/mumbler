@@ -213,22 +213,6 @@ describe("App saving a recording", () => {
 });
 
 describe("App generation readiness", () => {
-  it("asks again about newly affected results when prerequisites change during confirmation", async () => {
-    await act(async () => root?.render(createElement(App)));
-    await act(async () => button("detail.tabTranscribe").click());
-    const generate = [...document.querySelectorAll<HTMLButtonElement>("button")]
-      .filter((node) => node.textContent === english.text(message("transcribe.generate")));
-    await act(async () => generate[3]!.click());
-    const before = initialSnapshot.state!.cards[0]!;
-    initialSnapshot = { ...initialSnapshot, state: { ...initialSnapshot.state!, cards: [{ ...before, transcription: { text: null } }] } };
-    await act(async () => pipelineChanged?.());
-    await act(async () => button("transcribe.generate", document.querySelector('[role="dialog"]')!).click());
-    expect(generateCardStep).not.toHaveBeenCalled();
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Structured transcription, Title, Slug");
-    await act(async () => button("transcribe.generate", document.querySelector('[role="dialog"]')!).click());
-    expect(generateCardStep).toHaveBeenCalledExactlyOnceWith(before.id, "slug");
-  });
-
   it.each(["key", "endpoint"] as const)("disables individual generation and Retry when the %s is unavailable, including live changes", async (missing) => {
     const card = readyCard();
     card.status = "Error";

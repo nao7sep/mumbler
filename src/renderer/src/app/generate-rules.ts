@@ -177,12 +177,3 @@ export function getGenerateConfirmBody(card: MumblerCard, target: GenerateTarget
   }
   return message(GENERATE_CONFIRM_BODIES[startStep], { results: invalidated });
 }
-
-/** Consent belongs to the recording and results that were shown in the question. */
-export function sameGenerateInputs(before: MumblerCard, after: MumblerCard): boolean {
-  return before.id === after.id && before.updatedAtUtc === after.updatedAtUtc &&
-    before.trim.frontMarkerSec === after.trim.frontMarkerSec && before.trim.backMarkerSec === after.trim.backMarkerSec &&
-    before.transcription.text === after.transcription.text &&
-    before.metadata.structured === after.metadata.structured &&
-    before.metadata.title === after.metadata.title && before.metadata.slug === after.metadata.slug;
-}
