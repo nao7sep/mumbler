@@ -1200,7 +1200,7 @@ describe("working with a card", () => {
           : card,
     );
     // The long text lives in each card's own file, not in queue.json.
-    await new TranscriptStore(join(home, "transcripts")).writeChanged(transcribed.map((card) => ({ cardId: card.id, transcription: card.transcription.text, structured: card.metadata.structured })));
+    await new TranscriptStore(join(home, "transcripts")).writeChanged(transcribed);
     await store.save({ ...loaded.value, cards: transcribed });
     runtime = await ApplicationRuntime.initialize();
   }
@@ -1218,7 +1218,7 @@ describe("working with a card", () => {
     const saved = cards(runtime.getSnapshot())[0];
     if (missing === "transcription") saved.transcription.text = null;
     else saved.metadata.structured = null;
-    await new TranscriptStore(join(home, "transcripts")).writeChanged([{ cardId: saved.id, transcription: saved.transcription.text, structured: saved.metadata.structured }]);
+    await new TranscriptStore(join(home, "transcripts")).writeChanged([saved]);
     runtime = await ApplicationRuntime.initialize();
     await expect(runtime.saveCard(card.id)).rejects.toThrow();
     expect(await exists(saved.sourceFilePath)).toBe(true);
@@ -2007,7 +2007,7 @@ describe("each card's text in its own file", () => {
   async function withTextOnDisk(card: MumblerCard): Promise<void> {
     await runtime.shutdown();
     await new TranscriptStore(join(home, "transcripts")).writeChanged([
-      { cardId: card.id, transcription: "every word that was said", structured: "## what it was about" },
+      { ...card, transcription: { text: "every word that was said" }, metadata: { ...card.metadata, structured: "## what it was about" } },
     ]);
     runtime = await ApplicationRuntime.initialize();
   }
@@ -2152,7 +2152,7 @@ describe("a store in a newer format", () => {
     const card = await confirmedCard();
     await runtime.shutdown();
     await new TranscriptStore(join(home, "transcripts")).writeChanged([
-      { cardId: card.id, transcription: "words", structured: card.metadata.structured },
+      { ...card, transcription: { text: "words" } },
     ]);
     const [file] = (await readdir(join(home, "transcripts"))).filter((name) => name.endsWith(".json"));
     const path = join(home, "transcripts", file);
@@ -2592,7 +2592,7 @@ describe("the save a quit makes", () => {
   type Internals = { runtime: { state: { cards: MumblerCard[] } } };
 
   function observeFinalTranscriptWrite() {
-    const { transcriptStore } = (runtime as unknown as { runtime: { transcriptStore: InstanceType<typeof TranscriptStore> } }).runtime;
+    const { transcriptStore } = (runtime as unknown as { runtime: { transcriptStore: { writeChanged(cards: MumblerCard[]): Promise<void> } } }).runtime;
     return vi.spyOn(transcriptStore, "writeChanged");
   }
 
@@ -2800,7 +2800,7 @@ describe("the save a quit makes", () => {
   it("retries settings before a held optional transcript cleanup", async () => {
     const stores = (runtime as unknown as { runtime: {
       settingsStore: { retryFailedWrite(): Promise<unknown> };
-      transcriptStore: InstanceType<typeof TranscriptStore>;
+      transcriptStore: { removeAbsent(cards: MumblerCard[]): Promise<void> };
     } }).runtime;
     const configPath = join(home, "config.json");
     let releaseWrite!: () => void;

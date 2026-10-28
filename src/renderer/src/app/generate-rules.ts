@@ -1,4 +1,4 @@
-import type { CardSummary, GenerateTarget, MumblerCard, TrimDecision } from "@shared/app-shell";
+import type { GenerateTarget, MumblerCard, TrimDecision } from "@shared/app-shell";
 import { resolveGenerateStartStep } from "@shared/generate-rules";
 
 import type { MessageKey } from "@shared/i18n/catalogues";
@@ -97,10 +97,10 @@ export function getSaveDisabledReason(params: {
   return null;
 }
 
-export function getRemoveConfirmBody(card: MumblerCard | CardSummary): Message {
+export function getRemoveConfirmBody(card: MumblerCard): Message {
   const hasAiWork =
-    ("hasTranscription" in card ? card.hasTranscription || card.hasStructured :
-      (card.transcription.text ?? "").trim().length > 0 || (card.metadata.structured ?? "").trim().length > 0) ||
+    (card.transcription.text ?? "").trim().length > 0 ||
+    (card.metadata.structured ?? "").trim().length > 0 ||
     (card.metadata.title ?? "").trim().length > 0 ||
     (card.metadata.slug ?? "").trim().length > 0;
 

@@ -40,8 +40,8 @@ export type PipelineCompletionNotification =
 // Only a finished generation announces itself; a save handing its card back as
 // Ready to Save (a conflict, a cancel, a failure) is reported by the save itself.
 export function pipelineCompletionNotification(
-  previous: Pick<MumblerCard, "status">,
-  card: Pick<MumblerCard, "status" | "originalFilename">,
+  previous: MumblerCard,
+  card: MumblerCard,
 ): PipelineCompletionNotification | null {
   if (card.status === "Ready to Save" && previous.status !== "Saving") {
     return { message: message("notice.readyToSave", { file: nameValue(card.originalFilename) }), kind: "toast" };

@@ -6,7 +6,6 @@ import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery
 export const APP_SHELL_CHANNELS = {
   getInterfaceLanguage: "app-shell:get-interface-language",
   getSnapshot: "app-shell:get-snapshot",
-  getCardBody: "app-shell:get-card-body",
   dismissFirstRunSetup: "app-shell:dismiss-first-run-setup",
   getSettingsDraft: "app-shell:get-settings-draft",
   getDefaultPrompts: "app-shell:get-default-prompts",
@@ -313,28 +312,6 @@ export interface MumblerCard {
   updatedAtUtc: number;
 }
 
-/** Queue metadata never carries the two potentially large text bodies. */
-export type CardMetadata = Omit<MumblerCard, "transcription" | "metadata"> & {
-  metadata: Pick<MumblerCard["metadata"], "title" | "slug">;
-};
-export interface CardSummary extends CardMetadata {
-  bodyRevision: number;
-  hasTranscription: boolean;
-  hasStructured: boolean;
-}
-export interface CardBody {
-  readonly cardId: string;
-  readonly revision: number;
-  readonly hasTranscription: boolean;
-  readonly hasStructured: boolean;
-  readonly transcription: string | null;
-  readonly structured: string | null;
-}
-export interface QueueMetadata {
-  pendingImports: PendingImportReviewItem[];
-  cards: CardMetadata[];
-}
-
 /** The user's durable card queue and pending imports; presentation is in MumblerLayout. */
 export interface MumblerQueue {
   pendingImports: PendingImportReviewItem[];
@@ -575,7 +552,7 @@ export interface MumblerLayout {
   setupPending: boolean;
 }
 
-export interface AppSnapshot<Card = MumblerCard> {
+export interface AppSnapshot {
   firstRun: boolean;
   // The language the main process and the renderer both speak, resolved from
   // the saved choice and the computer's language.
@@ -595,7 +572,7 @@ export interface AppSnapshot<Card = MumblerCard> {
   commands: CommandDefinition[];
   startupDiagnostic: StartupFailure | null;
   appWideError: StartupDiagnostic | null;
-  state: { pendingImports: PendingImportReviewItem[]; cards: Card[] } | null;
+  state: MumblerQueue | null;
   // Disposable presentation state. Null until the runtime is ready, like the
   // other snapshot slices.
   layout: MumblerLayout | null;
@@ -605,8 +582,6 @@ export interface AppSnapshot<Card = MumblerCard> {
   dependencies: DependencyStatus[] | null;
 }
 
-export type ShellSnapshot = AppSnapshot<CardSummary>;
-
 export interface FailedImport {
   // Empty when the delivered item had no usable path or name.
   sourcePath: string;
@@ -614,8 +589,8 @@ export interface FailedImport {
   kind: "invalid" | "failure";
 }
 
-export interface ImportOperationResult<Snapshot = AppSnapshot> {
-  snapshot: Snapshot;
+export interface ImportOperationResult {
+  snapshot: AppSnapshot;
   attemptedPaths: string[];
   importedCount: number;
   failedImports: FailedImport[];
@@ -629,8 +604,8 @@ export interface ImportOriginalWarning {
   message: Message;
 }
 
-export interface ConfirmImportsResult<Snapshot = AppSnapshot> {
-  snapshot: Snapshot;
+export interface ConfirmImportsResult {
+  snapshot: AppSnapshot;
   originalWarnings: ImportOriginalWarning[];
 }
 
@@ -646,10 +621,10 @@ export interface SaveOutputFile {
   status: "saved" | "unchanged" | "failed" | "pending";
 }
 
-export type SaveCardResult<Snapshot = AppSnapshot> =
+export type SaveCardResult =
   | {
       kind: "saved";
-      snapshot: Snapshot;
+      snapshot: AppSnapshot;
       audioPath: string;
       jsonPath: string;
       markdownPath: string;
@@ -657,78 +632,77 @@ export type SaveCardResult<Snapshot = AppSnapshot> =
     }
   | {
       kind: "failed";
-      snapshot: Snapshot;
+      snapshot: AppSnapshot;
       message: Message;
       files?: SaveOutputFile[];
     }
   | {
       kind: "conflict";
-      snapshot: Snapshot;
+      snapshot: AppSnapshot;
       audioPath: string;
       jsonPath: string;
       markdownPath: string;
     }
   | {
       kind: "cancelled";
-      snapshot: Snapshot;
+      snapshot: AppSnapshot;
     };
 
 export interface MumblerShellApi {
   getInterfaceLanguage(): Promise<InterfaceLanguage>;
-  getSnapshot(): Promise<ShellSnapshot>;
-  getCardBody(cardId: string): Promise<CardBody | null>;
+  getSnapshot(): Promise<AppSnapshot>;
   dismissFirstRunSetup(): Promise<void>;
   getSettingsDraft(): Promise<SettingsDraft>;
   getDefaultPrompts(): Promise<PromptTemplates>;
-  openImportDialog(): Promise<ImportOperationResult<ShellSnapshot>>;
-  importDroppedPaths(paths: string[]): Promise<ImportOperationResult<ShellSnapshot>>;
-  updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<ShellSnapshot>;
-  confirmPendingImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult<ShellSnapshot>>;
-  selectCard(cardId: string | null): Promise<ShellSnapshot>;
-  duplicateCard(cardId: string): Promise<ShellSnapshot>;
-  updateCardTrim(cardId: string, trim: CardTrim): Promise<ShellSnapshot>;
+  openImportDialog(): Promise<ImportOperationResult>;
+  importDroppedPaths(paths: string[]): Promise<ImportOperationResult>;
+  updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot>;
+  confirmPendingImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult>;
+  selectCard(cardId: string | null): Promise<AppSnapshot>;
+  duplicateCard(cardId: string): Promise<AppSnapshot>;
+  updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot>;
   getCardMediaSource(cardId: string): Promise<string>;
   // The loudest level in each hundredth of a second, for the player's waveform.
   // Null when the run was stopped before it finished.
   getCardWaveformPeaks(cardId: string, requestId: string): Promise<Float32Array | null>;
   cancelCardWaveformPeaks(requestId: string): Promise<void>;
-  generateCardStep(cardId: string, target: GenerateTarget): Promise<ShellSnapshot>;
-  cancelCardProcessing(cardId: string): Promise<ShellSnapshot>;
+  generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot>;
+  cancelCardProcessing(cardId: string): Promise<AppSnapshot>;
   pickOutputDirectory(directory?: string, literalDirectory?: string): Promise<string | null>;
   pickBackupDirectory(directory?: string, literalDirectory?: string): Promise<string | null>;
   openOutputDirectory(): Promise<void>;
   openExternal(url: string): Promise<void>;
-  saveSettingsDraft(draft: SettingsDraft): Promise<ShellSnapshot>;
+  saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot>;
   // Set/clear the Gemini API key. These go to the dedicated secrets file
   // (api-keys.json), separate from the settings JSON, and return a fresh snapshot
   // so the renderer's hasGeminiApiKey presence flag updates immediately.
-  setGeminiApiKey(apiKey: string): Promise<ShellSnapshot>;
-  clearGeminiApiKey(): Promise<ShellSnapshot>;
-  chooseOutputDirectory(): Promise<ShellSnapshot>;
-  saveSetupDirectory(directory: string): Promise<ShellSnapshot>;
-  saveSetupRecordingsDirectory(directory: string): Promise<ShellSnapshot>;
-  saveSetupTimezone(timezone: string): Promise<ShellSnapshot>;
-  chooseOriginalsDirectory(): Promise<ShellSnapshot>;
-  saveCard(cardId: string, resolution?: SaveConflictResolution, options?: SaveCardOptions): Promise<SaveCardResult<ShellSnapshot>>;
-  removeCard(cardId: string): Promise<ShellSnapshot>;
-  reportRendererError(report: RendererErrorReport): Promise<ShellSnapshot>;
+  setGeminiApiKey(apiKey: string): Promise<AppSnapshot>;
+  clearGeminiApiKey(): Promise<AppSnapshot>;
+  chooseOutputDirectory(): Promise<AppSnapshot>;
+  saveSetupDirectory(directory: string): Promise<AppSnapshot>;
+  saveSetupRecordingsDirectory(directory: string): Promise<AppSnapshot>;
+  saveSetupTimezone(timezone: string): Promise<AppSnapshot>;
+  chooseOriginalsDirectory(): Promise<AppSnapshot>;
+  saveCard(cardId: string, resolution?: SaveConflictResolution, options?: SaveCardOptions): Promise<SaveCardResult>;
+  removeCard(cardId: string): Promise<AppSnapshot>;
+  reportRendererError(report: RendererErrorReport): Promise<AppSnapshot>;
   reportRendererDiagnostic(report: RendererErrorReport): Promise<void>;
-  dismissAppWideError(): Promise<ShellSnapshot>;
-  resetState(): Promise<ShellSnapshot>;
-  cancelPendingImports(ids: string[]): Promise<ShellSnapshot>;
+  dismissAppWideError(): Promise<AppSnapshot>;
+  resetState(): Promise<AppSnapshot>;
+  cancelPendingImports(ids: string[]): Promise<AppSnapshot>;
   // Managed audio-tool operations. Each returns a fresh snapshot so the surface
   // reflects the new state; live progress arrives via onDependenciesUpdated.
   // provisionTool is the single acquire operation (Install when absent, Update
   // when a newer version is known — same flow underneath).
-  provisionTool(name: ToolName): Promise<ShellSnapshot>;
-  cancelToolProvision(name: ToolName): Promise<ShellSnapshot>;
-  checkTools(): Promise<ShellSnapshot>;
-  cancelToolCheck(): Promise<ShellSnapshot>;
-  saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<ShellSnapshot>;
+  provisionTool(name: ToolName): Promise<AppSnapshot>;
+  cancelToolProvision(name: ToolName): Promise<AppSnapshot>;
+  checkTools(): Promise<AppSnapshot>;
+  cancelToolCheck(): Promise<AppSnapshot>;
+  saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot>;
   // Persist the queue (left) pane's dragged width intent to layout.json and return
   // a fresh snapshot. Called only on a splitter drag-commit; a window resize
   // re-derives the displayed width in the renderer and persists nothing.
-  saveLayout(queueWidth: number): Promise<ShellSnapshot>;
+  saveLayout(queueWidth: number): Promise<AppSnapshot>;
   // The records window: opened from the main window, it reads records.sqlite3.
   openRecordsWindow(): Promise<void>;
   readRecordsPage(query: RecordsQuery): Promise<RecordsPage>;

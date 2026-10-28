@@ -1104,7 +1104,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
       const save = QueueStore.prototype.save;
       const operations: string[] = [];
       vi.spyOn(TranscriptStore.prototype, "writeChanged").mockImplementation(async function (this: typeof TranscriptStore.prototype, cards) {
-        operations.push(`text:${cards[0].transcription}`);
+        operations.push(`text:${cards[0].metadata.title}`);
         if (operations.length === 1) { entered.release(); await release.promise; }
         return write.call(this, cards);
       });
@@ -1120,11 +1120,11 @@ describe("ApplicationRuntime confirmed import commit", () => {
         card.transcription.text = "later text";
         later = persistence(runtime).persistState();
         await Promise.resolve();
-        expect(operations).toEqual(["text:quit text"]);
+        expect(operations).toEqual(["text:quit title"]);
         release.release();
         expect(await quit).toEqual([]);
         await later;
-        expect(operations).toEqual(["text:quit text", "queue:quit title", "text:later text", "queue:later title"]);
+        expect(operations).toEqual(["text:quit title", "queue:quit title", "text:later title", "queue:later title"]);
         expect(persistence(runtime).queueBehind).toBe(false);
         expect((await createQueueStore(queuePath).load()).value.cards[0].metadata.title).toBe("later title");
         expect((await new TranscriptStore(getAppPaths().transcriptsDir).open([card.id])).get(card.id)?.transcription)

@@ -5,7 +5,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AppPaths, ShellSnapshot as AppSnapshot, MumblerShellApi } from "@shared/app-shell";
+import type { AppPaths, AppSnapshot, MumblerShellApi } from "@shared/app-shell";
 import { App } from "@renderer/app/App";
 import { createDefaultSettings, summarizeSettings } from "@main/core/settings-schema";
 

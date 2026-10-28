@@ -3,7 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ShellSnapshot as AppSnapshot, MumblerShellApi } from "@shared/app-shell";
+import type { AppSnapshot, MumblerShellApi } from "@shared/app-shell";
 import { FirstRunSetupModal } from "@renderer/app/FirstRunSetupModal";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

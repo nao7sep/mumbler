@@ -332,7 +332,6 @@
   "output.savedTo": "Gespeichert unter {path}",
   "output.hint": "Das Audio wird mit der Aufnahmezeit darin gespeichert, verschoben um einen vorderen Zuschnitt. Daneben liegen zwei Dateien: eine .json mit dem vollständigen Datensatz (Zeiten, Zuschnitt, Transkript, strukturierter Text, Titel, Slug und die verwendeten KI-Modelle) und eine .md mit dem strukturierten Text unter einem Kopf aus Titel, Slug und Datum, bereit für eine Notiz-App.",
   "detail.selectRecording": "Wählen Sie eine Aufnahme aus",
-  "detail.loading": "Text der Aufnahme wird geladen\u00a0…",
   "detail.noSelection": "Keine Auswahl",
   "detail.noSelectionBody": "Importieren Sie Aufnahmen, um zu beginnen.",
   "import.imported": {

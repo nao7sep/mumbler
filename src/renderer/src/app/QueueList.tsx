@@ -31,7 +31,7 @@ export function formatDuration(value: number): string {
 }
 
 export interface QueueListProps {
-  cards: Pick<MumblerCard, "id" | "originalFilename" | "timestamps" | "durationSec" | "status" | "activeStep" | "lastError">[];
+  cards: MumblerCard[];
   selectedCardId: string | null;
   onSelect: (cardId: string) => void;
   /** Asks to remove a card; its × is disabled while the card is busy. */

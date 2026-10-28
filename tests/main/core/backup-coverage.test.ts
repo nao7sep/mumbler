@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+import type { MumblerCard } from "@shared/app-shell";
 
 const { backupRecord } = vi.hoisted(() => ({ backupRecord: vi.fn() }));
 vi.mock("@main/core/backupStore", () => ({ record: backupRecord }));
@@ -36,7 +37,7 @@ it("records a settings save", async () => {
 it("does not record the queue or a transcript", async () => {
   await createQueueStore(join(dir, "queue.json")).save(createEmptyQueue());
   await new TranscriptStore(join(dir, "transcripts")).writeChanged([
-    { cardId: "take", transcription: "words", structured: null },
+    { id: "take", transcription: { text: "words" }, metadata: { structured: null, title: null, slug: null } } as MumblerCard,
   ]);
   expect(backupRecord).not.toHaveBeenCalled();
 });

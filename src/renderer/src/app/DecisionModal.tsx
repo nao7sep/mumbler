@@ -11,7 +11,6 @@ export interface DecisionModalProps {
   actions: Array<{
     label: string;
     onClick: () => void;
-    disabled?: boolean;
     variant?: "primary" | "danger" | "ghost";
   }>;
   // Escape and backdrop both route here. Callers pass the safe/cancel path so a
@@ -53,7 +52,6 @@ export function DecisionModal({
           // the confirming one: the filled role, never the outlined trigger.
           className={`button button--${action.variant === "danger" ? "danger-confirm" : (action.variant ?? "ghost")}`}
           onClick={action.onClick}
-          disabled={action.disabled}
         >
           {action.label}
         </button>

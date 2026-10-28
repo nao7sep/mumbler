@@ -1,7 +1,7 @@
 import { readdir, rm } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 
-import type { CardBody } from "@shared/app-shell";
+import type { MumblerCard } from "@shared/app-shell";
 
 import { isMissingFileError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
 import { FORMAT_VERSIONS } from "./format-versions";
@@ -11,6 +11,10 @@ import { assertReadableFormat, assertResettableJson, CorruptStateError, loadFail
 export interface CardTranscript {
   transcription: string | null;
   structured: string | null;
+}
+
+export function transcriptOf(card: MumblerCard): CardTranscript {
+  return { transcription: card.transcription.text, structured: card.metadata.structured };
 }
 
 function isEmpty(transcript: CardTranscript): boolean {
@@ -57,7 +61,7 @@ function parse(path: string, raw: unknown, cardId: string): CardTranscript {
 // rewrite every transcript each time.
 //
 // Writes are ordered through one queue. A save computes what to write from the
-// bodies as they are when it is called, and compares against what the last write
+// cards as they are when it is called, and compares against what the last write
 // left on disk, so repeated saves of unchanged text write nothing. Each file's
 // format is checked once, when open() reads it; writes and removals touch only
 // files this session read or wrote, so they do not re-read them.
@@ -122,8 +126,8 @@ export class TranscriptStore {
   }
 
   /** Writes the file of every card whose text differs from what is on disk; returns how many. */
-  writeChanged(bodies: readonly Pick<CardBody, "cardId" | "transcription" | "structured">[]): Promise<number> {
-    const wanted = bodies.map(({ cardId, transcription, structured }) => ({ cardId, transcript: { transcription, structured } }));
+  writeChanged(cards: readonly MumblerCard[]): Promise<number> {
+    const wanted = cards.map((card) => ({ cardId: card.id, transcript: transcriptOf(card) }));
     return this.enqueue(async () => {
       let written = 0;
       for (const { cardId, transcript } of wanted) {
@@ -144,8 +148,8 @@ export class TranscriptStore {
   }
 
   /** Deletes the file of every card that is gone or has no text left. */
-  removeAbsent(bodies: readonly Pick<CardBody, "cardId" | "transcription" | "structured">[]): Promise<void> {
-    const keep = new Set(bodies.filter((body) => !isEmpty(body)).map((body) => body.cardId));
+  removeAbsent(cards: readonly MumblerCard[]): Promise<void> {
+    const keep = new Set(cards.filter((card) => !isEmpty(transcriptOf(card))).map((card) => card.id));
     return this.enqueue(async () => {
       for (const cardId of [...this.onDisk.keys()]) {
         if (keep.has(cardId)) continue;

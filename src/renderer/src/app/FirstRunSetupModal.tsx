@@ -1,6 +1,6 @@
 import { shellApi } from "@renderer/shell-api";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
-import type { ShellSnapshot as AppSnapshot } from "@shared/app-shell";
+import type { AppSnapshot } from "@shared/app-shell";
 import { message, type Message } from "@shared/i18n/translate";
 import { SYSTEM_TIMEZONE, getSupportedTimezones, getSystemTimezone } from "@shared/timestamps";
 import { useI18n } from "../i18n/I18nContext";

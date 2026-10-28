@@ -9,7 +9,7 @@ import type { CardTrim, MumblerCard } from "./app-shell";
 // so the two sides can never disagree on what busy means. A card being saved is
 // busy too: the save reads its results and then deletes its working audio, so no
 // generation, trim, removal or second save may start underneath it.
-export function isCardBusy(card: Pick<MumblerCard, "status">): boolean {
+export function isCardBusy(card: MumblerCard): boolean {
   return (
     card.status === "Queued" ||
     card.status === "Transcribing" ||
@@ -26,6 +26,6 @@ export function sameTrim(left: CardTrim, right: CardTrim): boolean {
 // markers moved after the transcription was made. A trim keeps the results
 // rather than clearing them, so this is how both the renderer and a reader of
 // the card tell that they may no longer match the audio.
-export function hasStaleResults(card: Pick<MumblerCard, "transcribedTrim" | "trim">): boolean {
+export function hasStaleResults(card: MumblerCard): boolean {
   return card.transcribedTrim !== null && !sameTrim(card.transcribedTrim, card.trim);
 }

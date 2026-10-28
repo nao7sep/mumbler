@@ -1,7 +1,7 @@
 import { shellApi } from "@renderer/shell-api";
 import { useCallback, useEffect, useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
 
-import type { ShellSnapshot as AppSnapshot, SettingsDraft } from "@shared/app-shell";
+import type { AppSnapshot, SettingsDraft } from "@shared/app-shell";
 import { presentFailure } from "./presentFailure";
 import { message, type Message } from "@shared/i18n/translate";
 
