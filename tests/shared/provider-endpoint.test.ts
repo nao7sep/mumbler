@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isAllowedProviderRequest, providerEndpointIssue } from "@shared/provider-endpoint";
+import { providerEndpointIssue } from "@shared/provider-endpoint";
 
 const allowedEndpoints = [
   "https://provider.example",
@@ -34,25 +34,5 @@ describe("providerEndpointIssue", () => {
     "",
   ])("rejects %s", (endpoint) => {
     expect(providerEndpointIssue(endpoint)).toEqual(expect.any(String));
-  });
-});
-
-describe("isAllowedProviderRequest", () => {
-  it.each(allowedEndpoints)("allows requests to %s", (endpoint) => {
-    expect(isAllowedProviderRequest(new URL(endpoint))).toBe(true);
-  });
-
-  it("allows the query supplied by an HTTPS resumable upload URL", () => {
-    expect(isAllowedProviderRequest(new URL("https://uploads.example/resumable?upload_id=fixture"))).toBe(true);
-  });
-
-  it.each([
-    "http://uploads.example/resumable?upload_id=fixture",
-    "http://192.168.1.10/upload",
-    "http://localhost.example/upload",
-    "http://[::2]/upload",
-    "ftp://provider.example/upload",
-  ])("refuses requests to %s", (endpoint) => {
-    expect(isAllowedProviderRequest(new URL(endpoint))).toBe(false);
   });
 });

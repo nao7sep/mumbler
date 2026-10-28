@@ -1,4 +1,4 @@
-/** Transport policy is shared by settings and the privileged request boundary. */
+/** Settings admits a provider endpoint on save and reports a saved one it cannot use on load. */
 export function providerEndpointIssue(value: string): string | null {
   try {
     const url = new URL(value);
@@ -7,10 +7,6 @@ export function providerEndpointIssue(value: string): string | null {
     if (url.protocol === "http:" && isLoopback(url.hostname)) return null;
   } catch { /* Report an authored validation result below. */ }
   return "Use HTTPS for a remote provider. HTTP is allowed only on this computer's loopback address.";
-}
-
-export function isAllowedProviderRequest(url: URL): boolean {
-  return url.protocol === "https:" || (url.protocol === "http:" && isLoopback(url.hostname));
 }
 
 function isLoopback(host: string): boolean {

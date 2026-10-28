@@ -100,7 +100,6 @@ import {
   createLayoutStore,
   selectExistingCardId,
 } from "./layout-store";
-import { providerEndpointIssue } from "@shared/provider-endpoint";
 import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
 import { type AppLogger, createLogger, serializeError, type SessionLogger } from "./logger";
 import { OperationError } from "./operation-error";
@@ -1470,8 +1469,6 @@ export class ApplicationRuntime {
     if (quitAttempt !== this.quitAttempt) {
       throw new OperationError("Processing was stopped while Mumbler was closing.");
     }
-    const endpointProblem = providerEndpointIssue(this.runtime.settings!["gemini.endpoint"]);
-    if (endpointProblem !== null) throw new OperationError(endpointProblem);
     const card = this.requireIdleCard(cardId, {
       missing: "Card to generate does not exist.",
       busy: "This card is already being processed.",

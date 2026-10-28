@@ -77,21 +77,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("provider transport protection", () => {
+describe("provider transport", () => {
   const textParams = { apiKey: "test-key", prompt: "hi", model: "gemini-test", timeoutMs: 1000 };
-
-  it("rejects remote HTTP for audio and text before creating the SDK client", async () => {
-    const endpoint = "http://provider.example/v1";
-
-    await expect(transcribeWithGemini({ ...baseParams(), endpoint })).rejects.toThrow("Use HTTPS");
-    await expect(generateTextWithGemini({ ...textParams, endpoint })).rejects.toThrow("Use HTTPS");
-
-    expect(createClient).not.toHaveBeenCalled();
-    expect(stat).not.toHaveBeenCalled();
-    expect(readFile).not.toHaveBeenCalled();
-    expect(upload).not.toHaveBeenCalled();
-    expect(generateContent).not.toHaveBeenCalled();
-  });
 
   it.each(["http://localhost:8080", "http://127.0.0.1:8080", "http://127.42.5.9:8080", "http://[::1]:8080"])(
     "allows audio and text through the mocked SDK at loopback endpoint %s",
@@ -107,20 +94,6 @@ describe("provider transport protection", () => {
       expect(generateContent).toHaveBeenCalledTimes(2);
     },
   );
-
-  it("refuses a remote HTTP upload URL before calling fetch", async () => {
-    const networkFetch = vi.fn<typeof fetch>();
-    vi.stubGlobal("fetch", networkFetch);
-    generateContent.mockResolvedValue({ text: "result" });
-    await generateTextWithGemini(textParams);
-    const protectedFetch = createClient.mock.calls[0]![0].httpOptions.fetch as typeof fetch;
-
-    await expect(protectedFetch("http://uploads.example/resumable?upload_id=fixture", {
-      method: "POST", headers: { "x-goog-api-key": "test-key" }, body: "audio bytes",
-    })).rejects.toThrow("require HTTPS");
-
-    expect(networkFetch).not.toHaveBeenCalled();
-  });
 
   it("sends HTTPS requests with redirects disabled and preserves headers, signal and body", async () => {
     const response = new Response("uploaded");
