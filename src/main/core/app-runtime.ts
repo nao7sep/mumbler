@@ -6,7 +6,6 @@ import { basename, dirname, extname, isAbsolute, join, relative, sep } from "nod
 import { homedir } from "node:os";
 
 import { nanoid } from "nanoid";
-import { ExternalFileOperations, type ExternalFileContext } from "./external-file-operations";
 import { getAppPaths } from "./app-paths";
 import { admitStorageRoot, type StorageAdmission } from "./storage-admission";
 import { WaveformCache } from "./waveform-cache";
@@ -81,7 +80,7 @@ import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-
 import { resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
 import { formatError, preserveAside } from "./file-io";
-import { assertImportedSourceUnchanged, copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, sourceFileIdentity } from "./working-files";
+import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, sourceFileIdentity } from "./working-files";
 import {
   buildMarkdownContent,
   buildOutputPayload,
@@ -270,7 +269,6 @@ export class ApplicationRuntime {
   // Only short pending-state publications share this tail. External preparation
   // retains its own finite physical owner and cannot block unrelated reviews.
   private importCommitTail: Promise<void> = Promise.resolve();
-  private readonly externalFiles = new ExternalFileOperations();
   private readonly reviewedImports = new Set<string>();
   // Derive each settings intent from the last committed settings, and publish
   // its authority before another intent derives its replacement.
@@ -1179,17 +1177,8 @@ export class ApplicationRuntime {
           // Named by its settled recording time alone (timestamp-conventions,
           // Filenames); the card keeps the original name.
           const archivedName = `${formatUtcMarker(new Date(timestamps.confirmedUtc))}${extname(file).toLowerCase()}`;
-          const result = await this.externalFiles.run(async (context) => {
-            await claimImportSource(context, file, pendingImport.sourceIdentity);
-            await assertImportedSourceUnchanged(file, pendingImport.workingFilePath, pendingImport.sourceIdentity, context);
-            const filed = await copyOriginalToBackup(pendingImport.workingFilePath, backupDir!, archivedName, this.runtime.logger, context);
-            context.signal.throwIfAborted();
-            const sourceIsArchive = await realpath(file) === await realpath(filed.path);
-            context.signal.throwIfAborted();
-            return { filed, sourceIsArchive };
-          });
-          const { filed } = result;
-          sourceIsArchive = result.sourceIsArchive;
+          const filed = await copyOriginalToBackup(pendingImport.workingFilePath, backupDir!, archivedName, this.runtime.logger);
+          sourceIsArchive = await realpath(file) === await realpath(filed.path);
           // Only an independent source entry can be removed after deduplication;
           // the archive itself must survive reimport and path aliases.
           await this.runtime.logger.info("import.backup-original", filed.reused
@@ -1226,12 +1215,7 @@ export class ApplicationRuntime {
             { originalSourcePath: pendingImport.originalSourcePath },
           );
         } else {
-          try {
-            await this.externalFiles.run(async (context) => {
-              await claimImportSource(context, file, pendingImport.sourceIdentity);
-              await deleteImportedSource(file, pendingImport.workingFilePath, pendingImport.sourceIdentity, context);
-            });
-          }
+          try { await deleteImportedSource(file, pendingImport.sourceIdentity); }
           catch (error: unknown) {
             originalWarnings.push({ sourcePath: file, message: message("import.deleteFailed", { file: pathValue(file) }) });
             await this.runtime.logger.warn("import.delete-original", "Failed to delete original after confirm.", {
@@ -1865,7 +1849,6 @@ export class ApplicationRuntime {
       Promise.allSettled([...this.activeSaves.values()]),
       this.pipeline.shutdown(),
       this.runtime.toolManager?.pauseAndDrain(),
-      this.externalFiles.cancelAndDrain(),
       this.importCommitTail,
       Promise.allSettled([...this.activeStateChanges]),
     ]);
@@ -1936,7 +1919,6 @@ export class ApplicationRuntime {
     this.closing = false;
     this.settingsFailureBeforeQuit = undefined;
     this.runtime.toolManager?.resume();
-    this.externalFiles.resume();
     await this.pipeline.resume();
     void this.runtime.logger.info("quit.cancelled", "Quit cancelled; Mumbler keeps running.").catch(() => undefined);
   }
@@ -1957,7 +1939,7 @@ export class ApplicationRuntime {
         ...details,
         cardCount: this.runtime.state?.cards.length ?? 0,
       }).catch(() => undefined);
-      await Promise.all([backups, waveforms, this.runtime.toolManager?.pauseAndDrain(), this.externalFiles.cancelAndDrain(), this.runtime.logger.close()]);
+      await Promise.all([backups, waveforms, this.runtime.toolManager?.pauseAndDrain(), this.runtime.logger.close()]);
     })();
     return this.closePromise;
   }
@@ -2443,7 +2425,7 @@ export class ApplicationRuntime {
       }
       seenPaths.add(sourcePath);
       try {
-        const pending = await this.externalFiles.run((context) => this.prepareImport(sourcePath, importSource, context));
+        const pending = await this.prepareImport(sourcePath, importSource);
         try {
           await this.commitImports(async () => {
             this.runtime.state!.pendingImports.push(pending);
@@ -2501,16 +2483,13 @@ export class ApplicationRuntime {
     };
   }
 
-  private async prepareImport(sourcePath: string, importSource: ImportSource, context: ExternalFileContext): Promise<PendingImportReviewItem> {
+  private async prepareImport(sourcePath: string, importSource: ImportSource): Promise<PendingImportReviewItem> {
     const paths = this.runtime.paths!;
     const settings = this.runtime.settings!;
     if (!isSupportedAudioImportName(sourcePath)) {
       throw new ImportAdmissionError("import.unsupportedType");
     }
-    context.signal.throwIfAborted();
     const sourceStats = await stat(sourcePath);
-    context.signal.throwIfAborted();
-    context.progress();
 
     if (!sourceStats.isFile()) {
       throw new ImportAdmissionError("import.notAFile");
@@ -2518,8 +2497,7 @@ export class ApplicationRuntime {
 
     const originalFilename = basename(sourcePath);
     const sourceIdentity = sourceFileIdentity(sourceStats);
-    await claimImportSource(context, sourcePath, sourceIdentity);
-    const workingFilePath = await copyIntoWorking(sourcePath, paths.workingDir, originalFilename, context.signal, sourceIdentity, context.progress);
+    const workingFilePath = await copyIntoWorking(sourcePath, paths.workingDir, originalFilename);
     try {
 
       await this.runtime.logger.debug("import.file", "Staged file to working storage.", {
@@ -2578,7 +2556,6 @@ export class ApplicationRuntime {
         updatedAtUtc: Date.now(),
       };
 
-      context.signal.throwIfAborted();
       return pendingImport;
     } catch (error) {
       await rm(workingFilePath, { force: true });
@@ -2736,11 +2713,6 @@ export class ApplicationRuntime {
 export { resolveStorageRoot };
 
 export { getAppPaths };
-
-async function claimImportSource(context: ExternalFileContext, path: string, identity: PendingImportReviewItem["sourceIdentity"]): Promise<void> {
-  const key = identity !== undefined && identity.ino !== 0 ? `${identity.dev}:${identity.ino}` : await realpath(path);
-  context.claimSource(key);
-}
 
 function createLoggedSettingsStore(settingsPath: string, logger: AppLogger): SettingsStore {
   return createSettingsStore(settingsPath, homedir(), (key) => {

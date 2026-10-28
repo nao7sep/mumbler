@@ -8,7 +8,7 @@ import { createReadStream } from "node:fs";
 // managed-runtime-dependencies-conventions' integrity gate.
 
 // Stream the file through the hash so a ~27 MB archive never sits in memory.
-export async function sha256OfFile(filePath: string, signal?: AbortSignal, progress?: () => void): Promise<string> {
+export async function sha256OfFile(filePath: string, signal?: AbortSignal): Promise<string> {
   signal?.throwIfAborted();
   const hash = createHash("sha256");
   const stream = createReadStream(filePath);
@@ -20,7 +20,6 @@ export async function sha256OfFile(filePath: string, signal?: AbortSignal, progr
     for await (const chunk of stream) {
       signal?.throwIfAborted();
       hash.update(chunk as Buffer);
-      progress?.();
     }
   } finally {
     signal?.removeEventListener("abort", abort);

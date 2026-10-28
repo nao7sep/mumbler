@@ -3,9 +3,8 @@ import { createReadStream } from "node:fs";
 import { basename, extname, join } from "node:path";
 
 import { nanoid } from "nanoid";
-import type { ExternalFileContext } from "./external-file-operations";
 import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem, SourceFileIdentity } from "@shared/app-shell";
-import { fileExists, formatError, isMissingFileError, sameFileBytes, uniquePathInDirectory } from "./file-io";
+import { fileExists, formatError, isMissingFileError, uniquePathInDirectory } from "./file-io";
 
 import { sha256OfFile } from "./binaries/integrity";
 import { type AppLogger, serializeError } from "./logger";
@@ -28,29 +27,24 @@ function sameSourceIdentity(left: SourceFileIdentity, right: SourceFileIdentity)
     left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
 }
 
-export async function assertImportedSourceUnchanged(sourcePath: string, expectedCopy: string, expected: SourceFileIdentity | undefined, context?: ExternalFileContext): Promise<void> {
-  context?.signal.throwIfAborted();
-  if (expected === undefined || !sameSourceIdentity(await stat(sourcePath), expected) ||
-      !(await sameFileBytes(sourcePath, expectedCopy, context)) || !sameSourceIdentity(await stat(sourcePath), expected)) {
+// Deleting the user's original is irreversible, so its one precondition is
+// checked right before the unlink: the path still holds the file that was
+// imported. A review without a recorded identity cannot be checked and keeps it.
+export async function deleteImportedSource(sourcePath: string, expected: SourceFileIdentity | undefined): Promise<void> {
+  if (expected === undefined || !sameSourceIdentity(await stat(sourcePath), expected)) {
     throw new Error("The source recording can no longer be verified as the imported file; it was left in place.");
   }
-}
-
-export async function deleteImportedSource(sourcePath: string, expectedCopy: string, expected: SourceFileIdentity | undefined, context?: ExternalFileContext): Promise<void> {
-  await assertImportedSourceUnchanged(sourcePath, expectedCopy, expected, context);
-  context?.signal.throwIfAborted();
   await unlink(sourcePath);
 }
 
+// Imports run side by side, so a name chosen for one copy is held until that
+// copy exists and no other import can pick it.
 const reservedWorkingNames = new Set<string>();
 
 export async function copyIntoWorking(
   sourcePath: string,
   workingDir: string,
   preferredName: string,
-  signal?: AbortSignal,
-  expectedSource?: SourceFileIdentity,
-  progress?: () => void,
 ): Promise<string> {
   await mkdir(workingDir, { recursive: true });
   let workingFilePath = await uniquePathInDirectory(workingDir, preferredName);
@@ -61,26 +55,16 @@ export async function copyIntoWorking(
   reservedWorkingNames.add(workingFilePath.toLowerCase());
   let owned = false;
   try {
-    signal?.throwIfAborted();
-    const before = await stat(sourcePath);
-    signal?.throwIfAborted();
-    progress?.();
-    if (expectedSource && !sameSourceIdentity(before, expectedSource)) throw new Error("The source recording changed before it could be copied.");
     const handle = await open(workingFilePath, "wx", 0o600);
     owned = true;
-    const stream = createReadStream(sourcePath, { signal });
-    if (progress) stream.on("data", progress);
+    const stream = createReadStream(sourcePath);
     stream.on("error", () => undefined);
     let primary: unknown;
     try {
       await handle.writeFile(stream);
-      const after = await stat(sourcePath);
-      signal?.throwIfAborted();
-      if (!sameSourceIdentity(before, after)) {
-        throw new Error("The source recording changed while it was being imported.");
-      }
-      await handle.utimes(before.atime, before.mtime);
-      await handle.chmod(before.mode);
+      const source = await stat(sourcePath);
+      await handle.utimes(source.atime, source.mtime);
+      await handle.chmod(source.mode);
       await handle.sync();
     } catch (error) { primary = error; }
     finally {
@@ -92,7 +76,6 @@ export async function copyIntoWorking(
       }
     }
     if (primary !== undefined) throw primary;
-    signal?.throwIfAborted();
     return workingFilePath;
   } catch (error: unknown) {
     if (owned) await rm(workingFilePath, { force: true }).catch(() => undefined);
@@ -105,17 +88,14 @@ export async function copyIntoWorking(
 // Keep the descriptor writable through metadata and sync, including read-only
 // source copies on Windows. An exclusive public fallback can be incomplete on
 // failure; the caller reports failure and keeps the original recording.
-async function copyBackupFile(source: string, destination: string, context?: ExternalFileContext): Promise<void> {
-  context?.signal.throwIfAborted();
+async function copyBackupFile(source: string, destination: string): Promise<void> {
   const handle = await open(destination, "wx", 0o600);
-  const stream = createReadStream(source, { signal: context?.signal });
-  if (context) stream.on("data", context.progress);
+  const stream = createReadStream(source);
   stream.on("error", () => undefined);
   let primary: unknown;
   try {
     await handle.writeFile(stream);
     const sourceInfo = await stat(source);
-    context?.signal.throwIfAborted();
     await handle.utimes(sourceInfo.atime, sourceInfo.mtime);
     await handle.chmod(sourceInfo.mode);
     await handle.sync();
@@ -134,7 +114,7 @@ async function copyBackupFile(source: string, destination: string, context?: Ext
 // A recording already filed under `targetName`, or under that name with the
 // collision suffix, whose bytes equal the source: importing the same recording
 // again finds it rather than filing a second copy.
-async function alreadyFiled(sourcePath: string, backupDir: string, targetName: string, context?: ExternalFileContext): Promise<string | null> {
+async function alreadyFiled(sourcePath: string, backupDir: string, targetName: string): Promise<string | null> {
   const extension = extname(targetName).toLowerCase();
   const stem = targetName.slice(0, targetName.length - extension.length).toLowerCase();
   const escaped = stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -149,7 +129,6 @@ async function alreadyFiled(sourcePath: string, backupDir: string, targetName: s
   const { size } = await stat(sourcePath);
   let sourceHash: string | null = null;
   for (const name of names) {
-    context?.signal.throwIfAborted();
     const lower = name.toLowerCase();
     if (extname(lower) !== extension) continue;
     const nameStem = lower.slice(0, lower.length - extension.length);
@@ -160,8 +139,8 @@ async function alreadyFiled(sourcePath: string, backupDir: string, targetName: s
       throw error;
     });
     if (info === null || !info.isFile() || info.size !== size) continue;
-    sourceHash ??= await sha256OfFile(sourcePath, context?.signal, context?.progress);
-    if (await sha256OfFile(candidate, context?.signal, context?.progress) === sourceHash) return candidate;
+    sourceHash ??= await sha256OfFile(sourcePath);
+    if (await sha256OfFile(candidate) === sourceHash) return candidate;
   }
   return null;
 }
@@ -174,31 +153,24 @@ export async function copyOriginalToBackup(
   backupDir: string,
   targetName: string,
   logger?: Pick<AppLogger, "warn">,
-  context?: ExternalFileContext,
 ): Promise<{ path: string; reused: boolean }> {
   let stageDir: string | undefined;
   let targetPath: string | undefined;
   try {
-    context?.signal.throwIfAborted();
     await mkdir(backupDir, { recursive: true });
-    context?.signal.throwIfAborted();
-    context?.progress();
-    const existing = await alreadyFiled(sourcePath, backupDir, targetName, context);
+    const existing = await alreadyFiled(sourcePath, backupDir, targetName);
     if (existing !== null) return { path: existing, reused: true };
     targetPath = await uniquePathInDirectory(backupDir, targetName);
-    context?.signal.throwIfAborted();
     stageDir = await mkdtemp(join(backupDir, ".mumbler-backup-"));
     const stagePath = join(stageDir, "audio");
     // not recorded: this is a user-requested copy of the original audio binary,
     // written as output and never reopened as Mumbler-managed state.
-    await copyBackupFile(sourcePath, stagePath, context);
-    context?.signal.throwIfAborted();
+    await copyBackupFile(sourcePath, stagePath);
     try { await link(stagePath, targetPath); }
     catch (error) {
       if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
-      await copyBackupFile(stagePath, targetPath, context);
+      await copyBackupFile(stagePath, targetPath);
     }
-    context?.signal.throwIfAborted();
     return { path: targetPath, reused: false };
   } catch (error: unknown) {
     throw new Error(`Failed to copy ${sourcePath} into the Recordings folder ${backupDir}${targetPath === undefined ? "" : ` (target ${targetPath})`}: ${formatError(error)}`, { cause: error });

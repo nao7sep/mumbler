@@ -4,7 +4,6 @@ import { basename, dirname, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ExternalFileOperations, EXTERNAL_FILE_IDLE_MS } from "@main/core/external-file-operations";
 import type { AppLogger } from "@main/core/logger";
 import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
 import { createQueueStore } from "@main/core/settings-schema";
@@ -199,41 +198,6 @@ describe("working audio copies", () => {
     await expect(copyIntoWorking(source, working, "take.wav")).rejects.toThrow(/sync failed/);
     expect(await readFile(source, "utf8")).toBe("recording");
     expect(await readdir(working)).toEqual([]);
-  });
-
-  it("rejects a source changed during copying and removes its owned working copy", async () => {
-    const source = join(dir, "source.wav");
-    const working = join(dir, "working");
-    await writeFile(source, "old");
-    backupFaults.beforeCopy = async () => { await writeFile(source, "replacement recording"); };
-    await expect(copyIntoWorking(source, working, "take.wav")).rejects.toThrow(/changed/);
-    expect(await readFile(source, "utf8")).toBe("replacement recording");
-    expect(await readdir(working)).toEqual([]);
-  });
-
-  it("owns a late-opened private copy until it can close and clean up after timeout", async () => {
-    const source = join(dir, "source.wav");
-    const working = join(dir, "working");
-    await writeFile(source, "keep source");
-    let release!: () => void;
-    let entered!: () => void;
-    const opened = new Promise<void>((resolve) => { entered = resolve; });
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    backupFaults.beforeCopy = async () => { entered(); await held; };
-    const owner = new ExternalFileOperations(1);
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const result = owner.run(({ signal, progress }) => copyIntoWorking(source, working, "take.wav", signal, undefined, progress)).catch((error: unknown) => error);
-    try {
-      await opened;
-      await vi.advanceTimersByTimeAsync(EXTERNAL_FILE_IDLE_MS);
-      expect(await result).toMatchObject({ message: expect.stringContaining("progress") });
-      await expect(owner.run(async () => undefined)).rejects.toThrow("still settling");
-      release();
-      vi.useRealTimers();
-      await owner.cancelAndDrain();
-      expect(await readdir(working)).toEqual([]);
-      expect(await readFile(source, "utf8")).toBe("keep source");
-    } finally { release(); vi.useRealTimers(); await owner.cancelAndDrain(); }
   });
 
   it("copies imported audio under a case-insensitively unique working path", async () => {
@@ -456,8 +420,7 @@ describe("working audio copies", () => {
     await writeFile(source, "audio", "utf8");
 
     const identity = sourceFileIdentity(await stat(source));
-    const copy = await copyIntoWorking(source, join(dir, "working"), "source.m4a");
-    await deleteImportedSource(source, copy, identity);
+    await deleteImportedSource(source, identity);
 
     await expect(access(source)).rejects.toThrow();
   });

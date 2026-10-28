@@ -41,7 +41,6 @@ const unwritable = vi.hoisted(() => ({
   held: null as { path: string; release: Promise<void>; entered: number } | null,
 }));
 const secretReadGate = vi.hoisted(() => ({ held: null as { path: string; release: Promise<void>; entered: number } | null }));
-const externalStatGate = vi.hoisted(() => ({ path: "", wait: null as Promise<void> | null, entered: null as (() => void) | null }));
 const sourceChecks = vi.hoisted(() => ({
   paths: new Set<string>(), calls: [] as string[], active: 0, maximum: 0,
   held: null as Promise<void> | null, failure: null as Error | null,
@@ -66,13 +65,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
     ...actual,
-    stat: async (...args: Parameters<typeof actual.stat>) => {
-      if (String(args[0]) === externalStatGate.path) {
-        externalStatGate.entered?.();
-        await externalStatGate.wait;
-      }
-      return actual.stat(...args);
-    },
     realpath: async (...args: Parameters<typeof actual.realpath>) => {
       if (!sourceChecks.paths.has(String(args[0]))) return actual.realpath(...args);
       sourceChecks.calls.push(String(args[0]));
@@ -991,7 +983,10 @@ describe("confirming what was dropped in", () => {
     expect(originalWarnings.length).toBeGreaterThan(0);
     expect(await readFile(pending.originalSourcePath, "utf8")).toBe(replacement);
     expect(await readFile(cards(snapshot)[0]!.sourceFilePath, "utf8")).toBe(original);
-    expect(await readdir(archive).catch(() => [])).toEqual([]);
+    // Filing copies the imported working recording, never the changed source.
+    const filed = await readdir(archive).catch(() => []);
+    expect(filed).toHaveLength(copyToBackupOnConfirm ? 1 : 0);
+    if (copyToBackupOnConfirm) expect(await readFile(join(archive, filed[0]!), "utf8")).toBe(original);
   });
 
   it.each([false, true])("keeps an archived recording when importing it again (directory alias=%s)", async (alias) => {
@@ -1112,40 +1107,6 @@ describe("confirming what was dropped in", () => {
       expect(await readFile(queueFile, "utf8")).not.toBe(stored);
     } finally {
       now.mockRestore();
-    }
-  });
-
-  it("times out a held source inspection without blocking another review or admitting its late result", async () => {
-    const [ready] = await dropIn("ready.wav");
-    const slow = join(sourceDir, "slow.wav");
-    await writeFile(slow, "slow source");
-    let release!: () => void;
-    externalStatGate.path = slow;
-    externalStatGate.wait = new Promise<void>((resolve) => { release = resolve; });
-    const entered = new Promise<void>((resolve) => { externalStatGate.entered = resolve; });
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const importing = runtime.importDroppedPaths([slow]);
-    try {
-      await entered;
-      await runtime.cancelPendingImports([ready.id]);
-      expect(runtime.getSnapshot().state?.pendingImports).toEqual([]);
-      await vi.advanceTimersByTimeAsync(30_000);
-      const result = await importing;
-      expect(result.importedCount).toBe(0);
-      expect(result.failedImports).toHaveLength(1);
-      release();
-      vi.useRealTimers();
-      await runtime.saveForQuit();
-      expect(runtime.getSnapshot().state?.pendingImports).toEqual([]);
-      expect(await readdir(join(home, "working"))).toEqual([]);
-      expect(await readFile(slow, "utf8")).toBe("slow source");
-    } finally {
-      release();
-      externalStatGate.path = "";
-      externalStatGate.wait = null;
-      externalStatGate.entered = null;
-      vi.useRealTimers();
-      await importing;
     }
   });
 
