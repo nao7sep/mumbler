@@ -48,7 +48,7 @@ function Invoke-Native {
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoDir = Split-Path -Parent $scriptDir
 $runtimeHelper = Join-Path $scriptDir "launcher-runtime.mjs"
-$runtimeToken = [guid]::NewGuid().ToString("N")
+$appPid = $null
 $rendererUrl = "http://127.0.0.1:27259"
 
 try {
@@ -59,8 +59,7 @@ try {
     Set-Location $repoDir
 
     Write-Step "Replacing any existing Mumbler runtime"
-    Invoke-Native -FilePath "node" -ArgumentList @($runtimeHelper, "claim", $runtimeToken)
-    Invoke-Native -FilePath "node" -ArgumentList @($runtimeHelper, "stop", "electron", "Mumbler", "Mumbler")
+    Invoke-Native -FilePath "node" -ArgumentList @($runtimeHelper, "stop")
     Invoke-Native -FilePath "node" -ArgumentList @($runtimeHelper, "check-endpoint", "127.0.0.1", "27259")
 
     Write-Step "Installing dependencies"
@@ -76,7 +75,8 @@ try {
     Write-Step "Starting Mumbler in development mode"
     $devProcess = Start-Process -FilePath (Get-Command "npm.cmd").Source -ArgumentList @("run", "dev") -NoNewWindow -PassThru
     Invoke-Native -FilePath "node" -ArgumentList @($runtimeHelper, "wait-http", $rendererUrl, "60000")
-    Invoke-Native -FilePath "node" -ArgumentList @($runtimeHelper, "wait-process", (Join-Path $repoDir "node_modules/electron/dist/electron.exe"), "60000")
+    $appPid = & node $runtimeHelper record-wrapped $devProcess.Id (Join-Path $repoDir "node_modules/electron/dist/electron.exe")
+    if ($LASTEXITCODE -ne 0) { throw "Mumbler did not start." }
     Write-Step "Mumbler is ready at $rendererUrl"
     $devProcess.WaitForExit()
     if ($devProcess.ExitCode -notin @(0, 130, -1073741510)) {
@@ -89,11 +89,9 @@ catch {
     $scriptExitCode = 1
 }
 finally {
-    & node $runtimeHelper is-owner $runtimeToken *> $null
-    if ($LASTEXITCODE -eq 0) {
-        & node $runtimeHelper stop-if-owner $runtimeToken electron "Mumbler" "Mumbler" *> $null
-        Read-Host "Press Enter to close" | Out-Null
-    }
+    # Closing this launcher closes the app it started, unless a later launcher has replaced it.
+    if ($appPid) { & node $runtimeHelper stop-if-recorded $appPid *> $null }
+    Read-Host "Press Enter to close" | Out-Null
 }
 
 exit $scriptExitCode

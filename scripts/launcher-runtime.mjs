@@ -1,201 +1,189 @@
-import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { readFile, unlink, writeFile } from "node:fs/promises";
+/**
+ * Shared by the launchers (run-dev, run-built, rebuild) of both platforms: one
+ * Mumbler runtime per repository. The launcher that starts Mumbler records its
+ * process ID and executable under .git; the next launcher asks that process to
+ * quit only while it still runs that executable, and stops with a message
+ * rather than force-closing it when it stays open. Mumbler started any other way
+ * is left to its single-instance behavior, which brings its window forward
+ * instead of opening a second one.
+ *
+ * CLI: node launcher-runtime.mjs <command>
+ *   stop                              ask the recorded runtime to quit
+ *   stop-if-recorded <pid>            the same, only while <pid> is the recorded one
+ *   launch-bundle <app bundle>        open a new instance (macOS) and record it
+ *   launch-exe <executable>           start the executable (Windows) and record it
+ *   record-wrapped <pid> <executable> record the app process a wrapper started; prints its pid
+ *   check-endpoint <host> <port>      fail when the port is taken
+ *   wait-http <url> [timeout-ms]      wait until the URL responds
+ */
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
+import { readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, join, normalize, relative, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-export const REPO_ROOT = resolve(SCRIPT_DIR, "..");
-const OWNER_FILE = join(
-  tmpdir(),
-  `company-launcher-${createHash("sha256").update(REPO_ROOT).digest("hex").slice(0, 20)}.owner`,
-);
-
-function normalized(value) {
-  return normalize(value ?? "").replaceAll("\\", "/").toLowerCase();
-}
-
-function underRoot(value) {
-  const candidate = normalized(value);
-  const root = normalized(REPO_ROOT);
-  return candidate === root || candidate.startsWith(`${root}/`) || candidate.includes(`${root}/`);
-}
-
-export function ownsProcess(processInfo, identity) {
-  const executable = normalized(processInfo.executablePath);
-  const command = normalized(processInfo.commandLine);
-  const combined = `${executable}\n${command}`;
-  if (!underRoot(executable) && !underRoot(command)) return false;
-  if (combined.includes("/scripts/run-dev.command")
-    || combined.includes("/scripts/run-dev.ps1")
-    || combined.includes("/scripts/run-built.command")
-    || combined.includes("/scripts/run-built.ps1")
-    || combined.includes("/scripts/rebuild.command")
-    || combined.includes("/scripts/rebuild.ps1")) {
-    return true;
-  }
-
-  const executableName = identity.executable.toLowerCase();
-  const macBundleExecutable = `/${identity.label.toLowerCase()}.app/contents/macos/${executableName}`;
-  const windowsExecutable = `/${executableName}.exe`;
-  return combined.includes("/node_modules/.bin/electron-vite")
-    || combined.includes("/node_modules/electron-vite/")
-    || combined.includes("/node_modules/electron/dist/")
-    || combined.includes(macBundleExecutable)
-    || combined.includes(windowsExecutable);
-}
-
-export function parsePosixProcesses(stdout) {
-  return stdout.trim().split("\n").filter(Boolean).map((line) => {
-    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-    if (!match) return undefined;
-    return {
-      pid: Number(match[1]),
-      parentPid: Number(match[2]),
-      executablePath: "",
-      commandLine: match[3],
-    };
-  }).filter(Boolean);
-}
-
-async function listProcesses() {
-  if (process.platform !== "win32") {
-    const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,command="], {
-      encoding: "utf8",
-      timeout: 5000,
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    return parsePosixProcesses(stdout);
-  }
-
-  const script = [
-    "Get-CimInstance Win32_Process |",
-    "Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine |",
-    "ConvertTo-Json -Compress",
-  ].join(" ");
-  const { stdout } = await execFileAsync("powershell.exe", [
-    "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script,
-  ], {
-    encoding: "utf8",
-    timeout: 10000,
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  return parseWindowsProcesses(stdout);
-}
-
-// ConvertTo-Json writes one process as a bare object rather than an array, and
-// a process the user cannot inspect has a null path and command line.
-export function parseWindowsProcesses(stdout) {
-  const decoded = JSON.parse(stdout.trim() || "[]");
-  const rows = Array.isArray(decoded) ? decoded : [decoded];
-  return rows.map((row) => ({
-    pid: Number(row.ProcessId),
-    parentPid: Number(row.ParentProcessId),
-    executablePath: row.ExecutablePath ?? "",
-    commandLine: row.CommandLine ?? "",
-  }));
-}
-
-function descendantsOf(processes, roots) {
-  const selected = new Set(roots);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const item of processes) {
-      if (selected.has(item.parentPid) && !selected.has(item.pid)) {
-        selected.add(item.pid);
-        changed = true;
-      }
-    }
-  }
-  return selected;
-}
-
-function ancestorsOf(processes, pid) {
-  const byPid = new Map(processes.map((item) => [item.pid, item]));
-  const selected = new Set([pid]);
-  let current = byPid.get(pid)?.parentPid;
-  while (current && !selected.has(current)) {
-    selected.add(current);
-    current = byPid.get(current)?.parentPid;
-  }
-  return selected;
-}
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const RECORD_FILE = join(REPO_ROOT, ".git", "launcher-runtime-process");
+/** The app's processes are named after its product name, read from its one source. */
+const productName = /^productName:\s*(.+?)\s*$/m.exec(await readFile(join(REPO_ROOT, "electron-builder.yml"), "utf8"))?.[1];
+if (!productName) throw new Error("electron-builder.yml names no productName.");
+const windows = process.platform === "win32";
 
 const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 
-export async function claimRuntime(token) {
-  await writeFile(OWNER_FILE, `${token}\n`, { encoding: "utf8", mode: 0o600 });
+async function powershell(script) {
+  const { stdout } = await execFileAsync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  return stdout.trim();
 }
 
-export async function isRuntimeOwner(token) {
+async function osascript(script, ...args) {
+  const { stdout } = await execFileAsync("/usr/bin/osascript", ["-l", "JavaScript", "-e", script, ...args], { encoding: "utf8" });
+  return stdout.trim();
+}
+
+function sameExecutable(left, right) {
+  return windows ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
+/** The executable a process runs, or "" when no such process exists. */
+async function executableOf(pid) {
+  if (windows) return powershell(`(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).Path`);
+  // ps shows the path a process was started with, which a wrapper can give relative; lsof names the file it runs.
   try {
-    return (await readFile(OWNER_FILE, "utf8")).trim() === token;
+    const { stdout } = await execFileAsync("lsof", ["-a", "-p", String(pid), "-d", "txt", "-Fn"], { encoding: "utf8" });
+    return stdout.split("\n").find((line) => line.startsWith("n"))?.slice(1) ?? "";
   } catch (error) {
-    if (error?.code === "ENOENT") return false;
+    if (error?.code === 1) return ""; // lsof lists nothing for an ended process
     throw error;
   }
 }
 
-export async function releaseRuntime(token) {
-  if (!await isRuntimeOwner(token)) return false;
-  try {
-    await unlink(OWNER_FILE);
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-  return true;
+async function record(pid, executable) {
+  await writeFile(RECORD_FILE, `${pid}\n${executable}\n`, "utf8");
 }
 
-async function stopRuntime(identity) {
-  const initial = await listProcesses();
-  const excluded = ancestorsOf(initial, process.pid);
-  const ownedRoots = initial.filter((item) => !excluded.has(item.pid) && ownsProcess(item, identity)).map((item) => item.pid);
-  if (ownedRoots.length === 0) return;
-
-  const initialTargets = descendantsOf(initial, ownedRoots);
-  process.stdout.write(`Stopping the existing ${identity.label} runtime (pid ${ownedRoots.join(", ")}).\n`);
-
-  if (process.platform === "win32") {
-    for (const pid of ownedRoots) {
-      try {
-        await execFileAsync("taskkill.exe", ["/PID", String(pid), "/T"], { timeout: 5000 });
-      } catch {
-        // A process may exit while another root tears down the same tree.
-      }
-    }
-  } else {
-    for (const pid of initialTargets) {
-      try { process.kill(pid, "SIGTERM"); } catch {}
-    }
+/** The recorded process ID, returned only while that process still runs the recorded executable. */
+async function recordedPid() {
+  let text;
+  try {
+    text = await readFile(RECORD_FILE, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
   }
+  const [pidText, executable] = text.split(/\r?\n/);
+  const pid = Number(pidText);
+  if (!Number.isInteger(pid) || pid <= 0 || !executable) return undefined;
+  return sameExecutable(await executableOf(pid), executable) ? pid : undefined;
+}
 
+/** Ask the process to quit as a user would, so it can still finish or ask about running work. */
+async function requestClose(pid) {
+  if (windows) {
+    await powershell(`$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $null = $p.CloseMainWindow() }`);
+    return;
+  }
+  await osascript(`ObjC.import('AppKit');
+function run(args) {
+  var application = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(args[0]));
+  if (application) application.terminate;
+}`, String(pid));
+}
+
+async function stopRecorded(onlyPid) {
+  const pid = await recordedPid();
+  if (pid === undefined || (onlyPid !== undefined && pid !== onlyPid)) return;
+  process.stdout.write(`Asking the running ${productName} (pid ${pid}) to quit.\n`);
+  await requestClose(pid);
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    const current = await listProcesses();
-    if (!current.some((item) => initialTargets.has(item.pid))) return;
+    if (await recordedPid() !== pid) return;
     await delay(100);
   }
+  throw new Error(`${productName} is still open, perhaps finishing or asking about running work. Close it, then run this launcher again.`);
+}
 
-  const current = await listProcesses();
-  const currentOwnedRoots = current
-    .filter((item) => initialTargets.has(item.pid) && !excluded.has(item.pid) && ownsProcess(item, identity))
-    .map((item) => item.pid);
-  const forceTargets = descendantsOf(current, currentOwnedRoots);
-  if (process.platform === "win32") {
-    for (const pid of currentOwnedRoots) {
-      try {
-        await execFileAsync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { timeout: 5000 });
-      } catch {}
+const singleInstanceNote = `If ${productName} was already running outside these launchers, its window is brought forward instead.\n`;
+
+/** Open a new instance of the bundle through Launch Services, which gives it its bundle identity. */
+async function launchBundle(bundle) {
+  const pid = Number(await osascript(`ObjC.import('AppKit');
+function run(args) {
+  var application = $.NSWorkspace.sharedWorkspace.launchApplicationAtURLOptionsConfigurationError(
+    $.NSURL.fileURLWithPath(args[0]), $.NSWorkspaceLaunchNewInstance, $({}), null);
+  return application.isNil() ? '' : String(application.processIdentifier);
+}`, resolve(bundle)));
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`${productName} could not be opened.`);
+  await record(pid, await executableOf(pid));
+  process.stdout.write(singleInstanceNote);
+}
+
+async function launchExecutable(executable) {
+  const child = spawn(resolve(executable), [], { detached: true, stdio: "ignore" });
+  await once(child, "spawn");
+  child.unref();
+  await record(child.pid, resolve(executable));
+  process.stdout.write(singleInstanceNote);
+}
+
+async function listProcesses() {
+  if (!windows) {
+    const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,comm="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+    return stdout.split("\n").map((line) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)).filter(Boolean)
+      .map((match) => ({ pid: Number(match[1]), parentPid: Number(match[2]), executable: match[3].trim() }));
+  }
+  const decoded = JSON.parse(await powershell(
+    "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath | ConvertTo-Json -Compress",
+  ) || "[]");
+  return (Array.isArray(decoded) ? decoded : [decoded]).map((row) => ({
+    pid: Number(row.ProcessId),
+    parentPid: Number(row.ParentProcessId),
+    executable: row.ExecutablePath ?? "",
+  }));
+}
+
+/**
+ * Record the app process that the wrapper (npm run dev, then electron-vite)
+ * starts, once it appears: the topmost descendant running the executable, since
+ * Electron's own child processes can share it. Fails when the wrapper ends
+ * first, as it does when the build fails.
+ */
+async function recordWrapped(wrapperPid, executable) {
+  const expected = resolve(executable);
+  for (;;) {
+    const processes = await listProcesses();
+    if (!processes.some((item) => item.pid === wrapperPid)) {
+      throw new Error(`The ${productName} development runtime ended before the app started.`);
     }
-  } else {
-    for (const pid of forceTargets) {
-      try { process.kill(pid, "SIGKILL"); } catch {}
+    const descendants = new Set([wrapperPid]);
+    for (let grown = true; grown;) {
+      grown = false;
+      for (const item of processes) {
+        if (descendants.has(item.parentPid) && !descendants.has(item.pid)) {
+          descendants.add(item.pid);
+          grown = true;
+        }
+      }
     }
+    const candidates = processes.filter((item) => item.pid !== wrapperPid && descendants.has(item.pid) && sameExecutable(basename(item.executable), basename(expected)));
+    const matches = [];
+    for (const item of candidates) {
+      const executable = windows ? item.executable : await executableOf(item.pid);
+      if (sameExecutable(executable, expected)) matches.push({ ...item, executable });
+    }
+    const app = matches.find((item) => !matches.some((other) => other.pid === item.parentPid));
+    if (app) {
+      await record(app.pid, app.executable);
+      process.stdout.write(`${app.pid}\n`);
+      return;
+    }
+    await delay(200);
   }
 }
 
@@ -230,98 +218,40 @@ async function waitForHttp(url, timeoutMilliseconds) {
   throw new Error(`${url} did not become ready within ${timeoutMilliseconds} ms (${lastError}).`);
 }
 
-async function waitForExecutable(executablePath, timeoutMilliseconds) {
-  const expected = normalized(resolve(executablePath));
-  const repoRelativeExpected = normalized(relative(REPO_ROOT, expected));
-  const deadline = Date.now() + timeoutMilliseconds;
-  while (Date.now() < deadline) {
-    const processes = await listProcesses();
-    const byPid = new Map(processes.map((item) => [item.pid, item]));
-    const found = processes.some((item) => {
-      const executable = normalized(item.executablePath);
-      const command = normalized(item.commandLine);
-      if (executable === expected || command === expected || command.startsWith(expected + " ")) return true;
-      const relativeMatch = command === repoRelativeExpected
-        || command.startsWith(repoRelativeExpected + " ");
-      if (!relativeMatch) return false;
-      let parent = byPid.get(item.parentPid);
-      while (parent) {
-        if (underRoot(parent.executablePath) || underRoot(parent.commandLine)) return true;
-        parent = byPid.get(parent.parentPid);
-      }
-      return false;
-    });
-    if (found) return;
-    await delay(100);
+async function main([command, ...args]) {
+  if (command === "stop") return stopRecorded();
+  if (command === "stop-if-recorded") {
+    const pid = Number(args[0]);
+    if (!Number.isInteger(pid)) throw new Error("Expected stop-if-recorded <pid>.");
+    return stopRecorded(pid);
   }
-  throw new Error(`${executablePath} did not start within ${timeoutMilliseconds} ms.`);
-}
-
-function parseIdentity(args) {
-  const kind = args.shift();
-  const label = args.shift();
-  const executable = args.shift();
-  if (kind !== "electron" || !label || !executable) {
-    throw new Error("Expected runtime identity: electron <label> <executable-name>.");
+  if (command === "launch-bundle") {
+    if (!args[0]) throw new Error("Expected launch-bundle <app bundle>.");
+    return launchBundle(args[0]);
   }
-  return { kind, label, executable };
-}
-
-async function main(args) {
-  const command = args.shift();
-  if (command === "claim") {
-    const token = args.shift();
-    if (!token) throw new Error("Expected claim <token>.");
-    await claimRuntime(token);
-    return;
+  if (command === "launch-exe") {
+    if (!args[0]) throw new Error("Expected launch-exe <executable>.");
+    return launchExecutable(args[0]);
   }
-  if (command === "is-owner") {
-    const token = args.shift();
-    if (!token) throw new Error("Expected is-owner <token>.");
-    if (!await isRuntimeOwner(token)) process.exitCode = 3;
-    return;
-  }
-  if (command === "stop") {
-    await stopRuntime(parseIdentity(args));
-    return;
-  }
-  if (command === "stop-if-owner") {
-    const token = args.shift();
-    if (!token) throw new Error("Expected stop-if-owner <token> <identity...>.");
-    const identity = parseIdentity(args);
-    if (!await isRuntimeOwner(token)) return;
-    await stopRuntime(identity);
-    await releaseRuntime(token);
-    return;
+  if (command === "record-wrapped") {
+    const pid = Number(args[0]);
+    if (!Number.isInteger(pid) || !args[1]) throw new Error("Expected record-wrapped <pid> <executable>.");
+    return recordWrapped(pid, args[1]);
   }
   if (command === "check-endpoint") {
-    const host = args.shift();
-    const port = Number(args.shift());
-    if (!host || !Number.isInteger(port)) throw new Error("Expected check-endpoint <host> <port>.");
-    await assertEndpointAvailable(host, port);
-    return;
+    const port = Number(args[1]);
+    if (!args[0] || !Number.isInteger(port)) throw new Error("Expected check-endpoint <host> <port>.");
+    return assertEndpointAvailable(args[0], port);
   }
   if (command === "wait-http") {
-    const url = args.shift();
-    const timeout = Number(args.shift() ?? "60000");
-    if (!url || !Number.isFinite(timeout)) throw new Error("Expected wait-http <url> [timeout-ms].");
-    await waitForHttp(url, timeout);
-    return;
+    const timeout = Number(args[1] ?? "60000");
+    if (!args[0] || !Number.isFinite(timeout)) throw new Error("Expected wait-http <url> [timeout-ms].");
+    return waitForHttp(args[0], timeout);
   }
-  if (command === "wait-process") {
-    const executablePath = args.shift();
-    const timeout = Number(args.shift() ?? "30000");
-    if (!executablePath || !Number.isFinite(timeout)) throw new Error("Expected wait-process <executable-path> [timeout-ms].");
-    await waitForExecutable(executablePath, timeout);
-    return;
-  }
-  throw new Error("Expected one of: claim, is-owner, stop, stop-if-owner, check-endpoint, wait-http, wait-process.");
+  throw new Error("Expected one of: stop, stop-if-recorded, launch-bundle, launch-exe, record-wrapped, check-endpoint, wait-http.");
 }
 
-const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
-if (invokedPath === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2)).catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
-  });
-}
+main(process.argv.slice(2)).catch((error) => {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+});
