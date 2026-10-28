@@ -116,8 +116,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 vi.mock("@main/core/binaries/manager", () => ({
   ToolManager: class {
     async reconcile(): Promise<void> {}
-    async pauseAndDrain(): Promise<void> {}
-    resume(): void {}
+    cancelAll(): void {}
     listStatuses(): [] {
       return [];
     }
@@ -2857,24 +2856,13 @@ describe("the save a quit makes", () => {
     expect(saved.value.cards.map((card) => card.originalFilename).sort()).toEqual(["next.wav", "take.wav"]);
   });
 
-  it("starts managed-tool shutdown before waiting for saves and resumes admission after cancelling quit", async () => {
+  it("cancels managed-tool work when the quit save starts", async () => {
     const { ToolManager } = await import("@main/core/binaries/manager");
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    const stop = vi.spyOn(ToolManager.prototype, "pauseAndDrain").mockReturnValue(held);
-    const resume = vi.spyOn(ToolManager.prototype, "resume");
-    const quitting = runtime.saveForQuit();
+    const cancel = vi.spyOn(ToolManager.prototype, "cancelAll");
     try {
-      expect(stop).toHaveBeenCalledOnce();
-      await runtime.resumeAfterCancelledQuit();
-      expect(resume).toHaveBeenCalledOnce();
-      release();
+      const quitting = runtime.saveForQuit();
+      expect(cancel).toHaveBeenCalledOnce();
       expect(await quitting).toEqual([]);
-    } finally {
-      release();
-      await quitting;
-      stop.mockRestore();
-      resume.mockRestore();
-    }
+    } finally { cancel.mockRestore(); }
   });
 });

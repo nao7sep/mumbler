@@ -32,7 +32,6 @@ import {
   toolFileName,
 } from "./registry";
 import { launchCheckDue, type DependenciesValue } from "./store";
-import { VerifiedArchives } from "./verified-archives";
 
 // Both audio tools are required for mumbler to function (ffprobe at import/probe
 // and trim analysis, ffmpeg at trim/save).
@@ -64,9 +63,6 @@ export class ToolManager {
   private readonly installControllers = new Map<ToolName, AbortController>();
   private checkController: AbortController | null = null;
   private factsQueue: Promise<void> = Promise.resolve();
-  private acceptingWork = true;
-  private readonly operations = new Set<Promise<void>>();
-  private readonly archives: VerifiedArchives;
 
   constructor(
     private readonly deps: {
@@ -80,7 +76,6 @@ export class ToolManager {
       notify: () => void;
     },
   ) {
-    this.archives = new VerifiedArchives(deps.tempDir);
     for (const name of TOOL_NAMES) {
       this.present.set(name, false);
       this.installedVersion.set(name, null);
@@ -179,12 +174,7 @@ export class ToolManager {
   // publish it atomically. Install and Update are the same flow — a fresh verified
   // copy replaces whatever was there. A bad download is discarded, never kept, so
   // there is no broken-installed state to repair.
-  installTool(name: ToolName): Promise<void> {
-    if (!this.acceptingWork) return Promise.reject(new OperationError("Audio tools are stopping for quit."));
-    return this.track(this.runInstall(name));
-  }
-
-  private async runInstall(name: ToolName): Promise<void> {
+  async installTool(name: ToolName): Promise<void> {
     if (this.busy.has(name)) {
       throw new OperationError(`${name} is already being installed.`);
     }
@@ -231,21 +221,23 @@ export class ToolManager {
       // re-fetchable native executables, not user-authored managed text.
       const archivePath = join(this.deps.tempDir, `${name}-${token}.zip`);
       const stagedExe = join(this.deps.tempDir, `${name}-${token}${this.deps.platform === "win32" ? ".exe" : ".tmp"}`);
-      let sharedArchive: Awaited<ReturnType<VerifiedArchives["acquire"]>> | undefined;
 
       try {
-        const onProgress = (received: number, total: number): void => {
-          const percent = total > 0 ? Math.floor((received / total) * 100) : null;
-          this.setTransient(name, { kind: "running", operation: "provision", percent });
-        };
-        if (this.deps.platform === "win32") {
-          sharedArchive = await this.archives.acquire(spec.downloadUrl, expected, signal, onProgress);
-        } else {
-          await downloadToFile({ url: spec.downloadUrl, destPath: archivePath, maxBytes: TOOL_DOWNLOAD_MAX_BYTES, signal, onProgress });
-          await verifySha256(archivePath, expected, signal);
-        }
+        await downloadToFile({
+          url: spec.downloadUrl,
+          destPath: archivePath,
+          maxBytes: TOOL_DOWNLOAD_MAX_BYTES,
+          signal,
+          onProgress: (received, total) => {
+            const percent = total > 0 ? Math.floor((received / total) * 100) : null;
+            this.setTransient(name, { kind: "running", operation: "provision", percent });
+          },
+        });
+        // Integrity gate: verify the downloaded archive before it becomes
+        // executable. A mismatch throws and aborts the install.
+        await verifySha256(archivePath, expected, signal);
         await extractFileFromZip(
-          sharedArchive?.path ?? archivePath,
+          archivePath,
           spec.innerName,
           stagedExe,
           TOOL_EXTRACTED_MAX_BYTES,
@@ -286,8 +278,7 @@ export class ToolManager {
         await rename(stagedExe, this.toolPath(name));
         published = true;
       } finally {
-        sharedArchive?.release();
-        if (this.deps.platform !== "win32") await rm(archivePath, { force: true }).catch(() => undefined);
+        await rm(archivePath, { force: true }).catch(() => undefined);
         await rm(stagedExe, { force: true }).catch(() => undefined);
       }
 
@@ -374,12 +365,7 @@ export class ToolManager {
   // Check can show a transient "couldn't check" notice. When the attempt time
   // cannot be written, the automatic launch check skips, so it cannot repeat on
   // every launch, while the user's own Check goes ahead.
-  checkTools(options: { automatic?: boolean } = {}): Promise<void> {
-    if (!this.acceptingWork) return Promise.reject(new OperationError("Audio tools are stopping for quit."));
-    return this.track(this.runCheck(options));
-  }
-
-  private async runCheck(options: { automatic?: boolean }): Promise<void> {
+  async checkTools(options: { automatic?: boolean } = {}): Promise<void> {
     if (this.checkController !== null) {
       throw new OperationError("Audio tool updates are already being checked.");
     }
@@ -446,24 +432,11 @@ export class ToolManager {
     }
   }
 
-  // Quit owns physical settlement even if its caller's budget expires. A
-  // cancelled quit reopens admission, but the existing per-operation guards
-  // continue protecting any work still unwinding.
-  async pauseAndDrain(): Promise<void> {
-    this.acceptingWork = false;
+  // Quit stops running installs and the check through their own controllers;
+  // each removes its own staged files as it unwinds.
+  cancelAll(): void {
     for (const name of this.installControllers.keys()) this.cancelInstall(name);
     this.cancelCheck();
-    await Promise.allSettled([...this.operations]);
-  }
-
-  resume(): void {
-    this.acceptingWork = true;
-  }
-
-  private track(operation: Promise<void>): Promise<void> {
-    this.operations.add(operation);
-    void operation.finally(() => this.operations.delete(operation)).catch(() => undefined);
-    return operation;
   }
 
   private setTransient(name: ToolName, transient: ToolTransient): void {

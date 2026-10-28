@@ -241,17 +241,6 @@ describe("reconcile", () => {
 });
 
 describe("installTool", () => {
-  it("reuses one verified Windows archive for sequential installations of both tools", async () => {
-    const manager = await makeManager("win32");
-    await manager.installTool("ffmpeg");
-    await manager.installTool("ffprobe");
-    expect(downloadToFile).toHaveBeenCalledOnce();
-    expect(verifySha256).toHaveBeenCalledOnce();
-    expect(extractFileFromZip).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(extractFileFromZip).mock.calls[0]![0]).toBe(vi.mocked(extractFileFromZip).mock.calls[1]![0]);
-    expect(await readFile(manager.toolPath("ffmpeg"), "utf8")).toBe(banner("ffmpeg", RESOLVED.version));
-    expect(await readFile(manager.toolPath("ffprobe"), "utf8")).toBe(banner("ffprobe", RESOLVED.version));
-  });
   it.each(["darwin", "win32"])("retains the old %s executable when an integrity-valid stage cannot run", async (platform) => {
     const logger = fakeLogger();
     const manager = await makeManager(platform, logger);
@@ -266,7 +255,7 @@ describe("installTool", () => {
     });
     await manager.installTool("ffmpeg");
     expect(await readFile(target, "utf8")).toBe("existing working executable");
-    expect((await readdir(tempDir)).filter((file) => !file.startsWith("tools-"))).toEqual([]);
+    expect(await readdir(tempDir)).toEqual([]);
     expect(manager.listStatuses()[0]!.transient.kind).toBe("failed");
     expect(logger.warn).toHaveBeenCalledWith("tools.install-failed", expect.any(String), expect.objectContaining({ error: expect.objectContaining({ code: "ENOEXEC" }) }));
   });
@@ -431,7 +420,7 @@ describe("installTool", () => {
     expect(await readdir(tempDir)).toEqual([]);
   });
 
-  it("quit closes admission and owns an aborted download through physical settlement", async () => {
+  it("quit cancels a running download through its controller", async () => {
     const manager = await makeManager();
     let signal: AbortSignal | undefined;
     let release!: () => void;
@@ -443,19 +432,12 @@ describe("installTool", () => {
     });
     const installing = manager.installTool("ffmpeg");
     await vi.waitFor(() => expect(signal).toBeDefined());
-    let drained = false;
-    const stopping = manager.pauseAndDrain().then(() => { drained = true; });
+    manager.cancelAll();
     expect(signal!.aborted).toBe(true);
-    await expect(manager.installTool("ffprobe")).rejects.toThrow("stopping for quit");
-    await expect(manager.checkTools()).rejects.toThrow("stopping for quit");
-    expect(drained).toBe(false);
-    manager.resume();
-    await expect(manager.installTool("ffmpeg")).rejects.toThrow("already being installed");
     release();
-    await Promise.all([installing, stopping]);
+    await installing;
     expect(await readdir(binDir)).toEqual([]);
-    await manager.installTool("ffmpeg");
-    expect(manager.listStatuses().find((status) => status.name === "ffmpeg")?.state).toBe("up-to-date");
+    expect(await readdir(tempDir)).toEqual([]);
   });
 
   it("checks cancellation immediately before publishing", async () => {
@@ -704,7 +686,7 @@ describe("checkTools", () => {
     }
   });
 
-  it("quit waits for a cancelled check's settlement and a resumed check gets fresh admission", async () => {
+  it("quit cancels a running check through its controller", async () => {
     const manager = await makeManager();
     let signal: AbortSignal | undefined;
     let release!: () => void;
@@ -716,17 +698,11 @@ describe("checkTools", () => {
     });
     const checking = manager.checkTools();
     await vi.waitFor(() => expect(signal).toBeDefined());
-    let drained = false;
-    const stopping = manager.pauseAndDrain().then(() => { drained = true; });
+    manager.cancelAll();
     expect(signal!.aborted).toBe(true);
-    await Promise.resolve();
-    expect(drained).toBe(false);
     release();
-    await Promise.all([checking, stopping]);
+    await checking;
     expect(manager.listStatuses().every((status) => status.lastCheckedAtUtc === null)).toBe(true);
-    manager.resume();
-    await manager.checkTools();
-    expect(manager.listStatuses().every((status) => status.lastCheckedAtUtc !== null)).toBe(true);
   });
 
   it("uses one save and applies no in-memory facts when that atomic save fails", async () => {
@@ -764,7 +740,7 @@ describe("committed binary and metadata outcome", () => {
     await manager.installTool("ffmpeg");
     expect(await readFile(tool, "utf8")).not.toBe("old binary");
     expect(JSON.parse(await readFile(sidecar, "utf8"))).toMatchObject({ formatVersion: 1 });
-    expect(await readdir(tempDir)).toEqual([expect.stringMatching(/^tools-[\w-]+\.zip$/)]);
+    expect(await readdir(tempDir)).toEqual([]);
   });
 
   it("keeps a committed Windows binary truthful when sidecar persistence fails", async () => {
