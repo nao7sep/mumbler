@@ -70,16 +70,12 @@ try {
         Invoke-Native -FilePath "node" -ArgumentList @("node_modules/electron/install.js")
     }
 
-    # Windows locks the packaged executable while it runs, so replacement must
-    # happen before cleaning the package directory.
-    Write-Step "Replacing any existing Mumbler runtime"
-    Invoke-Native -FilePath "node" -ArgumentList @($runtimeHelper, "stop")
-
-    # Remove stale output so a build that fails to emit a file can't be masked by
-    # a leftover artifact from a previous run.
-    Write-Step "Cleaning previous build"
-    if (Test-Path "out") { Remove-Item -Recurse -Force "out" }
-    if (Test-Path $outDir) { Remove-Item -Recurse -Force $outDir }
+    # Build into a clean candidate so a build that fails to emit a file can't be
+    # masked by a leftover artifact; the previous package stays runnable until the
+    # candidate is complete.
+    Write-Step "Preparing clean build output"
+    $candidate = & node $runtimeHelper prepare-candidate
+    if ($LASTEXITCODE -ne 0) { throw "Could not prepare the build output." }
 
     # The release build type-checks the shipped sources (main/preload + renderer);
     # the dev server skips this entirely. Tests are checked separately and are not
@@ -95,11 +91,13 @@ try {
     # installer. This is what gives the app its own identity (correct name)
     # instead of running under the generic Electron runtime.
     Write-Step "Packaging the app bundle"
-    Invoke-Native -FilePath "node_modules/.bin/electron-builder.cmd" -ArgumentList @("--dir")
+    Invoke-Native -FilePath "node_modules/.bin/electron-builder.cmd" -ArgumentList @("--dir", "--config.directories.output=$candidate")
 
-    if (-not (Test-Path $exePath)) {
-        throw "Packaging did not produce $appName.exe under $outDir/win-unpacked/."
-    }
+    # Windows locks the packaged executable while it runs, so the running app
+    # closes before the candidate replaces its package.
+    Write-Step "Publishing the verified package"
+    Invoke-Native -FilePath "node" -ArgumentList @($runtimeHelper, "stop")
+    Invoke-Native -FilePath "node" -ArgumentList @($runtimeHelper, "publish-candidate")
 
     Write-Step "Launching the packaged app"
     Invoke-Native -FilePath "node" -ArgumentList @($runtimeHelper, "launch-exe", $exePath)

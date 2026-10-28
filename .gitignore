@@ -3,6 +3,8 @@ node_modules
 
 # Build output
 dist
+dist.candidate
+dist.previous
 out
 
 # OS files

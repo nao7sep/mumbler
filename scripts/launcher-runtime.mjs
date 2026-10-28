@@ -13,12 +13,15 @@
  *   launch-bundle <app bundle>        open a new instance (macOS) and record it
  *   launch-exe <executable>           start the executable (Windows) and record it
  *   record-wrapped <pid> <executable> record the app process a wrapper started; prints its pid
+ *   prepare-candidate                 remove the build output and any earlier candidate; print the candidate folder
+ *   publish-candidate                 replace the packaged app with the validated candidate
  *   check-endpoint <host> <port>      fail when the port is taken
  *   wait-http <url> [timeout-ms]      wait until the URL responds
  */
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { readFile, writeFile } from "node:fs/promises";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join, resolve } from "node:path";
@@ -31,6 +34,14 @@ const RECORD_FILE = join(REPO_ROOT, ".git", "launcher-runtime-process");
 const productName = /^productName:\s*(.+?)\s*$/m.exec(await readFile(join(REPO_ROOT, "electron-builder.yml"), "utf8"))?.[1];
 if (!productName) throw new Error("electron-builder.yml names no productName.");
 const windows = process.platform === "win32";
+const builderConfig = await readFile(join(REPO_ROOT, "electron-builder.yml"), "utf8");
+const outputFolder = /^\s+output:\s*(.+?)\s*$/m.exec(builderConfig)?.[1];
+if (!outputFolder) throw new Error("electron-builder.yml names no output directory.");
+const packagingOutput = join(REPO_ROOT, outputFolder);
+// rebuild packages into the candidate and publishes it over the output only once it is complete, so
+// the previous runnable package survives a failed build.
+const packagingCandidate = `${packagingOutput}.candidate`;
+const packagingPrevious = `${packagingOutput}.previous`;
 
 const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 
@@ -187,6 +198,47 @@ async function recordWrapped(wrapperPid, executable) {
   }
 }
 
+/** The packaged executable under an output folder: the .app's binary on macOS, the unpacked .exe on Windows. */
+function packagedExecutable(output) {
+  if (windows) {
+    const exe = join(output, "win-unpacked", `${productName}.exe`);
+    return existsSync(exe) ? exe : null;
+  }
+  if (!existsSync(output)) return null;
+  for (const entry of readdirSync(output, { withFileTypes: true })) {
+    const executable = join(output, entry.name, `${productName}.app`, "Contents", "MacOS", productName);
+    if (entry.isDirectory() && existsSync(executable) && statSync(executable).isFile()) return executable;
+  }
+  return null;
+}
+
+/** Swap the validated candidate in for the packaged output, restoring the previous one if the swap fails. */
+async function publishCandidate() {
+  const executable = packagedExecutable(packagingCandidate);
+  if (!executable) {
+    throw new Error(`Packaging did not produce a runnable ${productName} under ${packagingCandidate}.`);
+  }
+  await rm(packagingPrevious, { recursive: true, force: true });
+  let movedPrevious = false;
+  try {
+    await rename(packagingOutput, packagingPrevious);
+    movedPrevious = true;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  try {
+    await rename(packagingCandidate, packagingOutput);
+  } catch (error) {
+    if (movedPrevious) await rename(packagingPrevious, packagingOutput);
+    throw error;
+  }
+  if (movedPrevious) {
+    await rm(packagingPrevious, { recursive: true, force: true }).catch((error) => {
+      process.stderr.write(`The new package is ready; the previous one could not be removed from ${packagingPrevious}: ${error.message}\n`);
+    });
+  }
+}
+
 async function assertEndpointAvailable(host, port) {
   await new Promise((resolveProbe, rejectProbe) => {
     const probe = createServer();
@@ -238,6 +290,13 @@ async function main([command, ...args]) {
     if (!Number.isInteger(pid) || !args[1]) throw new Error("Expected record-wrapped <pid> <executable>.");
     return recordWrapped(pid, args[1]);
   }
+  if (command === "prepare-candidate") {
+    await rm(join(REPO_ROOT, "out"), { recursive: true, force: true });
+    await rm(packagingCandidate, { recursive: true, force: true });
+    process.stdout.write(`${packagingCandidate}\n`);
+    return;
+  }
+  if (command === "publish-candidate") return publishCandidate();
   if (command === "check-endpoint") {
     const port = Number(args[1]);
     if (!args[0] || !Number.isInteger(port)) throw new Error("Expected check-endpoint <host> <port>.");
@@ -248,7 +307,7 @@ async function main([command, ...args]) {
     if (!args[0] || !Number.isFinite(timeout)) throw new Error("Expected wait-http <url> [timeout-ms].");
     return waitForHttp(args[0], timeout);
   }
-  throw new Error("Expected one of: stop, stop-if-recorded, launch-bundle, launch-exe, record-wrapped, check-endpoint, wait-http.");
+  throw new Error("Expected one of: stop, stop-if-recorded, launch-bundle, launch-exe, record-wrapped, prepare-candidate, publish-candidate, check-endpoint, wait-http.");
 }
 
 main(process.argv.slice(2)).catch((error) => {
