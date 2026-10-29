@@ -185,6 +185,10 @@ class ImportAdmissionError extends Error {
   }
 }
 
+// What a runtime command returns: its own result and the snapshot after it.
+// The IPC boundary replies with the result alone.
+export type WithSnapshot<T> = T & { snapshot: AppSnapshot };
+
 /** The user's own work a quit could not save. */
 export type QuitSaveFailure = "queue" | "transcripts" | "settings";
 
@@ -937,7 +941,7 @@ export class ApplicationRuntime {
     return createDefaultSettings().prompts;
   }
 
-  async openImportDialog(window: BrowserWindow): Promise<ImportOperationResult> {
+  async openImportDialog(window: BrowserWindow): Promise<WithSnapshot<ImportOperationResult>> {
     this.ensureReady();
 
     const t = this.translator().t;
@@ -966,7 +970,7 @@ export class ApplicationRuntime {
     return this.importPaths(result.filePaths, "file-picker");
   }
 
-  async importDroppedPaths(paths: string[]): Promise<ImportOperationResult> {
+  async importDroppedPaths(paths: string[]): Promise<WithSnapshot<ImportOperationResult>> {
     return this.importPaths(paths, "drag-and-drop");
   }
 
@@ -1001,7 +1005,7 @@ export class ApplicationRuntime {
   // outside it, and the confirmation is validated and committed in a second
   // turn from the pending imports as they are then; original copies and
   // deletions follow the committed import, in the exports' turn.
-  async confirmPendingImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult> {
+  async confirmPendingImports(items: PendingImportReviewItem[]): Promise<WithSnapshot<ConfirmImportsResult>> {
     const byId = new Map(items.map((item) => [item.id, item]));
     const toProbe = await this.command(async () => {
       this.ensureAcceptingWork();
@@ -1923,7 +1927,7 @@ export class ApplicationRuntime {
     cardId: string,
     resolution?: SaveConflictResolution,
     options: SaveCardOptions = { removeAfterSave: true },
-  ): Promise<SaveCardResult> {
+  ): Promise<WithSnapshot<SaveCardResult>> {
     const card = await this.command(async () => {
       this.ensureReady();
       const card = this.requireCard(cardId, "Card to save does not exist.");
@@ -2247,7 +2251,7 @@ export class ApplicationRuntime {
     });
   }
 
-  private importPaths(sourcePaths: string[], importSource: ImportSource): Promise<ImportOperationResult> {
+  private importPaths(sourcePaths: string[], importSource: ImportSource): Promise<WithSnapshot<ImportOperationResult>> {
     return this.whenAccepting(() => this.importPathBatch(sourcePaths, importSource));
   }
 
@@ -2285,7 +2289,7 @@ export class ApplicationRuntime {
   private async importPathBatch(
     sourcePaths: string[],
     importSource: ImportSource,
-  ): Promise<ImportOperationResult> {
+  ): Promise<WithSnapshot<ImportOperationResult>> {
     this.ensureReady();
     const failedImports: FailedImport[] = [];
     const attemptedPaths = [...sourcePaths];

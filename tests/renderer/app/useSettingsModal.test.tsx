@@ -21,7 +21,7 @@ const onNotice = vi.fn();
 const onLastingNotice = vi.fn();
 const setGeminiApiKey = vi.fn<MumblerShellApi["setGeminiApiKey"]>();
 const clearGeminiApiKey = vi.fn<MumblerShellApi["clearGeminiApiKey"]>();
-function Harness() { state = useSettingsModal({ onSnapshotUpdate: vi.fn(), onError: vi.fn(), onNotice, onLastingNotice }); return null; }
+function Harness() { state = useSettingsModal({ onError: vi.fn(), onNotice, onLastingNotice }); return null; }
 beforeEach(async () => {
   saveSettingsDraft.mockReset();
   pickOutputDirectory.mockReset();
@@ -30,7 +30,7 @@ beforeEach(async () => {
   setGeminiApiKey.mockReset();
   onNotice.mockReset();
   onLastingNotice.mockReset();
-  saveSettingsDraft.mockResolvedValue({} as Awaited<ReturnType<MumblerShellApi["saveSettingsDraft"]>>);
+  saveSettingsDraft.mockResolvedValue(undefined);
   opened = initial;
   Object.defineProperty(window, "mumbler", {
     configurable: true,
@@ -134,7 +134,7 @@ describe("picked Settings directories", () => {
 
 describe("removing the stored API key", () => {
   const removed = (hasGeminiApiKey: boolean) =>
-    ({ settingsSummary: { hasGeminiApiKey } }) as Awaited<ReturnType<MumblerShellApi["clearGeminiApiKey"]>>;
+    ({ hasGeminiApiKey });
 
   it("confirms a plain removal with a toast", async () => {
     clearGeminiApiKey.mockResolvedValueOnce(removed(false));
@@ -157,7 +157,7 @@ function pending<T>() {
   return { promise, resolve };
 }
 const keySnapshot = (hasGeminiApiKey = true) =>
-  ({ settingsSummary: { hasGeminiApiKey } }) as Awaited<ReturnType<MumblerShellApi["setGeminiApiKey"]>>;
+  ({ hasGeminiApiKey });
 
 describe("Settings draft settlement", () => {
   it("protects an unsaved key on modal close and quit, reporting only the Settings label", async () => {
@@ -226,7 +226,7 @@ describe("Settings draft settlement", () => {
   });
 
   it("keeps newer Settings edits and compares them against the completed save", async () => {
-    const saving = pending<ReturnType<typeof keySnapshot>>();
+    const saving = pending<void>();
     saveSettingsDraft.mockReturnValueOnce(saving.promise);
     await act(async () => state.handleOpenSettings());
     await act(async () => state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "submitted" }));
@@ -238,7 +238,7 @@ describe("Settings draft settlement", () => {
     });
     await act(async () => {
       state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "newer" });
-      saving.resolve(keySnapshot());
+      saving.resolve();
       await operation;
     });
     expect(saveSettingsDraft).toHaveBeenCalledTimes(1);
@@ -250,7 +250,7 @@ describe("Settings draft settlement", () => {
   });
 
   it("preserves current key presence in the baseline when Settings finishes after key removal", async () => {
-    const saving = pending<ReturnType<typeof keySnapshot>>();
+    const saving = pending<void>();
     saveSettingsDraft.mockReturnValueOnce(saving.promise);
     clearGeminiApiKey.mockResolvedValueOnce(keySnapshot(false));
     await act(async () => state.handleOpenSettings());
@@ -259,21 +259,21 @@ describe("Settings draft settlement", () => {
     await act(async () => { operation = state.handleSaveSettings(); });
     await act(async () => state.handleClearGeminiApiKey());
     await act(async () => state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "newer" }));
-    await act(async () => { saving.resolve(keySnapshot()); await operation; });
+    await act(async () => { saving.resolve(); await operation; });
     expect(state.settingsDraft?.hasGeminiApiKey).toBe(false);
     await act(async () => state.setSettingsDraft((draft) => draft && { ...draft, titlePrompt: "submitted" }));
     expect(state.isSettingsDirty).toBe(false);
   });
 
   it("keeps a key first typed while Settings Save was pending", async () => {
-    const saving = pending<ReturnType<typeof keySnapshot>>();
+    const saving = pending<void>();
     saveSettingsDraft.mockReturnValueOnce(saving.promise);
     await act(async () => state.handleOpenSettings());
     let operation!: Promise<void>;
     await act(async () => { operation = state.handleSaveSettings(); });
     await act(async () => {
       state.setApiKeyInput("new secret");
-      saving.resolve(keySnapshot());
+      saving.resolve();
       await operation;
     });
     expect(state.settingsDraft).not.toBeNull();
@@ -311,7 +311,7 @@ describe("Settings draft settlement", () => {
 });
 
 function MountedSettings() {
-  const modal = useSettingsModal({ onSnapshotUpdate: vi.fn(), onError: vi.fn(), onNotice, onLastingNotice });
+  const modal = useSettingsModal({ onError: vi.fn(), onNotice, onLastingNotice });
   state = modal;
   return modal.settingsDraft && React.createElement(SettingsModal, {
     draft: modal.settingsDraft,

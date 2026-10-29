@@ -16,7 +16,6 @@ const chooseOriginalsDirectory = vi.fn();
 const pickOutputDirectory = vi.fn();
 const dismissFirstRunSetup = vi.fn();
 const close = vi.fn();
-const update = vi.fn();
 const snapshot = { settingsSummary: {
   outputDirectory: null, defaultOutputDirectory: "/fixtures/Documents/Mumbler",
   backupDirectory: null, defaultBackupDirectory: "/fixtures/Documents/Recordings",
@@ -41,7 +40,7 @@ beforeEach(async () => {
   const container = document.createElement("div"); document.body.append(container);
   root = createRoot(container);
   await act(async () => root.render(createElement(FirstRunSetupModal, {
-    snapshot, onSnapshot: update, onClose: close,
+    snapshot, onClose: close,
     tools: { dependencies: [], checkUpdatesAtLaunch: true, isChecking: false, checkNotice: null, operationError: null, onProvision: vi.fn(), onCancelProvision: vi.fn(), onCheck: vi.fn(), onCancelCheck: vi.fn(), onToggleCheckUpdates: vi.fn() },
   })));
 });
@@ -83,10 +82,9 @@ describe("ordered skippable setup", () => {
     expect(document.body.textContent).toContain("You have unsaved changes");
     await click("Keep editing");
     expect(input.value).toBe("test-secret");
-    setGeminiApiKey.mockResolvedValueOnce(snapshot);
+    setGeminiApiKey.mockResolvedValueOnce({ hasGeminiApiKey: true });
     await click("Continue");
     expect(document.body.textContent).toContain("Set Up Mumbler (3/4)");
-    expect(update).toHaveBeenCalledWith(snapshot);
   });
   it("keeps a cancelled picker on the folder step, then saves both suggested folders", async () => {
     await click("Skip"); await click("Skip");
@@ -95,8 +93,8 @@ describe("ordered skippable setup", () => {
     await act(async () => buttons("Choose Another Folder")[1]!.click());
     expect(saveSetupDirectory).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Set Up Mumbler (3/4)");
-    saveSetupDirectory.mockResolvedValueOnce(snapshot);
-    saveSetupRecordingsDirectory.mockResolvedValueOnce(snapshot);
+    saveSetupDirectory.mockResolvedValueOnce(undefined);
+    saveSetupRecordingsDirectory.mockResolvedValueOnce(undefined);
     await click("Use These Folders");
     expect(saveSetupDirectory).toHaveBeenCalledWith("/fixtures/Documents/Mumbler");
     expect(saveSetupRecordingsDirectory).toHaveBeenCalledWith("/fixtures/Documents/Recordings");
@@ -106,11 +104,10 @@ describe("ordered skippable setup", () => {
 
   it("shows the saved Recordings folder and names the output folder when only that save fails", async () => {
     await click("Skip"); await click("Skip");
-    const filed = { ...snapshot, settingsSummary: { ...snapshot.settingsSummary!, backupDirectory: "/fixtures/Documents/Recordings" } } as AppSnapshot;
-    saveSetupRecordingsDirectory.mockResolvedValueOnce(filed);
+    saveSetupRecordingsDirectory.mockResolvedValueOnce(undefined);
     saveSetupDirectory.mockRejectedValueOnce(new Error("EACCES"));
     await click("Use These Folders");
-    expect(update).toHaveBeenCalledWith(filed);
+    expect(saveSetupRecordingsDirectory).toHaveBeenCalledOnce();
     expect(document.body.textContent).toContain("The output folder could not be selected.");
     expect(document.body.textContent).toContain("Set Up Mumbler (3/4)");
   });
@@ -121,13 +118,12 @@ describe("ordered skippable setup", () => {
     await click("Use These Folders");
     expect(document.body.textContent).toContain("The Recordings folder could not be selected.");
     expect(saveSetupDirectory).not.toHaveBeenCalled();
-    expect(update).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Set Up Mumbler (3/4)");
   });
 
   it("saves the Recordings folder as soon as it is picked, and the confirmed time zone at the end", async () => {
     await click("Skip"); await click("Skip");
-    chooseOriginalsDirectory.mockResolvedValueOnce(snapshot);
+    chooseOriginalsDirectory.mockResolvedValueOnce(undefined);
     await act(async () => buttons("Choose Another Folder")[0]!.click());
     expect(chooseOriginalsDirectory).toHaveBeenCalledOnce();
     await click("Skip");
@@ -136,7 +132,7 @@ describe("ordered skippable setup", () => {
       select.value = "Europe/Berlin";
       select.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    saveSetupTimezone.mockResolvedValueOnce(snapshot);
+    saveSetupTimezone.mockResolvedValueOnce(undefined);
     await click("Use This Time Zone");
     expect(saveSetupTimezone).toHaveBeenCalledWith("Europe/Berlin");
     expect(close).toHaveBeenCalledOnce();

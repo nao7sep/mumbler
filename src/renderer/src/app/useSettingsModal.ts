@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, useRef, type Dispatch, type SetStateAction } from "react";
 
-import type { AppSnapshot, SettingsDraft } from "@shared/app-shell";
+import type { SettingsDraft } from "@shared/app-shell";
 import { presentFailure } from "./presentFailure";
 import { message, type Message } from "@shared/i18n/translate";
 
 interface UseSettingsModalOptions {
-  onSnapshotUpdate: (snapshot: AppSnapshot) => void;
   onError: (message: Message) => void;
   onNotice: (message: Message) => void;
   // A notice that stays until closed, for news the user must not miss.
@@ -39,7 +38,6 @@ interface UseSettingsModalResult {
 }
 
 export function useSettingsModal({
-  onSnapshotUpdate,
   onError,
   onNotice,
   onLastingNotice,
@@ -148,8 +146,7 @@ export function useSettingsModal({
     savingSettingsRef.current = true;
     setIsSavingSettings(true);
     try {
-      const nextSnapshot = await window.mumbler.saveSettingsDraft(submittedDraft);
-      onSnapshotUpdate(nextSnapshot);
+      await window.mumbler.saveSettingsDraft(submittedDraft);
       const currentDraft = currentDraftRef.current;
       if (currentDraft === submittedDraft && apiKeyInputRef.current.length === 0) {
         handleCloseSettings();
@@ -186,9 +183,8 @@ export function useSettingsModal({
     savingApiKeyRef.current = true;
     setIsSavingApiKey(true);
     try {
-      const nextSnapshot = await window.mumbler.setGeminiApiKey(trimmed);
-      onSnapshotUpdate(nextSnapshot);
-      applyHasKey(nextSnapshot.settingsSummary?.hasGeminiApiKey ?? true);
+      const { hasGeminiApiKey } = await window.mumbler.setGeminiApiKey(trimmed);
+      applyHasKey(hasGeminiApiKey);
       setApiKeyInput((current) => current === apiKey ? "" : current);
       setSettingsErrorMessage(null);
       onNotice(message("notice.apiKeySaved"));
@@ -205,14 +201,13 @@ export function useSettingsModal({
     savingApiKeyRef.current = true;
     setIsSavingApiKey(true);
     try {
-      const nextSnapshot = await window.mumbler.clearGeminiApiKey();
-      onSnapshotUpdate(nextSnapshot);
-      applyHasKey(nextSnapshot.settingsSummary?.hasGeminiApiKey ?? false);
+      const { hasGeminiApiKey } = await window.mumbler.clearGeminiApiKey();
+      applyHasKey(hasGeminiApiKey);
       setSettingsErrorMessage(null);
       // An env-supplied key can still resolve after clearing the stored one, so
       // the message reflects what actually happened rather than assuming removal,
       // and that surprise stays until the user closes it.
-      if (nextSnapshot.settingsSummary?.hasGeminiApiKey) {
+      if (hasGeminiApiKey) {
         onLastingNotice(message("notice.apiKeyRemovedEnvRemains"));
       } else {
         onNotice(message("notice.apiKeyRemoved"));

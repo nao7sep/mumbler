@@ -74,6 +74,12 @@ beforeEach(() => {
   logger.debug.mockClear();
   logger.error.mockClear();
   runtime = Object.fromEntries(RUNTIME_METHODS.map((name) => [name, vi.fn(async () => `${name} result`)]));
+  for (const name of ["openImportDialog", "importDroppedPaths", "confirmPendingImports", "saveCard"]) {
+    runtime[name] = vi.fn(async () => ({ snapshot: "the snapshot", outcome: `${name} result` }));
+  }
+  for (const name of ["setGeminiApiKey", "clearGeminiApiKey"]) {
+    runtime[name] = vi.fn(async () => ({ settingsSummary: { hasGeminiApiKey: true } }));
+  }
   runtime.currentLogger = vi.fn(() => logger);
   registerAppShellIpc(runtime as never, windows);
 });
@@ -127,10 +133,35 @@ describe("the app-shell IPC boundary", () => {
     ["readRecordSources", "readRecordSources", []],
     ["getRecordsListWidth", "recordsListWidth", []],
     ["saveRecordsListWidth", "saveRecordsListWidth", [420]],
-  ] as const)("carries %s to the runtime and answers with its result", async (channel, method, args) => {
+  ] as const)("carries %s to the runtime and answers with its own result", async (channel, method, args) => {
     const result = await invoke(APP_SHELL_CHANNELS[channel], ...args);
     expect(runtime[method]).toHaveBeenCalledExactlyOnceWith(...args);
-    expect(result).toBe(`${method} result`);
+    // A change replies with no snapshot: the window has it from its subscription.
+    const reply: Record<string, unknown> = {
+      importDroppedPaths: { outcome: "importDroppedPaths result" },
+      confirmPendingImports: { outcome: "confirmPendingImports result" },
+      saveCard: { outcome: "saveCard result" },
+      setGeminiApiKey: { hasGeminiApiKey: true },
+      clearGeminiApiKey: { hasGeminiApiKey: true },
+    };
+    const changes = new Set(["dismissFirstRunSetup", "updatePendingImportDrafts", "selectCard", "duplicateCard", "updateCardTrim",
+      "generateCardStep", "cancelCardProcessing", "saveSettingsDraft", "removeCard", "reportRendererError", "dismissAppWideError",
+      "resetState", "cancelPendingImports", "provisionTool", "cancelToolProvision", "checkTools", "cancelToolCheck",
+      "saveToolSettings", "saveLayout"]);
+    expect(result).toEqual(channel in reply ? reply[channel] : changes.has(channel) ? undefined : `${method} result`);
+  });
+
+  it("sends subscribed windows the new snapshot before replying to a change, even a refused one", async () => {
+    runtime.getSnapshot = vi.fn(() => "the snapshot");
+    const sender = { send: vi.fn(), isDestroyed: () => false, once: vi.fn() };
+    await electron.handlers.get(APP_SHELL_CHANNELS.subscribeSnapshot)!({ sender });
+    await invoke(APP_SHELL_CHANNELS.removeCard, "card-1");
+    expect(sender.send).toHaveBeenCalledTimes(2);
+    runtime.removeCard!.mockRejectedValueOnce(new OperationError("busy"));
+    await expect(invoke(APP_SHELL_CHANNELS.removeCard, "card-1")).rejects.toThrow("busy");
+    expect(sender.send).toHaveBeenCalledTimes(3);
+    await invoke(APP_SHELL_CHANNELS.readRecordSources);
+    expect(sender.send, "a read sends nothing").toHaveBeenCalledTimes(3);
   });
 
   it("sends a subscribing window the current snapshot, then every published one, until it closes", async () => {

@@ -589,8 +589,9 @@ export interface FailedImport {
   kind: "invalid" | "failure";
 }
 
+// Replies carry what the operation itself produced; the window learns the
+// app's new state from its snapshot subscription.
 export interface ImportOperationResult {
-  snapshot: AppSnapshot;
   attemptedPaths: string[];
   importedCount: number;
   failedImports: FailedImport[];
@@ -605,7 +606,6 @@ export interface ImportOriginalWarning {
 }
 
 export interface ConfirmImportsResult {
-  snapshot: AppSnapshot;
   originalWarnings: ImportOriginalWarning[];
 }
 
@@ -624,7 +624,6 @@ export interface SaveOutputFile {
 export type SaveCardResult =
   | {
       kind: "saved";
-      snapshot: AppSnapshot;
       audioPath: string;
       jsonPath: string;
       markdownPath: string;
@@ -632,20 +631,17 @@ export type SaveCardResult =
     }
   | {
       kind: "failed";
-      snapshot: AppSnapshot;
       message: Message;
       files?: SaveOutputFile[];
     }
   | {
       kind: "conflict";
-      snapshot: AppSnapshot;
       audioPath: string;
       jsonPath: string;
       markdownPath: string;
     }
   | {
       kind: "cancelled";
-      snapshot: AppSnapshot;
     };
 
 export interface MumblerShellApi {
@@ -658,53 +654,53 @@ export interface MumblerShellApi {
   getDefaultPrompts(): Promise<PromptTemplates>;
   openImportDialog(): Promise<ImportOperationResult>;
   importDroppedPaths(paths: string[]): Promise<ImportOperationResult>;
-  updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot>;
+  updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<void>;
   confirmPendingImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult>;
-  selectCard(cardId: string | null): Promise<AppSnapshot>;
-  duplicateCard(cardId: string): Promise<AppSnapshot>;
-  updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot>;
+  selectCard(cardId: string | null): Promise<void>;
+  duplicateCard(cardId: string): Promise<void>;
+  updateCardTrim(cardId: string, trim: CardTrim): Promise<void>;
   getCardMediaSource(cardId: string): Promise<string>;
   // The loudest level in each hundredth of a second, for the player's waveform.
   // Null when the run was stopped before it finished.
   getCardWaveformPeaks(cardId: string, requestId: string): Promise<Float32Array | null>;
   cancelCardWaveformPeaks(requestId: string): Promise<void>;
-  generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot>;
-  cancelCardProcessing(cardId: string): Promise<AppSnapshot>;
+  generateCardStep(cardId: string, target: GenerateTarget): Promise<void>;
+  cancelCardProcessing(cardId: string): Promise<void>;
   pickOutputDirectory(directory?: string, literalDirectory?: string): Promise<string | null>;
   pickBackupDirectory(directory?: string, literalDirectory?: string): Promise<string | null>;
   openOutputDirectory(): Promise<void>;
   openExternal(url: string): Promise<void>;
-  saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot>;
+  saveSettingsDraft(draft: SettingsDraft): Promise<void>;
   // Set/clear the Gemini API key. These go to the dedicated secrets file
   // (api-keys.json), separate from the settings JSON, and return a fresh snapshot
   // so the renderer's hasGeminiApiKey presence flag updates immediately.
-  setGeminiApiKey(apiKey: string): Promise<AppSnapshot>;
-  clearGeminiApiKey(): Promise<AppSnapshot>;
-  chooseOutputDirectory(): Promise<AppSnapshot>;
-  saveSetupDirectory(directory: string): Promise<AppSnapshot>;
-  saveSetupRecordingsDirectory(directory: string): Promise<AppSnapshot>;
-  saveSetupTimezone(timezone: string): Promise<AppSnapshot>;
-  chooseOriginalsDirectory(): Promise<AppSnapshot>;
+  setGeminiApiKey(apiKey: string): Promise<{ hasGeminiApiKey: boolean }>;
+  clearGeminiApiKey(): Promise<{ hasGeminiApiKey: boolean }>;
+  chooseOutputDirectory(): Promise<void>;
+  saveSetupDirectory(directory: string): Promise<void>;
+  saveSetupRecordingsDirectory(directory: string): Promise<void>;
+  saveSetupTimezone(timezone: string): Promise<void>;
+  chooseOriginalsDirectory(): Promise<void>;
   saveCard(cardId: string, resolution?: SaveConflictResolution, options?: SaveCardOptions): Promise<SaveCardResult>;
-  removeCard(cardId: string): Promise<AppSnapshot>;
-  reportRendererError(report: RendererErrorReport): Promise<AppSnapshot>;
+  removeCard(cardId: string): Promise<void>;
+  reportRendererError(report: RendererErrorReport): Promise<void>;
   reportRendererDiagnostic(report: RendererErrorReport): Promise<void>;
-  dismissAppWideError(): Promise<AppSnapshot>;
-  resetState(): Promise<AppSnapshot>;
-  cancelPendingImports(ids: string[]): Promise<AppSnapshot>;
+  dismissAppWideError(): Promise<void>;
+  resetState(): Promise<void>;
+  cancelPendingImports(ids: string[]): Promise<void>;
   // Managed audio-tool operations. Each returns a fresh snapshot so the surface
   // reflects the new state; live progress arrives with each snapshot.
   // provisionTool is the single acquire operation (Install when absent, Update
   // when a newer version is known — same flow underneath).
-  provisionTool(name: ToolName): Promise<AppSnapshot>;
-  cancelToolProvision(name: ToolName): Promise<AppSnapshot>;
-  checkTools(): Promise<AppSnapshot>;
-  cancelToolCheck(): Promise<AppSnapshot>;
-  saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot>;
+  provisionTool(name: ToolName): Promise<void>;
+  cancelToolProvision(name: ToolName): Promise<void>;
+  checkTools(): Promise<void>;
+  cancelToolCheck(): Promise<void>;
+  saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<void>;
   // Persist the queue (left) pane's dragged width intent to layout.json and return
   // a fresh snapshot. Called only on a splitter drag-commit; a window resize
   // re-derives the displayed width in the renderer and persists nothing.
-  saveLayout(queueWidth: number): Promise<AppSnapshot>;
+  saveLayout(queueWidth: number): Promise<void>;
   // The records window: opened from the main window, it reads records.sqlite3.
   openRecordsWindow(): Promise<void>;
   readRecordsPage(query: RecordsQuery): Promise<RecordsPage>;

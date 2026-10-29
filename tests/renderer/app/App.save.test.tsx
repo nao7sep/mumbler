@@ -26,6 +26,8 @@ let root: Root | null = null;
 let initialSnapshot: AppSnapshot;
 // Sends the window the current snapshot, as main does after every change.
 let pipelineChanged: (() => void) | undefined;
+// Sends the window a given snapshot, as main does before a reply.
+let publish: (next: AppSnapshot) => void = () => undefined;
 
 class TestResizeObserver {
   observe(): void {}
@@ -68,8 +70,8 @@ const outputs = {
   jsonPath: "/exports/20260301-073001-preserved-title.json",
   markdownPath: "/exports/20260301-073001-preserved-title.md",
 };
-const conflict = (): SaveCardResult => ({ kind: "conflict", snapshot: initialSnapshot, ...outputs });
-const saved = (remove = true): SaveCardResult => ({ kind: "saved", snapshot: remove ? snapshot([]) : initialSnapshot, ...outputs });
+const conflict = (): SaveCardResult => ({ kind: "conflict", ...outputs });
+const saved = (): SaveCardResult => ({ kind: "saved", ...outputs });
 
 function button(key: MessageKey, scope: ParentNode = document): HTMLButtonElement {
   const label = english.text(message(key));
@@ -103,7 +105,7 @@ beforeEach(() => {
   initialSnapshot = snapshot();
   pipelineChanged = undefined;
   saveCard.mockReset();
-  generateCardStep.mockReset().mockImplementation(async () => initialSnapshot);
+  generateCardStep.mockReset().mockResolvedValue(undefined);
   removeCard.mockReset();
   reportRendererDiagnostic.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal("ResizeObserver", TestResizeObserver);
@@ -113,6 +115,7 @@ beforeEach(() => {
     getInterfaceLanguage: vi.fn(async () => initialSnapshot.interfaceLanguage),
     subscribeSnapshot: vi.fn(async (listener: (next: AppSnapshot) => void) => {
       pipelineChanged = () => listener(initialSnapshot);
+      publish = listener;
       listener(initialSnapshot);
       return unsubscribe;
     }),
@@ -156,7 +159,7 @@ describe("App saving a recording", () => {
     ["decision.overwrite", "overwrite"],
     ["decision.addSuffix", "suffix"],
   ] as const)("resubmits the conflict using %s and renders the successful result", async (choice, strategy) => {
-    saveCard.mockResolvedValueOnce(conflict()).mockResolvedValueOnce(saved());
+    saveCard.mockResolvedValueOnce(conflict()).mockImplementationOnce(async () => { publish(snapshot([])); return saved(); });
     await mount();
     await clickSave();
     await act(async () => button(choice, document.querySelector('[role="dialog"]')!).click());
@@ -184,7 +187,7 @@ describe("App saving a recording", () => {
     const audioName = outputs.audioPath.split("/").at(-1)!;
     const jsonName = outputs.jsonPath.split("/").at(-1)!;
     const detail = message("error.saveIncomplete", { folder: "/exports", files: `${audioName}, ${jsonName}` });
-    saveCard.mockResolvedValue({ kind: "failed", snapshot: initialSnapshot, message: detail,
+    saveCard.mockResolvedValue({ kind: "failed", message: detail,
       files: [{ path: outputs.audioPath, status: "saved" }, { path: outputs.jsonPath, status: "saved" }, { path: outputs.markdownPath, status: "failed" }] });
     await mount();
     await clickSave();
@@ -208,7 +211,7 @@ describe("App saving a recording", () => {
     expect(selectedCardText()).toContain("Preserved transcript");
     expect(document.querySelector(".queue-empty")).toBeNull();
     expect(removeCard).not.toHaveBeenCalled();
-    await act(async () => pending.resolve(saved()));
+    await act(async () => { publish(snapshot([])); pending.resolve(saved()); });
     expect(document.querySelector(".queue-empty")?.textContent).toContain("Empty queue");
     expect(document.querySelector(".result-output")).toBeNull();
     expect(removeCard).not.toHaveBeenCalled();

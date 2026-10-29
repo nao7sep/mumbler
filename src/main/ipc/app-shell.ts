@@ -182,6 +182,26 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     });
   };
 
+  // A handler that may change the app's state: once it settles, succeeded or
+  // not, every subscribed window gets the new snapshot, sent before the reply,
+  // and the reply carries only what the operation itself produced.
+  const change = <A extends unknown[], R, T = void>(
+    channel: string,
+    fn: (event: IpcMainInvokeEvent, ...args: A) => R | Promise<R>,
+    reply: (result: R) => T = () => undefined as T,
+  ): void => {
+    handle(channel, async (event: IpcMainInvokeEvent, ...args: A): Promise<T> => {
+      try {
+        return reply(await fn(event, ...args));
+      } finally {
+        publish();
+      }
+    });
+  };
+  const withoutSnapshot = <R extends { snapshot: unknown }>({ snapshot: _snapshot, ...rest }: R): Omit<R, "snapshot"> => rest;
+  const keyPresence = (snapshot: { settingsSummary: { hasGeminiApiKey: boolean } | null }) =>
+    ({ hasGeminiApiKey: snapshot.settingsSummary?.hasGeminiApiKey ?? false });
+
   handle(APP_SHELL_CHANNELS.getInterfaceLanguage, () => runtime.interfaceLanguage());
   handle(APP_SHELL_CHANNELS.subscribeSnapshot, (event) => {
     const contents = event.sender;
@@ -191,25 +211,25 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     }
     contents.send(APP_SHELL_EVENTS.snapshotChanged, runtime.getSnapshot());
   });
-  handle(APP_SHELL_CHANNELS.dismissFirstRunSetup, () => runtime.dismissFirstRunSetup());
+  change(APP_SHELL_CHANNELS.dismissFirstRunSetup, () => runtime.dismissFirstRunSetup());
   handle(APP_SHELL_CHANNELS.getSettingsDraft, () => runtime.getSettingsDraft());
   handle(APP_SHELL_CHANNELS.getDefaultPrompts, () => runtime.getDefaultPrompts());
 
-  handle(APP_SHELL_CHANNELS.openImportDialog, (event) => {
+  change(APP_SHELL_CHANNELS.openImportDialog, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window === null) {
       throw new Error("Import dialog requires an active window.");
     }
 
     return runtime.openImportDialog(window);
-  });
+  }, withoutSnapshot);
 
-  handle(APP_SHELL_CHANNELS.importDroppedPaths, (_event, paths: string[]) => {
+  change(APP_SHELL_CHANNELS.importDroppedPaths, (_event, paths: string[]) => {
     assertStringArray(paths, "paths");
     return runtime.importDroppedPaths(paths);
-  });
+  }, withoutSnapshot);
 
-  handle(
+  change(
     APP_SHELL_CHANNELS.updatePendingImportDrafts,
     (_event, items: PendingImportReviewItem[]) => {
       assertPendingImportDrafts(items);
@@ -217,25 +237,26 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     },
   );
 
-  handle(
+  change(
     APP_SHELL_CHANNELS.confirmPendingImports,
     (_event, items: PendingImportReviewItem[]) => {
       assertPendingImportDrafts(items);
       return runtime.confirmPendingImports(items);
     },
+    withoutSnapshot,
   );
 
-  handle(APP_SHELL_CHANNELS.selectCard, (_event, cardId: string | null) => {
+  change(APP_SHELL_CHANNELS.selectCard, (_event, cardId: string | null) => {
     if (cardId !== null) assertString(cardId, "cardId");
     return runtime.selectCard(cardId);
   });
 
-  handle(APP_SHELL_CHANNELS.duplicateCard, (_event, cardId: string) => {
+  change(APP_SHELL_CHANNELS.duplicateCard, (_event, cardId: string) => {
     assertString(cardId, "cardId");
     return runtime.duplicateCard(cardId);
   });
 
-  handle(APP_SHELL_CHANNELS.updateCardTrim, (_event, cardId: string, trim: CardTrim) => {
+  change(APP_SHELL_CHANNELS.updateCardTrim, (_event, cardId: string, trim: CardTrim) => {
     assertString(cardId, "cardId");
     assertCardTrim(trim);
     return runtime.updateCardTrim(cardId, trim);
@@ -257,13 +278,13 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     runtime.cancelCardWaveformPeaks(requestId);
   });
 
-  handle(APP_SHELL_CHANNELS.generateCardStep, (_event, cardId: string, target: GenerateTarget) => {
+  change(APP_SHELL_CHANNELS.generateCardStep, (_event, cardId: string, target: GenerateTarget) => {
     assertString(cardId, "cardId");
     assertGenerateTarget(target);
     return runtime.generateCardStep(cardId, target);
   });
 
-  handle(APP_SHELL_CHANNELS.cancelCardProcessing, (_event, cardId: string) => {
+  change(APP_SHELL_CHANNELS.cancelCardProcessing, (_event, cardId: string) => {
     assertString(cardId, "cardId");
     return runtime.cancelCardProcessing(cardId);
   });
@@ -287,23 +308,23 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     return runtime.pickBackupDirectory(window, directory, literalDirectory);
   });
 
-  handle(APP_SHELL_CHANNELS.chooseOriginalsDirectory, (event) => {
+  change(APP_SHELL_CHANNELS.chooseOriginalsDirectory, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window === null) throw new Error("Choose Recordings directory requires an active window.");
     return runtime.chooseOriginalsDirectory(window);
   });
 
-  handle(APP_SHELL_CHANNELS.saveSetupDirectory, (_event, directory: string) => {
+  change(APP_SHELL_CHANNELS.saveSetupDirectory, (_event, directory: string) => {
     assertString(directory, "directory");
     return runtime.saveSetupDirectory(directory);
   });
 
-  handle(APP_SHELL_CHANNELS.saveSetupRecordingsDirectory, (_event, directory: string) => {
+  change(APP_SHELL_CHANNELS.saveSetupRecordingsDirectory, (_event, directory: string) => {
     assertString(directory, "directory");
     return runtime.saveSetupRecordingsDirectory(directory);
   });
 
-  handle(APP_SHELL_CHANNELS.saveSetupTimezone, (_event, timezone: string) => {
+  change(APP_SHELL_CHANNELS.saveSetupTimezone, (_event, timezone: string) => {
     assertString(timezone, "timezone");
     return runtime.saveSetupTimezone(timezone);
   });
@@ -314,18 +335,18 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     return openExternalUrl(url);
   });
 
-  handle(APP_SHELL_CHANNELS.saveSettingsDraft, (_event, draft: SettingsDraft) =>
+  change(APP_SHELL_CHANNELS.saveSettingsDraft, (_event, draft: SettingsDraft) =>
     runtime.saveSettingsDraft(draft),
   );
 
-  handle(APP_SHELL_CHANNELS.setGeminiApiKey, (_event, apiKey: string) => {
+  change(APP_SHELL_CHANNELS.setGeminiApiKey, (_event, apiKey: string) => {
     assertString(apiKey, "apiKey");
     return runtime.setGeminiApiKey(apiKey);
-  });
+  }, keyPresence);
 
-  handle(APP_SHELL_CHANNELS.clearGeminiApiKey, () => runtime.clearGeminiApiKey());
+  change(APP_SHELL_CHANNELS.clearGeminiApiKey, () => runtime.clearGeminiApiKey(), keyPresence);
 
-  handle(APP_SHELL_CHANNELS.chooseOutputDirectory, (event) => {
+  change(APP_SHELL_CHANNELS.chooseOutputDirectory, (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (window === null) {
       throw new Error("Choose output directory requires an active window.");
@@ -334,7 +355,7 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     return runtime.chooseOutputDirectory(window);
   });
 
-  handle(
+  change(
     APP_SHELL_CHANNELS.saveCard,
     (_event, cardId: string, resolution?: SaveConflictResolution, options?: SaveCardOptions) => {
       assertString(cardId, "cardId");
@@ -342,41 +363,42 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
         removeAfterSave: options === undefined || options === null || options.removeAfterSave !== false,
       });
     },
+    withoutSnapshot,
   );
 
-  handle(APP_SHELL_CHANNELS.removeCard, (_event, cardId: string) => {
+  change(APP_SHELL_CHANNELS.removeCard, (_event, cardId: string) => {
     assertString(cardId, "cardId");
     return runtime.removeCard(cardId);
   });
 
-  handle(APP_SHELL_CHANNELS.reportRendererError, (_event, report: RendererErrorReport) =>
+  change(APP_SHELL_CHANNELS.reportRendererError, (_event, report: RendererErrorReport) =>
     runtime.reportRendererError(report),
   );
   handle(APP_SHELL_CHANNELS.reportRendererDiagnostic, (_event, report: RendererErrorReport) =>
     runtime.reportRendererDiagnostic(report),
   );
 
-  handle(APP_SHELL_CHANNELS.dismissAppWideError, () => runtime.dismissAppWideError());
-  handle(APP_SHELL_CHANNELS.resetState, () => runtime.resetState());
-  handle(APP_SHELL_CHANNELS.cancelPendingImports, (_event, ids: string[]) => {
+  change(APP_SHELL_CHANNELS.dismissAppWideError, () => runtime.dismissAppWideError());
+  change(APP_SHELL_CHANNELS.resetState, () => runtime.resetState());
+  change(APP_SHELL_CHANNELS.cancelPendingImports, (_event, ids: string[]) => {
     assertStringArray(ids, "ids");
     return runtime.cancelPendingImports(ids);
   });
 
-  handle(APP_SHELL_CHANNELS.provisionTool, (_event, name: ToolName) => {
+  change(APP_SHELL_CHANNELS.provisionTool, (_event, name: ToolName) => {
     assertToolName(name);
     return runtime.provisionTool(name);
   });
 
-  handle(APP_SHELL_CHANNELS.cancelToolProvision, (_event, name: ToolName) => {
+  change(APP_SHELL_CHANNELS.cancelToolProvision, (_event, name: ToolName) => {
     assertToolName(name);
     return runtime.cancelToolProvision(name);
   });
 
-  handle(APP_SHELL_CHANNELS.checkTools, () => runtime.checkTools());
-  handle(APP_SHELL_CHANNELS.cancelToolCheck, () => runtime.cancelToolCheck());
+  change(APP_SHELL_CHANNELS.checkTools, () => runtime.checkTools());
+  change(APP_SHELL_CHANNELS.cancelToolCheck, () => runtime.cancelToolCheck());
 
-  handle(APP_SHELL_CHANNELS.saveToolSettings, (_event, checkUpdatesAtLaunch: boolean) => {
+  change(APP_SHELL_CHANNELS.saveToolSettings, (_event, checkUpdatesAtLaunch: boolean) => {
     if (typeof checkUpdatesAtLaunch !== "boolean") {
       throw new Error("Invalid IPC parameter: checkUpdatesAtLaunch must be a boolean.");
     }
@@ -405,7 +427,7 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     return runtime.saveRecordsListWidth(width);
   });
 
-  handle(APP_SHELL_CHANNELS.saveLayout, (_event, queueWidth: number) => {
+  change(APP_SHELL_CHANNELS.saveLayout, (_event, queueWidth: number) => {
     if (typeof queueWidth !== "number" || !Number.isFinite(queueWidth)) {
       throw new Error("Invalid IPC parameter: queueWidth must be a finite number.");
     }

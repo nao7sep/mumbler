@@ -17,6 +17,8 @@ const hostile = new Error(
 );
 // What main sends as the subscription's first snapshot.
 const firstSnapshot = vi.fn<() => Promise<AppSnapshot>>();
+// Sends the window a later snapshot, as main does before a reply.
+let publish: (snapshot: AppSnapshot) => void = () => undefined;
 const reportRendererDiagnostic = vi.fn<MumblerShellApi["reportRendererDiagnostic"]>();
 let root: Root | null = null;
 
@@ -165,7 +167,7 @@ describe("a startup diagnostic", () => {
         ...readySnapshot(),
         startupDiagnostic: { title: { key: "diagnostic.corruptTitle" }, message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/queue.json" } }, canReset: true },
       });
-      window.mumbler.resetState = vi.fn(async () => ({
+      window.mumbler.resetState = vi.fn(async () => publish({
         ...readySnapshot(),
         paths: { homeDir: "/home/me/.mumbler" } as AppPaths,
       }));
@@ -188,7 +190,7 @@ describe("a startup diagnostic", () => {
       ...readySnapshot(),
       startupDiagnostic: { title: { key: "diagnostic.corruptTitle" }, message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/queue.json" } }, canReset: true },
     });
-    window.mumbler.resetState = vi.fn(async (): Promise<AppSnapshot> => ({
+    window.mumbler.resetState = vi.fn(async () => publish({
       ...readySnapshot(),
       paths: { homeDir: "/home/me/.mumbler" } as AppPaths,
       startupDiagnostic: {
@@ -217,6 +219,7 @@ function rendererApi(): MumblerShellApi {
     {
       getInterfaceLanguage: async () => ({ language: "en", locale: "en-US" }),
       subscribeSnapshot: async (listener: (snapshot: AppSnapshot) => void) => {
+        publish = listener;
         listener(await firstSnapshot());
         return unsubscribe;
       },

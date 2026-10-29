@@ -25,7 +25,9 @@ import { fewNames, message, pathValue, type Message } from "@shared/i18n/transla
 
 interface UseImportFlowOptions {
   snapshot: AppSnapshot | null;
-  onSnapshotUpdate: (snapshot: AppSnapshot) => void;
+  // The latest snapshot from the window's subscription, which has already
+  // arrived when a reply resolves.
+  latestSnapshot: () => AppSnapshot | null;
   onError: (owner: string, message: Message) => void;
 }
 
@@ -59,7 +61,7 @@ function joinSentences(parts: Message[]): Message {
 
 export function useImportFlow({
   snapshot,
-  onSnapshotUpdate,
+  latestSnapshot,
   onError,
 }: UseImportFlowOptions): UseImportFlowResult {
   const [isImporting, setIsImporting] = useState(false);
@@ -207,7 +209,6 @@ export function useImportFlow({
     setIsImporting(true);
     try {
       const result = await window.mumbler.openImportDialog();
-      onSnapshotUpdate(result.snapshot);
       presentImportResult(result);
     } catch (error: unknown) {
       setImportResult({
@@ -228,12 +229,10 @@ export function useImportFlow({
     setIsConfirmingReview(true);
     try {
       if (submittedDrafts.some((item) => item.copyToBackupOnConfirm) && snapshot?.settingsSummary?.backupDirectory == null) {
-        const selected = await window.mumbler.chooseOriginalsDirectory();
-        onSnapshotUpdate(selected);
-        if (selected.settingsSummary?.backupDirectory == null) return;
+        await window.mumbler.chooseOriginalsDirectory();
+        if (latestSnapshot()?.settingsSummary?.backupDirectory == null) return;
       }
       const result = await window.mumbler.confirmPendingImports(submittedDrafts);
-      onSnapshotUpdate(result.snapshot);
       // The recordings are in the queue; an original that was not backed up or
       // deleted as asked is a warning on that success, kept until dismissed.
       if (result.originalWarnings.length > 0) {
@@ -254,10 +253,9 @@ export function useImportFlow({
   async function handleCancelPendingImports(): Promise<void> {
     setErrorMessage(null);
     try {
-      const nextSnapshot = await window.mumbler.cancelPendingImports(
+      await window.mumbler.cancelPendingImports(
         pendingReviewDrafts.map((item) => item.id),
       );
-      onSnapshotUpdate(nextSnapshot);
       setPendingReviewDrafts([]);
     } catch (error: unknown) {
       // The drafts stay, so the review stays open for the retry the message offers.
@@ -276,7 +274,6 @@ export function useImportFlow({
     setIsImporting(true);
     try {
       const result = await window.mumbler.importDroppedPaths(paths);
-      onSnapshotUpdate(result.snapshot);
       presentImportResult(result, unavailable);
     } catch (error: unknown) {
       setImportResult({

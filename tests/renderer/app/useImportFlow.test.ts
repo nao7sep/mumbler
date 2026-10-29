@@ -31,7 +31,7 @@ beforeEach(() => {
 function Harness({ onError }: { onError: (owner: string, message: Message) => void }): ReactElement {
   const flow = useImportFlow({
     snapshot: null,
-    onSnapshotUpdate: vi.fn(),
+    latestSnapshot: () => null,
     onError,
   });
   return React.createElement(
@@ -165,7 +165,6 @@ describe("useImportFlow drag acceptance", () => {
 
   it("summarizes a partial committed drop once beside Queue", async () => {
     importDroppedPaths.mockResolvedValue({
-      snapshot: {},
       attemptedPaths: ["/fixtures/sample.wav", "/fixtures/notes.txt"],
       importedCount: 1,
       failedImports: [{ sourcePath: "/fixtures/notes.txt", message: message("import.unsupportedType"), kind: "invalid" }],
@@ -197,14 +196,12 @@ describe("useImportFlow drag acceptance", () => {
   it("keeps an unresolved import result after a later full success", async () => {
     importDroppedPaths
       .mockResolvedValueOnce({
-        snapshot: {},
         attemptedPaths: ["/fixtures/notes.txt"],
         importedCount: 0,
         failedImports: [{ sourcePath: "/fixtures/notes.txt", message: message("import.unsupportedType"), kind: "invalid" }],
         duplicateImports: [],
       })
       .mockResolvedValueOnce({
-        snapshot: {},
         attemptedPaths: ["/fixtures/sample.wav", "/fixtures/also-ready.wav"],
         importedCount: 2,
         failedImports: [],
@@ -232,14 +229,12 @@ describe("useImportFlow drag acceptance", () => {
   it("clears an unresolved result after the exact failed source succeeds", async () => {
     importDroppedPaths
       .mockResolvedValueOnce({
-        snapshot: {},
         attemptedPaths: ["/fixtures/sample.wav"],
         importedCount: 0,
         failedImports: [{ sourcePath: "/fixtures/sample.wav", message: message("import.failed"), kind: "failure" }],
         duplicateImports: [],
       })
       .mockResolvedValueOnce({
-        snapshot: {},
         attemptedPaths: ["/fixtures/sample.wav"],
         importedCount: 1,
         failedImports: [],
@@ -271,7 +266,6 @@ describe("useImportFlow drag acceptance", () => {
       .mockImplementationOnce(() => "/fixtures/sample.wav")
       .mockImplementationOnce(() => { throw new Error("path unavailable"); });
     importDroppedPaths.mockResolvedValue({
-      snapshot: {},
       attemptedPaths: ["/fixtures/sample.wav"],
       importedCount: 1,
       failedImports: [],
@@ -298,7 +292,6 @@ describe("useImportFlow drag acceptance", () => {
 
   it("presents duplicate members as neutral information", async () => {
     importDroppedPaths.mockResolvedValue({
-      snapshot: {},
       attemptedPaths: ["/fixtures/sample.wav", "/fixtures/sample.wav"],
       importedCount: 1,
       failedImports: [],
@@ -328,7 +321,6 @@ describe("useImportFlow drag acceptance", () => {
 
   it("uses the same committed-result presentation for the Import action", async () => {
     openImportDialog.mockResolvedValue({
-      snapshot: {},
       attemptedPaths: ["/fixtures/notes.txt"],
       importedCount: 0,
       failedImports: [{ sourcePath: "/fixtures/notes.txt", message: message("import.unsupportedType"), kind: "invalid" }],
@@ -367,7 +359,6 @@ describe("useImportFlow drag acceptance", () => {
   it("names a few repeated files and counts the rest", async () => {
     const paths = ["a", "b", "c", "d", "e"].map((name) => `/fixtures/${name}.wav`);
     openImportDialog.mockResolvedValue({
-      snapshot: {},
       attemptedPaths: [...paths, ...paths],
       importedCount: 5,
       failedImports: [],
@@ -390,7 +381,6 @@ describe("useImportFlow drag acceptance", () => {
 
   it("presents an operational import failure as an error", async () => {
     importDroppedPaths.mockResolvedValue({
-      snapshot: {},
       attemptedPaths: ["/fixtures/sample.wav"],
       importedCount: 0,
       failedImports: [{ sourcePath: "/fixtures/sample.wav", message: message("import.failed"), kind: "failure" }],
@@ -438,7 +428,7 @@ describe("useImportFlow review cancel", () => {
   function ReviewHarness({ onError }: { onError: (owner: string, message: Message) => void }): ReactElement {
     const flow = useImportFlow({
       snapshot,
-      onSnapshotUpdate: vi.fn(),
+      latestSnapshot: () => null,
       onError,
     });
     return React.createElement(
@@ -496,7 +486,7 @@ describe("useImportFlow at quit", () => {
   >[0]["snapshot"];
 
   function EditHarness(): ReactElement {
-    const flow = useImportFlow({ snapshot, onSnapshotUpdate: vi.fn(), onError: vi.fn() });
+    const flow = useImportFlow({ snapshot, latestSnapshot: () => null, onError: vi.fn() });
     return React.createElement("button", {
       type: "button",
       onClick: () => flow.setPendingReviewDrafts((drafts) => drafts.map((draft) => ({ ...draft, timezone: "Europe/Berlin" }))),
@@ -587,7 +577,7 @@ describe("useImportFlow at quit", () => {
 
 describe("useImportFlow confirming a review", () => {
   async function confirmWith(originalWarnings: unknown[]): Promise<HTMLElement> {
-    confirmPendingImports.mockResolvedValue({ snapshot: {}, originalWarnings });
+    confirmPendingImports.mockResolvedValue({ originalWarnings });
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -642,11 +632,12 @@ describe("useImportFlow review ownership", () => {
   let flow: ReturnType<typeof useImportFlow>;
   const sent = vi.fn();
   const chooseOriginalsDirectory = vi.fn();
-  const snapshotUpdate = vi.fn();
+  // What the subscription last delivered, current when a reply resolves.
+  let latest: AppSnapshot | null = null;
   let flushPendingEdits: () => Promise<void>;
 
   function ReviewHarness({ snapshot }: { snapshot: AppSnapshot }): ReactElement {
-    flow = useImportFlow({ snapshot, onSnapshotUpdate: snapshotUpdate, onError: vi.fn() });
+    flow = useImportFlow({ snapshot, latestSnapshot: () => latest, onError: vi.fn() });
     return React.createElement("div", { "data-submitting": String(flow.isConfirmingReview) });
   }
 
@@ -659,7 +650,7 @@ describe("useImportFlow review ownership", () => {
     vi.useFakeTimers();
     sent.mockReset().mockResolvedValue({});
     chooseOriginalsDirectory.mockReset();
-    snapshotUpdate.mockReset();
+    latest = null;
     Object.defineProperty(window, "mumbler", {
       configurable: true,
       value: {
@@ -680,9 +671,9 @@ describe("useImportFlow review ownership", () => {
 
   it("claims confirmation once before the originals picker and freezes the submitted edits", async () => {
     await mount();
-    let select!: (snapshot: AppSnapshot) => void;
-    chooseOriginalsDirectory.mockImplementation(() => new Promise<AppSnapshot>((resolve) => { select = resolve; }));
-    confirmPendingImports.mockResolvedValue({ snapshot: {}, originalWarnings: [] });
+    let select!: () => void;
+    chooseOriginalsDirectory.mockImplementation(() => new Promise<void>((resolve) => { select = resolve; }));
+    confirmPendingImports.mockResolvedValue({ originalWarnings: [] });
     let first!: Promise<void>;
     let second!: Promise<void>;
     await act(async () => {
@@ -697,7 +688,8 @@ describe("useImportFlow review ownership", () => {
     expect(flow.pendingReviewDrafts[0]?.localTimestampText).toBe(pending.localTimestampText);
     await show([pending, { ...pending, id: "pending-2" }]);
     await act(async () => {
-      select({ settingsSummary: { backupDirectory: "/chosen" } } as unknown as AppSnapshot);
+      latest = { settingsSummary: { backupDirectory: "/chosen" } } as unknown as AppSnapshot;
+      select();
       await Promise.all([first, second]);
     });
     expect(confirmPendingImports).toHaveBeenCalledExactlyOnceWith([pending]);
@@ -732,7 +724,7 @@ describe("timestamp review failures inside the modal", () => {
   let flow: ReturnType<typeof useImportFlow>;
   const onError = vi.fn();
   function MountedReview(): ReactElement | null {
-    flow = useImportFlow({ snapshot, onSnapshotUpdate: vi.fn(), onError });
+    flow = useImportFlow({ snapshot, latestSnapshot: () => null, onError });
     return flow.pendingReviewDrafts.length === 0 ? null : React.createElement(TimestampReviewModal, {
       items: flow.pendingReviewDrafts,
       errorMessage: flow.errorMessage,

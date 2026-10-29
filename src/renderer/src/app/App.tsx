@@ -171,6 +171,9 @@ function StartupGate(): ReactElement {
   >({ status: "loading" });
   const startupAttemptRef = useRef(0);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  // The latest snapshot, already current when a reply resolves: main sends it
+  // before the reply.
+  const latestRef = useRef<AppSnapshot | null>(null);
 
   // The window's one subscription: its first event is the current snapshot,
   // and every later change arrives the same way.
@@ -183,7 +186,9 @@ function StartupGate(): ReactElement {
     );
     try {
       const unsubscribe = await window.mumbler.subscribeSnapshot((snapshot) => {
-        if (startupAttemptRef.current === attempt) setStartupLoad({ status: "ready", snapshot });
+        if (startupAttemptRef.current !== attempt) return;
+        latestRef.current = snapshot;
+        setStartupLoad({ status: "ready", snapshot });
       });
       if (startupAttemptRef.current === attempt) unsubscribeRef.current = unsubscribe;
       else unsubscribe();
@@ -236,28 +241,26 @@ function StartupGate(): ReactElement {
     );
   }
 
-  return <LoadedApp subscribed={startupLoad.snapshot} />;
+  return <LoadedApp snapshot={startupLoad.snapshot} latestSnapshot={() => latestRef.current!} />;
 }
 
-function LoadedApp({ subscribed }: { subscribed: AppSnapshot }): ReactElement {
-  const [snapshot, setSnapshot] = useState<AppSnapshot>(subscribed);
-  useEffect(() => setSnapshot(subscribed), [subscribed]);
+function LoadedApp({ snapshot, latestSnapshot }: { snapshot: AppSnapshot; latestSnapshot: () => AppSnapshot }): ReactElement {
   // Every snapshot carries the language the main process speaks, so a language
   // saved in Settings reaches the renderer with the snapshot that Save returns.
   const { language, locale } = snapshot.interfaceLanguage;
   return (
     <I18nProvider language={language} locale={locale}>
-      <LoadedShell snapshot={snapshot} setSnapshot={setSnapshot} />
+      <LoadedShell snapshot={snapshot} latestSnapshot={latestSnapshot} />
     </I18nProvider>
   );
 }
 
 function LoadedShell({
   snapshot,
-  setSnapshot,
+  latestSnapshot,
 }: {
   snapshot: AppSnapshot;
-  setSnapshot: (snapshot: AppSnapshot) => void;
+  latestSnapshot: () => AppSnapshot;
 }): ReactElement {
   const initialSnapshot = snapshot;
   const i18n = useI18n();
@@ -353,12 +356,11 @@ function LoadedShell({
 
   const importFlow = useImportFlow({
     snapshot,
-    onSnapshotUpdate: setSnapshot,
+    latestSnapshot,
     onError: (owner, msg) => addPersistent(owner, msg, "error"),
   });
 
   const settingsModal = useSettingsModal({
-    onSnapshotUpdate: setSnapshot,
     onError: (msg) => addPersistent("settings-load", msg, "error"),
     onNotice: addToast,
     onLastingNotice: (msg) => addPersistent("settings-api-key", msg, "info"),
@@ -393,14 +395,12 @@ function LoadedShell({
 
   const handleQueueSplitterCommit = useCallback(
     (nextWidth: number): void => {
-      // Persist the dragged intent, then release the local override only once the
-      // fresh snapshot (carrying the saved width) is in — so the pane never flickers
-      // back to the pre-drag width between commit and snapshot.
+      // Persist the dragged intent, then release the local override: the fresh
+      // snapshot carrying the saved width arrives before the reply, so the pane
+      // never flickers back to the pre-drag width.
       void window.mumbler
         .saveLayout(nextWidth)
-        .then((next) => {
-          snapshotRef.current = next;
-          setSnapshot(next);
+        .then(() => {
           setQueueDragWidth(null);
         })
         .catch((error: unknown) => {
@@ -510,8 +510,7 @@ function LoadedShell({
     function reportRendererFault(detail: string, source: string, stack?: string): void {
       void window.mumbler
         .reportRendererError({ message: detail, source, stack })
-        .then((nextSnapshot) => {
-          setSnapshot(nextSnapshot);
+        .then(() => {
         })
         .catch(() => {
           addPersistent(
@@ -604,8 +603,7 @@ function LoadedShell({
 
   async function handleCardSelect(cardId: string): Promise<void> {
     try {
-      const nextSnapshot = await window.mumbler.selectCard(cardId);
-      setSnapshot(nextSnapshot);
+      await window.mumbler.selectCard(cardId);
     } catch (error: unknown) {
       addPersistent(
         // The message does not name the recording, so a later failed selection of any
@@ -620,8 +618,7 @@ function LoadedShell({
   async function handleDuplicateCard(cardId: string): Promise<void> {
     clearCardActionError(cardId, "duplicate-card");
     try {
-      const nextSnapshot = await window.mumbler.duplicateCard(cardId);
-      setSnapshot(nextSnapshot);
+      await window.mumbler.duplicateCard(cardId);
       addToast(message("notice.duplicated"));
     } catch (error: unknown) {
       setCardActionError(cardId, "duplicate-card", presentFailure(error, message("detail.duplicateFailed"), "recording duplication failed"));
@@ -638,8 +635,7 @@ function LoadedShell({
   }
 
   async function handleTrimCommit(cardId: string, trim: MumblerCard["trim"]): Promise<void> {
-    const nextSnapshot = await window.mumbler.updateCardTrim(cardId, trim);
-    setSnapshot(nextSnapshot);
+    await window.mumbler.updateCardTrim(cardId, trim);
   }
 
   function beginCardOperation(cardId: string): void {
@@ -656,8 +652,7 @@ function LoadedShell({
     beginCardOperation(cardId);
     void window.mumbler
       .generateCardStep(cardId, target)
-      .then((nextSnapshot) => {
-        setSnapshot(nextSnapshot);
+      .then(() => {
         clearCardActionError(cardId, `generate-${target}`);
       })
       .catch((error: unknown) => {
@@ -675,8 +670,7 @@ function LoadedShell({
   function handleCancelCardProcessing(cardId: string): void {
     void window.mumbler
       .cancelCardProcessing(cardId)
-      .then((nextSnapshot) => {
-        setSnapshot(nextSnapshot);
+      .then(() => {
         clearCardActionError(cardId, "cancel-processing");
       })
       .catch((error: unknown) => {
@@ -715,8 +709,7 @@ function LoadedShell({
   async function handleChooseOutputDirectory(): Promise<void> {
     const cardId = selectedCard?.id ?? null;
     try {
-      const nextSnapshot = await window.mumbler.chooseOutputDirectory();
-      setSnapshot(nextSnapshot);
+      await window.mumbler.chooseOutputDirectory();
       if (cardId !== null) {
         clearCardActionError(cardId, "choose-output-directory");
       }
@@ -757,8 +750,7 @@ function LoadedShell({
 
   async function handleDismissAppWideError(): Promise<void> {
     try {
-      const nextSnapshot = await window.mumbler.dismissAppWideError();
-      setSnapshot(nextSnapshot);
+      await window.mumbler.dismissAppWideError();
     } catch (error: unknown) {
       addPersistent(
         "app-wide-error-dismissal",
@@ -771,13 +763,13 @@ function LoadedShell({
   async function handleResetState(): Promise<void> {
     setIsResettingState(true);
     try {
-      const nextSnapshot = await window.mumbler.resetState();
-      setSnapshot(nextSnapshot);
+      await window.mumbler.resetState();
       // A reset that failed part-way says so, and what it moved, where the Reset
       // button is. A finished one says where the previous queue and recordings
       // went, so it stays until dismissed.
-      if (nextSnapshot.startupDiagnostic === null) {
-        addPersistent("state-reset", message("notice.reset", { folder: pathValue(nextSnapshot.paths!.homeDir) }));
+      const reset = latestSnapshot();
+      if (reset.startupDiagnostic === null) {
+        addPersistent("state-reset", message("notice.reset", { folder: pathValue(reset.paths!.homeDir) }));
       }
     } catch (error: unknown) {
       // The call itself failed, before the reset could move anything.
@@ -792,14 +784,13 @@ function LoadedShell({
   }
 
   // Audio-tool operations. The main process records per-tool progress/errors in
-  // the snapshot (live, via onDependenciesUpdated), while a thrown failure (for
+  // the snapshot (live, with each one sent), while a thrown failure (for
   // example an operation already in flight) belongs to the still-open modal that
   // initiated it. Keeping that error here leaves it above the backdrop and next
   // to the retry action instead of sending it to app chrome behind the modal.
-  function applyToolSnapshot(promise: Promise<AppSnapshot>, failMessage: Message): void {
+  function applyToolSnapshot(promise: Promise<void>, failMessage: Message): void {
     setToolOperationError(null);
     void promise
-      .then((nextSnapshot) => setSnapshot(nextSnapshot))
       .catch((error: unknown) => {
         setToolOperationError(presentFailure(error, failMessage, "audio tool operation failed"));
       });
@@ -827,7 +818,6 @@ function LoadedShell({
     setToolCheckNotice(null);
     void window.mumbler
       .checkTools()
-      .then((nextSnapshot) => setSnapshot(nextSnapshot))
       .catch((error: unknown) => {
         setToolCheckNotice(
           presentFailure(error, message("tools.checkFailed"), "audio tool update check failed"),
@@ -957,13 +947,11 @@ function LoadedShell({
   ): Promise<void> {
     try {
       if (resolution !== "cancel" && snapshot.settingsSummary?.outputDirectory == null) {
-        const selected = await window.mumbler.chooseOutputDirectory();
-        setSnapshot(selected);
-        if (selected.settingsSummary?.outputDirectory == null) return;
+        await window.mumbler.chooseOutputDirectory();
+        if (latestSnapshot().settingsSummary?.outputDirectory == null) return;
       }
       const removeAfterSave = !keptAfterSaveCardIds.has(cardId);
       const result = await window.mumbler.saveCard(cardId, resolution, { removeAfterSave });
-      setSnapshot(result.snapshot);
 
       if (result.kind === "conflict") {
         setPendingSaveConflict({ cardId, result });
@@ -1003,8 +991,7 @@ function LoadedShell({
 
   async function confirmRemoveCard(cardId: string): Promise<void> {
     try {
-      const nextSnapshot = await window.mumbler.removeCard(cardId);
-      setSnapshot(nextSnapshot);
+      await window.mumbler.removeCard(cardId);
       clearCardActionErrors(cardId);
       setPendingRemoveCardId(null);
       setRemoveCardError(null);
@@ -1050,9 +1037,8 @@ function LoadedShell({
                 onSelect={() => {
                   void (async () => {
                     if (snapshot.settingsSummary?.outputDirectory == null) {
-                      const selected = await window.mumbler.chooseOutputDirectory();
-                      setSnapshot(selected);
-                      if (selected.settingsSummary?.outputDirectory == null) return;
+                      await window.mumbler.chooseOutputDirectory();
+                      if (latestSnapshot().settingsSummary?.outputDirectory == null) return;
                     }
                     await window.mumbler.openOutputDirectory();
                   })()
@@ -1815,7 +1801,7 @@ function LoadedShell({
       ) : null}
 
       {showSetup && snapshot.dependencies && !snapshot.startupDiagnostic && !snapshot.appWideError ? (
-        <FirstRunSetupModal snapshot={snapshot} onSnapshot={setSnapshot} onClose={() => setShowSetup(false)} tools={{
+        <FirstRunSetupModal snapshot={snapshot} onClose={() => setShowSetup(false)} tools={{
           dependencies: snapshot.dependencies,
           checkUpdatesAtLaunch: snapshot.settingsSummary?.checkUpdatesAtLaunch ?? true,
           isChecking: isCheckingTools || snapshot.dependencies.some((dependency) => dependency.transient.kind === "running" && dependency.transient.operation === "check"),
