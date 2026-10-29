@@ -24,9 +24,6 @@ import {
 } from "./installed-version";
 import { parseSha256Sidecar, verifySha256 } from "./integrity";
 import {
-  TOOL_DOWNLOAD_MAX_BYTES,
-  TOOL_EXTRACTED_MAX_BYTES,
-  TOOL_METADATA_MAX_BYTES,
   TOOL_NAMES,
   resolveLatest,
   toolFileName,
@@ -184,13 +181,7 @@ export class ToolManager {
       const resolved = await resolveLatest(this.deps.platform, this.deps.arch, signal);
       const spec = resolved.tools[name];
 
-      const sidecar = await fetchText(
-        spec.sha256Url,
-        {},
-        30_000,
-        signal,
-        TOOL_METADATA_MAX_BYTES,
-      );
+      const sidecar = await fetchText(spec.sha256Url, {}, 30_000, signal);
       const expected = parseSha256Sidecar(sidecar, spec.sha256AssetName);
       if (!expected) {
         throw new Error(`checksum for ${spec.sha256AssetName} not found at ${spec.sha256Url}`);
@@ -213,7 +204,6 @@ export class ToolManager {
         await downloadToFile({
           url: spec.downloadUrl,
           destPath: archivePath,
-          maxBytes: TOOL_DOWNLOAD_MAX_BYTES,
           signal,
           onProgress: (received, total) => {
             const percent = total > 0 ? Math.floor((received / total) * 100) : null;
@@ -223,13 +213,7 @@ export class ToolManager {
         // Integrity gate: verify the downloaded archive before it becomes
         // executable. A mismatch throws and aborts the install.
         await verifySha256(archivePath, expected, signal);
-        await extractFileFromZip(
-          archivePath,
-          spec.innerName,
-          stagedExe,
-          TOOL_EXTRACTED_MAX_BYTES,
-          signal,
-        );
+        await extractFileFromZip(archivePath, spec.innerName, stagedExe, signal);
         if (this.deps.platform === "darwin") {
           // Architecture gate: reject an x86_64-only build before it is published,
           // so a wrong-arch download fails clean here rather than at exec time on

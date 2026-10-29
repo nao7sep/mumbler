@@ -1,5 +1,4 @@
 import { createWriteStream } from "node:fs";
-import { Transform, type TransformCallback } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import unzipper from "unzipper";
@@ -15,7 +14,6 @@ export async function extractFileFromZip(
   zipPath: string,
   innerName: string,
   outPath: string,
-  maxBytes: number,
   signal?: AbortSignal,
 ): Promise<void> {
   signal?.throwIfAborted();
@@ -37,37 +35,5 @@ export async function extractFileFromZip(
     );
   }
 
-  if (file.uncompressedSize > maxBytes) {
-    throw new Error(
-      `Extracted ${innerName} is too large: ${file.uncompressedSize} bytes > cap ${maxBytes}`,
-    );
-  }
-
-  await pipeline(file.stream(), new ByteLimit(maxBytes, innerName), createWriteStream(outPath), {
-    signal,
-  });
-}
-
-export class ByteLimit extends Transform {
-  private received = 0;
-
-  constructor(
-    private readonly maxBytes: number,
-    private readonly label: string,
-  ) {
-    super();
-  }
-
-  override _transform(
-    chunk: Buffer,
-    _encoding: BufferEncoding,
-    callback: TransformCallback,
-  ): void {
-    this.received += chunk.byteLength;
-    if (this.received > this.maxBytes) {
-      callback(new Error(`Extracted ${this.label} exceeded cap ${this.maxBytes} bytes`));
-      return;
-    }
-    callback(null, chunk);
-  }
+  await pipeline(file.stream(), createWriteStream(outPath), { signal });
 }

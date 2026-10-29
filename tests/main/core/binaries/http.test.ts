@@ -26,8 +26,8 @@ afterEach(async () => {
 });
 
 const URL = "https://example.test/tool.zip";
-const text = () => fetchText(URL, {}, 25, undefined, 10);
-const download = () => downloadToFile({ url: URL, destPath: join(root, "tool.zip"), maxBytes: 10, idleTimeoutMs: 25 });
+const text = () => fetchText(URL, {}, 25);
+const download = () => downloadToFile({ url: URL, destPath: join(root, "tool.zip"), idleTimeoutMs: 25 });
 
 interface DiscardCase {
   name: string;
@@ -45,10 +45,7 @@ const discardedResponses: DiscardCase[] = [
   { name: "metadata status failure", run: text, init: { status: 503 }, error: /HTTP 503/ },
   { name: "followed redirect without Location", run: text, init: { status: 307 }, error: /omitted Location/ },
   { name: "insecure followed redirect", run: text, init: { status: 307, headers: { Location: "http://mirror.test/tool.zip" } }, error: /refusing non-https/ },
-  { name: "invalid metadata length", run: text, init: { status: 200, headers: { "Content-Length": "invalid" } }, error: /invalid Content-Length/ },
-  { name: "oversized metadata header", run: text, init: { status: 200, headers: { "Content-Length": "11" } }, error: /text response too large/ },
   { name: "download status failure", run: download, init: { status: 503 }, error: /HTTP 503/ },
-  { name: "oversized download header", run: download, init: { status: 200, headers: { "Content-Length": "11" } }, error: /tool download too large/ },
   { name: "insecure effective metadata URL", run: text, init: { status: 200 }, responseUrl: "http://example.test/tool.zip", error: /refusing non-https/ },
   { name: "insecure effective download URL", run: download, init: { status: 200 }, responseUrl: "http://example.test/tool.zip", error: /refusing non-https/ },
 ];
@@ -177,7 +174,6 @@ describe("managed tool HTTPS transport", () => {
       downloadToFile({
         url: "https://example.test/tool.zip",
         destPath: join(tmpdir(), "mumbler-https-downgrade-should-not-exist"),
-        maxBytes: 1024,
       }),
     ).rejects.toThrow(/refusing non-https tool URL/);
   });
@@ -220,37 +216,10 @@ describe("managed tool HTTPS transport", () => {
       return responseAt(URL, body);
     }));
 
-    const downloading = downloadToFile({ url: URL, destPath: join(root, "tool.zip"), maxBytes: 10, idleTimeoutMs: 2 * DOWNLOAD_WHOLE_TIMEOUT_MS });
+    const downloading = downloadToFile({ url: URL, destPath: join(root, "tool.zip"), idleTimeoutMs: 2 * DOWNLOAD_WHOLE_TIMEOUT_MS });
     const ended = expect(downloading).rejects.toThrow(/did not finish within/);
     await vi.advanceTimersByTimeAsync(DOWNLOAD_WHOLE_TIMEOUT_MS);
 
     await ended;
-  });
-
-  it("rejects an oversized advertised metadata body before reading it", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        responseAt("https://example.test/checksums.sha256", "small", {
-          status: 200,
-          headers: { "Content-Length": "100" },
-        }),
-      ),
-    );
-
-    await expect(
-      fetchText("https://example.test/checksums.sha256", {}, 30_000, undefined, 10),
-    ).rejects.toThrow(/text response too large/);
-  });
-
-  it("stops before retaining a streamed metadata body past its byte cap", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => responseAt("https://example.test/checksums.sha256", "12345")),
-    );
-
-    await expect(
-      fetchText("https://example.test/checksums.sha256", {}, 30_000, undefined, 4),
-    ).rejects.toThrow(/text response exceeded cap/);
   });
 });

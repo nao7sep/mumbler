@@ -14,11 +14,6 @@ import { fetchText, resolveRedirectLocation } from "./http";
 
 export const TOOL_NAMES: readonly ToolName[] = ["ffmpeg", "ffprobe"];
 
-// A generous per-archive cap; the real builds are ~28 MB.
-export const TOOL_DOWNLOAD_MAX_BYTES = 200 * 1024 * 1024;
-export const TOOL_EXTRACTED_MAX_BYTES = 500 * 1024 * 1024;
-export const TOOL_METADATA_MAX_BYTES = 2 * 1024 * 1024;
-
 // What `resolveLatest` yields for one tool: where to download it, where its
 // checksum lives, the asset name to match inside that checksum file, and the file
 // to extract from the archive.
@@ -113,7 +108,6 @@ async function resolveBtbNWindows(arch: string, signal?: AbortSignal): Promise<R
     },
     30_000,
     signal,
-    TOOL_METADATA_MAX_BYTES,
   );
   const release = (JSON.parse(raw) as GithubRelease[]).find((candidate) => FFMPEG_BUILD_TAG.test(candidate.tag_name));
   if (!release) {

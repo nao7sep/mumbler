@@ -4,9 +4,9 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 
 // Minimal HTTPS download/resolve helpers for the managed audio tools. Every URL
-// is https-only (refused up front), every transfer is bounded by a byte cap and
-// an idle watchdog, and the body streams to disk so a ~27 MB archive never sits
-// in memory. The managed-runtime-dependencies-conventions' https-only transport rule.
+// is https-only (refused up front), every transfer is bounded by an idle
+// watchdog, and the body streams to disk so a ~27 MB archive never sits in
+// memory. The managed-runtime-dependencies-conventions' https-only transport rule.
 
 function assertHttps(url: string): void {
   let scheme = "";
@@ -93,7 +93,6 @@ export async function fetchText(
   headers: Record<string, string> = {},
   timeoutMs = 30_000,
   signal?: AbortSignal,
-  maxBytes = 1024 * 1024,
 ): Promise<string> {
   assertHttps(url);
   const controller = new AbortController();
@@ -106,38 +105,8 @@ export async function fetchText(
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} ${res.statusText} from ${url}`);
     }
-    const advertisedRaw = res.headers.get("content-length");
-    if (advertisedRaw !== null) {
-      const advertised = Number(advertisedRaw);
-      if (!Number.isSafeInteger(advertised) || advertised < 0) {
-        throw new Error(`invalid Content-Length from ${url}: ${advertisedRaw}`);
-      }
-      if (advertised > maxBytes) {
-        throw new Error(`text response too large: ${advertised} bytes > cap ${maxBytes} from ${url}`);
-      }
-    }
-
-    if (res.body === null) return "";
-    const reader = res.body.getReader();
     readerOwnsBody = true;
-    const chunks: Uint8Array[] = [];
-    let received = 0;
-    try {
-      while (true) {
-        const next = await reader.read();
-        if (next.done) break;
-        received += next.value.byteLength;
-        if (received > maxBytes) {
-          const error = new Error(`text response exceeded cap ${maxBytes} bytes from ${url}`);
-          await reader.cancel(error).catch(() => undefined);
-          throw error;
-        }
-        chunks.push(next.value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
+    return await res.text();
   } finally {
     if (!readerOwnsBody) await discardResponseBody(res);
     clearTimeout(timer);
@@ -147,21 +116,18 @@ export async function fetchText(
 export interface DownloadOptions {
   url: string;
   destPath: string;
-  maxBytes: number;
   idleTimeoutMs?: number;
   signal?: AbortSignal;
   onProgress?: (received: number, total: number) => void;
 }
 
-// The largest Windows archive is allowed 200 MiB. Six hours still permits a
-// very slow healthy connection while ensuring that a peer which keeps the idle
+// Six hours still permits a very slow healthy connection while ensuring that a peer which keeps the idle
 // watchdog alive with a trickle cannot own a download forever.
 export const DOWNLOAD_WHOLE_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 // Download a URL to destPath. The idle watchdog aborts if no bytes arrive within
 // idleTimeoutMs (covers a stalled connect and a stalled transfer), the whole
-// bound ends a download that trickles on; the byte cap aborts if the response
-// advertises or streams more than maxBytes.
+// bound ends a download that trickles on.
 export async function downloadToFile(opts: DownloadOptions): Promise<void> {
   assertHttps(opts.url);
   const idleTimeoutMs = opts.idleTimeoutMs ?? 120_000;
@@ -192,9 +158,6 @@ export async function downloadToFile(opts: DownloadOptions): Promise<void> {
     }
 
     const total = Number(res.headers.get("content-length") ?? 0);
-    if (total > opts.maxBytes) {
-      throw new Error(`tool download too large: ${total} bytes > cap ${opts.maxBytes}`);
-    }
 
     let received = 0;
     const source = Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>);
@@ -202,10 +165,6 @@ export async function downloadToFile(opts: DownloadOptions): Promise<void> {
     source.on("data", (chunk: Buffer) => {
       received += chunk.length;
       kick();
-      if (received > opts.maxBytes) {
-        controller.abort(new Error(`tool download exceeded cap ${opts.maxBytes} bytes for ${opts.url}`));
-        return;
-      }
       opts.onProgress?.(received, total);
     });
 

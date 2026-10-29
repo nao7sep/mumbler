@@ -93,7 +93,7 @@ import { downloadToFile, fetchText } from "@main/core/binaries/http";
 import * as installedVersion from "@main/core/binaries/installed-version";
 import { verifySha256 } from "@main/core/binaries/integrity";
 import { ToolManager } from "@main/core/binaries/manager";
-import { TOOL_EXTRACTED_MAX_BYTES, resolveLatest } from "@main/core/binaries/registry";
+import { resolveLatest } from "@main/core/binaries/registry";
 import { createDependenciesStore } from "@main/core/binaries/store";
 import { JsonStore } from "@main/core/json-store";
 import { until } from "../../../support/until";
@@ -275,7 +275,6 @@ describe("installTool", () => {
       expect.any(String),
       "ffmpeg",
       expect.any(String),
-      TOOL_EXTRACTED_MAX_BYTES,
       expect.any(AbortSignal),
     );
   });
