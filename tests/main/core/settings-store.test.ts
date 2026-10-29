@@ -35,6 +35,7 @@ import {
   recoverInterruptedCards,
   serializeQueue,
 } from "@main/core/settings-schema";
+import { until } from "../../support/until";
 
 let dir: string;
 
@@ -640,7 +641,7 @@ describe("settings store", () => {
     const replacement = store.save({ ...value, theme: "dark" }, { replaceUnusable: true });
     let targeted: Promise<void> | undefined;
     try {
-      await vi.waitFor(() => expect(settingsWrite.held?.entered).toBe(1));
+      await until(() => expect(settingsWrite.held?.entered).toBe(1));
       targeted = store.save({ ...value, theme: "dark", checkUpdatesAtLaunch: false });
       release();
       await Promise.all([replacement, targeted]);
@@ -664,7 +665,7 @@ describe("settings store", () => {
     settingsWrite.refused = true;
     const replacement = store.save({ ...value, theme: "dark" }, { replaceUnusable: true }).then(() => "saved", () => "failed");
     try {
-      await vi.waitFor(() => expect(settingsWrite.held?.entered).toBe(1));
+      await until(() => expect(settingsWrite.held?.entered).toBe(1));
       release();
       expect(await replacement).toBe("failed");
       expect(store.failedWrite).not.toBeNull();

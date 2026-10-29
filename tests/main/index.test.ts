@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { until } from "../support/until";
 
 const state = vi.hoisted(() => ({
   initializeFailure: null as Error | null,
@@ -198,13 +199,13 @@ beforeEach(() => {
 describe("main startup recovery", () => {
   it("admits the instance and root before configuring the profile and starting the runtime", async () => {
     await import("@main/index");
-    await vi.waitFor(() => expect(state.startupOrder).toEqual(["lock", "admit", "profile", "runtime"]));
+    await until(() => expect(state.startupOrder).toEqual(["lock", "admit", "profile", "runtime"]));
   });
 
   it("shows terminal failure without configuring a profile or starting stores after root refusal", async () => {
     state.storageFailure = new Error("Root is not private");
     await import("@main/index");
-    await vi.waitFor(() => expect(state.dialogCalls).toBe(1));
+    await until(() => expect(state.dialogCalls).toBe(1));
     expect(state.startupOrder).toEqual(["lock", "admit"]);
     expect(state.loggerErrors).toEqual([]);
     expect(state.exits).toEqual([1]);
@@ -213,7 +214,7 @@ describe("main startup recovery", () => {
   it("shows the authored terminal surface when runtime bootstrap rejects", async () => {
     state.initializeFailure = new Error("EACCES /private/tmp/mumbler-state.json");
     await import("@main/index");
-    await vi.waitFor(() => expect(state.dialogCalls).toBe(1));
+    await until(() => expect(state.dialogCalls).toBe(1));
     expect(state.exits).toEqual([1]);
     expect(state.relaunches).toBe(0);
   });
@@ -223,7 +224,7 @@ describe("main startup recovery", () => {
     state.windowLoadFailure = hostile;
     state.dialogChoice = "restart";
     await import("@main/index");
-    await vi.waitFor(() => expect(state.dialogCalls).toBe(1));
+    await until(() => expect(state.dialogCalls).toBe(1));
     expect(state.loggerErrors[0]?.[2]).toBe(hostile);
     expect(state.relaunches).toBe(1);
     expect(state.exits).toEqual([1]);
@@ -233,12 +234,12 @@ describe("main startup recovery", () => {
     let finish!: () => void;
     state.initializeGate = new Promise<void>((resolve) => { finish = resolve; });
     await import("@main/index");
-    await vi.waitFor(() => expect(state.startupOrder).toContain("runtime"));
+    await until(() => expect(state.startupOrder).toContain("runtime"));
     const { app } = await import("electron");
     const calls = vi.mocked(app.on).mock.calls as unknown as [string, (event: { preventDefault: () => void }) => void][];
     calls.filter(([event]) => event === "before-quit").at(-1)![1]({ preventDefault: vi.fn() });
     finish();
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
     expect(state.windowsCreated).toBe(0);
     expect(state.questions).toEqual([]);
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
@@ -249,12 +250,12 @@ describe("main startup recovery", () => {
     state.initializeGate = new Promise<void>((resolve) => { finish = resolve; });
     state.initializeFailure = new Error("startup failed");
     await import("@main/index");
-    await vi.waitFor(() => expect(state.startupOrder).toContain("runtime"));
+    await until(() => expect(state.startupOrder).toContain("runtime"));
     const { app } = await import("electron");
     const calls = vi.mocked(app.on).mock.calls as unknown as [string, (event: { preventDefault: () => void }) => void][];
     calls.filter(([event]) => event === "before-quit").at(-1)![1]({ preventDefault: vi.fn() });
     finish();
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
     expect(state.dialogCalls).toBe(0);
   });
 
@@ -262,7 +263,7 @@ describe("main startup recovery", () => {
     state.initializeFailure = new Error("startup failed");
     state.dialogFailure = new Error("dialog construction failed");
     await import("@main/index");
-    await vi.waitFor(() => expect(state.exits).toEqual([1]));
+    await until(() => expect(state.exits).toEqual([1]));
     expect(state.relaunches).toBe(0);
   });
 });
@@ -274,7 +275,7 @@ describe("quit", () => {
   async function boot(): Promise<Handler> {
     vi.spyOn(process, "on").mockImplementation(() => process);
     await import("@main/index");
-    await vi.waitFor(() => expect(state.dependenciesWatched).toBe(true));
+    await until(() => expect(state.dependenciesWatched).toBe(true));
     const { app } = await import("electron");
     const calls = vi.mocked(app.on).mock.calls as unknown as [string, Handler][];
     return calls.filter(([event]) => event === "before-quit").at(-1)![1];
@@ -293,7 +294,7 @@ describe("quit", () => {
     const event = { preventDefault: vi.fn() };
 
     beforeQuit(event);
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
 
     expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(mainWindow.flushRequests).toBe(1);
@@ -311,12 +312,12 @@ describe("quit", () => {
     beforeQuit(first);
     const second = { preventDefault: vi.fn() };
     beforeQuit(second);
-    await vi.waitFor(() => expect(runtime.saveForQuit).toHaveBeenCalledOnce());
+    await until(() => expect(runtime.saveForQuit).toHaveBeenCalledOnce());
 
     expect(second.preventDefault).toHaveBeenCalledOnce();
     expect(state.exits).toEqual([]);
     finishSave([]);
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(state.exits).toEqual([0]);
   });
@@ -326,7 +327,7 @@ describe("quit", () => {
     const beforeQuit = await boot();
 
     beforeQuit({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(runtime.resumeAfterCancelledQuit).toHaveBeenCalledOnce());
+    await until(() => expect(runtime.resumeAfterCancelledQuit).toHaveBeenCalledOnce());
 
     expect(state.questions).toHaveLength(1);
     expect(state.exits).toEqual([]);
@@ -336,7 +337,7 @@ describe("quit", () => {
     state.unsavedDrafts = ["settings"];
     const beforeQuit = await boot();
     beforeQuit({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    await until(() => expect(state.questions).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mainWindow.flushRequests).toBe(0);
     expect(runtime.saveForQuit).not.toHaveBeenCalled();
@@ -349,7 +350,7 @@ describe("quit", () => {
     state.draftsChoice = "discard";
     const beforeQuit = await boot();
     beforeQuit({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
     expect(mainWindow.discards).toBe(1);
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
   });
@@ -362,12 +363,12 @@ describe("quit", () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(timeout.signal);
     const beforeQuit = await boot();
     beforeQuit({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.heldDraftsReplies).toHaveLength(1));
+    await until(() => expect(state.heldDraftsReplies).toHaveLength(1));
     timeout.abort();
-    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    await until(() => expect(state.questions).toHaveLength(1));
     expect(state.questions[0]).toMatchObject({ body: "quit.draftsUnavailableBody" });
     if (choice === "quit-anyway") {
-      await vi.waitFor(() => expect(state.exits).toEqual([0]));
+      await until(() => expect(state.exits).toEqual([0]));
       expect(mainWindow.discards).toBe(1);
       expect(runtime.saveForQuit).toHaveBeenCalledOnce();
     } else {
@@ -386,11 +387,11 @@ describe("quit", () => {
     vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(timeout.signal);
     const beforeQuit = await boot();
     beforeQuit({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.heldDraftsReplies).toHaveLength(1));
+    await until(() => expect(state.heldDraftsReplies).toHaveLength(1));
     timeout.abort();
-    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    await until(() => expect(state.questions).toHaveLength(1));
     state.powerListeners.get("shutdown")!();
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
     state.heldDraftsReplies[0]!();
     expect(mainWindow.discards).toBe(0);
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
@@ -402,7 +403,7 @@ describe("quit", () => {
     state.unsavedDrafts = ["settings"];
     await boot();
     mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    await until(() => expect(state.questions).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mainWindow.closes).toBe(0);
     expect(mainWindow.flushRequests).toBe(0);
@@ -414,7 +415,7 @@ describe("quit", () => {
 
     state.powerListeners.get("shutdown")!();
     beforeQuit({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
 
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
     expect(state.questions).toEqual([]);
@@ -425,7 +426,7 @@ describe("quit", () => {
     await boot();
 
     state.powerListeners.get("shutdown")!();
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
 
     expect(state.questions).toEqual([]);
   });
@@ -436,9 +437,9 @@ describe("quit", () => {
     const beforeQuit = await boot();
 
     beforeQuit({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.heldDraftsReplies).toHaveLength(1));
+    await until(() => expect(state.heldDraftsReplies).toHaveLength(1));
     state.powerListeners.get("shutdown")!();
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
     // The window's late answer changes nothing.
     state.heldDraftsReplies[0]!();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -456,9 +457,9 @@ describe("quit", () => {
     await boot();
 
     mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.heldDraftsReplies).toHaveLength(1));
+    await until(() => expect(state.heldDraftsReplies).toHaveLength(1));
     state.powerListeners.get("shutdown")!();
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
     state.heldDraftsReplies[0]!();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -476,7 +477,7 @@ describe("quit", () => {
 
     mainWindow.handlers.get("query-session-end")!(query);
     mainWindow.handlers.get("session-end")!({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
 
     expect(query.preventDefault, "saving never vetoes Windows logout").not.toHaveBeenCalled();
     expect(mainWindow.flushRequests).toBe(1);
@@ -489,7 +490,7 @@ describe("quit", () => {
     await boot();
 
     mainWindow.handlers.get("session-end")!({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
 
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
   });
@@ -500,7 +501,7 @@ describe("quit", () => {
     const close = { preventDefault: vi.fn() };
 
     mainWindow.handlers.get("close")!(close);
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
 
     expect(close.preventDefault).toHaveBeenCalledOnce();
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
@@ -514,9 +515,9 @@ describe("quit", () => {
     const close = { preventDefault: vi.fn() };
 
     mainWindow.handlers.get("close")!(close);
-    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    await until(() => expect(state.questions).toHaveLength(1));
     if (choice === "discard") {
-      await vi.waitFor(() => expect(state.exits).toEqual([0]));
+      await until(() => expect(state.exits).toEqual([0]));
       expect(mainWindow.discards).toBe(1);
       expect(runtime.saveForQuit).toHaveBeenCalledOnce();
     } else {
@@ -537,11 +538,11 @@ describe("quit", () => {
 
     mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
     if (choice === "cancel") {
-      await vi.waitFor(() => expect(runtime.resumeAfterCancelledQuit).toHaveBeenCalledOnce());
+      await until(() => expect(runtime.resumeAfterCancelledQuit).toHaveBeenCalledOnce());
       expect(state.exits).toEqual([]);
       expect(runtime.closeForQuit).not.toHaveBeenCalled();
     } else {
-      await vi.waitFor(() => expect(state.exits).toEqual([0]));
+      await until(() => expect(state.exits).toEqual([0]));
       expect(runtime.closeForQuit).toHaveBeenCalledOnce();
       expect(runtime.resumeAfterCancelledQuit).not.toHaveBeenCalled();
     }
@@ -556,7 +557,7 @@ describe("quit", () => {
     const close = { preventDefault: vi.fn() };
 
     mainWindow.handlers.get("close")!(close);
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
 
     expect(close.preventDefault).toHaveBeenCalledOnce();
     expect(mainWindow.flushRequests).toBe(1);
@@ -568,7 +569,7 @@ describe("quit", () => {
     state.flushSucceeded = false;
     await boot();
     mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(runtime.resumeAfterCancelledQuit).toHaveBeenCalledOnce());
+    await until(() => expect(runtime.resumeAfterCancelledQuit).toHaveBeenCalledOnce());
     expect(state.questions).toHaveLength(1);
     expect(mainWindow.closes).toBe(0);
     expect(state.exits).toEqual([]);
@@ -579,7 +580,7 @@ describe("quit", () => {
     state.runningWork = { recordings: 1, tools: 0 };
     const beforeQuit = await boot();
     beforeQuit({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.questions).toHaveLength(1));
+    await until(() => expect(state.questions).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(runtime.saveForQuit, "nothing stops while the user keeps the work").not.toHaveBeenCalled();
     expect(mainWindow.flushRequests).toBe(0);
@@ -592,7 +593,7 @@ describe("quit", () => {
     state.workChoice = "quit";
     await boot();
     mainWindow.handlers.get("close")!({ preventDefault: vi.fn() });
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
     expect(state.questions).toHaveLength(1);
     expect(runtime.saveForQuit).toHaveBeenCalledOnce();
   });
@@ -601,7 +602,7 @@ describe("quit", () => {
     state.runningWork = { recordings: 2, tools: 0 };
     await boot();
     state.powerListeners.get("shutdown")!();
-    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    await until(() => expect(state.exits).toEqual([0]));
     expect(state.questions).toEqual([]);
   });
 });
@@ -612,7 +613,7 @@ describe("records", () => {
     runtime.onRecordsChanged.mockClear();
     try {
       await import("@main/index");
-      await vi.waitFor(() =>
+      await until(() =>
         expect(runtime.onRecordsChanged).toHaveBeenCalledExactlyOnceWith(recordsWindow.notifyRecordsChanged),
       );
     } finally {

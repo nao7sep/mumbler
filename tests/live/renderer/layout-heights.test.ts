@@ -46,12 +46,10 @@ let folders: string[] = [];
 let port = "";
 
 async function page(file: string, ready: string): Promise<Target> {
-  const deadline = Date.now() + 30_000;
   for (;;) {
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as Target[];
     const target = targets.find((entry) => entry.type === "page" && entry.url.endsWith(file));
     if (target && await evaluate<boolean>(target, `document.querySelector(${JSON.stringify(ready)}) !== null`).catch(() => false)) return target;
-    if (Date.now() > deadline) throw new Error(`${file} did not show ${ready} within 30 s.`);
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 }
@@ -68,11 +66,16 @@ beforeAll(async () => {
   });
   let stderr = "";
   child.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-  const deadline = Date.now() + 30_000;
-  while (!/DevTools listening on ws:\/\/[^:]+:(\d+)/.test(stderr)) {
-    if (Date.now() > deadline || child.exitCode !== null) throw new Error(`Electron did not open its DevTools port:\n${stderr}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+  const started = child;
+  await new Promise<void>((resolve, reject) => {
+    const check = (): void => {
+      if (/DevTools listening on ws:\/\/[^:]+:(\d+)/.test(stderr)) resolve();
+      else if (started.exitCode !== null) reject(new Error(`Electron did not open its DevTools port:\n${stderr}`));
+    };
+    started.stderr!.on("data", check);
+    started.once("exit", check);
+    check();
+  });
   port = /DevTools listening on ws:\/\/[^:]+:(\d+)/.exec(stderr)![1]!;
 });
 
@@ -80,10 +83,8 @@ afterAll(async () => {
   // Only the process this lane started, by its own handle.
   if (child && child.exitCode === null && child.signalCode === null) {
     const exited = once(child, "exit");
-    child.kill("SIGTERM");
-    const forced = setTimeout(() => child?.kill("SIGKILL"), 5_000);
+    child.kill("SIGKILL");
     await exited;
-    clearTimeout(forced);
   }
   await Promise.all(folders.map((folder) => rm(folder, { recursive: true, force: true })));
 });

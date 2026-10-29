@@ -14,6 +14,7 @@ import {
   transcribeWithGemini,
 } from "@main/core/gemini-adapter";
 import { CancelledError, isCancelledError } from "@main/core/cancellation";
+import { until } from "../../support/until";
 
 describe("isRetryableGeminiError", () => {
   it("does not retry timeouts or cancellations", () => {
@@ -122,7 +123,7 @@ describe("the Gemini SDK transport", () => {
     const [startUrl, startInit] = fetchMock.mock.calls[0]!;
     expect(String(startUrl)).toBe(`${endpoint}/upload/v1beta/files`);
     expect(new Headers(startInit?.headers).get("x-goog-upload-protocol")).toBe("resumable");
-    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => init?.method === "DELETE" && String(url) === `${endpoint}/v1beta/files/one`)).toBe(true));
+    await until(() => expect(fetchMock.mock.calls.some(([url, init]) => init?.method === "DELETE" && String(url) === `${endpoint}/v1beta/files/one`)).toBe(true));
   });
 
   it("bounds the whole resumable upload while retaining its physical work and deleting a late file", async () => {

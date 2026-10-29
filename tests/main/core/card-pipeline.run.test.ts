@@ -43,6 +43,7 @@ import { join } from "node:path";
 import { executeCardPipeline, type CardPipelineContext, GEMINI_ATTEMPTS } from "@main/core/card-pipeline";
 import { createDefaultSettings, createEmptyQueue } from "@main/core/settings-schema";
 import { CancelledError } from "@main/core/cancellation";
+import { until } from "../../support/until";
 
 function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
   return {
@@ -299,7 +300,7 @@ describe("executeCardPipeline", () => {
     const ctx = makeContext(card, controller.signal);
 
     const run = executeCardPipeline(card.id, "structured", "generate", ctx);
-    await vi.waitFor(() => expect(mockGenerateText).toHaveBeenCalledOnce());
+    await until(() => expect(mockGenerateText).toHaveBeenCalledOnce());
     // What a cancel does: take the card from the run, abort it and show a copy.
     ctx.owner.owns = false;
     controller.abort();

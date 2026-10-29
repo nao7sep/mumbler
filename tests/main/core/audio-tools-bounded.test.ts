@@ -69,12 +69,16 @@ describe("audio tools are bounded and cancellable", () => {
   // protects calls without a cancellation signal; saves have their own
   // cancellation controller.
   it("kills a tool that never returns, and says the bound was hit", async () => {
-    const pending = runTool(process.execPath, [sleeperScript], { timeoutMs: 200 });
-    const child = spawnedChild();
-    await expect(pending).rejects.toThrow(
-      /did not finish within/i,
-    );
-    expectProcessGone(child.pid);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const pending = runTool(process.execPath, [sleeperScript], { timeoutMs: 200 });
+      const rejected = expect(pending).rejects.toThrow(/did not finish within/i);
+      const child = spawnedChild();
+      await once(child, "spawn");
+      await vi.advanceTimersByTimeAsync(200);
+      await rejected;
+      expectProcessGone(child.pid);
+    } finally { vi.useRealTimers(); }
   });
 
   it("answers a cancel with the pipeline's cancelled error, not a failure", async () => {

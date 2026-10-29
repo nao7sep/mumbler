@@ -14,7 +14,8 @@ export default defineConfig({
     exclude: configDefaults.exclude,
     setupFiles: base.test?.setupFiles,
     fileParallelism: false,
-    testTimeout: 15 * 60_000,
-    hookTimeout: 30 * 60_000,
+    // Tests carry no timeouts (tests-folder-conventions).
+    testTimeout: 0,
+    hookTimeout: 0,
   },
 });

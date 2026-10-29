@@ -10,6 +10,7 @@ import { CancelledError } from "@main/core/cancellation";
 import type { AppSnapshot, MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
 import { hasStaleResults } from "@shared/card-status";
 import { formatUtcMarker, getSystemTimezone, recomputeLocalFromUtc } from "@shared/timestamps";
+import { until } from "../../support/until";
 
 // The card list as the user builds it: confirm what was dropped in, duplicate a
 // card to trim it twice, move the markers, remove one, start over. This drives
@@ -490,7 +491,7 @@ describe("the durable queue store", () => {
     unwritable.held = { path: join(home, "queue.json"), entered: 0, release: new Promise<void>((resolve) => { release = resolve; }) };
     const removal = card ? runtime.removeCard(card.id) : runtime.cancelPendingImports([pending.id]);
     try {
-      await vi.waitFor(() => expect(unwritable.held!.entered).toBe(1));
+      await until(() => expect(unwritable.held!.entered).toBe(1));
       expect(await readFile(pending.workingFilePath, "utf8")).toBe("audio for retain.wav");
     } finally { release(); await removal; unwritable.held = null; }
     expect(await exists(pending.workingFilePath)).toBe(false);
@@ -1174,7 +1175,7 @@ describe("working with a card", () => {
     });
 
     const saving = runtime.saveCard(card.id);
-    await vi.waitFor(() => expect(audioGate.entered).toBe(1));
+    await until(() => expect(audioGate.entered).toBe(1));
 
     expect(cards(runtime.getSnapshot())[0].status).toBe("Saving");
     await expect(runtime.saveCard(card.id), "a second save").rejects.toThrow(/Ready to Save/);
@@ -1203,7 +1204,7 @@ describe("working with a card", () => {
     });
 
     const trimming = runtime.updateCardTrim(card.id, { frontMarkerSec: null, backMarkerSec: 200 });
-    await vi.waitFor(() => expect(trimGate.entered).toBe(1));
+    await until(() => expect(trimGate.entered).toBe(1));
 
     await expect(runtime.saveCard(card.id)).rejects.toThrow(/still being applied/);
     await expect(runtime.removeCard(card.id)).rejects.toThrow(/being processed/);
@@ -1253,7 +1254,7 @@ describe("working with a card", () => {
     });
 
     const earlier = runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: null });
-    await vi.waitFor(() => expect(trimGate.entered).toBe(1));
+    await until(() => expect(trimGate.entered).toBe(1));
     trimGate.held = null;
     await runtime.updateCardTrim(card.id, { frontMarkerSec: 9, backMarkerSec: null });
     release();
@@ -1273,7 +1274,7 @@ describe("working with a card", () => {
     trimGate.held = new Promise<void>((resolve) => { release = resolve; });
     const editing = runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: null });
     try {
-      await vi.waitFor(() => expect(trimGate.entered).toBe(1));
+      await until(() => expect(trimGate.entered).toBe(1));
       now.mockReturnValue(editedAtUtc + 60_000);
       release();
       await editing;
@@ -1314,7 +1315,7 @@ describe("working with a card", () => {
     });
 
     const other = runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: null });
-    await vi.waitFor(() => expect(trimGate.entered).toBe(1));
+    await until(() => expect(trimGate.entered).toBe(1));
     await runtime.updateCardTrim(card.id, { frontMarkerSec: null, backMarkerSec: null });
     release();
     await other;
@@ -1331,7 +1332,7 @@ describe("working with a card", () => {
 
     const saving = runtime.saveCard(card.id);
     const outcome = saving.then(() => "saved", () => "stopped");
-    await vi.waitFor(() => expect(audioGate.entered).toBe(1));
+    await until(() => expect(audioGate.entered).toBe(1));
     await runtime.shutdown();
 
     expect(await outcome).toBe("stopped");
@@ -1413,7 +1414,7 @@ describe("working with a card", () => {
 
     const saving = runtime.saveCard(card.id);
     // The save probes its final audio only after it found the names free.
-    await vi.waitFor(() => expect(probeGate.entered).toBe(probesBefore + 1));
+    await until(() => expect(probeGate.entered).toBe(probesBefore + 1));
     await writeFile(target, "another save's audio");
     release();
     const result = await saving;
@@ -1453,7 +1454,7 @@ describe("working with a card", () => {
     const card = await confirmed();
     const first = runtime.getCardWaveformPeaks(card.id, "first");
     const second = runtime.getCardWaveformPeaks(card.id, "request-2");
-    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    await until(() => expect(waveforms.runs).toHaveLength(1));
     expect(waveforms.runs[0]!.path).toBe(card.sourceFilePath);
     waveforms.runs[0]!.settle(Float32Array.of(0.5));
     expect([...(await first)!]).toEqual([0.5]);
@@ -1466,21 +1467,21 @@ describe("working with a card", () => {
   it("stops a waveform run the player no longer waits for, and computes it afresh next time", async () => {
     const card = await confirmed();
     const waiting = runtime.getCardWaveformPeaks(card.id, "request-1");
-    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    await until(() => expect(waveforms.runs).toHaveLength(1));
     runtime.cancelCardWaveformPeaks("request-1");
     expect(await waiting, "a stopped run is not a failure").toBeNull();
     expect(waveforms.runs[0]!.signal?.aborted).toBe(true);
     void runtime.getCardWaveformPeaks(card.id, "request-2").catch(() => undefined);
-    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(2));
+    await until(() => expect(waveforms.runs).toHaveLength(2));
   });
 
   it("starts afresh rather than joining a stopped run, as a player that closes and reopens at once does", async () => {
     const card = await confirmed();
     const first = runtime.getCardWaveformPeaks(card.id, "request-1");
-    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    await until(() => expect(waveforms.runs).toHaveLength(1));
     runtime.cancelCardWaveformPeaks("request-1");
     const second = runtime.getCardWaveformPeaks(card.id, "request-2");
-    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(2));
+    await until(() => expect(waveforms.runs).toHaveLength(2));
     waveforms.runs[1]!.settle(Float32Array.of(0.25));
     expect([...(await second)!]).toEqual([0.25]);
     expect(await first).toBeNull();
@@ -1490,14 +1491,14 @@ describe("working with a card", () => {
     const card = await confirmed();
     const first = runtime.getCardWaveformPeaks(card.id, "request-1");
     const second = runtime.getCardWaveformPeaks(card.id, "request-2");
-    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    await until(() => expect(waveforms.runs).toHaveLength(1));
     waveforms.runs[0]!.settle(Float32Array.of(0.75));
     expect([...(await first)!]).toEqual([0.75]);
     expect([...(await second)!]).toEqual([0.75]);
 
     const copy = cards(await runtime.duplicateCard(card.id)).find((entry) => entry.id !== card.id)!;
     const other = runtime.getCardWaveformPeaks(copy.id, "request-3");
-    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(2));
+    await until(() => expect(waveforms.runs).toHaveLength(2));
     waveforms.runs[1]!.settle(Float32Array.of(0.5));
     expect([...(await other)!]).toEqual([0.5]);
   });
@@ -1505,7 +1506,7 @@ describe("working with a card", () => {
   it("releases a waveform acquisition after its card has been removed", async () => {
     const card = await confirmed();
     const waiting = runtime.getCardWaveformPeaks(card.id, "removed-card");
-    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    await until(() => expect(waveforms.runs).toHaveLength(1));
     await runtime.removeCard(card.id);
     expect(runtime.resolveCardSourcePath(card.id)).toBeNull();
     runtime.cancelCardWaveformPeaks("removed-card");
@@ -1516,7 +1517,7 @@ describe("working with a card", () => {
   it("says the waveform could not be drawn when its run fails", async () => {
     const card = await confirmed();
     const waiting = runtime.getCardWaveformPeaks(card.id, "request-1");
-    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    await until(() => expect(waveforms.runs).toHaveLength(1));
     waveforms.runs[0]!.fail(new Error("ffmpeg exited with code 1"));
     await expect(waiting).rejects.toThrow("The waveform could not be drawn.");
   });
@@ -1524,7 +1525,7 @@ describe("working with a card", () => {
   it("stops a waveform being drawn when Mumbler quits", async () => {
     const card = await confirmed();
     const waiting = runtime.getCardWaveformPeaks(card.id, "request-1").catch((error: unknown) => error);
-    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
+    await until(() => expect(waveforms.runs).toHaveLength(1));
     await runtime.shutdown();
     expect(waveforms.runs[0]!.signal?.aborted).toBe(true);
     expect(await waiting).toBeNull();
@@ -1672,7 +1673,7 @@ describe("working with a card", () => {
     probeGate.held = new Promise<void>((resolve) => { release = resolve; });
     const saving = runtime.saveCard(card.id, "overwrite");
     try {
-      await vi.waitFor(() => expect(probeGate.entered).toBeGreaterThan(0));
+      await until(() => expect(probeGate.entered).toBeGreaterThan(0));
       const [pending] = await dropIn(name);
       expect(basename(pending!.workingFilePath)).toBe(name);
       const prior = await readFile(pending!.workingFilePath, "utf8");
@@ -1723,7 +1724,7 @@ describe("working with a card", () => {
     sourceChecks.held = new Promise<void>((resolve) => { release = resolve; });
     const saving = runtime.saveCard(card.id, undefined, { removeAfterSave: false });
     try {
-      await vi.waitFor(() => expect(sourceChecks.calls).toHaveLength(1));
+      await until(() => expect(sourceChecks.calls).toHaveLength(1));
       release();
       expect((await saving).kind).toBe("saved");
       expect(sourceChecks.maximum).toBe(1);
@@ -1999,8 +2000,7 @@ describe("closing at quit", () => {
     try {
       await expect(runtime.readRecordsPage(query)).resolves.toBeDefined();
       const closing = runtime.closeForQuit({ origin: "user" });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(close).toHaveBeenCalledOnce();
+      await until(() => expect(close).toHaveBeenCalledOnce());
       // The records are already closing while the backup history still drains.
       await expect(runtime.readRecordsPage(query)).rejects.toThrow("could not be read");
       release();
@@ -2226,7 +2226,7 @@ describe("settings, secrets and the window's own state", () => {
     const first = runtime.saveToolSettings(false);
     let second: Promise<AppSnapshot> | undefined;
     try {
-      await vi.waitFor(() => expect(unwritable.held?.entered).toBe(1));
+      await until(() => expect(unwritable.held?.entered).toBe(1));
       expect(runtime.getSnapshot().settingsSummary?.checkUpdatesAtLaunch).toBe(true);
       if (intent === "draft") second = runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), theme: "dark" });
       else if (intent === "setup") second = runtime.saveSetupDirectory(destination);
@@ -2262,7 +2262,7 @@ describe("settings, secrets and the window's own state", () => {
     catalogueGate.held = new Promise((resolve) => { release = resolve; });
     const saving = runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), theme: "dark" });
     try {
-      await vi.waitFor(() => expect(catalogueGate.entered).toBe(1));
+      await until(() => expect(catalogueGate.entered).toBe(1));
       await runtime.saveToolSettings(false);
       expect(runtime.getSnapshot().settingsSummary?.checkUpdatesAtLaunch).toBe(false);
       release();
@@ -2517,7 +2517,7 @@ describe("the save a quit makes", () => {
       .then(() => "saved", () => "failed");
     let quit: Promise<unknown> | undefined;
     try {
-      await vi.waitFor(() => expect(secretReadGate.held?.entered).toBe(1));
+      await until(() => expect(secretReadGate.held?.entered).toBe(1));
       quit = runtime.saveForQuit();
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(finalWrite).not.toHaveBeenCalled();
@@ -2586,7 +2586,7 @@ describe("the save a quit makes", () => {
     unwritable.refuses = (path) => path === configPath;
     const saving = runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" })
       .then(() => "saved", () => "failed");
-    await vi.waitFor(() => expect(unwritable.held?.entered).toBe(1));
+    await until(() => expect(unwritable.held?.entered).toBe(1));
 
     const quit = runtime.saveForQuit();
     release();
@@ -2618,7 +2618,7 @@ describe("the save a quit makes", () => {
       .then(() => "saved", () => "failed");
     let quit: Promise<unknown> | undefined;
     try {
-      await vi.waitFor(() => expect(unwritable.held?.entered).toBe(1));
+      await until(() => expect(unwritable.held?.entered).toBe(1));
       quit = runtime.saveForQuit();
       release();
       expect(await saving).toBe("failed");
@@ -2669,10 +2669,10 @@ describe("the save a quit makes", () => {
       .then(() => "saved", () => "failed");
     let quit: Promise<unknown> | undefined;
     try {
-      await vi.waitFor(() => expect(unwritable.held?.entered).toBe(1));
+      await until(() => expect(unwritable.held?.entered).toBe(1));
       quit = runtime.saveForQuit();
       releaseWrite();
-      await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+      await until(() => expect(cleanup).toHaveBeenCalledOnce());
       expect(retry).toHaveBeenCalledOnce();
       expect(await saving).toBe("failed");
       releaseCleanup();

@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { act, createElement, isValidElement, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { loadCatalogue, loadedCatalogue, type MessageKey } from "@shared/i18n/catalogues";
 import { createTranslator, message } from "@shared/i18n/translate";
 import type { Language } from "@shared/i18n/languages";
 import { createRendererTranslator, I18nProvider, useI18n } from "@renderer/i18n/I18nContext";
+import { until } from "../support/until";
 
 beforeAll(() => Promise.all((["de", "ru", "fr", "ja"] as const).map(loadCatalogue)));
 
@@ -103,7 +104,7 @@ describe("catalogue loading", () => {
       expect(host.textContent).toBe("Language");
       act(() => render("es"));
       expect(host.textContent).toBe("Language");
-      await vi.waitFor(() => expect(host.textContent).toBe("Idioma"));
+      await until(() => expect(host.textContent).toBe("Idioma"));
       expect(document.documentElement.lang).toBe("es");
     } finally {
       act(() => root.unmount());

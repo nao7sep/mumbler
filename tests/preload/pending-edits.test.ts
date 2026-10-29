@@ -12,6 +12,7 @@ vi.mock("electron", () => ({
   webUtils: {},
 }));
 import "../../src/preload/index";
+import { until } from "../support/until";
 afterEach(() => electron.send.mockClear());
 it("waits for every flusher and reports rejection instead of a successful acknowledgement", async () => {
   let release!: () => void;
@@ -23,16 +24,16 @@ it("waits for every flusher and reports rejection instead of a successful acknow
     await Promise.resolve(); await Promise.resolve();
     expect(electron.send).not.toHaveBeenCalled();
     release();
-    await vi.waitFor(() => expect(electron.send).toHaveBeenCalledWith(APP_SHELL_EVENTS.pendingEditsFlushed, 41, false));
+    await until(() => expect(electron.send).toHaveBeenCalledWith(APP_SHELL_EVENTS.pendingEditsFlushed, 41, false));
   } finally { release(); removeHeld(); removeFailed(); }
 });
 it("captures synchronous flusher failure and acknowledges a subsequent successful request", async () => {
   const remove = electron.api!.onFlushPendingEdits(() => { throw new Error("synchronous failure"); });
   electron.handlers.get(APP_SHELL_EVENTS.flushPendingEdits)!({}, 42);
-  await vi.waitFor(() => expect(electron.send).toHaveBeenCalledWith(APP_SHELL_EVENTS.pendingEditsFlushed, 42, false));
+  await until(() => expect(electron.send).toHaveBeenCalledWith(APP_SHELL_EVENTS.pendingEditsFlushed, 42, false));
   remove();
   electron.handlers.get(APP_SHELL_EVENTS.flushPendingEdits)!({}, 43);
-  await vi.waitFor(() => expect(electron.send).toHaveBeenCalledWith(APP_SHELL_EVENTS.pendingEditsFlushed, 43, true));
+  await until(() => expect(electron.send).toHaveBeenCalledWith(APP_SHELL_EVENTS.pendingEditsFlushed, 43, true));
 });
 it("reports every registered session-only draft and discards them on request", () => {
   const discard = vi.fn();

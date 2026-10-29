@@ -96,6 +96,7 @@ import { ToolManager } from "@main/core/binaries/manager";
 import { TOOL_EXTRACTED_MAX_BYTES, resolveLatest } from "@main/core/binaries/registry";
 import { createDependenciesStore } from "@main/core/binaries/store";
 import { JsonStore } from "@main/core/json-store";
+import { until } from "../../../support/until";
 
 const RESOLVED = {
   version: "8.2",
@@ -411,7 +412,7 @@ describe("installTool", () => {
       options.signal?.throwIfAborted();
     });
     const installing = manager.installTool("ffmpeg");
-    await vi.waitFor(() => expect(signal).toBeDefined());
+    await until(() => expect(signal).toBeDefined());
     manager.cancelAll();
     expect(signal!.aborted).toBe(true);
     release();
@@ -535,7 +536,7 @@ describe("installTool", () => {
     });
 
     const installing = manager.installTool("ffmpeg");
-    await vi.waitFor(() => {
+    await until(() => {
       const t = manager.listStatuses().find((s) => s.name === "ffmpeg")?.transient;
       expect(t).toMatchObject({ kind: "running", operation: "provision" });
     });
@@ -677,7 +678,7 @@ describe("checkTools", () => {
       return RESOLVED as never;
     });
     const checking = manager.checkTools();
-    await vi.waitFor(() => expect(signal).toBeDefined());
+    await until(() => expect(signal).toBeDefined());
     manager.cancelAll();
     expect(signal!.aborted).toBe(true);
     release();

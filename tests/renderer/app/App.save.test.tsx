@@ -10,6 +10,7 @@ import type { AppSnapshot, MumblerCard, MumblerShellApi, SaveCardResult } from "
 import { createDefaultSettings, summarizeSettings } from "@main/core/settings-schema";
 import { createTranslator, message } from "@shared/i18n/translate";
 import type { MessageKey } from "@shared/i18n/catalogues";
+import { until } from "../../support/until";
 
 // Playback is outside this mounted Save flow; the rest of App and its modals
 // stay real, with persistence outcomes supplied only at the shell boundary.
@@ -83,7 +84,7 @@ function removeAfterSave(): HTMLInputElement {
 }
 async function mount(): Promise<void> {
   await act(async () => root?.render(createElement(App)));
-  await vi.waitFor(() => expect(document.querySelector(".app-shell")).not.toBeNull());
+  await until(() => expect(document.querySelector(".app-shell")).not.toBeNull());
   await act(async () => button("detail.tabOutput").click());
   expect(button("output.save").disabled).toBe(false);
 }

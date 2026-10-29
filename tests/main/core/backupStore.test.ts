@@ -12,7 +12,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -173,10 +172,9 @@ describe("record — an OS session end skips the history", () => {
     record(file, Buffer.from("before", "utf8"));
     abandonBackupStore();
     record(file, Buffer.from("after", "utf8"));
-    await delay(200);
+    await closeBackupStore();
 
     expect(warn).not.toHaveBeenCalled();
-    await closeBackupStore();
     const rows = readdirSync(root).includes("backups.sqlite3") ? readRows(file) : [];
     expect(rows.map(text)).not.toContain("after");
   });

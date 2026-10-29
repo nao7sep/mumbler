@@ -44,6 +44,7 @@ import {
   transcribeWithGemini,
 } from "@main/core/gemini-adapter";
 import { CancelledError } from "@main/core/cancellation";
+import { until } from "../../support/until";
 
 const SAFE = INLINE_AUDIO_LIMIT_BYTES;
 
@@ -469,14 +470,14 @@ describe("every provider call is recorded whole", () => {
     const tracked: Promise<unknown>[] = [];
 
     const transcribing = transcribeWithGemini({ ...baseParams(), signal: controller.signal, trackWork: (work) => tracked.push(work) });
-    await vi.waitFor(() => expect(upload).toHaveBeenCalledOnce());
+    await until(() => expect(upload).toHaveBeenCalledOnce());
     controller.abort();
 
     await expect(transcribing).rejects.toBeInstanceOf(CancelledError);
     expect(tracked).toHaveLength(1);
     expect(generateContent).not.toHaveBeenCalled();
     finish({ name: "files/late", uri: "gs://late", mimeType: "audio/mp4" });
-    await vi.waitFor(() => expect(deleteFile).toHaveBeenCalledWith(expect.objectContaining({ name: "files/late" })));
+    await until(() => expect(deleteFile).toHaveBeenCalledWith(expect.objectContaining({ name: "files/late" })));
   });
 
   it("records the upload, the generation and the delete of a Files-API transcription", async () => {
@@ -486,7 +487,7 @@ describe("every provider call is recorded whole", () => {
     const recordCall = vi.fn().mockResolvedValue(undefined);
 
     await transcribeWithGemini({ ...baseParams(), recordCall });
-    await vi.waitFor(() => expect(recordCall).toHaveBeenCalledTimes(6));
+    await until(() => expect(recordCall).toHaveBeenCalledTimes(6));
 
     expect(recordCall.mock.calls.filter(([call]) => call.phase === "finished").map(([call]) => call.operation)).toEqual([
       "files.upload",

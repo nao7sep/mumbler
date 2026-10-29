@@ -29,6 +29,7 @@ vi.mock("electron", () => ({
 }));
 
 import { renderPlainDialogHtml, showPlainDialog, type PlainDialog } from "@main/plain-dialog";
+import { until } from "../support/until";
 
 const dialog: PlainDialog<"cancel" | "retry" | "quit-anyway"> = {
   language: "de",
@@ -78,7 +79,7 @@ describe("plain dialog", () => {
     showPlainDialog(dialog);
     const window = windows.last!;
     window.ready();
-    await vi.waitFor(() => expect(window.scripts).toHaveLength(2));
+    await until(() => expect(window.scripts).toHaveLength(2));
     expect(window.calls).toEqual(["show"]);
     expect(window.scripts[1]).toContain('"choice-retry"');
   });

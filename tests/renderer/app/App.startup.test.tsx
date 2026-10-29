@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppPaths, AppSnapshot, MumblerShellApi } from "@shared/app-shell";
 import { App } from "@renderer/app/App";
 import { createDefaultSettings, summarizeSettings } from "@main/core/settings-schema";
+import { until } from "../../support/until";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -56,7 +57,7 @@ describe("App startup snapshot gate", () => {
     }));
     window.mumbler.dismissFirstRunSetup = vi.fn(async () => { firstRun = false; });
     await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Set Up Mumbler (1/4)"));
+    await until(() => expect(document.body.textContent).toContain("Set Up Mumbler (1/4)"));
     for (let step = 0; step < 4; step += 1) {
       await act(async () => button("Skip")!.click());
     }
@@ -64,7 +65,7 @@ describe("App startup snapshot gate", () => {
     await act(async () => root?.unmount());
     root = createRoot(document.querySelector("#root")!);
     await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(document.querySelector(".app-shell")).not.toBeNull());
+    await until(() => expect(document.querySelector(".app-shell")).not.toBeNull());
     expect(document.body.textContent).not.toContain("Set Up Mumbler");
   });
 
@@ -72,7 +73,7 @@ describe("App startup snapshot gate", () => {
     getSnapshot.mockRejectedValue(hostile);
 
     await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(button("Retry")).toBeDefined());
+    await until(() => expect(button("Retry")).toBeDefined());
 
     expect(document.querySelector(".app-shell")).toBeNull();
     expect(document.querySelector('[role="alert"]')?.textContent).toContain(
@@ -93,9 +94,9 @@ describe("App startup snapshot gate", () => {
     getSnapshot.mockRejectedValueOnce(hostile).mockResolvedValueOnce(readySnapshot());
 
     await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(button("Retry")).toBeDefined());
+    await until(() => expect(button("Retry")).toBeDefined());
     await act(async () => button("Retry")!.click());
-    await vi.waitFor(() => expect(document.querySelector(".app-shell")).not.toBeNull());
+    await until(() => expect(document.querySelector(".app-shell")).not.toBeNull());
 
     expect(getSnapshot).toHaveBeenCalledTimes(2);
     expect(document.querySelector(".renderer-failure")).toBeNull();
@@ -115,7 +116,7 @@ describe("a startup diagnostic", () => {
     });
 
     await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Saved Data Is From a Newer Version"));
+    await until(() => expect(document.body.textContent).toContain("Saved Data Is From a Newer Version"));
 
     expect(document.body.textContent).toContain("/home/me/.mumbler/queue.json was saved by a newer version of Mumbler");
     expect(button("Reset State")).toBeUndefined();
@@ -132,7 +133,7 @@ describe("a startup diagnostic", () => {
     });
 
     await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Read"));
+    await until(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Read"));
 
     expect(document.body.textContent).toContain("Mumbler could not read /home/me/.mumbler/queue.json.");
     expect(button("Reset State")).toBeUndefined();
@@ -149,7 +150,7 @@ describe("a startup diagnostic", () => {
     });
 
     await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Loaded"));
+    await until(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Loaded"));
 
     expect(document.body.textContent).toContain("Mumbler could not safely load /home/me/.mumbler/queue.json.");
     expect(document.body.textContent).toContain("choose Reset State to set your saved work aside");
@@ -169,7 +170,7 @@ describe("a startup diagnostic", () => {
       }));
 
       await act(async () => root?.render(createElement(App)));
-      await vi.waitFor(() => expect(button("Reset State")).toBeDefined());
+      await until(() => expect(button("Reset State")).toBeDefined());
       await act(async () => button("Reset State")!.click());
       await act(async () => vi.advanceTimersByTime(10_000));
 
@@ -197,7 +198,7 @@ describe("a startup diagnostic", () => {
     }));
 
     await act(async () => root?.render(createElement(App)));
-    await vi.waitFor(() => expect(button("Reset State")).toBeDefined());
+    await until(() => expect(button("Reset State")).toBeDefined());
     await act(async () => button("Reset State")!.click());
 
     const text = document.body.textContent ?? "";

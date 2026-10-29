@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { WaveformCache } from "@main/core/waveform-cache";
+import { until } from "../../support/until";
 
 it("releases a summary with its last consumer and computes it again on revisit", async () => {
   const compute = vi.fn(async () => Float32Array.of(0.25, 0.75));
@@ -19,10 +20,10 @@ it("discards stale results even if an aborted decoder returns and lets a new con
   const compute = vi.fn((_file: string, signal: AbortSignal) => new Promise<Float32Array>((finish) => runs.push({ signal, finish })));
   const cache = new WaveformCache(compute);
   const first = cache.acquire("audio", "first");
-  await vi.waitFor(() => expect(runs).toHaveLength(1));
+  await until(() => expect(runs).toHaveLength(1));
   cache.release("first");
   const next = cache.acquire("audio", "next");
-  await vi.waitFor(() => expect(runs).toHaveLength(2));
+  await until(() => expect(runs).toHaveLength(2));
   expect(runs[0]!.signal.aborted).toBe(true);
   runs[1]!.finish(Float32Array.of(0.75));
   expect(await next).toEqual(Float32Array.of(0.75));

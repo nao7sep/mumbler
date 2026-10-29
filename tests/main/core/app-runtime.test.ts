@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PipelineCoordinator } from "@main/core/pipeline-coordinator";
 
 import type { MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
+import { until } from "../../support/until";
 
 // app-runtime imports electron at module load; stub it so the module's exported
 // pure helpers can be exercised under the node test environment. The helpers
@@ -941,7 +942,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
       const diagnostic = vi.spyOn(runtime.currentLogger(), "error").mockImplementation(() => held.promise);
       const quit = runtime.saveForQuit();
       try {
-        await vi.waitFor(() => expect(layout).toHaveBeenCalledOnce());
+        await until(() => expect(layout).toHaveBeenCalledOnce());
         expect(text).toHaveBeenCalledOnce();
         expect(diagnostic).toHaveBeenCalledOnce();
         held.release();

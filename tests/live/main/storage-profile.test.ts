@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
-import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 let root: string;
 const children: ChildProcess[] = [];
 beforeAll(async () => {
@@ -21,11 +21,10 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const child of children) {
     if (child.exitCode !== null || child.signalCode !== null) continue;
+    // The lane's own child, by its handle.
     const exited = once(child, "exit");
-    child.kill("SIGTERM");
-    const force = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    child.kill("SIGKILL");
     await exited;
-    clearTimeout(force);
   }
   await rm(root, { recursive: true, force: true });
 });
@@ -39,10 +38,16 @@ async function launch(home: string) {
   let stderr = "";
   child.stdout!.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
   child.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-  await vi.waitFor(() => {
-    if (child.exitCode !== null && !stdout.includes("\n")) throw new Error(stderr);
-    expect(stdout).toContain("\n");
-  }, { timeout: 30_000 });
+  // The fixture prints one line and stays running; an exit before it fails.
+  await new Promise<void>((resolve, reject) => {
+    const check = (): void => {
+      if (stdout.includes("\n")) resolve();
+      else if (child.exitCode !== null) reject(new Error(stderr));
+    };
+    child.stdout!.on("data", check);
+    child.once("exit", check);
+    check();
+  });
   return { child, result: JSON.parse(stdout.split("\n")[0]!) as Record<string, unknown> };
 }
 it("redirects both paths before ready while retaining the original single-instance lock", async () => {

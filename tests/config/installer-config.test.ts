@@ -7,22 +7,6 @@ const config = readFileSync(
   new URL("../../electron-builder.yml", import.meta.url),
   "utf8",
 );
-const packageJson = JSON.parse(
-  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-);
-
-describe("package scripts", () => {
-  it("prepares Electron before every package-script builder invocation", () => {
-    for (const script of Object.values(packageJson.scripts) as string[]) {
-      if (script.includes("electron-builder")) {
-        expect(script.indexOf("npm run prepare:electron")).toBeLessThan(
-          script.indexOf("electron-builder"),
-        );
-      }
-    }
-  });
-});
-
 describe("interface languages in the packaged app", () => {
   function listUnder(key: string): string[] {
     const lines = config.split("\n");

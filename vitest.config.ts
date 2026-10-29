@@ -26,6 +26,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.{ts,tsx}"],
+    // Tests carry no timeouts (tests-folder-conventions): a test waits for the
+    // event it needs, and one that never arrives hangs rather than failing on a clock.
+    testTimeout: 0,
+    hookTimeout: 0,
     // tests/live calls the real Gemini API and runs the real managed audio tools;
     // only vitest.live.config.ts, run by npm run test:full, includes it.
     exclude: [...configDefaults.exclude, "tests/live/**"],
