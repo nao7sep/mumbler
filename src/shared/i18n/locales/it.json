@@ -231,9 +231,6 @@
     "other": "{count} registrazioni recuperate da una sessione interrotta: genera di nuovo per riprendere."
   },
   "error.layoutSave": "La disposizione dei riquadri non è stata salvata. Resta in uso la disposizione attuale.",
-  "error.refreshRecordings": "Impossibile aggiornare lo stato delle registrazioni. Riapri Mumbler per riprovare.",
-  "error.refreshWindow": "Impossibile aggiornare lo stato della finestra. Riapri Mumbler per continuare.",
-  "error.refreshTools": "Impossibile aggiornare lo stato degli strumenti audio. Riapri Strumenti gestiti per riprovare.",
   "error.recordWindowError": "Mumbler non è riuscito a registrare l’errore imprevisto della finestra. Riavvia l’app per continuare.",
   "error.selectRecording": "Impossibile selezionare la registrazione. La selezione attuale non è cambiata; riprova.",
   "notice.duplicated": "Registrazione duplicata.",

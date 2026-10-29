@@ -217,9 +217,6 @@
     "other": "{count} recordings recovered from an interrupted session — generate again to resume."
   },
   "error.layoutSave": "The pane layout wasn't saved. Your current layout is still in use.",
-  "error.refreshRecordings": "The recording state could not be refreshed. Reopen Mumbler to try again.",
-  "error.refreshWindow": "The window state could not be refreshed. Reopen Mumbler to continue.",
-  "error.refreshTools": "Audio tool status could not be refreshed. Reopen Managed tools to try again.",
   "error.recordWindowError": "Mumbler could not record the unexpected window error. Restart the app to continue.",
   "error.selectRecording": "The recording could not be selected. The current selection is unchanged; try again.",
   "notice.duplicated": "Recording duplicated.",

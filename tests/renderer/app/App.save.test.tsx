@@ -24,6 +24,7 @@ const removeCard = vi.fn<MumblerShellApi["removeCard"]>();
 const reportRendererDiagnostic = vi.fn<MumblerShellApi["reportRendererDiagnostic"]>();
 let root: Root | null = null;
 let initialSnapshot: AppSnapshot;
+// Sends the window the current snapshot, as main does after every change.
 let pipelineChanged: (() => void) | undefined;
 
 class TestResizeObserver {
@@ -110,11 +111,12 @@ beforeEach(() => {
   const unsubscribe = (): void => undefined;
   Object.defineProperty(window, "mumbler", { configurable: true, value: {
     getInterfaceLanguage: vi.fn(async () => initialSnapshot.interfaceLanguage),
-    getSnapshot: vi.fn(async () => initialSnapshot),
+    subscribeSnapshot: vi.fn(async (listener: (next: AppSnapshot) => void) => {
+      pipelineChanged = () => listener(initialSnapshot);
+      listener(initialSnapshot);
+      return unsubscribe;
+    }),
     saveCard, generateCardStep, removeCard, reportRendererDiagnostic,
-    onAppWideErrorChanged: () => unsubscribe,
-    onDependenciesUpdated: () => unsubscribe,
-    onPipelineProgressUpdated: (listener) => { pipelineChanged = listener; return unsubscribe; },
     onFlushPendingEdits: () => unsubscribe,
     onUnsavedDrafts: () => unsubscribe,
   } satisfies Partial<MumblerShellApi> });

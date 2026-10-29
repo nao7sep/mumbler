@@ -223,9 +223,6 @@
     "other": "중단된 세션에서 녹음 {count}개를 복구했습니다. 계속하려면 다시 생성하십시오."
   },
   "error.layoutSave": "창 영역 배치가 저장되지 않았습니다. 현재 배치는 그대로 사용됩니다.",
-  "error.refreshRecordings": "녹음 상태를 새로 고칠 수 없습니다. Mumbler를 다시 열어 다시 시도하십시오.",
-  "error.refreshWindow": "윈도우 상태를 새로 고칠 수 없습니다. 계속하려면 Mumbler를 다시 여십시오.",
-  "error.refreshTools": "오디오 도구 상태를 새로 고칠 수 없습니다. '관리형 도구'를 다시 열어 다시 시도하십시오.",
   "error.recordWindowError": "Mumbler가 예기치 않은 윈도우 오류를 기록하지 못했습니다. 계속하려면 앱을 다시 시작하십시오.",
   "error.selectRecording": "녹음을 선택할 수 없습니다. 현재 선택은 변경되지 않았습니다. 다시 시도하십시오.",
   "notice.duplicated": "녹음을 복제했습니다.",

@@ -1,7 +1,8 @@
-import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, ipcMain, type IpcMainInvokeEvent, type WebContents } from "electron";
 
 import {
   APP_SHELL_CHANNELS,
+  APP_SHELL_EVENTS,
   type CardTrim,
   type GenerateTarget,
   type PendingImportReviewItem,
@@ -138,7 +139,21 @@ export interface AppShellWindows {
   openRecords(): Promise<void>;
 }
 
-export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShellWindows): void {
+/** Sends the current snapshot to every subscribed window. */
+export type PublishSnapshot = () => void;
+
+export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShellWindows): PublishSnapshot {
+  // The windows that subscribed to the snapshot: each gets the current one when
+  // it subscribes and every later one, over the one event channel.
+  const subscribers = new Set<WebContents>();
+  const publish: PublishSnapshot = () => {
+    if (subscribers.size === 0) return;
+    const snapshot = runtime.getSnapshot();
+    for (const contents of subscribers) {
+      if (!contents.isDestroyed()) contents.send(APP_SHELL_EVENTS.snapshotChanged, snapshot);
+    }
+  };
+
   // Single chokepoint for every IPC handler: registers it and wraps it so that
   // any failure is logged in main before it propagates back to the renderer. An
   // expected, user-facing rejection (OperationError) is traced at debug —
@@ -168,7 +183,14 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
   };
 
   handle(APP_SHELL_CHANNELS.getInterfaceLanguage, () => runtime.interfaceLanguage());
-  handle(APP_SHELL_CHANNELS.getSnapshot, () => runtime.getSnapshot());
+  handle(APP_SHELL_CHANNELS.subscribeSnapshot, (event) => {
+    const contents = event.sender;
+    if (!subscribers.has(contents)) {
+      subscribers.add(contents);
+      contents.once("destroyed", () => subscribers.delete(contents));
+    }
+    contents.send(APP_SHELL_EVENTS.snapshotChanged, runtime.getSnapshot());
+  });
   handle(APP_SHELL_CHANNELS.dismissFirstRunSetup, () => runtime.dismissFirstRunSetup());
   handle(APP_SHELL_CHANNELS.getSettingsDraft, () => runtime.getSettingsDraft());
   handle(APP_SHELL_CHANNELS.getDefaultPrompts, () => runtime.getDefaultPrompts());
@@ -389,4 +411,6 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
     }
     return runtime.saveLayout(queueWidth);
   });
+
+  return publish;
 }

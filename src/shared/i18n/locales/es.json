@@ -231,9 +231,6 @@
     "other": "Se recuperaron {count} grabaciones de una sesión interrumpida: genera de nuevo para continuar."
   },
   "error.layoutSave": "No se guardó la distribución de los paneles. Se sigue usando tu distribución actual.",
-  "error.refreshRecordings": "No se pudo actualizar el estado de las grabaciones. Vuelve a abrir Mumbler para intentarlo de nuevo.",
-  "error.refreshWindow": "No se pudo actualizar el estado de la ventana. Vuelve a abrir Mumbler para continuar.",
-  "error.refreshTools": "No se pudo actualizar el estado de las herramientas de audio. Vuelve a abrir Herramientas gestionadas para intentarlo de nuevo.",
   "error.recordWindowError": "Mumbler no pudo registrar el error inesperado de la ventana. Reinicia la app para continuar.",
   "error.selectRecording": "No se pudo seleccionar la grabación. La selección actual no cambió; inténtalo de nuevo.",
   "notice.duplicated": "Grabación duplicada.",

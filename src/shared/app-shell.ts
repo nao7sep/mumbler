@@ -5,7 +5,7 @@ import type { RecordDetail, RecordKind, RecordSources, RecordsPage, RecordsQuery
 
 export const APP_SHELL_CHANNELS = {
   getInterfaceLanguage: "app-shell:get-interface-language",
-  getSnapshot: "app-shell:get-snapshot",
+  subscribeSnapshot: "app-shell:subscribe-snapshot",
   dismissFirstRunSetup: "app-shell:dismiss-first-run-setup",
   getSettingsDraft: "app-shell:get-settings-draft",
   getDefaultPrompts: "app-shell:get-default-prompts",
@@ -56,9 +56,9 @@ export const APP_SHELL_CHANNELS = {
 } as const;
 
 export const APP_SHELL_EVENTS = {
-  appWideErrorUpdated: "app-shell:event-app-wide-error-updated",
-  pipelineProgressUpdated: "app-shell:event-pipeline-progress-updated",
-  dependenciesUpdated: "app-shell:event-dependencies-updated",
+  // The app's state, sent to each subscribed window when it subscribes and
+  // after every change: the window's one source of the snapshot.
+  snapshotChanged: "app-shell:event-snapshot-changed",
   interfaceLanguageChanged: "app-shell:event-interface-language-changed",
   recordsChanged: "app-shell:event-records-changed",
   // A quit asks the main window to send the edits it has not sent yet; the
@@ -650,7 +650,9 @@ export type SaveCardResult =
 
 export interface MumblerShellApi {
   getInterfaceLanguage(): Promise<InterfaceLanguage>;
-  getSnapshot(): Promise<AppSnapshot>;
+  /** Delivers the current snapshot to `listener`, then every later one; resolves
+   * with the unsubscribe once the first has been delivered. */
+  subscribeSnapshot(listener: (snapshot: AppSnapshot) => void): Promise<() => void>;
   dismissFirstRunSetup(): Promise<void>;
   getSettingsDraft(): Promise<SettingsDraft>;
   getDefaultPrompts(): Promise<PromptTemplates>;
@@ -691,7 +693,7 @@ export interface MumblerShellApi {
   resetState(): Promise<AppSnapshot>;
   cancelPendingImports(ids: string[]): Promise<AppSnapshot>;
   // Managed audio-tool operations. Each returns a fresh snapshot so the surface
-  // reflects the new state; live progress arrives via onDependenciesUpdated.
+  // reflects the new state; live progress arrives with each snapshot.
   // provisionTool is the single acquire operation (Install when absent, Update
   // when a newer version is known — same flow underneath).
   provisionTool(name: ToolName): Promise<AppSnapshot>;
@@ -714,9 +716,6 @@ export interface MumblerShellApi {
   getRecordsListWidth(): Promise<number>;
   saveRecordsListWidth(width: number): Promise<number>;
   getPathForFile(file: File): string;
-  onAppWideErrorChanged(listener: () => void): () => void;
-  onPipelineProgressUpdated(listener: () => void): () => void;
-  onDependenciesUpdated(listener: () => void): () => void;
   onInterfaceLanguageChanged(listener: () => void): () => void;
   // A record was stored or missing-history health changed.
   onRecordsChanged(listener: (missingRecords: boolean) => void): () => void;

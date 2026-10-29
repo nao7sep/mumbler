@@ -223,9 +223,6 @@
     "other": "已从中断的会话中恢复 {count} 个录音——请重新生成以继续。"
   },
   "error.layoutSave": "面板布局未保存。当前布局仍在使用。",
-  "error.refreshRecordings": "无法刷新录音状态。请重新打开 Mumbler 后重试。",
-  "error.refreshWindow": "无法刷新窗口状态。请重新打开 Mumbler 以继续。",
-  "error.refreshTools": "无法刷新音频工具状态。请重新打开“托管工具”后重试。",
   "error.recordWindowError": "Mumbler 无法记录窗口的意外错误。请重新启动应用以继续。",
   "error.selectRecording": "无法选择该录音。当前选择未改变；请重试。",
   "notice.duplicated": "已复制录音。",

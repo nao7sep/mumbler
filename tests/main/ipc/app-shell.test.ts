@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { APP_SHELL_CHANNELS, type PendingImportReviewItem } from "@shared/app-shell";
+import { APP_SHELL_CHANNELS, APP_SHELL_EVENTS, type PendingImportReviewItem } from "@shared/app-shell";
 
 // The boundary the window calls: every channel reaches its runtime method with
 // the arguments it was given, a malformed argument is refused before the runtime
@@ -86,7 +86,6 @@ describe("the app-shell IPC boundary", () => {
   // Each row: the channel, the runtime method it must reach, and the arguments
   // the renderer sends, which must arrive unchanged.
   it.each([
-    ["getSnapshot", "getSnapshot", []],
     ["dismissFirstRunSetup", "dismissFirstRunSetup", []],
     ["getSettingsDraft", "getSettingsDraft", []],
     ["getDefaultPrompts", "getDefaultPrompts", []],
@@ -132,6 +131,21 @@ describe("the app-shell IPC boundary", () => {
     const result = await invoke(APP_SHELL_CHANNELS[channel], ...args);
     expect(runtime[method]).toHaveBeenCalledExactlyOnceWith(...args);
     expect(result).toBe(`${method} result`);
+  });
+
+  it("sends a subscribing window the current snapshot, then every published one, until it closes", async () => {
+    runtime.getSnapshot = vi.fn(() => "the snapshot");
+    let closed: () => void = () => undefined;
+    const sender = { send: vi.fn(), isDestroyed: () => false, once: (_event: string, listener: () => void) => { closed = listener; } };
+    electron.handlers.clear();
+    const publish = registerAppShellIpc(runtime as never, windows);
+    await electron.handlers.get(APP_SHELL_CHANNELS.subscribeSnapshot)!({ sender });
+    expect(sender.send).toHaveBeenCalledExactlyOnceWith(APP_SHELL_EVENTS.snapshotChanged, "the snapshot");
+    publish();
+    expect(sender.send).toHaveBeenCalledTimes(2);
+    closed();
+    publish();
+    expect(sender.send).toHaveBeenCalledTimes(2);
   });
 
   it.each([[undefined], [null], ["keep"], [{}], [{ removeAfterSave: "no" }]])(

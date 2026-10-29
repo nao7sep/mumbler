@@ -170,7 +170,10 @@ function StartupGate(): ReactElement {
     | { status: "ready"; snapshot: AppSnapshot }
   >({ status: "loading" });
   const startupAttemptRef = useRef(0);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
+  // The window's one subscription: its first event is the current snapshot,
+  // and every later change arrives the same way.
   const loadStartupSnapshot = useCallback(async (): Promise<void> => {
     const attempt = ++startupAttemptRef.current;
     setStartupLoad((current) =>
@@ -179,10 +182,11 @@ function StartupGate(): ReactElement {
         : { status: "loading" },
     );
     try {
-      const snapshot = await window.mumbler.getSnapshot();
-      if (startupAttemptRef.current === attempt) {
-        setStartupLoad({ status: "ready", snapshot });
-      }
+      const unsubscribe = await window.mumbler.subscribeSnapshot((snapshot) => {
+        if (startupAttemptRef.current === attempt) setStartupLoad({ status: "ready", snapshot });
+      });
+      if (startupAttemptRef.current === attempt) unsubscribeRef.current = unsubscribe;
+      else unsubscribe();
     } catch (error: unknown) {
       if (startupAttemptRef.current === attempt) {
         setStartupLoad({
@@ -202,6 +206,8 @@ function StartupGate(): ReactElement {
     void loadStartupSnapshot();
     return () => {
       startupAttemptRef.current += 1;
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
     };
   }, [loadStartupSnapshot]);
 
@@ -230,11 +236,12 @@ function StartupGate(): ReactElement {
     );
   }
 
-  return <LoadedApp initialSnapshot={startupLoad.snapshot} />;
+  return <LoadedApp subscribed={startupLoad.snapshot} />;
 }
 
-function LoadedApp({ initialSnapshot }: { initialSnapshot: AppSnapshot }): ReactElement {
-  const [snapshot, setSnapshot] = useState<AppSnapshot>(initialSnapshot);
+function LoadedApp({ subscribed }: { subscribed: AppSnapshot }): ReactElement {
+  const [snapshot, setSnapshot] = useState<AppSnapshot>(subscribed);
+  useEffect(() => setSnapshot(subscribed), [subscribed]);
   // Every snapshot carries the language the main process speaks, so a language
   // saved in Settings reaches the renderer with the snapshot that Save returns.
   const { language, locale } = snapshot.interfaceLanguage;
@@ -455,67 +462,23 @@ function LoadedShell({
     setShowReviewDiscardConfirm(false);
   }
 
+  // A card whose status changed since the previous snapshot may announce it.
+  const previousSnapshotRef = useRef(snapshot);
   useEffect(() => {
-    return window.mumbler.onPipelineProgressUpdated(() => {
-      const prevSnapshot = snapshotRef.current;
-      void window.mumbler
-        .getSnapshot()
-        .then((nextSnapshot) => {
-          if (prevSnapshot?.state?.cards) {
-            const previousCards = new Map(prevSnapshot.state.cards.map((card) => [card.id, card]));
-            for (const card of nextSnapshot.state?.cards ?? []) {
-              const prevCard = previousCards.get(card.id);
-              if (prevCard && prevCard.status !== card.status) {
-                const notification = pipelineCompletionNotification(prevCard, card);
-                if (notification?.kind === "toast") {
-                  addToast(notification.message);
-                }
-              }
-            }
-          }
-          setSnapshot(nextSnapshot);
-        })
-        .catch((error: unknown) => {
-          addPersistent(
-            "snapshot-refresh:pipeline",
-            presentFailure(error, message("error.refreshRecordings"), "card state refresh failed"),
-            "error",
-          );
-        });
-    });
-  }, []);
-
-  useEffect(() => {
-    return window.mumbler.onAppWideErrorChanged(() => {
-      void window.mumbler
-        .getSnapshot()
-        .then((nextSnapshot) => {
-          setSnapshot(nextSnapshot);
-        })
-        .catch((error: unknown) => {
-          addPersistent(
-            "snapshot-refresh:app-wide-error",
-            presentFailure(error, message("error.refreshWindow"), "app error state refresh failed"),
-            "error",
-          );
-        });
-    });
-  }, []);
-
-  useEffect(() => {
-    return window.mumbler.onDependenciesUpdated(() => {
-      void window.mumbler
-        .getSnapshot()
-        .then((nextSnapshot) => setSnapshot(nextSnapshot))
-        .catch((error: unknown) => {
-          addPersistent(
-            "snapshot-refresh:dependencies",
-            presentFailure(error, message("error.refreshTools"), "audio tools state refresh failed"),
-            "error",
-          );
-        });
-    });
-  }, []);
+    const previous = previousSnapshotRef.current;
+    previousSnapshotRef.current = snapshot;
+    if (previous === snapshot || !previous?.state?.cards) return;
+    const previousCards = new Map(previous.state.cards.map((card) => [card.id, card]));
+    for (const card of snapshot.state?.cards ?? []) {
+      const prevCard = previousCards.get(card.id);
+      if (prevCard && prevCard.status !== card.status) {
+        const notification = pipelineCompletionNotification(prevCard, card);
+        if (notification?.kind === "toast") {
+          addToast(notification.message);
+        }
+      }
+    }
+  }, [snapshot]);
 
   const dependencies = snapshot?.dependencies ?? null;
 

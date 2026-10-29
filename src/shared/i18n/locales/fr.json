@@ -231,9 +231,6 @@
     "other": "{count} enregistrements récupérés après une session interrompue — générez à nouveau pour reprendre."
   },
   "error.layoutSave": "La disposition des volets n’a pas été enregistrée. Votre disposition actuelle reste utilisée.",
-  "error.refreshRecordings": "L’état des enregistrements n’a pas pu être actualisé. Rouvrez Mumbler pour réessayer.",
-  "error.refreshWindow": "L’état de la fenêtre n’a pas pu être actualisé. Rouvrez Mumbler pour continuer.",
-  "error.refreshTools": "L’état des outils audio n’a pas pu être actualisé. Rouvrez «\u00a0Outils gérés\u00a0» pour réessayer.",
   "error.recordWindowError": "Mumbler n’a pas pu consigner l’erreur inattendue de la fenêtre. Redémarrez l’app pour continuer.",
   "error.selectRecording": "L’enregistrement n’a pas pu être sélectionné. La sélection actuelle est inchangée\u00a0; réessayez.",
   "notice.duplicated": "Enregistrement dupliqué.",

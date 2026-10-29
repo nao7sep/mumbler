@@ -227,9 +227,6 @@
     "other": "{count} Aufnahmen aus einer unterbrochenen Sitzung wiederhergestellt – erzeugen Sie erneut, um fortzufahren."
   },
   "error.layoutSave": "Das Bereichslayout wurde nicht gespeichert. Ihr aktuelles Layout bleibt in Verwendung.",
-  "error.refreshRecordings": "Der Zustand der Aufnahmen konnte nicht aktualisiert werden. Öffnen Sie Mumbler erneut, um es noch einmal zu versuchen.",
-  "error.refreshWindow": "Der Fensterzustand konnte nicht aktualisiert werden. Öffnen Sie Mumbler erneut, um fortzufahren.",
-  "error.refreshTools": "Der Status der Audiowerkzeuge konnte nicht aktualisiert werden. Öffnen Sie „Verwaltete Werkzeuge“ erneut, um es noch einmal zu versuchen.",
   "error.recordWindowError": "Mumbler konnte den unerwarteten Fensterfehler nicht protokollieren. Starten Sie die App neu, um fortzufahren.",
   "error.selectRecording": "Die Aufnahme konnte nicht ausgewählt werden. Die aktuelle Auswahl ist unverändert; versuchen Sie es erneut.",
   "notice.duplicated": "Aufnahme dupliziert.",

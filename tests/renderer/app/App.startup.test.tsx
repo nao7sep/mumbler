@@ -15,7 +15,8 @@ import { until } from "../../support/until";
 const hostile = new Error(
   "Error invoking remote method: EACCES /private/tmp/MUMBLER_STARTUP_SENTINEL",
 );
-const getSnapshot = vi.fn<MumblerShellApi["getSnapshot"]>();
+// What main sends as the subscription's first snapshot.
+const firstSnapshot = vi.fn<() => Promise<AppSnapshot>>();
 const reportRendererDiagnostic = vi.fn<MumblerShellApi["reportRendererDiagnostic"]>();
 let root: Root | null = null;
 
@@ -27,7 +28,7 @@ class TestResizeObserver {
 
 beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>';
-  getSnapshot.mockReset();
+  firstSnapshot.mockReset();
   reportRendererDiagnostic.mockReset();
   reportRendererDiagnostic.mockResolvedValue(undefined);
   vi.stubGlobal("ResizeObserver", TestResizeObserver);
@@ -51,7 +52,7 @@ afterEach(async () => {
 describe("App startup snapshot gate", () => {
   it("does not reopen dismissed setup when a new Mac window mounts in the same app session", async () => {
     let firstRun = true;
-    getSnapshot.mockImplementation(async () => ({
+    firstSnapshot.mockImplementation(async () => ({
       ...readySnapshot(), firstRun, dependencies: [],
       settingsSummary: summarizeSettings(createDefaultSettings(), "/fixtures/Documents/Mumbler", "/fixtures/Documents/Recordings", false),
     }));
@@ -70,7 +71,7 @@ describe("App startup snapshot gate", () => {
   });
 
   it("keeps the ordinary shell unmounted and presents authored recovery for a hostile rejection", async () => {
-    getSnapshot.mockRejectedValue(hostile);
+    firstSnapshot.mockRejectedValue(hostile);
 
     await act(async () => root?.render(createElement(App)));
     await until(() => expect(button("Retry")).toBeDefined());
@@ -91,14 +92,14 @@ describe("App startup snapshot gate", () => {
   });
 
   it("loads the real shell after a successful retry", async () => {
-    getSnapshot.mockRejectedValueOnce(hostile).mockResolvedValueOnce(readySnapshot());
+    firstSnapshot.mockRejectedValueOnce(hostile).mockResolvedValueOnce(readySnapshot());
 
     await act(async () => root?.render(createElement(App)));
     await until(() => expect(button("Retry")).toBeDefined());
     await act(async () => button("Retry")!.click());
     await until(() => expect(document.querySelector(".app-shell")).not.toBeNull());
 
-    expect(getSnapshot).toHaveBeenCalledTimes(2);
+    expect(firstSnapshot).toHaveBeenCalledTimes(2);
     expect(document.querySelector(".renderer-failure")).toBeNull();
     expect(document.body.textContent).toContain("Empty queue");
   });
@@ -106,7 +107,7 @@ describe("App startup snapshot gate", () => {
 
 describe("a startup diagnostic", () => {
   it("names a store from a newer version and offers no reset", async () => {
-    getSnapshot.mockResolvedValue({
+    firstSnapshot.mockResolvedValue({
       ...readySnapshot(),
       startupDiagnostic: {
         title: { key: "diagnostic.newerTitle" },
@@ -123,7 +124,7 @@ describe("a startup diagnostic", () => {
   });
 
   it("names a work file it could not read and offers no reset", async () => {
-    getSnapshot.mockResolvedValue({
+    firstSnapshot.mockResolvedValue({
       ...readySnapshot(),
       startupDiagnostic: {
         title: { key: "diagnostic.unreadableTitle" },
@@ -140,7 +141,7 @@ describe("a startup diagnostic", () => {
   });
 
   it("offers a reset when a damaged work file stopped launch", async () => {
-    getSnapshot.mockResolvedValue({
+    firstSnapshot.mockResolvedValue({
       ...readySnapshot(),
       startupDiagnostic: {
         title: { key: "diagnostic.corruptTitle" },
@@ -160,7 +161,7 @@ describe("a startup diagnostic", () => {
   it("says where a reset set the previous queue and recordings aside, and keeps saying it", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
-      getSnapshot.mockResolvedValue({
+      firstSnapshot.mockResolvedValue({
         ...readySnapshot(),
         startupDiagnostic: { title: { key: "diagnostic.corruptTitle" }, message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/queue.json" } }, canReset: true },
       });
@@ -183,7 +184,7 @@ describe("a startup diagnostic", () => {
   });
 
   it("shows a reset that failed part-way where the Reset button is, naming what it moved, and no success notice", async () => {
-    getSnapshot.mockResolvedValue({
+    firstSnapshot.mockResolvedValue({
       ...readySnapshot(),
       startupDiagnostic: { title: { key: "diagnostic.corruptTitle" }, message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/queue.json" } }, canReset: true },
     });
@@ -215,11 +216,11 @@ function rendererApi(): MumblerShellApi {
   return new Proxy(
     {
       getInterfaceLanguage: async () => ({ language: "en", locale: "en-US" }),
-      getSnapshot,
+      subscribeSnapshot: async (listener: (snapshot: AppSnapshot) => void) => {
+        listener(await firstSnapshot());
+        return unsubscribe;
+      },
       reportRendererDiagnostic,
-      onAppWideErrorChanged: () => unsubscribe,
-      onDependenciesUpdated: () => unsubscribe,
-      onPipelineProgressUpdated: () => unsubscribe,
       onFlushPendingEdits: () => unsubscribe,
       onUnsavedDrafts: () => unsubscribe,
     } as Partial<MumblerShellApi>,

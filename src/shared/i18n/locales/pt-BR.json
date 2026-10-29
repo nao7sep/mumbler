@@ -231,9 +231,6 @@
     "other": "{count} gravações recuperadas de uma sessão interrompida — gere novamente para continuar."
   },
   "error.layoutSave": "O layout dos painéis não foi salvo. Seu layout atual continua em uso.",
-  "error.refreshRecordings": "Não foi possível atualizar o estado das gravações. Abra o Mumbler novamente para tentar outra vez.",
-  "error.refreshWindow": "Não foi possível atualizar o estado da janela. Abra o Mumbler novamente para continuar.",
-  "error.refreshTools": "Não foi possível atualizar o status das ferramentas de áudio. Abra Ferramentas gerenciadas novamente para tentar outra vez.",
   "error.recordWindowError": "O Mumbler não conseguiu registrar o erro inesperado da janela. Reinicie o app para continuar.",
   "error.selectRecording": "Não foi possível selecionar a gravação. A seleção atual não foi alterada; tente novamente.",
   "notice.duplicated": "Gravação duplicada.",

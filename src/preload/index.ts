@@ -44,7 +44,19 @@ ipcRenderer.on(APP_SHELL_EVENTS.discardUnsavedDrafts, () => {
 const api: MumblerShellApi = {
   getInterfaceLanguage: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getInterfaceLanguage) as Promise<InterfaceLanguage>,
-  getSnapshot: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.getSnapshot) as Promise<AppSnapshot>,
+  subscribeSnapshot: async (listener: (snapshot: AppSnapshot) => void) => {
+    const wrapped = (_event: unknown, snapshot: AppSnapshot) => listener(snapshot);
+    ipcRenderer.on(APP_SHELL_EVENTS.snapshotChanged, wrapped);
+    const unsubscribe = () => { ipcRenderer.removeListener(APP_SHELL_EVENTS.snapshotChanged, wrapped); };
+    try {
+      // Main sends the current snapshot on the event channel before it replies.
+      await ipcRenderer.invoke(APP_SHELL_CHANNELS.subscribeSnapshot);
+    } catch (error: unknown) {
+      unsubscribe();
+      throw error;
+    }
+    return unsubscribe;
+  },
   dismissFirstRunSetup: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.dismissFirstRunSetup) as Promise<void>,
   getSettingsDraft: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.getSettingsDraft) as Promise<SettingsDraft>,
@@ -147,33 +159,6 @@ const api: MumblerShellApi = {
   saveRecordsListWidth: (width: number) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.saveRecordsListWidth, width) as Promise<number>,
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
-  onAppWideErrorChanged: (listener: () => void) => {
-    const wrapped = () => {
-      listener();
-    };
-    ipcRenderer.on(APP_SHELL_EVENTS.appWideErrorUpdated, wrapped);
-    return () => {
-      ipcRenderer.removeListener(APP_SHELL_EVENTS.appWideErrorUpdated, wrapped);
-    };
-  },
-  onPipelineProgressUpdated: (listener: () => void) => {
-    const wrapped = () => {
-      listener();
-    };
-    ipcRenderer.on(APP_SHELL_EVENTS.pipelineProgressUpdated, wrapped);
-    return () => {
-      ipcRenderer.removeListener(APP_SHELL_EVENTS.pipelineProgressUpdated, wrapped);
-    };
-  },
-  onDependenciesUpdated: (listener: () => void) => {
-    const wrapped = () => {
-      listener();
-    };
-    ipcRenderer.on(APP_SHELL_EVENTS.dependenciesUpdated, wrapped);
-    return () => {
-      ipcRenderer.removeListener(APP_SHELL_EVENTS.dependenciesUpdated, wrapped);
-    };
-  },
   onInterfaceLanguageChanged: (listener: () => void) => {
     const wrapped = () => {
       listener();

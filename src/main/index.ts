@@ -221,7 +221,7 @@ async function bootstrap(admission: StorageAdmission): Promise<void> {
     }
   });
 
-  registerAppShellIpc(runtime, { openRecords: () => openRecordsWindow(runtime) });
+  const publishSnapshot = registerAppShellIpc(runtime, { openRecords: () => openRecordsWindow(runtime) });
   runtime.onRecordsChanged(notifyRecordsChanged);
   // The native menu speaks the interface language, and is rebuilt when a
   // language saved in Settings changes it; the other windows are told so.
@@ -246,39 +246,18 @@ async function bootstrap(admission: StorageAdmission): Promise<void> {
   // their atomic rename. Other app stores are excluded from backup history,
   // and there is no startup backup scan.
 
-  const broadcastAppWideError = (): void => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) {
-        window.webContents.send(APP_SHELL_EVENTS.appWideErrorUpdated);
-      }
-    }
-  };
-
-  runtime.onPipelineProgress(() => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) {
-        window.webContents.send(APP_SHELL_EVENTS.pipelineProgressUpdated);
-      }
-    }
-  });
-
-  runtime.onDependenciesChanged(() => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) {
-        window.webContents.send(APP_SHELL_EVENTS.dependenciesUpdated);
-      }
-    }
-  });
+  runtime.onPipelineProgress(publishSnapshot);
+  runtime.onDependenciesChanged(publishSnapshot);
 
   process.on("uncaughtException", (error) => {
     void runtime.reportMainProcessError("uncaughtException", error).then(() => {
-      broadcastAppWideError();
+      publishSnapshot();
     });
   });
 
   process.on("unhandledRejection", (error) => {
     void runtime.reportMainProcessError("unhandledRejection", error).then(() => {
-      broadcastAppWideError();
+      publishSnapshot();
     });
   });
 
