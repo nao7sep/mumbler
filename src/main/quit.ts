@@ -4,11 +4,12 @@ import type { QuitSaveFailure, RunningWork } from "./core/app-runtime";
 import type { PlainDialog } from "./plain-dialog";
 
 // Every quit path in one place (unsaved-edits conventions, Quitting). The menu
-// Quit, Cmd+Q, the Dock's Quit and closing the main window are the user's; an OS logout, restart or shutdown is a session end. Both save the
-// same work. A user's quit whose save fails is held, and the user chooses
-// Retry, Quit anyway or Cancel; a session end never asks, and exits within the
-// budget below, under the 5 s Windows gives a session-end message before it
-// lets the user end the app.
+// Quit, Cmd+Q, the Dock's Quit and closing the main window are the user's; an
+// OS logout, restart or shutdown is a session end. Both save the same work. A
+// user's quit whose save fails, or is still running at the deadline, is held,
+// and the user chooses Retry, Quit anyway or Cancel; a session end never asks.
+// One exit deadline, fixed when the quit begins, bounds every step; an answered
+// question starts it again (architecture-conventions, Deadlines at the owner).
 
 /** Who started a quit. */
 export type QuitOrigin = "user" | "session-end";
@@ -16,7 +17,7 @@ export type QuitOrigin = "user" | "session-end";
 /** What the user chose after a failed save; "cancel" is also the dialog closed. */
 export type QuitChoice = "retry" | "quit-anyway" | "cancel";
 
-/** What prevented quit: failed stores, a stalled save, or drafts that could not be checked. */
+/** What prevented quit: failed stores, a save not finished by the deadline, or drafts that could not be checked. */
 export type QuitFailure = readonly (QuitSaveFailure | "edits")[] | "stalled" | "drafts-unavailable";
 
 export interface QuitSteps {
@@ -26,9 +27,11 @@ export interface QuitSteps {
   /** Then, when the window holds session-only drafts, asks whether to discard
    * them; resolves false when the user keeps them. */
   confirmDiscardDrafts(): Promise<boolean>;
-  /** Asks the main window to send the edits it has not sent yet. */
-  flushEdits(signal: AbortSignal): Promise<void>;
-  /** Saves the user's own work; resolves with what could not be saved. */
+  /** Asks the main window to send the edits it has not sent yet; the signal
+   * ends at the exit deadline. */
+  flushEdits(deadline: AbortSignal): Promise<void>;
+  /** Saves the user's own work; resolves with what could not be saved. A call
+   * while one runs joins it. */
   save(): Promise<QuitSaveFailure[]>;
   /** The user cancelled the quit: the app takes work again. */
   resume(): Promise<void>;
@@ -40,36 +43,17 @@ export interface QuitSteps {
   dismissQuestion(): void;
   /** Logs a quit step that failed or ran out of time. */
   warn(event: string, message: string, details: Record<string, unknown>): void;
-  /** Ends the process. */
-  exit(): void;
+  /** Ends the process: cleanly when every step settled, otherwise at once,
+   * since a clean exit waits for a worker still inside a native call. */
+  exit(settled: boolean): void;
 }
 
-/** Each step's bound, in ms. A user's quit waits at most 15 s before it asks
- * or exits; a session end at most 4 s in all. */
-export const QUIT_BUDGETS: Record<QuitOrigin, { flush: number; save: number; close: number }> = {
-  user: { flush: 1_000, save: 9_000, close: 5_000 },
-  "session-end": { flush: 500, save: 2_000, close: 1_500 },
-};
-
-/** A session end that arrives while a quit's step runs ends the process this
- * long after it arrived, whatever that step is doing. */
-export const SESSION_END_LIMIT_MS = 4_500;
+/** The one exit deadline, in ms: a user's quit, restarted by each answered
+ * question, and an OS session end from its takeover, under the 5 s Windows
+ * gives a session-end message before it lets the user end the app. */
+export const QUIT_DEADLINE_MS: Record<QuitOrigin, number> = { user: 5_000, "session-end": 4_000 };
 
 type Bounded<T> = { done: true; value: T } | { done: false };
-
-/** Waits for `work` at most `ms`; a rejection counts as not done. */
-export function within<T>(work: Promise<T>, ms: number): Promise<Bounded<T>> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<Bounded<T>>((resolve) => {
-    timer = setTimeout(() => resolve({ done: false }), ms);
-  });
-  const finished = work.then(
-    (value): Bounded<T> => ({ done: true, value }),
-    // A step that throws is logged by the caller as not done.
-    (): Bounded<T> => ({ done: false }),
-  );
-  return Promise.race([finished, expired]).finally(() => clearTimeout(timer));
-}
 
 export interface QuitController {
   /** Starts a quit, or holds one that arrives while a quit runs; a session end
@@ -82,23 +66,52 @@ export function createQuitController(steps: QuitSteps): QuitController {
   let running = false;
   let sessionEnding = false;
   let exited = false;
+  let deadline = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const exit = (): void => {
+  const exit = (settled: boolean): void => {
     if (exited) return;
     exited = true;
-    steps.exit();
+    clearTimeout(timer);
+    steps.exit(settled);
   };
 
-  const budget = () => QUIT_BUDGETS[sessionEnding ? "session-end" : "user"];
+  // A fresh deadline. At a session end's deadline the process ends whatever
+  // step runs; a user's deadline ends the step waiting on it.
+  const startDeadline = (origin: QuitOrigin): void => {
+    clearTimeout(timer);
+    deadline = new AbortController();
+    const current = deadline;
+    timer = setTimeout(() => {
+      current.abort();
+      if (origin === "session-end") {
+        steps.warn("quit.deadline", "The session ended before the quit finished; exiting.", { deadlineMs: QUIT_DEADLINE_MS[origin] });
+        exit(false);
+      }
+    }, QUIT_DEADLINE_MS[origin]);
+  };
+
+  // Waits for `work` until the current deadline; a rejection counts as not done.
+  function untilDeadline<T>(work: Promise<T>): Promise<Bounded<T>> {
+    const signal = deadline.signal;
+    return new Promise<Bounded<T>>((resolve) => {
+      const expired = (): void => resolve({ done: false });
+      if (signal.aborted) expired();
+      else signal.addEventListener("abort", expired, { once: true });
+      work.then(
+        (value) => { signal.removeEventListener("abort", expired); resolve({ done: true, value }); },
+        // A step that throws is logged by the caller as not done.
+        () => { signal.removeEventListener("abort", expired); resolve({ done: false }); },
+      );
+    });
+  }
 
   async function finish(details: Record<string, unknown>): Promise<void> {
-    const closed = await within(steps.close(details), budget().close);
+    const closed = await untilDeadline(steps.close(details));
     if (!closed.done) {
-      steps.warn("quit.close-incomplete", "The backup history or the records did not close in time.", {
-        boundMs: budget().close,
-      });
+      steps.warn("quit.close-incomplete", "The backup history or the records did not close before the deadline.", {});
     }
-    exit();
+    exit(closed.done);
   }
 
   // A question a user's quit asks before it ends anything; false cancels the
@@ -126,22 +139,17 @@ export function createQuitController(steps: QuitSteps): QuitController {
       running = false;
       return;
     }
+    if (!sessionEnding) startDeadline("user");
     for (;;) {
-      const flush = new AbortController();
-      const flushed = await within(Promise.resolve().then(() => steps.flushEdits(flush.signal)), budget().flush);
-      flush.abort();
+      const flushed = await untilDeadline(Promise.resolve().then(() => steps.flushEdits(deadline.signal)));
       if (!flushed.done) {
-        steps.warn("quit.flush-incomplete", "The window did not send its unsent edits in time.", {
-          boundMs: budget().flush,
-        });
+        steps.warn("quit.flush-incomplete", "The window did not send its unsent edits.", {});
       }
-      const saved = await within(steps.save(), budget().save);
+      const saved = await untilDeadline(steps.save());
       const unsaved = saved.done ? [...saved.value, ...(!flushed.done ? ["edits" as const] : [])] : [];
       const failure: QuitFailure | null = !saved.done ? "stalled" : unsaved.length > 0 ? unsaved : null;
       if (failure === "stalled") {
-        steps.warn("quit.save-incomplete", "Saving before quitting did not finish in time.", {
-          boundMs: budget().save,
-        });
+        steps.warn("quit.save-incomplete", "Saving before quitting did not finish before the deadline.", {});
       }
       if (failure === null) {
         return finish({ origin: sessionEnding ? "session-end" : "user" });
@@ -158,12 +166,18 @@ export function createQuitController(steps: QuitSteps): QuitController {
         });
         choice = "cancel";
       }
-      // A session end closed the question: save once more within its budget.
-      if (sessionEnding || choice === "retry") continue;
+      // A session end closed the question: save once more within its deadline.
+      if (sessionEnding) continue;
+      if (choice === "retry") {
+        startDeadline("user");
+        continue;
+      }
       if (choice === "quit-anyway") {
         steps.warn("quit.forced", "Quit anyway, without what could not be saved.", { unsaved: failure });
+        startDeadline("user");
         return finish({ origin: "user", unsaved: failure, forced: true });
       }
+      clearTimeout(timer);
       running = false;
       await steps.resume().catch((error: unknown) => {
         steps.warn("quit.resume-failed", "Queued recordings could not be started again after a cancelled quit.", {
@@ -180,15 +194,8 @@ export function createQuitController(steps: QuitSteps): QuitController {
       if (exited) return;
       if (origin === "session-end" && !sessionEnding) {
         sessionEnding = true;
-        if (running) {
-          steps.dismissQuestion();
-          setTimeout(() => {
-            steps.warn("quit.session-end-limit", "The session ended before the quit finished; exiting.", {
-              limitMs: SESSION_END_LIMIT_MS,
-            });
-            exit();
-          }, SESSION_END_LIMIT_MS);
-        }
+        startDeadline("session-end");
+        if (running) steps.dismissQuestion();
       }
       if (running) return;
       running = true;
@@ -196,8 +203,9 @@ export function createQuitController(steps: QuitSteps): QuitController {
         steps.warn("quit.failed", "The quit failed.", {
           error: error instanceof Error ? error.message : String(error),
         });
-        if (sessionEnding) exit();
+        if (sessionEnding) exit(false);
         else {
+          clearTimeout(timer);
           running = false;
           void steps.resume().catch((resumeError: unknown) => steps.warn("quit.resume-failed", "Could not resume after the failed quit.", { error: String(resumeError) }));
         }

@@ -13,7 +13,7 @@ import { showStartupFailureDialog } from "./startup-failure-dialog";
 import { loadInterfaceCatalogue, mainTranslator } from "./i18n";
 import { installApplicationMenu } from "./app-menu";
 import { notifyRecordsChanged, openRecordsWindow } from "./records-window";
-import { createQuitController, discardDraftsDialog, QUIT_BUDGETS, quitFailureDialog, stopWorkDialog, type QuitController } from "./quit";
+import { createQuitController, discardDraftsDialog, quitFailureDialog, stopWorkDialog } from "./quit";
 import { showPlainDialog, type OpenPlainDialog } from "./plain-dialog";
 import { discardWindowDrafts, flushWindowEdits, queryWindowDrafts } from "./pending-edits";
 
@@ -37,13 +37,17 @@ const AUDIO_MIME_TYPES: Record<string, string> = {
   ".opus": "audio/ogg",
 };
 
-// Set once bootstrap finishes so the quit paths can reach the runtime.
+// Set once the runtime exists, so the quit paths can reach it.
 let runtimeForShutdown: ApplicationRuntime | null = null;
-// Every quit path goes through it once the runtime exists.
-let quitController: QuitController | null = null;
+// Settles when startup has finished or failed; a quit's save waits for it.
+let startupSettled: Promise<void> = Promise.resolve();
 // The main window, apart from the records window beside it: closing it quits
 // on every platform (window-conventions), and the other windows go with it.
 let mainWindow: BrowserWindow | null = null;
+
+// How long the window has to report its session-only drafts. The renderer
+// times out its own interaction; a window that does not answer is asked about.
+const DRAFTS_ANSWER_MS = 1_000;
 
 type DraftQuitChoice = "discard" | "cancel" | "retry" | "quit-anyway";
 
@@ -51,12 +55,13 @@ type DraftQuitChoice = "discard" | "cancel" | "retry" | "quit-anyway";
 // takeover cancels the query or question and continues through the bounded
 // session-end path.
 async function confirmDiscardDrafts(
-  runtime: ApplicationRuntime,
+  runtime: ApplicationRuntime | null,
   window: BrowserWindow | null,
   shown: (question: OpenPlainDialog<DraftQuitChoice> | null) => void,
   cancelled: AbortSignal,
 ): Promise<boolean> {
-  const timeout = AbortSignal.any([AbortSignal.timeout(QUIT_BUDGETS.user.flush), cancelled]);
+  if (runtime === null) return true;
+  const timeout = AbortSignal.any([AbortSignal.timeout(DRAFTS_ANSWER_MS), cancelled]);
   const result = await queryWindowDrafts(window, timeout);
   if (cancelled.aborted) return false;
   if (result.kind === "available" && result.drafts.length === 0) return true;
@@ -75,16 +80,20 @@ async function confirmDiscardDrafts(
   return true;
 }
 
-function createQuit(runtime: ApplicationRuntime): QuitController {
+// The quit owner exists before startup, so a quit at any moment goes through
+// it; before the runtime exists there is nothing to ask about or save.
+const quitController = (() => {
   let question: OpenPlainDialog<"retry" | "quit-anyway" | "cancel"> | null = null;
   let draftsQuestion: OpenPlainDialog<DraftQuitChoice> | null = null;
   let workQuestion: OpenPlainDialog<"quit" | "cancel"> | null = null;
   let draftsQuery = new AbortController();
+  const runtime = (): ApplicationRuntime | null => runtimeForShutdown;
   return createQuitController({
     // Running work the app owns is asked about before quit stops it
     // (unsaved-edits-conventions, Closing and quitting).
     confirmStopWork: async () => {
-      const dialog = stopWorkDialog(runtime.translator(), runtime.runningWork());
+      const current = runtime();
+      const dialog = current === null ? null : stopWorkDialog(current.translator(), current.runningWork());
       if (dialog === null) return true;
       workQuestion = showPlainDialog(dialog);
       try {
@@ -95,14 +104,18 @@ function createQuit(runtime: ApplicationRuntime): QuitController {
     },
     confirmDiscardDrafts: () => {
       draftsQuery = new AbortController();
-      return confirmDiscardDrafts(runtime, mainWindow, (shown) => { draftsQuestion = shown; }, draftsQuery.signal);
+      return confirmDiscardDrafts(runtime(), mainWindow, (shown) => { draftsQuestion = shown; }, draftsQuery.signal);
     },
     flushEdits: (signal) => flushWindowEdits(mainWindow, signal),
-    save: () => runtime.saveForQuit(),
-    resume: () => runtime.resumeAfterCancelledQuit(),
-    close: (details) => runtime.closeForQuit(details),
+    // Startup may still be writing its stores; the save follows it.
+    save: async () => {
+      await startupSettled;
+      return runtime()?.saveForQuit() ?? [];
+    },
+    resume: async () => { await runtime()?.resumeAfterCancelledQuit(); },
+    close: async (details) => { await runtime()?.closeForQuit(details); },
     ask: async (failure) => {
-      question = showPlainDialog(quitFailureDialog(runtime.translator(), failure));
+      question = showPlainDialog(quitFailureDialog(runtime()?.translator() ?? mainTranslator("system"), failure));
       try {
         return await question.choice;
       } finally {
@@ -117,11 +130,17 @@ function createQuit(runtime: ApplicationRuntime): QuitController {
     },
     warn: (event, message, details) => {
       console.error(`[mumbler] ${message}`, details);
-      void runtime.currentLogger().warn(event, message, details);
+      void runtime()?.currentLogger().warn(event, message, details);
     },
-    exit: () => app.exit(0),
+    // A clean exit waits for a worker blocked inside SQLite (measured:
+    // Electron's app.exit joins it), so an exit at the deadline kills the
+    // process instead; nothing is claimed as saved by it.
+    exit: (settled) => {
+      if (settled) app.exit(0);
+      else process.kill(process.pid, "SIGKILL");
+    },
   });
-}
+})();
 
 async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
   const window = await createMainWindow(runtime);
@@ -129,7 +148,6 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
   // Closing the main window quits on every platform, through the same quit
   // flow and questions as every other quit, which a question can cancel.
   window.on("close", (event) => {
-    if (quitController === null) return;
     event.preventDefault();
     quitController.request("user");
   });
@@ -137,13 +155,13 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
   // saving without vetoing or extending the OS session end; Windows may end
   // the process before the app's own bounded attempt finishes.
   window.on("query-session-end", () => {
-    quitController?.request("session-end");
+    quitController.request("session-end");
   });
   // A session end Windows did not ask about first (a forced or critical one)
   // ends the process soon after this returns; the same save starts, as far as
   // it gets.
   window.on("session-end", () => {
-    quitController?.request("session-end");
+    quitController.request("session-end");
   });
   window.once("closed", () => {
     if (mainWindow === window) mainWindow = null;
@@ -153,13 +171,15 @@ async function openMainWindow(runtime: ApplicationRuntime): Promise<void> {
 async function bootstrap(admission: StorageAdmission): Promise<void> {
   const runtime = await ApplicationRuntime.initialize(admission);
   runtimeForShutdown = runtime;
-  quitController = createQuit(runtime);
+  // Once a quit has begun, startup goes no further: it opens no window and
+  // shows nothing, and the quit exits through its own deadline.
+  if (quitController.isRunning()) return;
   // A logout, restart or shutdown on macOS (and Linux) starts the session-end
   // quit at once: it closes any open question, saves within its bound and
   // exits. The OS's own quit that follows joins it. Nothing is remembered for a
   // later quit, so one after another app cancelled the logout asks as usual.
   powerMonitor.on("shutdown", () => {
-    quitController?.request("session-end");
+    quitController.request("session-end");
   });
 
   protocol.handle("mumbler-asset", async (request) => {
@@ -219,6 +239,7 @@ async function bootstrap(admission: StorageAdmission): Promise<void> {
   // already match the saved choice.
   applyThemePreference(runtime.themePreference());
   followOsThemeChanges();
+  if (quitController.isRunning()) return;
   await openMainWindow(runtime);
 
   // Settings saves enqueue asynchronous, best-effort history recording after
@@ -267,6 +288,11 @@ let handlingBootstrapFailure = false;
 async function handleBootstrapFailure(error: unknown): Promise<void> {
   if (handlingBootstrapFailure) return;
   handlingBootstrapFailure = true;
+  // A quit under way ends the process; startup shows nothing more.
+  if (quitController.isRunning()) {
+    console.error("[mumbler] Bootstrap failed during quit:", error instanceof Error ? error.stack : String(error));
+    return;
+  }
   console.error("[mumbler] Bootstrap failed:", error instanceof Error ? error.stack : String(error));
   try {
     await runtimeForShutdown?.currentLogger().error(
@@ -314,9 +340,9 @@ if (!app.requestSingleInstanceLock()) {
   try {
     const admission = await admitStorageRoot(getAppPaths());
     await prepareFrameworkStorage(admission, app);
-    app.whenReady().then(() => bootstrap(admission)).catch(handleBootstrapFailure);
+    startupSettled = app.whenReady().then(() => bootstrap(admission)).catch(handleBootstrapFailure);
   } catch (error) {
-    app.whenReady().then(() => handleBootstrapFailure(error));
+    startupSettled = app.whenReady().then(() => handleBootstrapFailure(error));
   }
 
   // Only an exit closes the main window, so this is the same end on every platform.
@@ -326,14 +352,10 @@ if (!app.requestSingleInstanceLock()) {
 
   // The menu's Quit, Cmd+Q, the Dock's Quit and, on macOS, a logout, restart
   // or shutdown all arrive here. Every quit is held and goes through the quit
-  // controller, whose app.exit(0) alone ends the process; one arriving while a
-  // quit runs is held too (PLAYBOOK, Own the work in flight).
+  // controller, whose exit alone ends the process; one arriving while a quit
+  // runs is held too.
   app.on("before-quit", (event) => {
     event.preventDefault();
-    if (quitController === null) {
-      app.exit(0);
-      return;
-    }
     quitController.request("user");
   });
 }

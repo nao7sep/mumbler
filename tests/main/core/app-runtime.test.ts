@@ -976,51 +976,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("a cancelled quit keeps old producers owned and a new quit drains newly admitted work", async () => {
-    await withCard(async (runtime, card, queuePath) => {
-      const firstHeld = gate();
-      const secondHeld = gate();
-      const firstEntered = gate();
-      const secondEntered = gate();
-      const copy = workingFiles.copyIntoWorking;
-      vi.spyOn(workingFiles, "copyIntoWorking")
-        .mockImplementationOnce(async (...args) => { firstEntered.release(); await firstHeld.promise; return copy(...args); })
-        .mockImplementationOnce(async (...args) => { secondEntered.release(); await secondHeld.promise; return copy(...args); });
-      const writes = vi.spyOn(TranscriptStore.prototype, "writeChanged");
-      const first = runtime.duplicateCard(card.id);
-      let second: Promise<unknown> | undefined;
-      let firstQuit: Promise<unknown> | undefined;
-      let secondQuit: Promise<unknown> | undefined;
-      try {
-        await firstEntered.promise;
-        firstQuit = runtime.saveForQuit();
-        await runtime.resumeAfterCancelledQuit();
-        second = runtime.duplicateCard(card.id);
-        await secondEntered.promise;
-        secondQuit = runtime.saveForQuit();
-        expect(secondQuit).not.toBe(firstQuit);
-        let settled = false;
-        void secondQuit.then(() => { settled = true; });
-        firstHeld.release();
-        await first;
-        expect(await firstQuit).toEqual([]);
-        expect(settled).toBe(false);
-        expect(runtime.saveForQuit()).toBe(secondQuit);
-        secondHeld.release();
-        await second;
-        expect(await secondQuit).toEqual([]);
-        expect((await createQueueStore(queuePath).load()).value.cards).toHaveLength(3);
-        // Two producer packets and only the current quit's final packet.
-        expect(writes).toHaveBeenCalledTimes(3);
-      } finally {
-        firstHeld.release();
-        secondHeld.release();
-        await Promise.allSettled([first, ...(second ? [second] : []), ...(firstQuit ? [firstQuit] : []), ...(secondQuit ? [secondQuit] : [])]);
-      }
-    });
-  });
-
-  it.each([false, true])("quit owns an admitted key lookup and prevents late processing even after resume=%s", async (resumed) => {
+  it("quit owns an admitted key lookup and prevents late processing", async () => {
     await withCard(async (runtime, card) => {
       const held = gate();
       const entered = gate();
@@ -1041,7 +997,6 @@ describe("ApplicationRuntime confirmed import commit", () => {
         void quit.then(() => { settled = true; });
         await Promise.resolve();
         expect(settled).toBe(false);
-        if (resumed) await runtime.resumeAfterCancelledQuit();
         held.release();
         expect(await outcome).toMatchObject({ message: expect.stringContaining("closing") });
         expect(await quit).toEqual([]);

@@ -136,9 +136,6 @@ function rendererReportError(report: RendererErrorReport): Error {
   return build(report);
 }
 
-// How long a user's quit waits for queued backup-history writes.
-const BACKUP_QUIT_DRAIN_MS = 1_000;
-
 /** Stable presentation for a failed user-commanded reset, naming what it had
  * already set aside in `folder`; the error itself is only logged. */
 export function resetFailureDiagnostic(movedAside: readonly string[], folder: string): StartupFailure {
@@ -248,11 +245,6 @@ export class ApplicationRuntime {
   // Set while a quit saves and closes; a cancelled quit clears it again.
   private closing = false;
   private quitSave: Promise<QuitSaveFailure[]> | null = null;
-  private quitAttempt = 0;
-  // The settings write that had failed before this quit began, if any: that
-  // failure was reported where the change was made, so only a later one is the
-  // quit's to retry. Undefined while no quit is under way.
-  private settingsFailureBeforeQuit: object | null | undefined = undefined;
   private closePromise: Promise<void> | null = null;
   // Whether queue.json may be behind the queue the app holds: set when a
   // persist fails, cleared when one lands.
@@ -1455,7 +1447,6 @@ export class ApplicationRuntime {
   }
 
   private async generateCardFromStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
-    const quitAttempt = this.quitAttempt;
     this.ensureReady();
     this.requireCard(cardId, "Card to generate does not exist.");
 
@@ -1466,9 +1457,6 @@ export class ApplicationRuntime {
     }
 
     this.ensureAcceptingWork();
-    if (quitAttempt !== this.quitAttempt) {
-      throw new OperationError("Processing was stopped while Mumbler was closing.");
-    }
     const card = this.requireIdleCard(cardId, {
       missing: "Card to generate does not exist.",
       busy: "This card is already being processed.",
@@ -1809,23 +1797,15 @@ export class ApplicationRuntime {
   // rolls back and leaves its card Ready to Save; a cancelled run leaves its
   // card Cancelled), drains the store write-queues, then writes the user's own
   // work that is not on disk: the queue and the transcripts from what the app
-  // holds, and a settings write that failed during the quit. Returns what could
-  // not be saved; a call while one runs shares it.
+  // holds, and any settings write that failed, during the quit or before it.
+  // Returns what could not be saved; a call while one runs joins it.
   saveForQuit(): Promise<QuitSaveFailure[]> {
-    if (this.quitSave !== null) return this.quitSave;
-    const attempt = ++this.quitAttempt;
-    const save = this.runQuitSave(attempt).finally(() => {
-      if (this.quitSave === save) this.quitSave = null;
-    });
-    this.quitSave = save;
-    return save;
+    this.quitSave ??= this.runQuitSave().finally(() => { this.quitSave = null; });
+    return this.quitSave;
   }
 
-  private async runQuitSave(attemptId: number): Promise<QuitSaveFailure[]> {
+  private async runQuitSave(): Promise<QuitSaveFailure[]> {
     const { queueStore, transcriptStore, settingsStore, logger } = this.runtime;
-    if (this.settingsFailureBeforeQuit === undefined) {
-      this.settingsFailureBeforeQuit = settingsStore?.failedWrite ?? null;
-    }
     this.closing = true;
     for (const controller of this.activeSaves.keys()) {
       controller.abort();
@@ -1837,12 +1817,10 @@ export class ApplicationRuntime {
       this.importCommitTail,
       Promise.allSettled([...this.activeStateChanges]),
     ]);
-    if (attemptId !== this.quitAttempt) return [];
     await this.persistenceTail;
     await queueStore?.flush();
     await transcriptStore?.flush();
     await settingsStore?.flush();
-    if (attemptId !== this.quitAttempt) return [];
 
     const failures: QuitSaveFailure[] = [];
     const attempt = async (store: QuitSaveFailure, write: () => Promise<unknown>): Promise<boolean> => {
@@ -1855,10 +1833,11 @@ export class ApplicationRuntime {
         return false;
       }
     };
+    // A settings change that could not be saved, at the time or during this
+    // quit, is tried again; one that still fails is asked about.
     const retrySettings = async (): Promise<void> => {
-      if (attemptId !== this.quitAttempt) return;
       const settingsFailure = settingsStore?.failedWrite ?? null;
-      if (settingsStore && settingsFailure !== null && settingsFailure !== this.settingsFailureBeforeQuit) {
+      if (settingsStore && settingsFailure !== null) {
         await attempt("settings", async () => {
           const commit = await this.retryFailedSettings(settingsFailure);
           if (commit !== null) this.followSettingsCommit(commit);
@@ -1871,7 +1850,6 @@ export class ApplicationRuntime {
       const request = ++this.persistenceRequest;
       const saveQueue = this.queueBehind;
       await this.enqueuePersistence(async () => {
-        if (attemptId !== this.quitAttempt) return;
         const transcriptsSaved = await attempt("transcripts", () => transcriptStore.writeChanged(snapshot.cards));
         if (transcriptsSaved && saveQueue) {
           await attempt("queue", () => queueStore.save(snapshot));
@@ -1879,7 +1857,7 @@ export class ApplicationRuntime {
         const packetSaved = failures.length === 0;
         this.queueBehind = !packetSaved || request !== this.persistenceRequest;
         await retrySettings();
-        if (packetSaved && attemptId === this.quitAttempt) {
+        if (packetSaved) {
           // Cleanup of removed cards' files, not the user's work: logged only.
           await transcriptStore.removeAbsent(snapshot.cards).catch((error: unknown) => {
             void logger.warn("quit.transcript-cleanup-failed", "Could not delete a removed card's text file.", {
@@ -1889,7 +1867,6 @@ export class ApplicationRuntime {
         }
       });
     } else await retrySettings();
-    if (attemptId !== this.quitAttempt) return failures;
     await this.runtime.layoutStore?.flush();
     return failures;
   }
@@ -1897,20 +1874,15 @@ export class ApplicationRuntime {
   // The user cancelled the quit: the app takes work again. Runs a quit stopped
   // stay Cancelled, for the user to start again.
   async resumeAfterCancelledQuit(): Promise<void> {
-    // Already admitted producers and physical writes remain owned, but a later
-    // quit gets its own drain and a cancelled pass cannot publish a final snapshot.
-    this.quitAttempt += 1;
-    this.quitSave = null;
     this.closing = false;
-    this.settingsFailureBeforeQuit = undefined;
     await this.pipeline.resume();
     void this.runtime.logger.info("quit.cancelled", "Quit cancelled; Mumbler keeps running.").catch(() => undefined);
   }
 
   // The quit's last step, after its save: closes the backup history and the
   // records, which log their own failures. Called once; later calls share it.
-  // The history is best effort and never holds up an exit: a user's quit gives
-  // its pending writes a short bound alongside the records close, and an OS
+  // The history is best effort and never holds up an exit: a user's quit lets
+  // its pending writes draw on what remains of the exit deadline, and an OS
   // session end skips them (data-backup-conventions).
   closeForQuit(details: Record<string, unknown> = {}): Promise<void> {
     this.closePromise ??= (async () => {
@@ -1918,7 +1890,7 @@ export class ApplicationRuntime {
       const waveforms = this.waveformCache?.close() ?? Promise.resolve();
       let backups: Promise<void> = Promise.resolve();
       if (details.origin === "session-end") abandonBackupStore();
-      else backups = closeBackupStore(BACKUP_QUIT_DRAIN_MS);
+      else backups = closeBackupStore();
       void this.runtime.logger.info("app.shutdown", "Shutdown complete.", {
         ...details,
         cardCount: this.runtime.state?.cards.length ?? 0,

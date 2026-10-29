@@ -26,6 +26,9 @@ const state = vi.hoisted(() => ({
   powerListeners: new Map<string, () => void>(),
   runningWork: { recordings: 0, tools: 0 },
   workChoice: "cancel" as "quit" | "cancel",
+  // Set to hold runtime initialization until the test releases it.
+  initializeGate: null as Promise<void> | null,
+  windowsCreated: 0,
 }));
 
 // The main window as main sees it: its handlers by event, and the edits request
@@ -106,7 +109,12 @@ const runtime = vi.hoisted(() => ({
 
 vi.mock("@main/core/app-runtime", () => ({
   ApplicationRuntime: {
-    initialize: () => { state.startupOrder.push("runtime"); return state.initializeFailure ? Promise.reject(state.initializeFailure) : Promise.resolve(runtime); },
+    initialize: async () => {
+      state.startupOrder.push("runtime");
+      await state.initializeGate;
+      if (state.initializeFailure) throw state.initializeFailure;
+      return runtime;
+    },
   },
 }));
 vi.mock("@main/core/app-paths", () => ({ getAppPaths: () => ({ homeDir: "/unused" }) }));
@@ -124,7 +132,10 @@ const recordsWindow = vi.hoisted(() => ({ openRecordsWindow: vi.fn(), notifyReco
 vi.mock("@main/records-window", () => recordsWindow);
 vi.mock("@main/core/theme", () => ({ applyThemePreference: vi.fn(), followOsThemeChanges: vi.fn() }));
 vi.mock("@main/window", () => ({
-  createMainWindow: () => state.windowLoadFailure ? Promise.reject(state.windowLoadFailure) : Promise.resolve(mainWindow),
+  createMainWindow: () => {
+    state.windowsCreated += 1;
+    return state.windowLoadFailure ? Promise.reject(state.windowLoadFailure) : Promise.resolve(mainWindow);
+  },
 }));
 vi.mock("@main/plain-dialog", () => ({
   showPlainDialog: (dialog: { actions: { choice: string }[] }) => {
@@ -173,6 +184,8 @@ beforeEach(() => {
   state.powerListeners.clear();
   state.runningWork = { recordings: 0, tools: 0 };
   state.workChoice = "cancel";
+  state.initializeGate = null;
+  state.windowsCreated = 0;
   mainWindow.handlers.clear();
   mainWindow.flushRequests = 0;
   mainWindow.discards = 0;
@@ -214,6 +227,35 @@ describe("main startup recovery", () => {
     expect(state.loggerErrors[0]?.[2]).toBe(hostile);
     expect(state.relaunches).toBe(1);
     expect(state.exits).toEqual([1]);
+  });
+
+  it("opens no window and shows nothing when a quit arrives during startup, and exits through the quit", async () => {
+    let finish!: () => void;
+    state.initializeGate = new Promise<void>((resolve) => { finish = resolve; });
+    await import("@main/index");
+    await vi.waitFor(() => expect(state.startupOrder).toContain("runtime"));
+    const { app } = await import("electron");
+    const calls = vi.mocked(app.on).mock.calls as unknown as [string, (event: { preventDefault: () => void }) => void][];
+    calls.filter(([event]) => event === "before-quit").at(-1)![1]({ preventDefault: vi.fn() });
+    finish();
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    expect(state.windowsCreated).toBe(0);
+    expect(state.questions).toEqual([]);
+    expect(runtime.saveForQuit).toHaveBeenCalledOnce();
+  });
+
+  it("shows no startup failure once a quit has begun", async () => {
+    let finish!: () => void;
+    state.initializeGate = new Promise<void>((resolve) => { finish = resolve; });
+    state.initializeFailure = new Error("startup failed");
+    await import("@main/index");
+    await vi.waitFor(() => expect(state.startupOrder).toContain("runtime"));
+    const { app } = await import("electron");
+    const calls = vi.mocked(app.on).mock.calls as unknown as [string, (event: { preventDefault: () => void }) => void][];
+    calls.filter(([event]) => event === "before-quit").at(-1)![1]({ preventDefault: vi.fn() });
+    finish();
+    await vi.waitFor(() => expect(state.exits).toEqual([0]));
+    expect(state.dialogCalls).toBe(0);
   });
 
   it("still exits when the terminal recovery surface itself cannot be created", async () => {

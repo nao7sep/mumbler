@@ -71,7 +71,6 @@ export interface LoggerPaths {
   logsDir: string;
 }
 
-const CLOSE_TIMEOUT_MS = 5_000;
 const RECORD_TIMEOUT_MS = 5_000;
 
 // Captures the full exception — type, message, stack — and follows the whole
@@ -354,8 +353,8 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
       failReads();
       await Promise.all([termination, fallbackTail]);
     })();
-    closing = boundedWrite(work, CLOSE_TIMEOUT_MS, () =>
-      failWorker(new Error("Records close timed out; unconfirmed entries may still be written.")));
+    // No bound of its own: the close draws on the exit deadline.
+    closing = work.catch(reportRecordsFailure);
     return closing;
   };
 

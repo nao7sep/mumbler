@@ -13,10 +13,6 @@ let warn: BackupWarn = (message, details) => {
   console.warn(message, details);
 };
 
-// Closing is bounded on its own (PLAYBOOK, Bound every external wait); a quit
-// passes its own, shorter bound.
-const CLOSE_TIMEOUT_MS = 5_000;
-
 // This launch's session: each path keeps one row per session. The runtime sets
 // it to the records' session so the two can be read side by side.
 let session = new Date().toISOString();
@@ -59,9 +55,8 @@ export function record(absolutePath: string, bytes: Buffer): void {
 
 // Drain every queued record and close its SQLite handle. The close message sits
 // behind prior record messages in the same FIFO worker channel. Tests use this
-// to inspect the store; a user's quit uses it with a short bound. A worker that
-// does not answer in time is terminated, and its queued records are not written.
-export async function closeBackupStore(timeoutMs = CLOSE_TIMEOUT_MS): Promise<void> {
+// to inspect the store; a user's quit waits for it within the exit deadline.
+export async function closeBackupStore(): Promise<void> {
   if (abandoned) {
     resetSession();
     return;
@@ -74,20 +69,7 @@ export async function closeBackupStore(timeoutMs = CLOSE_TIMEOUT_MS): Promise<vo
   }
 
   closing = new Promise<void>((resolve) => {
-    let settled = false;
-    const settle = (): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      warn("backup store: close timed out; records still queued were not written", {
-        file: storeFile(),
-        timeoutMs,
-      });
-      settle();
-    }, timeoutMs);
+    const settle = (): void => resolve();
     current.once("error", settle);
     current.once("exit", settle);
     current.on("message", (message: WorkerResponse) => {

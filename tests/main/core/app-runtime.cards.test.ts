@@ -2086,7 +2086,7 @@ describe("closing at quit", () => {
       await expect(runtime.readRecordsPage(query)).resolves.toBeDefined();
       const closing = runtime.closeForQuit({ origin: "user" });
       await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(close).toHaveBeenCalledWith(1_000);
+      expect(close).toHaveBeenCalledOnce();
       // The records are already closing while the backup history still drains.
       await expect(runtime.readRecordsPage(query)).rejects.toThrow("could not be read");
       release();
@@ -2824,15 +2824,17 @@ describe("the save a quit makes", () => {
     }
   });
 
-  it("leaves a settings change that failed before the quit to where it was reported", async () => {
+  it("retries a settings change that failed before the quit, and reports it when it fails again", async () => {
     const configPath = join(home, "config.json");
     unwritable.refuses = (path) => path === configPath;
     await expect(runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" })).rejects.toThrow();
+
+    expect(await runtime.saveForQuit()).toEqual(["settings"]);
+    expect(await savedSettings(), "still refused").toEqual(FIRST_LAUNCH);
+
     unwritable.refuses = () => false;
-
     expect(await runtime.saveForQuit()).toEqual([]);
-
-    expect(await savedSettings(), "the refused change stays unsaved").toEqual(FIRST_LAUNCH);
+    expect(await savedSettings()).toMatchObject({ defaultTimezone: "Europe/Berlin" });
   });
 
   it("takes work again after a cancelled quit", async () => {

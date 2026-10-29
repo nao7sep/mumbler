@@ -37,7 +37,7 @@ function harness(overrides: Partial<QuitSteps> = {}): Harness {
     },
     dismissQuestion: () => { calls.push("dismiss"); answer("cancel"); },
     warn: (event) => { calls.push(`warn:${event}`); },
-    exit: () => { exits += 1; calls.push("exit"); },
+    exit: (settled) => { exits += 1; calls.push(settled ? "exit" : "kill"); },
     ...overrides,
   };
   return { steps, calls, asked, exits: () => exits, answer: (choice) => answer(choice) };
@@ -161,20 +161,41 @@ describe("a quit the user started", () => {
     expect(quit.calls.slice(4)).toEqual(["flush", "save", "close", "exit"]);
   });
 
-  it("treats a save that does not finish within 9 s as failed, after at most 1 s for the window", async () => {
-    const quit = harness({ flushEdits: never, save: never });
+  it("asks about a save still running at the 5 s deadline, and Retry waits for it under a fresh one", async () => {
+    let finishSave!: (failures: QuitSaveFailure[]) => void;
+    const running = new Promise<QuitSaveFailure[]>((resolve) => { finishSave = resolve; });
+    const quit = harness({ save: () => { quit.calls.push("save"); return running; } });
     createQuitController(quit.steps).request("user");
 
-    await vi.advanceTimersByTimeAsync(9_999);
+    await vi.advanceTimersByTimeAsync(4_999);
     expect(quit.asked).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
-
     expect(quit.asked).toEqual(["stalled"]);
-    expect(quit.calls).toContain("warn:quit.flush-incomplete");
     expect(quit.calls).toContain("warn:quit.save-incomplete");
+
+    quit.answer("retry");
+    await vi.advanceTimersByTimeAsync(4_000);
+    finishSave([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quit.calls.slice(-2)).toEqual(["close", "exit"]);
   });
 
-  it("exits 5 s into a close that does not finish", async () => {
+  it("starts the deadline only once the questions are answered", async () => {
+    let proceed!: (value: boolean) => void;
+    const quit = harness({
+      confirmStopWork: () => new Promise<boolean>((resolve) => { proceed = resolve; }),
+      save: never,
+    });
+    createQuitController(quit.steps).request("user");
+    await vi.advanceTimersByTimeAsync(60_000);
+    proceed(true);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(quit.asked).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(quit.asked).toEqual(["stalled"]);
+  });
+
+  it("kills the process when the close has not finished by the deadline", async () => {
     const quit = harness({ close: never });
     createQuitController(quit.steps).request("user");
 
@@ -182,8 +203,7 @@ describe("a quit the user started", () => {
     expect(quit.exits()).toBe(0);
     await vi.advanceTimersByTimeAsync(1);
 
-    expect(quit.exits()).toBe(1);
-    expect(quit.calls).toContain("warn:quit.close-incomplete");
+    expect(quit.calls.slice(-2)).toEqual(["warn:quit.close-incomplete", "kill"]);
   });
 });
 
@@ -264,7 +284,7 @@ describe("a session end", () => {
     expect(quit.asked).toEqual([]);
   });
 
-  it("exits within 4 s when no step finishes, under the 5 s Windows allows", async () => {
+  it("kills the process 4 s after it began when no step finishes, under the 5 s Windows allows", async () => {
     const quit = harness({ flushEdits: never, save: never, close: never });
     createQuitController(quit.steps).request("session-end");
 
@@ -272,7 +292,7 @@ describe("a session end", () => {
     expect(quit.exits()).toBe(0);
     await vi.advanceTimersByTimeAsync(1);
 
-    expect(quit.exits()).toBe(1);
+    expect(quit.calls.filter((call) => call === "kill" || call === "exit")).toEqual(["kill"]);
     expect(quit.asked).toEqual([]);
   });
 
@@ -291,18 +311,19 @@ describe("a session end", () => {
     expect(quit.asked, "asked only before the session end").toHaveLength(1);
   });
 
-  it("ends a user's quit stuck in its 9 s save 4.5 s after the session end arrives", async () => {
+  it("ends a user's quit stuck in its save 4 s after the session end arrives", async () => {
     const quit = harness({ save: never, close: never });
     const controller = createQuitController(quit.steps);
     controller.request("user");
     await vi.advanceTimersByTimeAsync(1_000);
 
     controller.request("session-end");
-    await vi.advanceTimersByTimeAsync(4_499);
+    controller.request("session-end");
+    await vi.advanceTimersByTimeAsync(3_999);
     expect(quit.exits()).toBe(0);
     await vi.advanceTimersByTimeAsync(1);
 
-    expect(quit.exits()).toBe(1);
+    expect(quit.calls.filter((call) => call === "kill" || call === "exit")).toEqual(["kill"]);
     expect(quit.asked).toEqual([]);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(quit.exits(), "the process ends once").toBe(1);

@@ -163,39 +163,4 @@ describe("optional records lifetime", () => {
     expect(await read).toMatchObject({ message: "The records database could not be read." });
     expect(vi.mocked(process.stderr.write).mock.calls.some(([text]) => String(text).includes("termination refused"))).toBe(true);
   });
-
-  it("bounds close after worker failure while termination and fallback remain held", async () => {
-    fallback.held.set("held", hold().wait);
-    const logger = open();
-    const write = logger.info("test", "held");
-    const termination = hold();
-    workers[0]!.termination = termination.wait.then(() => 0);
-    workers[0]!.emit("error", new Error("worker failed"));
-    let closed = false;
-    const close = logger.close().then(() => { closed = true; });
-    await vi.advanceTimersByTimeAsync(4_999);
-    expect(closed).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    await Promise.all([write, close]);
-    expect(fallback.completed).toEqual([]);
-    expect(logger.close()).toBe(logger.close());
-  });
-
-  it("includes a held termination after a successful closed reply in the one close budget", async () => {
-    const logger = open();
-    const write = logger.info("test", "confirmed");
-    const request = workers[0]!.requests[0]!;
-    expect(request.type).toBe("write");
-    if (request.type !== "write") throw new Error("Expected write request");
-    workers[0]!.emit("message", { type: "written", id: request.id, stored: true });
-    await write;
-    workers[0]!.termination = hold().wait.then(() => 0);
-    let closed = false;
-    const close = logger.close().then(() => { closed = true; });
-    await vi.advanceTimersByTimeAsync(4_999);
-    expect(closed).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    await close;
-    expect(fallback.started).toEqual([]);
-  });
 });
