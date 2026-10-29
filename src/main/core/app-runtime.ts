@@ -78,7 +78,7 @@ import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-
 import { resolveStorageRoot } from "./storage-root";
 import { TranscriptStore } from "./transcript-store";
 import { formatError, preserveAside } from "./file-io";
-import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, sourceFileIdentity } from "./working-files";
+import { claimWorkingPath, copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, sourceFileIdentity } from "./working-files";
 import {
   buildMarkdownContent,
   buildOutputPayload,
@@ -238,57 +238,47 @@ interface SettingsCommit {
 export class ApplicationRuntime {
   private readonly runtime: AppRuntimeState;
   private firstRun = false;
-  // All running-pipeline bookkeeping (concurrency slots, active runs, the
-  // queued-card drain) lives in the coordinator; the runtime keeps owning the
-  // app state those pipelines mutate and the single persist path they call.
+  // The runs and their places under Concurrent transcriptions live in the
+  // coordinator; the runtime owns the queue those runs report to.
   private readonly pipeline: PipelineCoordinator;
   // Set while a quit saves and closes; a cancelled quit clears it again.
   private closing = false;
   private quitSave: Promise<QuitSaveFailure[]> | null = null;
   private closePromise: Promise<void> | null = null;
-  // Whether queue.json may be behind the queue the app holds: set when a
-  // persist fails, cleared when one lands.
-  private queueBehind = false;
-  private persistenceRequest = 0;
+  // The queue's owner: every change to the cards and pending imports runs as
+  // one of these commands, including its persist, after every earlier one.
+  // Long work (copies, probes, analyses, runs, saves) runs outside a command
+  // and reports its result through another.
+  private queueTail: Promise<void> = Promise.resolve();
   private persistenceTail: Promise<void> = Promise.resolve();
   private onPipelineProgressCallback: (() => void) | null = null;
   private onLanguageChangedCallback: (() => void) | null = null;
   private onDependenciesChangedCallback: (() => void) | null = null;
-  // Only short pending-state publications share this tail. External preparation
-  // retains its own finite physical owner and cannot block unrelated reviews.
-  private importCommitTail: Promise<void> = Promise.resolve();
-  private readonly reviewedImports = new Set<string>();
   // Derive each settings intent from the last committed settings, and publish
   // its authority before another intent derives its replacement.
   private settingsTail: Promise<void> = Promise.resolve();
   // A quit can retry a rejected write. Its exact failure identity owns the
   // settings to publish if those bytes later commit and the user keeps running.
   private failedSettingsMutation: { failure: object; next: MumblerSettings } | null = null;
-  // Card producers must be reached before quit snapshots the store tails: a
-  // copy, deletion, trim analysis or key lookup can create its first write after an await.
-  private readonly activeStateChanges = new Set<Promise<unknown>>();
-  // Newly confirmed cards are not command targets until the import queue write
-  // succeeds; another operation's snapshot can expose memory during that wait.
-  private readonly confirmingCards = new Set<string>();
-  // In-flight saves, so shutdown can cancel each one and await its completed
-  // publication attempt before the stores are flushed.
-  private readonly activeSaves = new Map<AbortController, Promise<unknown>>();
-  // Cards whose trim markers are being analyzed, with the number of the latest
-  // request. A card listed here is busy for every other mutation (save,
-  // generate, remove, duplicate), because the trim changes it after its await;
-  // a newer trim of the same card supersedes an older one still analyzing.
-  // Request numbers never repeat, so an entry removed and taken again cannot
-  // hand a superseded analysis the number it started with.
-  private readonly trimRequests = new Map<string, number>();
-  // Active players own memory; revisits use disposable on-disk summaries.
+  // api-keys.json has one writer: setting and clearing the key take turns.
+  private keyTail: Promise<void> = Promise.resolve();
+  // Saves to the output folder and copies of originals into Recordings take
+  // turns (developer decision); a quit aborts them through one controller.
+  private exportsTail: Promise<void> = Promise.resolve();
+  private exportsAbort = new AbortController();
+  // Cards whose trim markers are being analyzed, each with its analysis's
+  // controller. Such a card is busy for every other change (save, generate,
+  // remove, duplicate); a newer trim of the same card aborts the older.
+  private readonly trimAnalyses = new Map<string, AbortController>();
+  // The waveform of the recording on screen; it lives while its player does.
   private waveformCache: WaveformCache | undefined;
-  private lastTrimRequest = 0;
 
   private constructor(runtime: AppRuntimeState) {
     this.runtime = runtime;
     this.pipeline = new PipelineCoordinator(runtime, {
       persistState: () => this.persistState(),
       resolveApiKey: () => this.resolveGeminiApiKey(),
+      command: (work) => this.command(work),
     });
   }
 
@@ -698,12 +688,8 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.persistToolSettings(checkUpdatesAtLaunch));
-  }
-
-  private async persistToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot> {
-    this.ensureReady();
+  async saveToolSettings(checkUpdatesAtLaunch: boolean): Promise<AppSnapshot> {
+    this.ensureAcceptingWork();
     await this.mutateSettings((current) => ({ ...current, checkUpdatesAtLaunch }));
     await this.runtime.logger.info("settings.tool-gates", "Updated audio tool settings.", {
       checkUpdatesAtLaunch,
@@ -915,7 +901,6 @@ export class ApplicationRuntime {
       this.runtime.settingsStore = settingsStore;
       this.runtime.queueStore = queueStore;
       this.runtime.transcriptStore = new TranscriptStore(paths.transcriptsDir);
-      this.queueBehind = false;
       this.runtime.layoutStore = layoutNewer ? null : layoutStore;
       this.runtime.hasGeminiApiKey = await hasApiKey(paths.apiKeysPath, "gemini", makeApiKeyWarn(logger));
       if (this.runtime.toolManager === null) await this.initializeTools();
@@ -985,75 +970,52 @@ export class ApplicationRuntime {
     return this.importPaths(paths, "drag-and-drop");
   }
 
-  async updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot> {
-    this.ensureReady();
-    const state = this.runtime.state!;
+  updatePendingImportDrafts(items: PendingImportReviewItem[]): Promise<AppSnapshot> {
+    return this.command(async () => {
+      this.ensureReady();
+      const state = this.runtime.state!;
 
-    const currentIds = new Set(state.pendingImports.map((item) => item.id));
-    const nextIds = new Set(items.map((item) => item.id));
+      const currentIds = new Set(state.pendingImports.map((item) => item.id));
+      const nextIds = new Set(items.map((item) => item.id));
 
-    if (currentIds.size !== nextIds.size || [...currentIds].some((id) => !nextIds.has(id))) {
-      throw new OperationError("Pending import drafts are out of date. Reopen the timestamp review.");
-    }
+      if (currentIds.size !== nextIds.size || [...currentIds].some((id) => !nextIds.has(id))) {
+        throw new OperationError("Pending import drafts are out of date. Reopen the timestamp review.");
+      }
 
-    const draftsById = new Map(items.map((item) => [item.id, item]));
-    const current = state.pendingImports;
-    state.pendingImports = current.map((authoritative) => {
-      const draft = draftsById.get(authoritative.id);
-      const next = draft ? applyPendingImportDraft(authoritative, draft) : authoritative;
-      if (this.reviewedImports.has(authoritative.id) && next !== authoritative) throw new OperationError("This import review is already being settled.");
-      return next;
-    });
-    // Equal drafts still retry a packet whose previous write failed.
-    if (this.queueBehind || state.pendingImports.some((item, index) => item !== current[index])) {
-      await this.persistState();
-    }
-    return this.getSnapshot();
-  }
-
-  // Per-review claims exclude overlapping confirm/cancel while preparation and
-  // optional original effects stay outside the short queue publication boundary.
-  async confirmPendingImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult> {
-    return this.withReviewedImports(items.map((item) => item.id), () => this.confirmReviewedImports(items));
-  }
-
-  private async confirmReviewedImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult> {
-    this.ensureReady();
-    const state = this.runtime.state!;
-
-    const byId = new Map(items.map((item) => [item.id, item]));
-    // Every reviewed import is validated before any file is touched, so a bad
-    // timestamp on one of them cannot leave another's original already deleted
-    // while its import is still pending.
-    const reviewed = state.pendingImports
-      .filter((pendingImport) => byId.has(pendingImport.id))
-      .map((pendingImport) => {
-        // Overlay only the review-editable fields onto the authoritative item; the
-        // working/original paths always come from server-side state.
-        const merged = applyPendingImportDraft(pendingImport, byId.get(pendingImport.id)!);
-        const timestamps = buildConfirmedTimestamps(
-          merged.localTimestampText,
-          merged.timezone,
-          merged.utcTimestampText,
-          merged.timestampBasis,
-        );
-        return { pendingImport, merged, timestamps };
+      const draftsById = new Map(items.map((item) => [item.id, item]));
+      const current = state.pendingImports;
+      state.pendingImports = current.map((authoritative) => {
+        const draft = draftsById.get(authoritative.id);
+        return draft ? applyPendingImportDraft(authoritative, draft) : authoritative;
       });
-    const backupDir = this.runtime.settings!.backupDirectory;
-    if (reviewed.some(({ merged }) => merged.copyToBackupOnConfirm) && backupDir === null) {
-      throw new OperationError("Choose a Recordings folder before adding recordings to it.");
-    }
-    const cardsToAdd: MumblerCard[] = [];
-    // A backup or deletion of the original that did not happen is a warning on
-    // the confirmed import, never its failure (error-handling-conventions).
-    const originalWarnings: ImportOriginalWarning[] = [];
+      // A draft that could not be saved stays as the user's latest input; the
+      // next save of the queue, or the quit's, writes it.
+      if (state.pendingImports.some((item, index) => item !== current[index])) {
+        await this.persistState();
+      }
+      return this.getSnapshot();
+    });
+  }
 
-    for (const { pendingImport, timestamps } of reviewed) {
-      let probed: Awaited<ReturnType<typeof probeAudioProfile>>;
+  // The queue reads what to probe in its turn, the recordings are probed
+  // outside it, and the confirmation is validated and committed in a second
+  // turn from the pending imports as they are then; original copies and
+  // deletions follow the committed import, in the exports' turn.
+  async confirmPendingImports(items: PendingImportReviewItem[]): Promise<ConfirmImportsResult> {
+    const byId = new Map(items.map((item) => [item.id, item]));
+    const toProbe = await this.command(async () => {
+      this.ensureAcceptingWork();
+      return this.runtime.state!.pendingImports
+        .filter((pendingImport) => byId.has(pendingImport.id))
+        .map(({ id, originalFilename, workingFilePath }) => ({ id, originalFilename, workingFilePath }));
+    });
+    const probes = new Map<string, Awaited<ReturnType<typeof probeAudioProfile>>>();
+    for (const { id, originalFilename, workingFilePath } of toProbe) {
       try {
-        probed = await probeAudioProfile(pendingImport.workingFilePath);
+        const probed = await probeAudioProfile(workingFilePath);
+        probes.set(id, probed);
         await this.runtime.logger.debug("audio.probe", "Probed audio profile for imported file.", {
-          filename: pendingImport.originalFilename,
+          filename: originalFilename,
           durationSec: probed.durationSec,
           formatName: probed.audioProfile?.formatName,
           codecName: probed.audioProfile?.codecName,
@@ -1063,90 +1025,85 @@ export class ApplicationRuntime {
         });
       } catch (error: unknown) {
         await this.runtime.logger.warn("audio.probe", "Failed to probe imported audio metadata.", {
-          filePath: pendingImport.workingFilePath,
+          filePath: workingFilePath,
           error: error instanceof Error ? error.message : String(error),
         });
-        probed = { durationSec: null, audioProfile: null };
       }
-
-      cardsToAdd.push({
-        id: nanoid(),
-        originalFilename: pendingImport.originalFilename,
-        importSource: pendingImport.importSource,
-        sourceFilePath: pendingImport.workingFilePath,
-        audioProfile: probed.audioProfile,
-        durationSec: probed.durationSec,
-        fileSizeBytes: pendingImport.fileSizeBytes,
-        timestamps,
-        trim: {
-          frontMarkerSec: null,
-          backMarkerSec: null,
-        },
-        trimDecision: null,
-        transcribedTrim: null,
-        transcription: {
-          text: null,
-        },
-        metadata: {
-          structured: null,
-          title: null,
-          slug: null,
-        },
-        ai: {
-          transcription: null,
-          structured: null,
-          title: null,
-          slug: null,
-        },
-        status: "Imported",
-        activeStep: null,
-        queuedMode: null,
-        queuedAtUtc: null,
-        lastError: null,
-        createdAtUtc: Date.now(),
-        updatedAtUtc: Date.now(),
-      });
     }
 
-    await this.commitImports(async () => {
+    const { reviewed, cardsToAdd, backupDir } = await this.command(async () => {
+      this.ensureReady();
+      const state = this.runtime.state!;
+      // Every reviewed import is validated before anything changes, so a bad
+      // timestamp on one of them cannot leave another confirmed.
+      const reviewed = state.pendingImports
+        .filter((pendingImport) => byId.has(pendingImport.id))
+        .map((pendingImport) => {
+          // Overlay only the review-editable fields onto the authoritative item; the
+          // working/original paths always come from server-side state.
+          const merged = applyPendingImportDraft(pendingImport, byId.get(pendingImport.id)!);
+          const timestamps = buildConfirmedTimestamps(
+            merged.localTimestampText,
+            merged.timezone,
+            merged.utcTimestampText,
+            merged.timestampBasis,
+          );
+          return { pendingImport, merged, timestamps };
+        });
+      const backupDir = this.runtime.settings!.backupDirectory;
+      if (reviewed.some(({ merged }) => merged.copyToBackupOnConfirm) && backupDir === null) {
+        throw new OperationError("Choose a Recordings folder before adding recordings to it.");
+      }
+      const cardsToAdd = reviewed.map(({ pendingImport, timestamps }) =>
+        createConfirmedCard(pendingImport, timestamps, probes.get(pendingImport.id) ?? { durationSec: null, audioProfile: null }));
+
       const confirmedIds = new Set(reviewed.map(({ pendingImport }) => pendingImport.id));
       const previousPending = state.pendingImports;
-      const addedIds = new Set(cardsToAdd.map((card) => card.id));
-      for (const id of addedIds) this.confirmingCards.add(id);
+      const previousCards = state.cards;
       state.pendingImports = state.pendingImports.filter((item) => !confirmedIds.has(item.id));
       state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
         left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
       );
-
       try {
         await this.persistState();
       } catch (error: unknown) {
-        const current = new Map(state.pendingImports.map((item) => [item.id, item]));
+        // The review stays, with the choices just submitted.
         const submitted = new Map(reviewed.map(({ pendingImport, merged }) => [pendingImport.id, merged]));
-        state.pendingImports = previousPending.map((item) => current.get(item.id) ?? submitted.get(item.id) ?? item);
-        state.cards = state.cards.filter((card) => !addedIds.has(card.id));
-        // A concurrent packet may contain the temporary conversion. Restore behind
-        // it, retaining newer drafts for the imports this confirmation did not own.
-        try { await this.persistState(); }
-        catch (restoreError: unknown) {
-          await this.runtime.logger.error("import.confirm-restore", "Confirmation failed and the retained review could not be saved; recordings and originals remain intact.", restoreError);
-        }
+        state.pendingImports = previousPending.map((item) => submitted.get(item.id) ?? item);
+        state.cards = previousCards;
         throw error;
-      } finally {
-        for (const id of addedIds) this.confirmingCards.delete(id);
       }
+      if (cardsToAdd.length > 0) {
+        try {
+          await this.persistSelectedCard(cardsToAdd[0].id);
+        } catch (error: unknown) {
+          await this.runtime.logger.warn("import.select-card", "Import committed, but selection was not saved.", {
+            error: serializeError(error),
+          });
+        }
+      }
+      return { reviewed, cardsToAdd, backupDir };
     });
-    if (cardsToAdd.length > 0) {
-      try {
-        await this.persistSelectedCard(cardsToAdd[0].id);
-      } catch (error: unknown) {
-        await this.runtime.logger.warn("import.select-card", "Import committed, but selection was not saved.", {
-          error: serializeError(error),
-        });
-      }
-    }
+
     // Original copies/deletions are optional consequences of the committed
     // import. A refused primary save leaves no copy to repeat on Retry.
+    const originalWarnings = await this.exportTurn(() => this.fileOriginals(reviewed, backupDir));
+    await this.runtime.logger.info(
+      "import.confirm-review",
+      "Confirmed pending imports into queue.",
+      { addedCards: cardsToAdd.length, stillPending: this.runtime.state!.pendingImports.length },
+    );
+
+    return { snapshot: this.getSnapshot(), originalWarnings };
+  }
+
+  // A backup or deletion of the original that did not happen is a warning on
+  // the confirmed import, never its failure (error-handling-conventions).
+  private async fileOriginals(
+    reviewed: { pendingImport: PendingImportReviewItem; merged: PendingImportReviewItem; timestamps: MumblerCard["timestamps"] }[],
+    backupDir: string | null,
+  ): Promise<ImportOriginalWarning[]> {
+    const originalWarnings: ImportOriginalWarning[] = [];
     for (const { pendingImport, merged, timestamps } of reviewed) {
       let backupSucceeded = true;
       let sourceIsArchive = false;
@@ -1204,60 +1161,41 @@ export class ApplicationRuntime {
         }
       }
     }
-    await this.runtime.logger.info(
-      "import.confirm-review",
-      "Confirmed pending imports into queue.",
-      { addedCards: cardsToAdd.length, stillPending: state.pendingImports.length },
-    );
-
-    return { snapshot: this.getSnapshot(), originalWarnings };
+    return originalWarnings;
   }
 
-  async cancelPendingImports(ids: string[]): Promise<AppSnapshot> {
-    return this.withReviewedImports(ids, () => this.cancelReviewedImports(ids));
-  }
-
-  private async cancelReviewedImports(ids: string[]): Promise<AppSnapshot> {
-    this.ensureReady();
-    const state = this.runtime.state!;
-    const cancelIds = new Set(ids);
-    const cancelled = state.pendingImports.filter((item) => cancelIds.has(item.id));
-    await this.commitImports(async () => {
+  cancelPendingImports(ids: string[]): Promise<AppSnapshot> {
+    return this.command(async () => {
+      this.ensureAcceptingWork();
+      const state = this.runtime.state!;
+      const cancelIds = new Set(ids);
+      const cancelled = state.pendingImports.filter((item) => cancelIds.has(item.id));
       const previousPending = state.pendingImports;
-
       state.pendingImports = state.pendingImports.filter((item) => !cancelIds.has(item.id));
       // Keep every recording until the durable queue no longer references it.
-      // New imports and cancellation are serialized, but draft saves for the
-      // remaining imports can still run while this publication is pending.
       try {
         await this.persistState();
       } catch (error: unknown) {
-        const current = new Map(state.pendingImports.map((item) => [item.id, item]));
-        state.pendingImports = previousPending.map((item) => current.get(item.id) ?? item);
-        // A concurrent draft packet may have committed the temporary removal.
-        // Publish the restored list after it, retaining newer surviving drafts.
-        try { await this.persistState(); } catch (restoreError: unknown) {
-          await this.runtime.logger.error("import.cancel-restore", "Cancellation failed and the retained review items could not be saved; working audio remains intact.", restoreError);
-        }
+        state.pendingImports = previousPending;
         throw error;
       }
-    });
-    for (const pendingImport of cancelled) {
-      try {
-        await rm(pendingImport.workingFilePath, { force: true });
-      } catch (error: unknown) {
-        await this.runtime.logger.warn("import.cancel-cleanup", "Failed to delete working file on cancel.", {
-          workingFilePath: pendingImport.workingFilePath,
-          error: error instanceof Error ? error.message : String(error),
-        });
+      for (const pendingImport of cancelled) {
+        try {
+          await rm(pendingImport.workingFilePath, { force: true });
+        } catch (error: unknown) {
+          await this.runtime.logger.warn("import.cancel-cleanup", "Failed to delete working file on cancel.", {
+            workingFilePath: pendingImport.workingFilePath,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
-    }
 
-    await this.runtime.logger.info("import.cancelled", "Cancelled pending imports.", {
-      cancelledCount: cancelled.length,
+      await this.runtime.logger.info("import.cancelled", "Cancelled pending imports.", {
+        cancelledCount: cancelled.length,
+      });
+
+      return this.getSnapshot();
     });
-
-    return this.getSnapshot();
   }
 
   async selectCard(cardId: string | null): Promise<AppSnapshot> {
@@ -1275,87 +1213,87 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  duplicateCard(cardId: string): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.duplicateCardFromWorking(cardId));
-  }
-
-  private async duplicateCardFromWorking(cardId: string): Promise<AppSnapshot> {
-    this.ensureReady();
-    const state = this.runtime.state!;
-    const paths = this.runtime.paths!;
-    const source = this.requireIdleCard(cardId, {
-      missing: "Card to duplicate does not exist.",
-      busy: "Cannot duplicate a card while it is being processed.",
+  // The queue claims the copy's name in its turn, the copy runs outside it,
+  // and the duplicate joins the queue in a second turn. The copy is
+  // independent audio, so the source may change or go meanwhile.
+  async duplicateCard(cardId: string): Promise<AppSnapshot> {
+    const { source, duplicatePath } = await this.command(async () => {
+      this.ensureAcceptingWork();
+      const source = this.requireIdleCard(cardId, {
+        missing: "Card to duplicate does not exist.",
+        busy: "Cannot duplicate a card while it is being processed.",
+      });
+      const duplicatePath = await claimWorkingPath(this.runtime.paths!.workingDir, basename(source.sourceFilePath));
+      return { source: structuredClone(source), duplicatePath };
     });
-
-    const duplicateSourcePath = await copyIntoWorking(
-      source.sourceFilePath,
-      paths.workingDir,
-      basename(source.sourceFilePath),
-    );
-    const duplicate = createDuplicatedCard(source, duplicateSourcePath);
-    state.cards = [...state.cards, duplicate].sort((left, right) =>
-      left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
-    );
-
-    await this.persistState();
-    await this.persistSelectedCard(duplicate.id);
-    await this.runtime.logger.info("card.duplicate", "Duplicated card for independent trimming.", {
-      sourceCardId: source.id,
-      duplicateCardId: duplicate.id,
-      duplicateSourcePath,
-    });
-
-    return this.getSnapshot();
-  }
-
-  updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.analyzeAndApplyCardTrim(cardId, trim));
-  }
-
-  private async analyzeAndApplyCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot> {
-    this.ensureReady();
-    const card = this.requireCard(cardId, "Card to update does not exist.");
-    // Not requireIdleCard: a trim still analyzing is superseded by this one
-    // rather than refusing it.
-    if (isCardBusy(card)) {
-      throw new OperationError("Cannot change trim markers while this card is being processed.");
-    }
-    const normalizedTrim = normalizeTrim(trim, card.durationSec);
-
-    // The trim the card already holds changes nothing: no analysis, no new
-    // updatedAtUtc, no write. Dropping the card's entry still supersedes a
-    // different trim that is analyzing, since this one is the user's latest.
-    if (sameTrim(normalizedTrim, card.trim)) {
-      this.trimRequests.delete(cardId);
-      return this.getSnapshot();
-    }
-
-    const request = ++this.lastTrimRequest;
-    const editedAtUtc = Date.now();
-    this.trimRequests.set(cardId, request);
-    try {
-      const trimDecision = await analyzeTrimDecision(
-        card.sourceFilePath,
-        normalizedTrim,
-        card.durationSec,
+    await copyIntoWorking(source.sourceFilePath, duplicatePath);
+    return this.command(async () => {
+      const state = this.runtime.state!;
+      const duplicate = createDuplicatedCard(source, duplicatePath);
+      const previousCards = state.cards;
+      state.cards = [...state.cards, duplicate].sort((left, right) =>
+        left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
       );
-      if (this.trimRequests.get(cardId) !== request) {
-        return this.getSnapshot();
+      try {
+        await this.persistState();
+      } catch (error: unknown) {
+        state.cards = previousCards;
+        await rm(duplicatePath, { force: true }).catch(() => undefined);
+        throw error;
       }
-      // Processing may have started while the trim was analyzed; a run works
-      // from the trim it started with, so this one would not match its results.
-      const current = this.requireCard(cardId, "Card to update does not exist.");
-      if (isCardBusy(current) || this.pipeline.hasRun(cardId)) {
+      await this.persistSelectedCard(duplicate.id);
+      await this.runtime.logger.info("card.duplicate", "Duplicated card for independent trimming.", {
+        sourceCardId: source.id,
+        duplicateCardId: duplicate.id,
+        duplicateSourcePath: duplicatePath,
+      });
+      return this.getSnapshot();
+    });
+  }
+
+  // The analysis runs outside the queue's turn, from the inputs the queue
+  // handed it; the card stays busy for other changes meanwhile, and a newer
+  // trim of the same card aborts it. The result is applied in a second turn.
+  async updateCardTrim(cardId: string, trim: CardTrim): Promise<AppSnapshot> {
+    const request = await this.command(async () => {
+      this.ensureAcceptingWork();
+      const card = this.requireCard(cardId, "Card to update does not exist.");
+      // Not requireIdleCard: a trim still analyzing is superseded by this one
+      // rather than refusing it.
+      if (isCardBusy(card)) {
         throw new OperationError("Cannot change trim markers while this card is being processed.");
       }
-      await this.applyCardTrim(current, normalizedTrim, trimDecision, editedAtUtc);
-    } finally {
-      if (this.trimRequests.get(cardId) === request) {
-        this.trimRequests.delete(cardId);
-      }
+      const normalizedTrim = normalizeTrim(trim, card.durationSec);
+      this.trimAnalyses.get(cardId)?.abort();
+      this.trimAnalyses.delete(cardId);
+      // The trim the card already holds changes nothing: no analysis, no new
+      // updatedAtUtc, no write.
+      if (sameTrim(normalizedTrim, card.trim)) return null;
+      const controller = new AbortController();
+      this.trimAnalyses.set(cardId, controller);
+      return { controller, normalizedTrim, sourceFilePath: card.sourceFilePath, durationSec: card.durationSec, editedAtUtc: Date.now() };
+    });
+    if (request === null) return this.getSnapshot();
+    const { controller, normalizedTrim } = request;
+    const finished = (): void => {
+      if (this.trimAnalyses.get(cardId) === controller) this.trimAnalyses.delete(cardId);
+    };
+    let trimDecision: TrimDecision;
+    try {
+      trimDecision = await analyzeTrimDecision(request.sourceFilePath, normalizedTrim, request.durationSec, controller.signal);
+    } catch (error: unknown) {
+      finished();
+      // A newer trim superseded this one.
+      if (controller.signal.aborted) return this.getSnapshot();
+      throw error;
     }
-    return this.getSnapshot();
+    return this.command(async () => {
+      finished();
+      if (controller.signal.aborted) return this.getSnapshot();
+      const card = this.requireCard(cardId, "Card to update does not exist.");
+      await this.applyCardTrim(card, normalizedTrim, trimDecision, request.editedAtUtc);
+      return this.getSnapshot();
+    });
   }
 
   private async applyCardTrim(
@@ -1366,6 +1304,7 @@ export class ApplicationRuntime {
   ): Promise<void> {
     const state = this.runtime.state!;
     const cardId = card.id;
+    const previous = { trim: card.trim, trimDecision: card.trimDecision, timestamps: card.timestamps, updatedAtUtc: card.updatedAtUtc };
     // The AI results are kept: a trim usually shaves silence and leaves the
     // words as they were. They read as stale while the trim differs from the
     // one they were transcribed from (hasStaleResults), and Generate replaces
@@ -1379,7 +1318,12 @@ export class ApplicationRuntime {
       left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
     );
 
-    await this.persistState();
+    try {
+      await this.persistState();
+    } catch (error: unknown) {
+      Object.assign(card, previous);
+      throw error;
+    }
     await this.runtime.logger.info("trim.analyze", "Analyzed trim decision.", {
       cardId,
       sourceFilePath: card.sourceFilePath,
@@ -1443,88 +1387,88 @@ export class ApplicationRuntime {
   }
 
   generateCardStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.generateCardFromStep(cardId, target));
+    return this.command(async () => {
+      this.ensureReady();
+      this.requireCard(cardId, "Card to generate does not exist.");
+      if ((await this.resolveGeminiApiKey()) === null) {
+        throw new OperationError("Gemini API key is not configured.");
+      }
+      // A quit that began during the key lookup stops this start.
+      this.ensureAcceptingWork();
+      const card = this.requireIdleCard(cardId, {
+        missing: "Card to generate does not exist.",
+        busy: "This card is already being processed.",
+      });
+      this.pipeline.assertCardCanStart(card);
+
+      const startStep = resolveGenerateStartStep(card, target);
+      const previous = structuredClone(card);
+      if (clearCardResultsFromStep(card, startStep)) {
+        card.updatedAtUtc = Date.now();
+      }
+      card.status = "Imported";
+      card.activeStep = null;
+      card.queuedMode = null;
+      card.queuedAtUtc = null;
+      card.lastError = null;
+      try {
+        await this.pipeline.startOrEnqueue(cardId, "generate", startStep);
+      } catch (error: unknown) {
+        Object.assign(card, previous);
+        throw error;
+      }
+      await this.runtime.logger.info("pipeline.generate", "Started dependency-aware generation.", {
+        cardId,
+        requestedStep: target,
+        startStep,
+      });
+      return this.getSnapshot();
+    });
   }
 
-  private async generateCardFromStep(cardId: string, target: GenerateTarget): Promise<AppSnapshot> {
-    this.ensureReady();
-    this.requireCard(cardId, "Card to generate does not exist.");
+  cancelCardProcessing(cardId: string): Promise<AppSnapshot> {
+    return this.command(async () => {
+      this.ensureReady();
+      const state = this.runtime.state!;
+      const cardIndex = state.cards.findIndex((entry) => entry.id === cardId);
 
-    // The key is resolved before the card is checked, so nothing awaits between
-    // the idle check and startOrEnqueue claiming the card.
-    if ((await this.resolveGeminiApiKey()) === null) {
-      throw new OperationError("Gemini API key is not configured.");
-    }
+      if (cardIndex === -1) {
+        throw new OperationError("Card to cancel does not exist.");
+      }
 
-    this.ensureAcceptingWork();
-    const card = this.requireIdleCard(cardId, {
-      missing: "Card to generate does not exist.",
-      busy: "This card is already being processed.",
-    });
-    this.pipeline.assertCardCanStart(card);
+      const oldCard = state.cards[cardIndex];
+      if (oldCard.status !== "Queued" && !this.pipeline.hasRun(cardId)) {
+        throw new OperationError("This card is not being processed.");
+      }
 
-    const startStep = resolveGenerateStartStep(card, target);
-    if (clearCardResultsFromStep(card, startStep)) {
-      card.updatedAtUtc = Date.now();
-    }
-    card.status = "Imported";
-    card.activeStep = null;
-    card.queuedMode = null;
-    card.queuedAtUtc = null;
-    card.lastError = null;
-    await this.pipeline.startOrEnqueue(cardId, "generate", startStep);
-    await this.runtime.logger.info("pipeline.generate", "Started dependency-aware generation.", {
-      cardId,
-      requestedStep: target,
-      startStep,
-    });
-    return this.getSnapshot();
-  }
+      const failedStep = oldCard.activeStep ?? "transcription";
 
-  async cancelCardProcessing(cardId: string): Promise<AppSnapshot> {
-    this.ensureReady();
-    const state = this.runtime.state!;
-    const cardIndex = state.cards.findIndex((entry) => entry.id === cardId);
+      // Take the card from its run and abort it: from here the run no longer
+      // owns the card, so a result it reports later is dropped.
+      this.pipeline.detachAndAbort(cardId);
 
-    if (cardIndex === -1) {
-      throw new OperationError("Card to cancel does not exist.");
-    }
+      // The card shows as cancelled at once.
+      state.cards[cardIndex] = {
+        ...oldCard,
+        status: "Cancelled",
+        activeStep: null,
+        queuedMode: null,
+        queuedAtUtc: null,
+        lastError: {
+          message: "AI work cancelled by user.",
+          occurredAtUtc: Date.now(),
+          failedStep,
+        },
+      };
 
-    const oldCard = state.cards[cardIndex];
-    const isQueued = oldCard.status === "Queued";
-    const isActive = this.pipeline.hasRun(cardId);
+      await this.persistState();
 
-    if (!isQueued && !isActive) {
-      throw new OperationError("This card is not being processed.");
-    }
-
-    const failedStep = oldCard.activeStep ?? "transcription";
-
-    // Take the card from its run and abort it before anything awaits: from here
-    // the run no longer owns the card, so a result it receives later is dropped.
-    this.pipeline.detachAndAbort(cardId);
-
-    // The card shows as cancelled at once.
-    state.cards[cardIndex] = {
-      ...oldCard,
-      status: "Cancelled",
-      activeStep: null,
-      queuedMode: null,
-      queuedAtUtc: null,
-      lastError: {
-        message: "AI work cancelled by user.",
-        occurredAtUtc: Date.now(),
+      await this.runtime.logger.info("pipeline.cancel-immediate", "Immediately detached and cancelled card pipeline.", {
+        cardId,
         failedStep,
-      },
-    };
-
-    await this.persistState();
-
-    await this.runtime.logger.info("pipeline.cancel-immediate", "Immediately detached and cancelled card pipeline.", {
-      cardId,
-      failedStep,
+      });
+      return this.getSnapshot();
     });
-    return this.getSnapshot();
   }
 
   async pickOutputDirectory(window: BrowserWindow, directory?: string, literalDirectory?: string): Promise<string | null> {
@@ -1619,7 +1563,7 @@ export class ApplicationRuntime {
   }
 
   saveSettingsDraft(draft: SettingsDraft): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.persistSettingsDraft({ ...draft }));
+    return this.whenAccepting(() => this.persistSettingsDraft({ ...draft }));
   }
 
   private mutateSettings(
@@ -1707,7 +1651,7 @@ export class ApplicationRuntime {
       concurrencyLimit: nextSettings.concurrencyLimit,
     });
 
-    await this.pipeline.drainQueued();
+    await this.command(() => this.pipeline.drainQueued());
 
     return this.getSnapshot();
   }
@@ -1717,7 +1661,7 @@ export class ApplicationRuntime {
   // cards that were waiting only on a missing key. The raw key never enters the
   // snapshot or the log — only the resulting presence boolean is reported.
   setGeminiApiKey(apiKey: string): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.storeGeminiApiKey(apiKey));
+    return this.whenAccepting(() => this.withKeyFile(() => this.storeGeminiApiKey(apiKey)));
   }
 
   private async storeGeminiApiKey(apiKey: string): Promise<AppSnapshot> {
@@ -1734,14 +1678,14 @@ export class ApplicationRuntime {
       hasGeminiApiKey: this.runtime.hasGeminiApiKey,
     });
 
-    await this.pipeline.drainQueued();
+    await this.command(() => this.pipeline.drainQueued());
     return this.getSnapshot();
   }
 
   // Remove the stored key from the secrets file. An environment-supplied key, if
   // present, still resolves afterward — so hasGeminiApiKey may remain true.
   clearGeminiApiKey(): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.removeGeminiApiKey());
+    return this.whenAccepting(() => this.withKeyFile(() => this.removeGeminiApiKey()));
   }
 
   private async removeGeminiApiKey(): Promise<AppSnapshot> {
@@ -1776,8 +1720,8 @@ export class ApplicationRuntime {
     return makeApiKeyWarn(this.runtime.logger);
   }
 
-  async drainQueuedCards(): Promise<void> {
-    await this.pipeline.drainQueued();
+  drainQueuedCards(): Promise<void> {
+    return this.command(() => this.pipeline.drainQueued());
   }
 
   // The app-owned work still running that a quit would stop, which a quit by
@@ -1807,17 +1751,12 @@ export class ApplicationRuntime {
   private async runQuitSave(): Promise<QuitSaveFailure[]> {
     const { queueStore, transcriptStore, settingsStore, logger } = this.runtime;
     this.closing = true;
-    for (const controller of this.activeSaves.keys()) {
-      controller.abort();
-    }
+    this.exportsAbort.abort();
     this.runtime.toolManager?.cancelAll();
-    await Promise.all([
-      Promise.allSettled([...this.activeSaves.values()]),
-      this.pipeline.shutdown(),
-      this.importCommitTail,
-      Promise.allSettled([...this.activeStateChanges]),
-    ]);
-    await this.persistenceTail;
+    // Admission is closed; the queue stops the runs in its turn, and they
+    // report as they unwind. A cancelled save leaves its card Ready to Save.
+    const runs = this.runtime.state === null ? null : await this.command(async () => this.pipeline.stop());
+    await Promise.all([runs?.settled, this.exportsTail, this.settingsTail, this.keyTail]);
     await queueStore?.flush();
     await transcriptStore?.flush();
     await settingsStore?.flush();
@@ -1846,16 +1785,15 @@ export class ApplicationRuntime {
     };
     const state = this.runtime.state;
     if (state !== null && queueStore !== null && transcriptStore !== null) {
-      const snapshot = structuredClone(state);
-      const request = ++this.persistenceRequest;
-      const saveQueue = this.queueBehind;
-      await this.enqueuePersistence(async () => {
+      // The queue as the app holds it is always written: the transcripts first,
+      // then queue.json.
+      await this.command(async () => {
+        const snapshot = structuredClone(state);
         const transcriptsSaved = await attempt("transcripts", () => transcriptStore.writeChanged(snapshot.cards));
-        if (transcriptsSaved && saveQueue) {
+        if (transcriptsSaved) {
           await attempt("queue", () => queueStore.save(snapshot));
         }
         const packetSaved = failures.length === 0;
-        this.queueBehind = !packetSaved || request !== this.persistenceRequest;
         await retrySettings();
         if (packetSaved) {
           // Cleanup of removed cards' files, not the user's work: logged only.
@@ -1875,7 +1813,8 @@ export class ApplicationRuntime {
   // stay Cancelled, for the user to start again.
   async resumeAfterCancelledQuit(): Promise<void> {
     this.closing = false;
-    await this.pipeline.resume();
+    this.exportsAbort = new AbortController();
+    if (this.runtime.state !== null) await this.command(() => this.pipeline.resume());
     void this.runtime.logger.info("quit.cancelled", "Quit cancelled; Mumbler keeps running.").catch(() => undefined);
   }
 
@@ -1909,7 +1848,7 @@ export class ApplicationRuntime {
   }
 
   chooseOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.pickAndSaveOutputDirectory(window));
+    return this.whenAccepting(() => this.pickAndSaveOutputDirectory(window));
   }
 
   private async pickAndSaveOutputDirectory(window: BrowserWindow): Promise<AppSnapshot> {
@@ -1922,7 +1861,7 @@ export class ApplicationRuntime {
   }
 
   chooseOriginalsDirectory(window: BrowserWindow): Promise<AppSnapshot> {
-    return this.runStateChange(async () => {
+    return this.whenAccepting(async () => {
       this.ensureReady();
       const result = await dialog.showOpenDialog(window, {
         title: this.translator().t("settings.backupDirectory"),
@@ -1936,7 +1875,7 @@ export class ApplicationRuntime {
   }
 
   saveSetupDirectory(directory: string): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.persistSetupDirectory(directory));
+    return this.whenAccepting(() => this.persistSetupDirectory(directory));
   }
 
   private async persistSetupDirectory(directory: string): Promise<AppSnapshot> {
@@ -1956,7 +1895,7 @@ export class ApplicationRuntime {
   // Setup's Recordings folder: the suggested absolute path or a picker result,
   // kept literal like the output folder.
   saveSetupRecordingsDirectory(directory: string): Promise<AppSnapshot> {
-    return this.runStateChange(async () => {
+    return this.whenAccepting(async () => {
       this.ensureReady();
       if (!isAbsolute(directory)) throw new OperationError("Choose a Recordings folder first.");
       await this.mutateSettings((current) => ({ ...current, backupDirectory: directory }));
@@ -1966,7 +1905,7 @@ export class ApplicationRuntime {
 
   // Setup's confirmation of the zone recording times without one are read in.
   saveSetupTimezone(timezone: string): Promise<AppSnapshot> {
-    return this.runStateChange(async () => {
+    return this.whenAccepting(async () => {
       this.ensureReady();
       if (timezone !== SYSTEM_TIMEZONE && !isValidTimezone(timezone)) throw new OperationError("Choose a valid time zone.");
       await this.mutateSettings((current) => ({ ...current, defaultTimezone: timezone }));
@@ -1974,77 +1913,72 @@ export class ApplicationRuntime {
     });
   }
 
+  // A save starts with a queue command that marks the card Saving, publishes
+  // in the exports' turn, outside the queue's, and ends with a command that
+  // records the outcome. Saving is busy, so no generation, trim, removal or
+  // second save starts while this one reads the card and then deletes its
+  // working audio; any outcome but a completed save hands the card back as
+  // Ready to Save.
   async saveCard(
     cardId: string,
     resolution?: SaveConflictResolution,
     options: SaveCardOptions = { removeAfterSave: true },
   ): Promise<SaveCardResult> {
-    this.ensureReady();
-    const card = this.requireCard(cardId, "Card to save does not exist.");
+    const card = await this.command(async () => {
+      this.ensureReady();
+      const card = this.requireCard(cardId, "Card to save does not exist.");
 
-    if (card.status !== "Ready to Save") {
-      throw new OperationError("Only cards in Ready to Save state can be finalized.");
-    }
-    // A text write may have committed before an interrupted queue update, or
-    // its file may be absent. Status alone cannot certify a complete export.
-    if ([card.transcription.text, card.metadata.structured, card.metadata.title, card.metadata.slug]
-      .some((value) => value === null || value.trim().length === 0)) {
-      throw new OperationError("Generate the missing transcript and metadata before saving this recording.");
-    }
-    if (this.closing) {
-      throw new OperationError("Mumbler is closing; the recording was not saved.");
-    }
-    if (this.trimRequests.has(cardId)) {
-      throw new OperationError("The trim markers are still being applied. Save again in a moment.");
-    }
-
-    if (resolution !== "cancel" && this.runtime.settings!.outputDirectory === null) {
-      throw new OperationError("Choose a save folder before exporting a recording.");
-    }
-
-    // Claim the card before the first await: "Saving" is busy, so no generation,
-    // trim, removal or second save can start while this one reads the card and
-    // then deletes its working audio. Any outcome other than a completed save
-    // hands the card back as Ready to Save.
-    card.status = "Saving";
-    const controller = new AbortController();
-    const run = this.runSave(card, resolution, options, controller.signal);
-    this.activeSaves.set(controller, run);
-    try {
-      const outcome = await run;
-      return { ...outcome, snapshot: this.getSnapshot() };
-    } finally {
-      this.activeSaves.delete(controller);
-    }
-  }
-
-  private async runSave(
-    card: MumblerCard,
-    resolution: SaveConflictResolution | undefined,
-    options: SaveCardOptions,
-    signal: AbortSignal,
-  ): Promise<SaveOutcome> {
-    let outcome: SaveOutcome | null = null;
-    try {
-      await this.persistState();
-      outcome = await this.writeCardOutputs(card, resolution, signal);
-    } finally {
-      // A recording kept after its save stays ready to be saved again.
-      if (outcome?.kind !== "saved" || !options.removeAfterSave) {
-        card.status = "Ready to Save";
-        await this.persistState().catch((error: unknown) =>
-          this.runtime.logger.error("card.save-settlement-failed", "Could not persist the recording's ready state after saving stopped.", error, {
-            cardId: card.id,
-          }).catch(() => undefined));
+      if (card.status !== "Ready to Save") {
+        throw new OperationError("Only cards in Ready to Save state can be finalized.");
       }
-    }
-    // Publication is the commit point: once the files are out, the save has
-    // succeeded, and removing the card from the queue is cleanup that reports
-    // its own failure to the log rather than turning the save into a failure.
-    if (outcome.kind === "saved" && options.removeAfterSave) {
-      await this.discardWorkingCard(card);
-    }
-    return outcome;
+      // A text write may have committed before an interrupted queue update, or
+      // its file may be absent. Status alone cannot certify a complete export.
+      if ([card.transcription.text, card.metadata.structured, card.metadata.title, card.metadata.slug]
+        .some((value) => value === null || value.trim().length === 0)) {
+        throw new OperationError("Generate the missing transcript and metadata before saving this recording.");
+      }
+      if (this.closing) {
+        throw new OperationError("Mumbler is closing; the recording was not saved.");
+      }
+      if (this.trimAnalyses.has(cardId)) {
+        throw new OperationError("The trim markers are still being applied. Save again in a moment.");
+      }
+      if (resolution !== "cancel" && this.runtime.settings!.outputDirectory === null) {
+        throw new OperationError("Choose a save folder before exporting a recording.");
+      }
+      card.status = "Saving";
+      try {
+        await this.persistState();
+      } catch (error: unknown) {
+        card.status = "Ready to Save";
+        throw error;
+      }
+      return card;
+    });
+    const outcome = await this.exportTurn(async (signal) => {
+      let outcome: SaveOutcome | null = null;
+      try {
+        outcome = await this.writeCardOutputs(card, resolution, signal);
+        return outcome;
+      } finally {
+        await this.command(async () => {
+          // Publication is the commit point: once the files are out, the save
+          // has succeeded, and removing the card from the queue is cleanup that
+          // reports its own failure to the log.
+          if (outcome?.kind === "saved" && options.removeAfterSave) {
+            await this.discardWorkingCard(card);
+            return;
+          }
+          // A recording kept after its save stays ready to be saved again.
+          card.status = "Ready to Save";
+          await this.persistState().catch((error: unknown) =>
+            this.runtime.logger.error("card.save-settlement-failed", "Could not persist the recording's ready state after saving stopped.", error, {
+              cardId: card.id,
+            }).catch(() => undefined));
+        });
+      }
+    });
+    return { ...outcome, snapshot: this.getSnapshot() };
   }
 
   private async writeCardOutputs(
@@ -2087,10 +2021,6 @@ export class ApplicationRuntime {
       resolution === "suffix"
         ? await buildUniqueSuffixedTargets(outputDirectory, baseName, extension)
         : initialTargets;
-
-    if (!(await this.isSafeSaveLocation(targetPaths, card.sourceFilePath))) {
-      return { kind: "failed", message: message("error.saveOutputLocationUnsafe") };
-    }
 
     const trimmedAudio = await prepareAudioForTranscription({
       sourceFilePath: card.sourceFilePath,
@@ -2275,80 +2205,76 @@ export class ApplicationRuntime {
   }
 
   removeCard(cardId: string): Promise<AppSnapshot> {
-    return this.runStateChange(() => this.removeCardWorkingAudio(cardId));
-  }
+    return this.command(async () => {
+      this.ensureAcceptingWork();
+      const state = this.runtime.state!;
+      // requireIdleCard also refuses a "Queued" card: its working audio is one
+      // drain away from a run reading it, so removal waits until the card is
+      // cancelled or finishes.
+      const card = this.requireIdleCard(cardId, {
+        missing: "Card to remove does not exist.",
+        busy: "Cannot remove a card while it is being processed.",
+      });
+      const previousCards = state.cards;
+      state.cards = state.cards.filter((entry) => entry.id !== cardId);
 
-  private async removeCardWorkingAudio(cardId: string): Promise<AppSnapshot> {
-    this.ensureReady();
-    const state = this.runtime.state!;
-    // requireIdleCard also refuses a "Queued" card: its working audio is one
-    // drain pass away from a pipeline reading it, so removal must wait until
-    // the card is cancelled or finishes.
-    const card = this.requireIdleCard(cardId, {
-      missing: "Card to remove does not exist.",
-      busy: "Cannot remove a card while it is being processed.",
-    });
-    // Out of the queue before the first await, so no save or trim can claim the
-    // card while its removal is being committed.
-    state.cards = state.cards.filter((entry) => entry.id !== cardId);
-
-    // Commit removal before deleting the recording. A failed queue publication
-    // must leave the working audio intact; a crash after publication may leave
-    // an unreferenced recording, which launch deliberately never sweeps.
-    try {
-      await this.persistState();
-      await rm(card.sourceFilePath, { force: true });
-    } catch (error: unknown) {
-      state.cards = [...state.cards, card].sort((left, right) =>
-        left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
-      );
-      // Restore retry information, including the transcript removed by the
-      // committed queue change. persistState writes text before the queue.
-      try { await this.persistState(); } catch (restoreError: unknown) {
-        await this.runtime.logger.error("card.remove-restore", "Removal failed and the retained card could not be saved; working audio remains intact.", restoreError, { cardId });
+      // Commit removal before deleting the recording. A failed queue publication
+      // must leave the working audio intact; a crash after publication may leave
+      // an unreferenced recording, which launch deliberately never sweeps.
+      try {
+        await this.persistState();
+      } catch (error: unknown) {
+        state.cards = previousCards;
+        throw error;
       }
-      throw new Error(`Failed to delete the working audio of card ${cardId}: ${formatError(error)}`, { cause: error });
-    }
-    await this.runtime.logger.info("card.remove", "Deleted card working audio and removed card.", {
-      cardId,
-      sourceFilePath: card.sourceFilePath,
-    });
+      try {
+        await rm(card.sourceFilePath, { force: true });
+      } catch (error: unknown) {
+        state.cards = previousCards;
+        // Restore retry information, including the transcript removed by the
+        // committed queue change. persistState writes text before the queue.
+        try { await this.persistState(); } catch (restoreError: unknown) {
+          await this.runtime.logger.error("card.remove-restore", "Removal failed and the retained card could not be saved; working audio remains intact.", restoreError, { cardId });
+        }
+        throw new Error(`Failed to delete the working audio of card ${cardId}: ${formatError(error)}`, { cause: error });
+      }
+      await this.runtime.logger.info("card.remove", "Deleted card working audio and removed card.", {
+        cardId,
+        sourceFilePath: card.sourceFilePath,
+      });
 
-    return this.getSnapshot();
-  }
-
-  private async importPaths(
-    sourcePaths: string[],
-    importSource: ImportSource,
-  ): Promise<ImportOperationResult> {
-    return this.runStateChange(() => this.importPathBatch(sourcePaths, importSource));
-  }
-
-  private withReviewedImports<T>(ids: string[], operation: () => Promise<T>): Promise<T> {
-    this.ensureAcceptingWork();
-    if (ids.some((id) => this.reviewedImports.has(id))) throw new OperationError("This import review is already being settled.");
-    for (const id of ids) this.reviewedImports.add(id);
-    return this.runStateChange(operation).finally(() => {
-      for (const id of ids) this.reviewedImports.delete(id);
+      return this.getSnapshot();
     });
   }
 
-  // Runs one short queue publication after every earlier one has settled.
-  private commitImports<T>(operation: () => Promise<T>): Promise<T> {
-    const run = this.importCommitTail.then(operation);
-    this.importCommitTail = run.then(() => undefined, () => undefined);
+  private importPaths(sourcePaths: string[], importSource: ImportSource): Promise<ImportOperationResult> {
+    return this.whenAccepting(() => this.importPathBatch(sourcePaths, importSource));
+  }
+
+  // Runs `work` as a queue command, after every earlier one has settled.
+  private command<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.queueTail.then(work);
+    this.queueTail = run.then(() => undefined, () => undefined);
     return run;
   }
 
-  private runStateChange<T>(operation: () => Promise<T>): Promise<T> {
+  // Runs `work` in the exports' turn: saves and original copies take turns.
+  private exportTurn<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const run = this.exportsTail.then(() => work(this.exportsAbort.signal));
+    this.exportsTail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  // The key file's one writer.
+  private withKeyFile<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.keyTail.then(work);
+    this.keyTail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  private whenAccepting<T>(work: () => Promise<T>): Promise<T> {
     try { this.ensureAcceptingWork(); } catch (error: unknown) { return Promise.reject(error); }
-    const run = operation();
-    this.activeStateChanges.add(run);
-    void run.then(
-      () => this.activeStateChanges.delete(run),
-      () => this.activeStateChanges.delete(run),
-    );
-    return run;
+    return work();
   }
 
   private ensureAcceptingWork(): void {
@@ -2383,19 +2309,12 @@ export class ApplicationRuntime {
       seenPaths.add(sourcePath);
       try {
         const pending = await this.prepareImport(sourcePath, importSource);
-        try {
-          await this.commitImports(async () => {
-            this.runtime.state!.pendingImports.push(pending);
-            await this.persistState();
-          });
-          importedCount += 1;
-        } catch (error) {
-          // Once state owns the copy, a failed queue save retains it for retry.
-          if (!this.runtime.state!.pendingImports.some((item) => item.id === pending.id)) {
-            await rm(pending.workingFilePath, { force: true });
-          }
-          throw error;
-        }
+        // Once the queue holds the copy, a failed queue save retains it for retry.
+        await this.command(async () => {
+          this.runtime.state!.pendingImports.push(pending);
+          await this.persistState();
+        });
+        importedCount += 1;
       } catch (error: unknown) {
         const kind = error instanceof ImportAdmissionError ? "invalid" : "failure";
         failedImports.push({
@@ -2454,8 +2373,10 @@ export class ApplicationRuntime {
 
     const originalFilename = basename(sourcePath);
     const sourceIdentity = sourceFileIdentity(sourceStats);
-    const workingFilePath = await copyIntoWorking(sourcePath, paths.workingDir, originalFilename);
+    // The queue claims the copy's name in its turn; the copy runs outside it.
+    const workingFilePath = await this.command(() => claimWorkingPath(paths.workingDir, originalFilename));
     try {
+      await copyIntoWorking(sourcePath, workingFilePath);
 
       await this.runtime.logger.debug("import.file", "Staged file to working storage.", {
         originalFilename,
@@ -2527,7 +2448,6 @@ export class ApplicationRuntime {
   }
 
   private requireCard(cardId: string, missingMessage: string): MumblerCard {
-    if (this.confirmingCards.has(cardId)) throw new OperationError("This recording's import is still being saved.");
     const card = this.runtime.state!.cards.find((entry) => entry.id === cardId);
     if (card === undefined) {
       throw new OperationError(missingMessage);
@@ -2543,7 +2463,7 @@ export class ApplicationRuntime {
     messages: { missing: string; busy: string },
   ): MumblerCard {
     const card = this.requireCard(cardId, messages.missing);
-    if (isCardBusy(card) || this.trimRequests.has(cardId)) {
+    if (isCardBusy(card) || this.trimAnalyses.has(cardId)) {
       throw new OperationError(messages.busy);
     }
     return card;
@@ -2555,22 +2475,13 @@ export class ApplicationRuntime {
     return run;
   }
 
-  // The live state object is never replaced here: handlers and pipelines hold
-  // `this.runtime.state` (and its cards) across awaits and mutate it afterwards,
-  // so swapping in a copy would detach their later writes from what is saved.
+  // Called inside queue commands: the transcripts, then queue.json, from the
+  // queue as the command left it.
   private async persistState(): Promise<void> {
     const snapshot = structuredClone(this.runtime.state!);
-    const request = ++this.persistenceRequest;
-    this.queueBehind = true;
     await this.enqueuePersistence(async () => {
-      try {
-        await this.runtime.transcriptStore!.writeChanged(snapshot.cards);
-        await this.runtime.queueStore!.save(snapshot);
-      } catch (error: unknown) {
-        this.queueBehind = true;
-        throw error;
-      }
-      this.queueBehind = request !== this.persistenceRequest;
+      await this.runtime.transcriptStore!.writeChanged(snapshot.cards);
+      await this.runtime.queueStore!.save(snapshot);
       // Error-handling-conventions: secondary failures cannot deny the queue commit.
       try {
         await this.runtime.transcriptStore!.removeAbsent(snapshot.cards);
@@ -2766,6 +2677,36 @@ export function applyPendingImportDraft(
     return { ...authoritative, ...content, ...flags, updatedAtUtc: Date.now() };
   }
   return differs(flags) ? { ...authoritative, ...flags } : authoritative;
+}
+
+function createConfirmedCard(
+  pendingImport: PendingImportReviewItem,
+  timestamps: MumblerCard["timestamps"],
+  probed: Awaited<ReturnType<typeof probeAudioProfile>>,
+): MumblerCard {
+  return {
+    id: nanoid(),
+    originalFilename: pendingImport.originalFilename,
+    importSource: pendingImport.importSource,
+    sourceFilePath: pendingImport.workingFilePath,
+    audioProfile: probed.audioProfile,
+    durationSec: probed.durationSec,
+    fileSizeBytes: pendingImport.fileSizeBytes,
+    timestamps,
+    trim: { frontMarkerSec: null, backMarkerSec: null },
+    trimDecision: null,
+    transcribedTrim: null,
+    transcription: { text: null },
+    metadata: { structured: null, title: null, slug: null },
+    ai: { transcription: null, structured: null, title: null, slug: null },
+    status: "Imported",
+    activeStep: null,
+    queuedMode: null,
+    queuedAtUtc: null,
+    lastError: null,
+    createdAtUtc: Date.now(),
+    updatedAtUtc: Date.now(),
+  };
 }
 
 function createDuplicatedCard(source: MumblerCard, sourceFilePath: string): MumblerCard {

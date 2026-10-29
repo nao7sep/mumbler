@@ -26,7 +26,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
 });
 
 import { executeCardPipeline, type CardPipelineContext } from "@main/core/card-pipeline";
-import { createDefaultSettings, createEmptyQueue } from "@main/core/settings-schema";
+import { createDefaultSettings } from "@main/core/settings-schema";
 
 const UNKNOWN_MODEL = "gemini-9-imaginary";
 const PROVIDER_TEXT = `models/${UNKNOWN_MODEL} is not found for API version v1beta, or is not supported for generateContent.`;
@@ -75,22 +75,18 @@ function makeLogger(): AppLogger {
 }
 
 function makeContext(card: MumblerCard, dir: string): CardPipelineContext {
-  const state = createEmptyQueue();
-  state.cards = [card];
   const settings = createDefaultSettings();
   settings["gemini.transcription"] = UNKNOWN_MODEL;
   return {
-    state,
     settings,
     paths: { homeDir: dir, workingDir: join(dir, "working") } as AppPaths,
     logger: makeLogger(),
     signal: new AbortController().signal,
     apiKey: "fixture-key",
-    persistState: vi.fn().mockResolvedValue(undefined),
-    releaseTranscriptionSlot: vi.fn().mockResolvedValue(undefined),
-    ownsCard: () => true,
+    current: () => card,
+    update: async (change) => { change(card); },
+    settle: async (change) => { change(card); },
     trackWork: () => undefined,
-    runMetadataCall: (operation) => operation(),
   };
 }
 

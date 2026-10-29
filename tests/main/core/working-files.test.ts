@@ -40,7 +40,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     open: async (...args: Parameters<typeof actual.open>) => {
       if (args[1] === "wx" && basename(dirname(String(args[0]))) === "working") await backupFaults.beforeCopy?.(String(args[0]));
       const handle = await actual.open(...args);
-      if (args[1] === "wx" && basename(dirname(String(args[0]))) === "working") {
+      if (args[1] === "w" && basename(dirname(String(args[0]))) === "working") {
         const sync = handle.sync.bind(handle);
         const close = handle.close.bind(handle);
         handle.sync = async () => {
@@ -71,6 +71,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const {
+  claimWorkingPath,
   cleanupDerivedFiles,
   copyIntoWorking,
   copyOriginalToBackup,
@@ -81,6 +82,13 @@ const {
 } = await import("@main/core/working-files");
 
 let dir: string;
+
+/** What an import does: the queue claims the name, then the copy fills it. */
+async function copyToWorking(source: string, workingDir: string, name: string): Promise<string> {
+  const path = await claimWorkingPath(workingDir, name);
+  await copyIntoWorking(source, path);
+  return path;
+}
 
 function makeLogger(): AppLogger {
   return {
@@ -184,7 +192,7 @@ describe("working audio copies", () => {
     await writeFile(source, "recording");
     await chmod(source, 0o400);
     try {
-      const copied = await copyIntoWorking(source, join(dir, "working"), "take.wav");
+      const copied = await copyToWorking(source, join(dir, "working"), "take.wav");
       expect(await readFile(copied, "utf8")).toBe("recording");
       expect(backupFaults.workingEvents).toEqual(["file", "close"]);
     } finally { await chmod(source, 0o600); }
@@ -195,7 +203,7 @@ describe("working audio copies", () => {
     const working = join(dir, "working");
     await writeFile(source, "recording");
     backupFaults.workingSyncFailure = true;
-    await expect(copyIntoWorking(source, working, "take.wav")).rejects.toThrow(/sync failed/);
+    await expect(copyToWorking(source, working, "take.wav")).rejects.toThrow(/sync failed/);
     expect(await readFile(source, "utf8")).toBe("recording");
     expect(await readdir(working)).toEqual([]);
   });
@@ -207,7 +215,7 @@ describe("working audio copies", () => {
     await mkdir(working, { recursive: true });
     await writeFile(join(working, "Clip.wav"), "existing", "utf8");
 
-    const copied = await copyIntoWorking(source, working, "clip.wav");
+    const copied = await copyToWorking(source, working, "clip.wav");
 
     expect(basename(copied).toLowerCase()).not.toBe("clip.wav");
     expect(await readFile(copied, "utf8")).toBe("audio");
@@ -220,7 +228,7 @@ describe("working audio copies", () => {
     let claimed = "";
     backupFaults.beforeCopy = async (target) => { claimed = target; await writeFile(target, "someone else's", "utf8"); };
 
-    await expect(copyIntoWorking(source, working, "clip.wav")).rejects.toMatchObject({ cause: { code: "EEXIST" } });
+    await expect(copyToWorking(source, working, "clip.wav")).rejects.toMatchObject({ code: "EEXIST" });
 
     expect(await readFile(claimed, "utf8")).toBe("someone else's");
   });
@@ -228,7 +236,7 @@ describe("working audio copies", () => {
   it("names the import that could not be copied, and leaves no partial copy behind", async () => {
     const working = join(dir, "working");
 
-    await expect(copyIntoWorking(join(dir, "gone.wav"), working, "clip.wav")).rejects.toMatchObject({
+    await expect(copyToWorking(join(dir, "gone.wav"), working, "clip.wav")).rejects.toMatchObject({
       message: expect.stringMatching(/Failed to create a readable working copy for clip\.wav/),
       cause: { code: "ENOENT" },
     });
@@ -241,7 +249,7 @@ describe("working audio copies", () => {
     await mkdir(working, { recursive: true });
     undeletable.add(join(working, "clip.wav"));
 
-    await expect(copyIntoWorking(join(dir, "gone.wav"), working, "clip.wav")).rejects.toThrow(
+    await expect(copyToWorking(join(dir, "gone.wav"), working, "clip.wav")).rejects.toThrow(
       /Failed to create a readable working copy for clip\.wav/,
     );
   });
@@ -380,7 +388,7 @@ describe("working audio copies", () => {
   const RECORDED = new Date(Date.UTC(2024, 4, 6, 7, 8, 9, 500));
 
   it.each([
-    ["a working copy", (source: string) => copyIntoWorking(source, join(dir, "working"), "clip.wav")],
+    ["a working copy", (source: string) => copyToWorking(source, join(dir, "working"), "clip.wav")],
     ["a backup of the original", async (source: string) => (await copyOriginalToBackup(source, join(dir, "backup"), "source.m4a")).path],
   ])("keeps the recording's modified time on %s", async (_name, copy) => {
     const source = join(dir, "clip.wav");
@@ -397,7 +405,7 @@ describe("working audio copies", () => {
     await writeFile(source, "audio", "utf8");
     await chmod(source, 0o640);
 
-    const working = await copyIntoWorking(source, join(dir, "working"), "clip.wav");
+    const working = await copyToWorking(source, join(dir, "working"), "clip.wav");
     const { path: backup } = await copyOriginalToBackup(source, join(dir, "backup"), "source.m4a");
 
     expect((await stat(working)).mode & 0o777).toBe(0o640);

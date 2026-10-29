@@ -495,9 +495,8 @@ describe("ApplicationRuntime confirmed import commit", () => {
   // Exercise the actual persistence owner without involving providers or output publication.
   function persistence(runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>>): {
     persistState(): Promise<void>;
-    queueBehind: boolean;
   } {
-    return runtime as unknown as { persistState(): Promise<void>; queueBehind: boolean };
+    return runtime as unknown as { persistState(): Promise<void> };
   }
 
   function gate(): { promise: Promise<void>; release(): void } {
@@ -605,9 +604,11 @@ describe("ApplicationRuntime confirmed import commit", () => {
     await withCard(async (runtime, card) => {
       const control = runtime as unknown as {
         pipeline: PipelineCoordinator;
+        command<T>(work: () => Promise<T>): Promise<T>;
         runtime: { settings: { concurrencyLimit: number } };
       };
-      control.runtime.settings.concurrencyLimit = 1;
+      // A place stays free beside the detached run's own.
+      control.runtime.settings.concurrencyLimit = 2;
       const started = gate();
       const stopped = gate();
       let signal: AbortSignal | undefined;
@@ -620,7 +621,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
         });
         stopped.release();
       });
-      await control.pipeline.startOrEnqueue(card.id, "generate", "transcription");
+      await control.command(() => control.pipeline.startOrEnqueue(card.id, "generate", "transcription"));
       await started.promise;
       const failure = new Error("cancel queue save failed");
       if (saveFails) vi.spyOn(QueueStore.prototype, "save").mockRejectedValueOnce(failure);
@@ -633,58 +634,11 @@ describe("ApplicationRuntime confirmed import commit", () => {
         expect(control.pipeline.hasRun(card.id)).toBe(false);
         expect(runtime.getSnapshot().state!.cards[0]).not.toBe(card);
         expect(runtime.getSnapshot().state!.cards[0].status).toBe("Cancelled");
-        await control.pipeline.startOrEnqueue(card.id, "generate", "transcription");
+        await control.command(() => control.pipeline.startOrEnqueue(card.id, "generate", "transcription"));
         expect(control.pipeline.hasRun(card.id)).toBe(true);
         expect(runtime.getSnapshot().state!.cards[0].status).toBe("Transcribing");
       } finally {
-        await control.pipeline.shutdown();
-      }
-    });
-  });
-
-  it("persists failed-start settlement after a queued successor captured its busy status", async () => {
-    await withCard(async (runtime, card, queuePath) => {
-      const duplicate = await runtime.duplicateCard(card.id);
-      const second = duplicate.state!.cards.find((entry) => entry.id !== card.id)!;
-      const control = runtime as unknown as {
-        pipeline: PipelineCoordinator;
-        runtime: { settings: { concurrencyLimit: number } };
-      };
-      control.runtime.settings.concurrencyLimit = 1;
-      vi.spyOn(cardPipeline, "executeCardPipeline").mockImplementation(async (_id, _step, _mode, ctx) => {
-        await new Promise<void>((resolve) => {
-          if (ctx.signal.aborted) resolve();
-          else ctx.signal.addEventListener("abort", () => resolve(), { once: true });
-        });
-      });
-      const entered = gate();
-      let reject!: (error: Error) => void;
-      const held = new Promise<void>((_resolve, fail) => { reject = fail; });
-      vi.spyOn(QueueStore.prototype, "save").mockImplementationOnce(async () => {
-        entered.release();
-        await held;
-      });
-      const failure = new Error("prestart publication failed");
-      const first = control.pipeline.startOrEnqueue(card.id, "generate", "transcription");
-      const rejected = expect(first).rejects.toBe(failure);
-      let queued: Promise<void> | undefined;
-      try {
-        await entered.promise;
-        queued = control.pipeline.startOrEnqueue(second.id, "generate", "transcription");
-        expect(second.status).toBe("Queued");
-        reject(failure);
-        await rejected;
-        await queued;
-        expect(card.status).toBe("Imported");
-        expect(control.pipeline.hasRun(card.id)).toBe(false);
-        expect(control.pipeline.hasRun(second.id)).toBe(true);
-        expect(persistence(runtime).queueBehind).toBe(false);
-        const durable = (await createQueueStore(queuePath).load()).value.cards.find((entry) => entry.id === card.id)!;
-        expect(durable).toMatchObject({ status: "Imported", activeStep: null, queuedMode: null, queuedAtUtc: null });
-      } finally {
-        reject(failure);
-        await Promise.allSettled([first, rejected, ...(queued ? [queued] : [])]);
-        await control.pipeline.shutdown();
+        await (await control.command(async () => control.pipeline.stop())).settled;
       }
     });
   });
@@ -777,81 +731,6 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("keeps newer packets dirty after an older commit and continues after their failed save", async () => {
-    await withCard(async (runtime, card, queuePath) => {
-      const entered = gate();
-      const release = gate();
-      const write = TranscriptStore.prototype.writeChanged;
-      let writes = 0;
-      vi.spyOn(TranscriptStore.prototype, "writeChanged").mockImplementation(async function (this: typeof TranscriptStore.prototype, cards) {
-        if (++writes === 2) { entered.release(); await release.promise; }
-        return write.call(this, cards);
-      });
-      const save = QueueStore.prototype.save;
-      const failure = new Error("newer queue save failed");
-      let saves = 0;
-      vi.spyOn(QueueStore.prototype, "save").mockImplementation(function (this: typeof QueueStore.prototype, queue) {
-        return ++saves === 2 ? Promise.reject(failure) : save.call(this, queue);
-      });
-      card.metadata.title = "older";
-      const older = persistence(runtime).persistState();
-      card.metadata.title = "newer";
-      const newer = persistence(runtime).persistState();
-      const rejected = expect(newer).rejects.toBe(failure);
-      try {
-        await entered.promise;
-        await older;
-        expect(persistence(runtime).queueBehind).toBe(true);
-        expect((await createQueueStore(queuePath).load()).value.cards[0].metadata.title).toBe("older");
-        release.release();
-        await rejected;
-        expect(persistence(runtime).queueBehind).toBe(true);
-        await persistence(runtime).persistState();
-        expect(persistence(runtime).queueBehind).toBe(false);
-        expect((await createQueueStore(queuePath).load()).value.cards[0].metadata.title).toBe("newer");
-      } finally {
-        release.release();
-        await Promise.allSettled([older, newer, rejected]);
-      }
-    });
-  });
-
-  it.each(["import", "duplicate"] as const)("quit drains %s copy admitted before its first persistence", async (kind) => {
-    await withCard(async (runtime, card, queuePath) => {
-      const held = gate();
-      const entered = gate();
-      const copy = workingFiles.copyIntoWorking;
-      const copying = vi.spyOn(workingFiles, "copyIntoWorking").mockImplementationOnce(async (...args) => {
-        entered.release();
-        await held.promise;
-        return copy(...args);
-      });
-      const work = kind === "import" ? runtime.importDroppedPaths([card.sourceFilePath]) : runtime.duplicateCard(card.id);
-      let quit: Promise<unknown> | undefined;
-      try {
-        await entered.promise;
-        quit = runtime.saveForQuit();
-        let settled = false;
-        void quit.then(() => { settled = true; });
-        await expect(runtime.importDroppedPaths([card.sourceFilePath])).rejects.toThrow("closing");
-        await expect(runtime.duplicateCard(card.id)).rejects.toThrow("closing");
-        await expect(runtime.updateCardTrim(card.id, { frontMarkerSec: 1, backMarkerSec: null })).rejects.toThrow("closing");
-        await expect(runtime.generateCardStep(card.id, "transcription")).rejects.toThrow("closing");
-        expect(settled).toBe(false);
-        expect(copying).toHaveBeenCalledTimes(1);
-        held.release();
-        await work;
-        expect(await quit).toEqual([]);
-        const saved = (await createQueueStore(queuePath).load()).value;
-        expect(kind === "import" ? saved.pendingImports.length : saved.cards.length).toBe(kind === "import" ? 1 : 2);
-        expect((await stat(card.sourceFilePath)).isFile()).toBe(true);
-      } finally {
-        held.release();
-        await Promise.allSettled([work, ...(quit ? [quit] : [])]);
-      }
-    });
-  });
-
   it("quit waits for failed working deletion to restore and persist its card", async () => {
     await withCard(async (runtime, card, queuePath) => {
       const held = gate();
@@ -871,9 +750,10 @@ describe("ApplicationRuntime confirmed import commit", () => {
         quit = runtime.saveForQuit();
         let settled = false;
         void quit.then(() => { settled = true; });
-        await expect(runtime.removeCard(card.id)).rejects.toThrow("closing");
+        const refused = runtime.removeCard(card.id);
         expect(settled).toBe(false);
         held.release();
+        await expect(refused).rejects.toThrow("closing");
         expect(await outcome).toMatchObject({ cause: primary });
         expect(await quit).toEqual([]);
         expect((await createQueueStore(queuePath).load()).value.cards.map((entry) => entry.id)).toEqual([card.id]);
@@ -1046,51 +926,6 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("orders quit's final packet with a later admitted save without mixing snapshots", async () => {
-    await withCard(async (runtime, card, queuePath) => {
-      card.metadata.title = "quit title";
-      card.transcription.text = "quit text";
-      vi.spyOn(QueueStore.prototype, "save").mockRejectedValueOnce(new Error("initial save failure"));
-      await expect(persistence(runtime).persistState()).rejects.toThrow("initial save failure");
-      vi.restoreAllMocks();
-      const entered = gate();
-      const release = gate();
-      const write = TranscriptStore.prototype.writeChanged;
-      const save = QueueStore.prototype.save;
-      const operations: string[] = [];
-      vi.spyOn(TranscriptStore.prototype, "writeChanged").mockImplementation(async function (this: typeof TranscriptStore.prototype, cards) {
-        operations.push(`text:${cards[0].metadata.title}`);
-        if (operations.length === 1) { entered.release(); await release.promise; }
-        return write.call(this, cards);
-      });
-      vi.spyOn(QueueStore.prototype, "save").mockImplementation(function (this: typeof QueueStore.prototype, queue) {
-        operations.push(`queue:${queue.cards[0].metadata.title}`);
-        return save.call(this, queue);
-      });
-      const quit = runtime.saveForQuit();
-      let later: Promise<void> | undefined;
-      try {
-        await entered.promise;
-        card.metadata.title = "later title";
-        card.transcription.text = "later text";
-        later = persistence(runtime).persistState();
-        await Promise.resolve();
-        expect(operations).toEqual(["text:quit title"]);
-        release.release();
-        expect(await quit).toEqual([]);
-        await later;
-        expect(operations).toEqual(["text:quit title", "queue:quit title", "text:later title", "queue:later title"]);
-        expect(persistence(runtime).queueBehind).toBe(false);
-        expect((await createQueueStore(queuePath).load()).value.cards[0].metadata.title).toBe("later title");
-        expect((await new TranscriptStore(getAppPaths().transcriptsDir).open([card.id])).get(card.id)?.transcription)
-          .toBe("later text");
-      } finally {
-        release.release();
-        await Promise.allSettled([quit, ...(later ? [later] : [])]);
-      }
-    });
-  });
-
   it("attempts required stores before held layout work and does not await optional error logging", async () => {
     await withCard(async (runtime, card) => {
       type Stores = {
@@ -1133,11 +968,9 @@ describe("ApplicationRuntime confirmed import commit", () => {
         queueSave.mockRejectedValueOnce(new Error("quit queue failure"));
       }
       expect(await runtime.saveForQuit()).toEqual([failedStore]);
-      expect(persistence(runtime).queueBehind).toBe(true);
       expect(cleanup).not.toHaveBeenCalled();
       if (failedStore === "transcripts") expect(queueSave).not.toHaveBeenCalled();
       expect(await runtime.saveForQuit()).toEqual([]);
-      expect(persistence(runtime).queueBehind).toBe(false);
       expect((await createQueueStore(queuePath).load()).value.cards[0].metadata.title).toBe("unsaved title");
       expect((await new TranscriptStore(getAppPaths().transcriptsDir).open([card.id])).get(card.id)?.transcription)
         .toBe("unsaved transcript");

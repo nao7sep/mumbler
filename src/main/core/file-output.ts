@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
-import { link, mkdir, mkdtemp, open, realpath, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { link, mkdir, mkdtemp, open, rename, rm, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { nanoid } from "nanoid";
 
 import type { MumblerCard, SaveOutputFile } from "@shared/app-shell";
@@ -126,56 +126,6 @@ export async function buildUniqueSuffixedTargets(
   }
 }
 
-// Reserve only overlapping groups. Every earlier live intersection matters:
-// cancelling a pending bridge must not let a later group bypass its predecessor.
-const publications = new Set<{ keys: Set<string>; released: Promise<void> }>();
-
-async function canonicalPath(path: string): Promise<string> {
-  try { return await realpath(path); }
-  catch (error) {
-    if (errorCode(error) !== "ENOENT") throw error;
-    return join(await canonicalPath(dirname(path)), basename(path));
-  }
-}
-
-async function reservePublication(paths: string[], signal?: AbortSignal): Promise<() => void> {
-  const keys = new Set((await Promise.all(paths.map(async (path) => {
-    // Keep the directory entry as well as an existing symlink's target: equality
-    // reads follow symlinks, whereas replacement publishes at the literal entry.
-    const entry = join(await canonicalPath(dirname(path)), basename(path));
-    const target = await canonicalPath(path);
-    // Conservative identity on case-sensitive volumes is harmless exclusion;
-    // actual filesystem operations retain the user's literal paths.
-    return [entry, target].map((value) => value.normalize("NFC").toLowerCase());
-  }))).flat());
-  if (signal?.aborted) throw new CancelledError("Save cancelled.");
-  const previous = [...publications].filter((publication) =>
-    [...publication.keys].some((key) => keys.has(key)),
-  );
-  let resolveRelease!: () => void;
-  const publication = { keys, released: new Promise<void>((resolve) => { resolveRelease = resolve; }) };
-  const release = () => { publications.delete(publication); resolveRelease(); };
-  // Capture predecessors and register without an intervening await, so groups
-  // never acquire members separately or deadlock on partially overlapping trios.
-  publications.add(publication);
-  let onAbort: (() => void) | undefined;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      onAbort = () => reject(new CancelledError("Save cancelled."));
-      signal?.addEventListener("abort", onAbort, { once: true });
-      if (signal?.aborted) onAbort();
-      void Promise.all(previous.map((value) => value.released)).then(() => resolve());
-    });
-    if (signal?.aborted) throw new CancelledError("Save cancelled.");
-    return release;
-  } catch (error) {
-    release();
-    throw error;
-  } finally {
-    if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
-  }
-}
-
 export async function finalizeOutputs(params: {
   sourceAudioPath: string;
   targets: SaveTargetPaths;
@@ -221,26 +171,24 @@ export async function finalizeOutputs(params: {
       }
       if (failure !== undefined) throw failure;
     }
-    const release = await reservePublication(members.map((member) => member.path), params.signal);
-    try {
-      if (params.isSafeLocation !== undefined && !(await params.isSafeLocation())) throw new OutputLocationError();
-      for (const [index, member] of members.entries()) {
-        current = files[index]!;
-        if (params.signal?.aborted) throw new CancelledError("Save cancelled.");
-        if (params.overwrite && await fileExists(member.path) && await sameFileBytes(member.stage, member.path)) {
-          current.status = "unchanged";
-          continue;
-        }
-        if (params.overwrite) {
-          await keepReplacedMode(member.path, member.stage);
-          if (params.signal?.aborted) throw new CancelledError("Save cancelled.");
-          await rename(member.stage, member.path);
-        } else {
-          await publishExclusive(member.stage, member.path, params.signal, () => { publicCopyCreated = true; });
-        }
-        current.status = "saved";
+    // Saves take turns, so no other save publishes beside this one.
+    if (params.isSafeLocation !== undefined && !(await params.isSafeLocation())) throw new OutputLocationError();
+    for (const [index, member] of members.entries()) {
+      current = files[index]!;
+      if (params.signal?.aborted) throw new CancelledError("Save cancelled.");
+      if (params.overwrite && await fileExists(member.path) && await sameFileBytes(member.stage, member.path)) {
+        current.status = "unchanged";
+        continue;
       }
-    } finally { release(); }
+      if (params.overwrite) {
+        await keepReplacedMode(member.path, member.stage);
+        if (params.signal?.aborted) throw new CancelledError("Save cancelled.");
+        await rename(member.stage, member.path);
+      } else {
+        await publishExclusive(member.stage, member.path, params.signal, () => { publicCopyCreated = true; });
+      }
+      current.status = "saved";
+    }
   } catch (error) {
     primary = isNodeAbortError(error) ? new CancelledError("Save cancelled.") : error;
     if (current !== undefined && current.status === "pending") current.status = "failed";

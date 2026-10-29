@@ -2,7 +2,6 @@ import { link, mkdir, mkdtemp, open, readdir, rm, stat, unlink } from "node:fs/p
 import { createReadStream } from "node:fs";
 import { basename, extname, join } from "node:path";
 
-import { nanoid } from "nanoid";
 import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem, SourceFileIdentity } from "@shared/app-shell";
 import { fileExists, formatError, isMissingFileError, uniquePathInDirectory } from "./file-io";
 
@@ -37,26 +36,20 @@ export async function deleteImportedSource(sourcePath: string, expected: SourceF
   await unlink(sourcePath);
 }
 
-// Imports run side by side, so a name chosen for one copy is held until that
-// copy exists and no other import can pick it.
-const reservedWorkingNames = new Set<string>();
-
-export async function copyIntoWorking(
-  sourcePath: string,
-  workingDir: string,
-  preferredName: string,
-): Promise<string> {
+/** Claims a free name in working/ for a recording by creating it, empty and
+ * owner-only; the queue calls this in its turn, so no two copies get one name. */
+export async function claimWorkingPath(workingDir: string, preferredName: string): Promise<string> {
   await mkdir(workingDir, { recursive: true });
-  let workingFilePath = await uniquePathInDirectory(workingDir, preferredName);
-  while (reservedWorkingNames.has(workingFilePath.toLowerCase())) {
-    const extension = extname(preferredName);
-    workingFilePath = join(workingDir, `${basename(preferredName, extension)}-${nanoid(8).toLowerCase()}${extension}`);
-  }
-  reservedWorkingNames.add(workingFilePath.toLowerCase());
-  let owned = false;
+  const workingFilePath = await uniquePathInDirectory(workingDir, preferredName);
+  await (await open(workingFilePath, "wx", 0o600)).close();
+  return workingFilePath;
+}
+
+/** Copies a recording into the working path the queue claimed for it, keeping
+ * the source's times and mode; a failed copy removes the claimed file. */
+export async function copyIntoWorking(sourcePath: string, workingFilePath: string): Promise<void> {
   try {
-    const handle = await open(workingFilePath, "wx", 0o600);
-    owned = true;
+    const handle = await open(workingFilePath, "w", 0o600);
     const stream = createReadStream(sourcePath);
     stream.on("error", () => undefined);
     let primary: unknown;
@@ -76,12 +69,9 @@ export async function copyIntoWorking(
       }
     }
     if (primary !== undefined) throw primary;
-    return workingFilePath;
   } catch (error: unknown) {
-    if (owned) await rm(workingFilePath, { force: true }).catch(() => undefined);
-    throw new Error(`Failed to create a readable working copy for ${preferredName}: ${formatError(error)}`, { cause: error });
-  } finally {
-    reservedWorkingNames.delete(workingFilePath.toLowerCase());
+    await rm(workingFilePath, { force: true }).catch(() => undefined);
+    throw new Error(`Failed to create a readable working copy for ${basename(workingFilePath)}: ${formatError(error)}`, { cause: error });
   }
 }
 

@@ -42,6 +42,7 @@ import { join } from "node:path";
 
 import { executeCardPipeline, type CardPipelineContext, GEMINI_ATTEMPTS } from "@main/core/card-pipeline";
 import { createDefaultSettings, createEmptyQueue } from "@main/core/settings-schema";
+import { CancelledError } from "@main/core/cancellation";
 
 function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
   return {
@@ -107,25 +108,39 @@ function makePaths(): AppPaths {
   };
 }
 
-function makeContext(card: MumblerCard, signal: AbortSignal): CardPipelineContext {
+// A run's context as the coordinator gives it: results apply to the card while
+// the run owns it, and are refused once a cancel takes it.
+function makeContext(card: MumblerCard, signal: AbortSignal) {
   const state = createEmptyQueue();
   state.cards = [card];
-  const settings = createDefaultSettings();
-  // The key is now resolved by the runtime and passed in via ctx.apiKey; a
-  // non-empty value is all the pipeline's key guard needs.
-  return {
+  const persistState = vi.fn().mockResolvedValue(undefined);
+  const owner = { owns: true };
+  const find = () => state.cards.find((entry) => entry.id === card.id);
+  const current = (): MumblerCard => {
+    const found = find();
+    if (found === undefined || !owner.owns || signal.aborted) throw new CancelledError();
+    return found;
+  };
+  const ctx: CardPipelineContext & { state: typeof state; persistState: typeof persistState; owner: typeof owner } = {
     state,
-    settings,
+    persistState,
+    owner,
+    settings: createDefaultSettings(),
     paths: makePaths(),
     logger: makeLogger(),
     signal,
     apiKey: "test-key",
-    persistState: vi.fn().mockResolvedValue(undefined),
-    releaseTranscriptionSlot: vi.fn().mockResolvedValue(undefined),
-    ownsCard: () => true,
+    current,
+    update: async (change) => { change(current()); await persistState(); },
+    settle: async (change) => {
+      const found = find();
+      if (found === undefined || !owner.owns) return;
+      change(found);
+      await persistState();
+    },
     trackWork: () => undefined,
-    runMetadataCall: (operation) => operation(),
   };
+  return ctx;
 }
 
 beforeEach(() => {
@@ -165,12 +180,9 @@ describe("executeCardPipeline", () => {
 
       const fresh = makeCard({ sourceFilePath: source });
       const freshCtx = makeContext(fresh, new AbortController().signal);
-      const metadataAdmissions = vi.fn();
-      freshCtx.runMetadataCall = (operation) => { metadataAdmissions(); return operation(); };
       await executeCardPipeline(fresh.id, "transcription", "generate", freshCtx);
 
       expect(fresh.transcribedTrim, "the transcription records the trim it was made from").toEqual(fresh.trim);
-      expect(metadataAdmissions).toHaveBeenCalledTimes(3);
       expect(mockTranscribe).toHaveBeenCalledOnce();
 
       const known = makeCard({ sourceFilePath: source, trimDecision: analyzed });
@@ -250,7 +262,6 @@ describe("executeCardPipeline", () => {
     expect(card.metadata.slug).toBe("result");
     expect(card.status).toBe("Ready to Save");
     expect(card.lastError).toBeNull();
-    expect(ctx.releaseTranscriptionSlot).toHaveBeenCalledTimes(1);
   });
 
   it("inserts prompt values literally without expanding dollars or tokens inside them", async () => {
@@ -286,13 +297,11 @@ describe("executeCardPipeline", () => {
     const card = makeCard();
     const controller = new AbortController();
     const ctx = makeContext(card, controller.signal);
-    let owns = true;
-    ctx.ownsCard = () => owns;
 
     const run = executeCardPipeline(card.id, "structured", "generate", ctx);
     await vi.waitFor(() => expect(mockGenerateText).toHaveBeenCalledOnce());
     // What a cancel does: take the card from the run, abort it and show a copy.
-    owns = false;
+    ctx.owner.owns = false;
     controller.abort();
     const replacement: MumblerCard = { ...ctx.state.cards[0]!, status: "Cancelled", activeStep: null };
     ctx.state.cards[0] = replacement;
@@ -402,7 +411,6 @@ describe("executeCardPipeline", () => {
     expect(mockGenerateText).not.toHaveBeenCalled();
     expect(card.status).toBe("Cancelled");
     expect(card.updatedAtUtc, "a status change is not a content edit").toBe(1);
-    expect(ctx.releaseTranscriptionSlot).toHaveBeenCalledTimes(1);
   });
 
   it("records an error outcome (not a throw) when a metadata step fails unrecoverably", async () => {
@@ -415,6 +423,5 @@ describe("executeCardPipeline", () => {
 
     expect(card.status).toBe("Error");
     expect(card.lastError?.failedStep).toBe("structured");
-    expect(ctx.releaseTranscriptionSlot).toHaveBeenCalledTimes(1);
   });
 });

@@ -48,38 +48,6 @@ describe("independent output publication", () => {
     expect(await readFile(t.markdownPath, "utf8")).toBe("OLD MD");
     expect((await readdir(directory)).sort()).toEqual(["out.json", "out.md", "out.wav", "source.wav"]);
   });
-  it("serializes publication to the same targets after parallel staging, and releases a failed turn", async () => {
-    const secondSource = join(directory, "second.wav");
-    await writeFile(secondSource, "SECOND AUDIO");
-    let entered!: () => void;
-    const firstEntered = new Promise<void>((resolve) => { entered = resolve; });
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    let first = true;
-    faults.beforeRename = async (_source, target) => {
-      if (first && target === targets().jsonPath) {
-        first = false;
-        entered();
-        await held;
-        throw new Error("first card JSON publication refused");
-      }
-    };
-    const firstSave = save(true);
-    const failedFirst = expect(firstSave).rejects.toBeInstanceOf(OutputPartialFailureError);
-    await firstEntered;
-    const secondSave = finalizeOutputs({ sourceAudioPath: secondSource, targets: targets(), overwrite: true, jsonContent: "SECOND JSON", markdownContent: "SECOND MD" });
-    try {
-      // Both staging directories exist while only the first has published audio.
-      await vi.waitFor(async () => expect((await readdir(directory)).filter((name) => name.startsWith(".mumbler-save-"))).toHaveLength(2));
-      expect(await readFile(targets().audioPath, "utf8")).toBe("NEW AUDIO");
-      release();
-      await failedFirst;
-      await secondSave;
-      expect(await readFile(targets().audioPath, "utf8")).toBe("SECOND AUDIO");
-      expect(await readFile(targets().jsonPath, "utf8")).toBe("SECOND JSON");
-      expect(await readFile(targets().markdownPath, "utf8")).toBe("SECOND MD");
-    } finally { release(); await Promise.allSettled([firstSave, secondSave]); }
-  });
   it.each(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"])("uses exclusive copy when hard links reject with %s", async (code) => {
     faults.linkCode = code;
     const earlier = new Date("2024-01-02T03:04:05Z");

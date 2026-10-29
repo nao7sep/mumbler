@@ -115,21 +115,20 @@ describe("provider reasons published by the pipeline", () => {
     settings["gemini.endpoint"] = "https://proxy.example/gemini";
     settings["gemini.transcription"] = "custom";
     settings["gemini.outline"] = "custom";
+    const persistState = async (): Promise<void> => {
+      await queue.save(state);
+      publications.push(JSON.stringify(state));
+    };
     const ctx: CardPipelineContext = {
-      state,
       settings,
       paths: { homeDir: dir, workingDir: join(dir, "working"), queuePath } as AppPaths,
       logger: makeLogger(),
       signal: new AbortController().signal,
       apiKey: API_KEY,
-      persistState: async () => {
-        await queue.save(state);
-        publications.push(JSON.stringify(state));
-      },
-      releaseTranscriptionSlot: async () => undefined,
-      ownsCard: () => true,
+      current: () => card,
+      update: async (change) => { change(card); await persistState(); },
+      settle: async (change) => { change(card); await persistState(); },
       trackWork: () => undefined,
-      runMetadataCall: (operation) => operation(),
     };
     fetchMock.mockResolvedValue(response(reason));
 

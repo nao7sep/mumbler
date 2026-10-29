@@ -5,7 +5,6 @@ import type {
   CardProcessingStep,
   MumblerCard,
   MumblerSettings,
-  MumblerQueue,
 } from "@shared/app-shell";
 import { thinkingFor } from "@shared/ai-models";
 
@@ -28,34 +27,43 @@ import { CancelledError, isCancelledError } from "./cancellation";
 import { multiline } from "./text-cleanup";
 
 export interface CardPipelineContext {
-  state: MumblerQueue;
   settings: MumblerSettings;
   paths: AppPaths;
   logger: AppLogger;
   signal: AbortSignal;
   // The resolved Gemini API key for this run. The runtime resolves it
-  // environment-first from the dedicated secrets store before spawning the
-  // pipeline, so the pipeline itself does no secret I/O and the key never flows
-  // through the settings object.
+  // environment-first from the dedicated secrets store before the run starts,
+  // so the pipeline itself does no secret I/O and the key never flows through
+  // the settings object.
   apiKey: string;
-  persistState: () => Promise<void>;
-  // Releases the transcription concurrency slot this run holds, then admits any
-  // queued cards into the freed capacity. A no-op when the run never acquired a
-  // slot (e.g. a metadata-only regeneration), and idempotent so it can be called
-  // both when transcription finishes and again on the way out.
-  releaseTranscriptionSlot: () => Promise<void>;
-  // Whether this run still owns its card: a cancel or a newer run takes it
-  // away. Only the owner writes to the card, and only an owner not cancelled
-  // applies a result.
-  ownsCard: () => boolean;
-  // Provider work that may outlive the run's cancellation; the run's slot is
+  // The card as it is now, for reading; throws CancelledError once this run no
+  // longer owns it (a cancel or a newer run took it) or was cancelled.
+  current: () => MumblerCard;
+  // Reports a result: the queue applies it to the card and saves it in its
+  // turn, only while this run still owns the card and was not cancelled;
+  // otherwise it throws CancelledError and nothing changes.
+  update: (change: (card: MumblerCard) => void) => Promise<void>;
+  // Reports how the run ended: applied while this run still owns the card,
+  // even after cancellation, and dropped once another took it.
+  settle: (change: (card: MumblerCard) => void) => Promise<void>;
+  // Provider work that may outlive the run's cancellation; the run's place is
   // held until it settles.
   trackWork: (work: Promise<unknown>) => void;
-  runMetadataCall: <T>(operation: () => Promise<T>) => Promise<T>;
 }
 
 export type PipelineMode = "generate";
 export type PipelineStartStep = Exclude<CardProcessingStep, null>;
+
+// The card's status while this run works on `step`, cleared of results from
+// that step on.
+function enterStep(card: MumblerCard, step: PipelineStartStep): void {
+  if (clearCardResultsFromStep(card, step)) card.updatedAtUtc = Date.now();
+  card.status = step === "transcription" ? "Transcribing" : "Generating Metadata";
+  card.activeStep = step;
+  card.queuedMode = null;
+  card.queuedAtUtc = null;
+  card.lastError = null;
+}
 
 export async function executeCardPipeline(
   cardId: string,
@@ -63,67 +71,46 @@ export async function executeCardPipeline(
   mode: PipelineMode,
   ctx: CardPipelineContext,
 ): Promise<void> {
-  const state = ctx.state;
   const settings = ctx.settings;
   const logger = ctx.logger;
-  const started = state.cards.find((entry) => entry.id === cardId);
-  if (started === undefined) {
-    throw new Error("Card to process does not exist.");
-  }
-  // The card as it is now, for this run to read or write: looked up by id each
-  // time, because a cancel replaces the card object, and refused once the run no
-  // longer owns it or was cancelled, so a late provider result can never land in
-  // the card a cancel or a newer run took over. Checked and written without an
-  // await in between.
-  const live = (): MumblerCard => {
-    const current = state.cards.find((entry) => entry.id === cardId);
-    if (current === undefined || !ctx.ownsCard()) throw new CancelledError();
-    throwIfCancelled(ctx.signal);
-    return current;
-  };
-  // What the run transcribes from, fixed when it starts, so a trim changed
-  // mid-run never passes for the one the transcript was cut from.
-  const runTrim = { ...started.trim };
-  let runTrimDecision = started.trimDecision === null ? null : { ...started.trimDecision };
-  const sourceFilePath = started.sourceFilePath;
-  const durationSec = started.durationSec;
-  const audioProfile = started.audioProfile;
   const apiKey = ctx.apiKey;
-
-  await logger.info("pipeline.start", "Starting card pipeline.", {
-    cardId,
-    mode,
-    startStep,
-  });
   let activeStep: PipelineStartStep = startStep;
 
-  started.queuedMode = null;
-  started.queuedAtUtc = null;
-
   try {
-    throwIfCancelled(ctx.signal);
+    // What the run transcribes from, fixed when it starts, so a trim changed
+    // mid-run never passes for the one the transcript was cut from.
+    const started = ctx.current();
+    const runTrim = { ...started.trim };
+    let runTrimDecision = started.trimDecision === null ? null : { ...started.trimDecision };
+    const sourceFilePath = started.sourceFilePath;
+    const durationSec = started.durationSec;
+    const audioProfile = started.audioProfile;
+
+    await logger.info("pipeline.start", "Starting card pipeline.", {
+      cardId,
+      mode,
+      startStep,
+    });
     if (apiKey.length === 0) {
       throw new Error("Gemini API key is not configured.");
     }
 
     if (startStep === "transcription") {
-      const clearing = live();
-      if (clearCardResultsFromStep(clearing, "transcription")) {
-        clearing.updatedAtUtc = Date.now();
-      }
-      await setCardStepState(live, "Transcribing", "transcription", ctx);
+      await ctx.update((card) => enterStep(card, "transcription"));
 
       let trimDecision = runTrimDecision;
       if (trimDecision === null) {
-        trimDecision = await analyzeTrimDecision(sourceFilePath, runTrim, durationSec, ctx.signal);
-        runTrimDecision = trimDecision;
-        live().trimDecision = { ...trimDecision };
-        await ctx.persistState();
+        const analyzed = await analyzeTrimDecision(sourceFilePath, runTrim, durationSec, ctx.signal);
+        trimDecision = analyzed;
+        runTrimDecision = analyzed;
+        await ctx.update((card) => { card.trimDecision = { ...analyzed }; });
       }
 
-      // The signal the Gemini call already honours now reaches the audio
-      // stage too: it was the one await in this pipeline that ignored Cancel,
-      // so a stop left ffmpeg running and the promise unsettled.
+      // The signal the Gemini call honours reaches the audio stage too, so a
+      // stop also ends ffmpeg. Preparation runs inside the run's place: one
+      // preparation keeps one core busy (measured: trimming and re-encoding an
+      // hour of stereo audio to AAC or MP3 used CPU time about equal to its wall
+      // time, on a ten-core Mac), so several side by side use otherwise idle cores.
       const preparedAudio = await prepareAudioForTranscription({
         sourceFilePath,
         workingDir: ctx.paths.workingDir,
@@ -173,24 +160,25 @@ export async function executeCardPipeline(
         // The transcript is the largest stored body and was previously kept RAW.
         // Trim per-line trailing whitespace and drop edge blank lines, but keep
         // interior blank runs — they are deliberate paragraph breaks in speech.
-        const transcribed = live();
-        transcribed.transcription = {
-          text: multiline(transcriptionResult.text, {
-            trimLineEnds: true,
-            dropEdgeBlankLines: true,
-            collapseBlankLines: false,
-          }),
-        };
-        transcribed.ai = {
-          ...transcribed.ai,
-          transcription: {
-            provider: "gemini",
-            model: transcriptionResult.modelVersion ?? settings["gemini.transcription"],
-            generatedAtUtc: Date.now(),
-          },
-        };
-        transcribed.transcribedTrim = { ...runTrim };
-        transcribed.updatedAtUtc = Date.now();
+        await ctx.update((transcribed) => {
+          transcribed.transcription = {
+            text: multiline(transcriptionResult.text, {
+              trimLineEnds: true,
+              dropEdgeBlankLines: true,
+              collapseBlankLines: false,
+            }),
+          };
+          transcribed.ai = {
+            ...transcribed.ai,
+            transcription: {
+              provider: "gemini",
+              model: transcriptionResult.modelVersion ?? settings["gemini.transcription"],
+              generatedAtUtc: Date.now(),
+            },
+          };
+          transcribed.transcribedTrim = { ...runTrim };
+          transcribed.updatedAtUtc = Date.now();
+        });
 
         await logger.info("pipeline.transcription-complete", "Completed Gemini transcription.", {
           cardId,
@@ -202,21 +190,13 @@ export async function executeCardPipeline(
         await cleanupPreparedAudio(preparedAudio, logger);
       }
 
-      // Release the concurrency slot the moment transcription is done so other
-      // queued transcriptions can start while this card continues with metadata.
-      await ctx.releaseTranscriptionSlot();
-
       activeStep = "structured";
     }
 
     if (activeStep === "structured") {
-      const clearing = live();
-      if (clearCardResultsFromStep(clearing, "structured")) {
-        clearing.updatedAtUtc = Date.now();
-      }
-      await setCardStepState(live, "Generating Metadata", "structured", ctx);
+      await ctx.update((card) => enterStep(card, "structured"));
       const structuredPrompt = renderPromptTemplate(settings.prompts.structured, {
-        transcript: live().transcription.text ?? "",
+        transcript: ctx.current().transcription.text ?? "",
         structured: "",
         title: "",
       });
@@ -240,25 +220,25 @@ export async function executeCardPipeline(
       // Structured output is a multi-line Markdown outline. A scalar .trim() here
       // would eat the first content line's indentation and leave interior trailing
       // whitespace, so clean it as a multiline body instead.
-      const outlined = live();
-      outlined.metadata = {
-        ...outlined.metadata,
-        structured: multiline(structuredResult.text, {
-          trimLineEnds: true,
-          dropEdgeBlankLines: true,
-          collapseBlankLines: false,
-        }),
-      };
-      outlined.ai = {
-        ...outlined.ai,
-        structured: {
-          provider: "gemini",
-          model: structuredResult.modelVersion ?? settings["gemini.outline"],
-          generatedAtUtc: Date.now(),
-        },
-      };
-      outlined.updatedAtUtc = Date.now();
-      await ctx.persistState();
+      await ctx.update((outlined) => {
+        outlined.metadata = {
+          ...outlined.metadata,
+          structured: multiline(structuredResult.text, {
+            trimLineEnds: true,
+            dropEdgeBlankLines: true,
+            collapseBlankLines: false,
+          }),
+        };
+        outlined.ai = {
+          ...outlined.ai,
+          structured: {
+            provider: "gemini",
+            model: structuredResult.modelVersion ?? settings["gemini.outline"],
+            generatedAtUtc: Date.now(),
+          },
+        };
+        outlined.updatedAtUtc = Date.now();
+      });
       await logger.info("pipeline.structured-complete", "Generated structured outline.", {
         cardId,
         modelVersion: structuredResult.modelVersion,
@@ -269,12 +249,8 @@ export async function executeCardPipeline(
     }
 
     if (activeStep === "title") {
-      const clearing = live();
-      if (clearCardResultsFromStep(clearing, "title")) {
-        clearing.updatedAtUtc = Date.now();
-      }
-      await setCardStepState(live, "Generating Metadata", "title", ctx);
-      const titleInput = live();
+      await ctx.update((card) => enterStep(card, "title"));
+      const titleInput = ctx.current();
       const titlePrompt = renderPromptTemplate(settings.prompts.title, {
         transcript: titleInput.transcription.text ?? "",
         structured: titleInput.metadata.structured ?? "",
@@ -298,18 +274,18 @@ export async function executeCardPipeline(
           }),
       }, ctx);
 
-      const titled = live();
-      titled.metadata = { ...titled.metadata, title: sanitizeTitle(titleResult.text) };
-      titled.ai = {
-        ...titled.ai,
-        title: {
-          provider: "gemini",
-          model: titleResult.modelVersion ?? settings["gemini.metadata"],
-          generatedAtUtc: Date.now(),
-        },
-      };
-      titled.updatedAtUtc = Date.now();
-      await ctx.persistState();
+      await ctx.update((titled) => {
+        titled.metadata = { ...titled.metadata, title: sanitizeTitle(titleResult.text) };
+        titled.ai = {
+          ...titled.ai,
+          title: {
+            provider: "gemini",
+            model: titleResult.modelVersion ?? settings["gemini.metadata"],
+            generatedAtUtc: Date.now(),
+          },
+        };
+        titled.updatedAtUtc = Date.now();
+      });
       await logger.info("pipeline.title-complete", "Generated title metadata.", {
         cardId,
         modelVersion: titleResult.modelVersion,
@@ -320,12 +296,8 @@ export async function executeCardPipeline(
     }
 
     if (activeStep === "slug") {
-      const clearing = live();
-      if (clearCardResultsFromStep(clearing, "slug")) {
-        clearing.updatedAtUtc = Date.now();
-      }
-      await setCardStepState(live, "Generating Metadata", "slug", ctx);
-      const slugInput = live();
+      await ctx.update((card) => enterStep(card, "slug"));
+      const slugInput = ctx.current();
       const slugPrompt = renderPromptTemplate(settings.prompts.slug, {
         transcript: slugInput.transcription.text ?? "",
         structured: slugInput.metadata.structured ?? "",
@@ -353,22 +325,21 @@ export async function executeCardPipeline(
       if (slug.length === 0) {
         throw new Error("Generated slug was empty after sanitization.");
       }
-      const finished = live();
-      finished.metadata = { ...finished.metadata, slug };
-      finished.ai = {
-        ...finished.ai,
-        slug: {
-          provider: "gemini",
-          model: slugResult.modelVersion ?? settings["gemini.metadata"],
-          generatedAtUtc: Date.now(),
-        },
-      };
-      finished.status = "Ready to Save";
-      finished.activeStep = null;
-      finished.lastError = null;
-      finished.updatedAtUtc = Date.now();
-
-      await ctx.persistState();
+      await ctx.update((finished) => {
+        finished.metadata = { ...finished.metadata, slug };
+        finished.ai = {
+          ...finished.ai,
+          slug: {
+            provider: "gemini",
+            model: slugResult.modelVersion ?? settings["gemini.metadata"],
+            generatedAtUtc: Date.now(),
+          },
+        };
+        finished.status = "Ready to Save";
+        finished.activeStep = null;
+        finished.lastError = null;
+        finished.updatedAtUtc = Date.now();
+      });
       await logger.info("pipeline.slug-complete", "Generated slug metadata.", {
         cardId,
         modelVersion: slugResult.modelVersion,
@@ -379,8 +350,7 @@ export async function executeCardPipeline(
     const wasCancelled = isCancelledError(error);
     const status = wasCancelled ? "Cancelled" : "Error";
     // A run that lost its card leaves it to whatever took it over.
-    const card = state.cards.find((entry) => entry.id === cardId);
-    if (card !== undefined && ctx.ownsCard()) {
+    await ctx.settle((card) => {
       card.status = status;
       card.activeStep = null;
       card.queuedMode = null;
@@ -393,21 +363,8 @@ export async function executeCardPipeline(
         occurredAtUtc: Date.now(),
         failedStep: activeStep,
       };
-      await ctx.persistState();
-    }
+    });
     await logPipelineFailure(logger, error, cardId, activeStep, status);
-  } finally {
-    // Always release on the way out. Idempotent: a no-op if transcription already
-    // released the slot above; otherwise it frees the slot still held by a run
-    // that failed or was cancelled before transcription completed.
-    try {
-      await ctx.releaseTranscriptionSlot();
-    } catch (drainError: unknown) {
-      await logger.warn("pipeline.drain-failed", "Failed to drain queued cards after slot release.", {
-        cardId,
-        error: drainError instanceof Error ? drainError.message : String(drainError),
-      });
-    }
   }
 }
 
@@ -432,19 +389,6 @@ async function logPipelineFailure(
     failedStep: activeStep,
     status,
   });
-}
-
-async function setCardStepState(
-  live: () => MumblerCard,
-  status: Extract<MumblerCard["status"], "Transcribing" | "Generating Metadata">,
-  step: Exclude<CardProcessingStep, null>,
-  ctx: CardPipelineContext,
-): Promise<void> {
-  const card = live();
-  card.status = status;
-  card.activeStep = step;
-  card.lastError = null;
-  await ctx.persistState();
 }
 
 // How long one call may take: a transcription carries a whole recording and
@@ -476,7 +420,7 @@ async function executeWithRetry<T>(params: {
       const callAttempt = attempt;
       const execute = () => params.execute((call) =>
         logger.providerCall({ ...call, cardId: params.cardId, step: params.step, attempt: callAttempt }));
-      return await (params.step === "transcription" ? execute() : ctx.runMetadataCall(execute));
+      return await execute();
     } catch (error: unknown) {
       const retryable = isRetryableGeminiError(error);
       const exhausted = attempt >= GEMINI_ATTEMPTS;

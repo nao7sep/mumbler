@@ -1,6 +1,6 @@
 import type { MumblerCard } from "@shared/app-shell";
 
-// A single occupied transcription concurrency slot. Each acquisition gets its own
+// A single occupied place under Concurrent transcriptions. Each acquisition gets its own
 // handle whose release() is idempotent and affects only that handle.
 export interface TranscriptionSlot {
   /** Release this slot back to the pool. Only the first call frees a slot. */
@@ -9,7 +9,7 @@ export interface TranscriptionSlot {
   readonly held: boolean;
 }
 
-// Caps how many transcription jobs run at once. Ownership is per-acquisition, not
+// Counts the places runs hold under Concurrent transcriptions. Ownership is per-acquisition, not
 // per-card: acquire() hands back an independent handle, so a detached or cancelled
 // pipeline releasing its own slot can never free the slot a *replacement* pipeline
 // holds — even when both are for the same card. The pool only counts occupied
@@ -40,32 +40,18 @@ export class TranscriptionSlotPool {
   }
 }
 
-// Picks the earliest-queued card eligible to start, skipping any card that already
-// has an active pipeline run. The skip is what lets one drain pass fill several
-// free slots at once: a card's status flips from "Queued" to "Transcribing" only
-// asynchronously, inside its pipeline, so without this exclusion the loop would
-// re-select a card it just spawned and start it twice (or spin).
-export function selectNextQueuedCard(
-  cards: MumblerCard[],
-  activeCardIds: ReadonlySet<string>,
-): MumblerCard | null {
+// Picks the earliest-queued card. A started card leaves Queued in the same
+// command that starts it, so a drain never selects it twice.
+export function selectNextQueuedCard(cards: MumblerCard[]): MumblerCard | null {
   let earliest: MumblerCard | null = null;
   let earliestQueuedAt = Number.POSITIVE_INFINITY;
 
   for (const card of cards) {
-    if (
-      card.status !== "Queued" ||
-      card.queuedMode === null ||
-      card.queuedAtUtc === null ||
-      activeCardIds.has(card.id)
-    ) {
+    if (card.status !== "Queued" || card.queuedMode === null || card.queuedAtUtc === null) {
       continue;
     }
 
-    // Strict `<` keeps the first-seen card on a queuedAtUtc tie, matching the
-    // stable ordering of the previous sort-based selection. The card's
-    // queuedAtUtc is a plain number here (the guard above excluded null), so the
-    // comparison needs no fallback.
+    // Strict `<` keeps the first-seen card on a queuedAtUtc tie.
     if (card.queuedAtUtc < earliestQueuedAt) {
       earliest = card;
       earliestQueuedAt = card.queuedAtUtc;

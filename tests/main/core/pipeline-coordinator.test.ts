@@ -1,46 +1,58 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MumblerCard, MumblerQueue } from "@shared/app-shell";
 import type { AppLogger } from "@main/core/logger";
 
-// The coordinator spawns executeCardPipeline fire-and-forget; stub it with a
-// per-card deferred so a test can hold a "pipeline" running and settle it when
-// it chooses. Everything else in card-pipeline stays real (types only here).
-const pipelineDeferreds = new Map<string, { resolve: () => void; promise: Promise<void> }>();
+// The coordinator starts executeCardPipeline without awaiting it; the stub
+// holds each run until the test ends it or the run is aborted, and announces
+// that it started, so a test waits for the start it expects.
+interface StubRun { started: Promise<void>; markStarted(): void; end(): void; ended: Promise<void> }
+const runs = new Map<string, StubRun[]>();
 // Provider work a stubbed run hands to the coordinator, as an upload the SDK
 // cannot abort is.
 const untrackedWork = new Map<string, Promise<unknown>>();
-const metadataWork = new Map<string, { promise: Promise<void>; resolve(): void }>();
-const metadataStarted: string[] = [];
+
+function deferred(): { promise: Promise<void>; resolve(): void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+function stubRun(cardId: string, index = 0): StubRun {
+  const list = runs.get(cardId) ?? [];
+  runs.set(cardId, list);
+  while (list.length <= index) {
+    const started = deferred();
+    const ended = deferred();
+    list.push({ started: started.promise, markStarted: started.resolve, end: ended.resolve, ended: ended.promise });
+  }
+  return list[index]!;
+}
+
+const startCounts = new Map<string, number>();
 vi.mock("@main/core/card-pipeline", async (importOriginal) => {
   const original = await importOriginal<typeof import("@main/core/card-pipeline")>();
   return {
     ...original,
     executeCardPipeline: vi.fn(async (cardId: string, _step, _mode, ctx: import("@main/core/card-pipeline").CardPipelineContext) => {
-      const metadata = metadataWork.get(cardId);
-      if (metadata !== undefined) {
-        await ctx.runMetadataCall(() => { metadataStarted.push(cardId); return metadata.promise; });
-        return;
-      }
-      let resolve!: () => void;
-      const promise = new Promise<void>((r) => {
-        resolve = r;
-      });
-      pipelineDeferreds.set(cardId, { resolve, promise });
+      const index = startCounts.get(cardId) ?? 0;
+      startCounts.set(cardId, index + 1);
+      const run = stubRun(cardId, index);
       const work = untrackedWork.get(cardId);
       if (work !== undefined) ctx.trackWork(work);
-      ctx.signal.addEventListener("abort", resolve, { once: true });
-      if (ctx.signal.aborted) resolve();
-      try {
-        await promise;
-      } finally {
-        ctx.signal.removeEventListener("abort", resolve);
-      }
+      run.markStarted();
+      const aborted = new Promise<void>((resolve) => {
+        if (ctx.signal.aborted) resolve();
+        ctx.signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      await Promise.race([run.ended, aborted]);
+      await ctx.settle((card) => { card.status = ctx.signal.aborted ? "Cancelled" : "Ready to Save"; card.activeStep = null; });
     }),
   };
 });
 
 const { PipelineCoordinator } = await import("@main/core/pipeline-coordinator");
+const { executeCardPipeline } = await import("@main/core/card-pipeline");
 const { createDefaultSettings, createEmptyQueue } = await import("@main/core/settings-schema");
 const { OperationError } = await import("@main/core/operation-error");
 
@@ -86,530 +98,140 @@ function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
   };
 }
 
-// A settled pipeline finalizes on a microtask; flush enough turns for the
-// finally → finalize → drain chain to complete.
-async function settle(cardId: string): Promise<void> {
-  pipelineDeferreds.get(cardId)?.resolve();
-  for (let i = 0; i < 10; i += 1) {
-    await Promise.resolve();
-  }
-}
-
-const coordinators = new Set<InstanceType<typeof PipelineCoordinator>>();
-
+// The coordinator with the runtime's queue owner reduced to its one rule:
+// commands run one at a time, in order.
 function harness(cards: MumblerCard[], concurrencyLimit = 1) {
   const state: MumblerQueue = { ...createEmptyQueue(), cards };
   const settings = { ...createDefaultSettings(), concurrencyLimit };
   const persistState = vi.fn(async () => {});
   const resolveApiKey = vi.fn(async (): Promise<string | null> => "test-key");
+  let tail: Promise<void> = Promise.resolve();
+  const command = <T,>(work: () => Promise<T>): Promise<T> => {
+    const run = tail.then(work);
+    tail = run.then(() => undefined, () => undefined);
+    return run;
+  };
   const coordinator = new PipelineCoordinator(
     { state, settings, paths: null, logger: noopLogger },
-    { persistState, resolveApiKey },
+    { persistState, resolveApiKey, command },
   );
-  coordinators.add(coordinator);
-  return { state, coordinator, persistState, resolveApiKey };
+  const card = (id: string): MumblerCard => state.cards.find((entry) => entry.id === id)!;
+  const start = (id: string, step: "transcription" | "structured" | "title" | "slug" = "transcription") =>
+    command(() => coordinator.startOrEnqueue(id, "generate", step));
+  return { state, settings, coordinator, persistState, resolveApiKey, command, card, start };
 }
 
 beforeEach(() => {
-  pipelineDeferreds.clear();
-  metadataWork.clear();
-  metadataStarted.length = 0;
+  runs.clear();
+  startCounts.clear();
+  untrackedWork.clear();
+  vi.mocked(executeCardPipeline).mockClear();
 });
 
-afterEach(async () => {
-  const shutdowns = [...coordinators].map((coordinator) => coordinator.shutdown());
-  for (const deferred of pipelineDeferreds.values()) deferred.resolve();
-  for (const deferred of metadataWork.values()) deferred.resolve();
-  await Promise.all(shutdowns);
-  coordinators.clear();
-  pipelineDeferreds.clear();
-});
+describe("PipelineCoordinator", () => {
+  it("runs up to Concurrent transcriptions and queues the rest, metadata-only starts included", async () => {
+    const h = harness([makeCard({ id: "a" }), makeCard({ id: "b" }), makeCard({ id: "c" })], 2);
+    await h.start("a");
+    await h.start("b", "title");
+    await h.start("c", "structured");
 
-describe("PipelineCoordinator.startOrEnqueue", () => {
-  it("bounds metadata separately from transcription and retains issued capacity after cancel", async () => {
-    for (const id of ["a", "b", "c"]) {
-      let resolve!: () => void;
-      const promise = new Promise<void>((done) => { resolve = done; });
-      metadataWork.set(id, { promise, resolve });
-    }
-    const { coordinator } = harness(["a", "b", "c", "transcribing"].map((id) => makeCard({ id })), 1);
-    for (const id of ["a", "b", "c"]) await coordinator.startOrEnqueue(id, "generate", "title");
-    await coordinator.startOrEnqueue("transcribing", "generate", "transcription");
-    await vi.waitFor(() => expect(metadataStarted).toEqual(["a"]));
-    expect(pipelineDeferreds.has("transcribing")).toBe(true);
-    expect(coordinator.detachAndAbort("b")).toBe(true);
-    expect(coordinator.detachAndAbort("a")).toBe(true);
-    await Promise.resolve();
-    expect(metadataStarted).toEqual(["a"]);
-    metadataWork.get("a")!.resolve();
-    await vi.waitFor(() => expect(metadataStarted).toEqual(["a", "c"]));
-    metadataWork.get("c")!.resolve();
-    await settle("transcribing");
+    expect([h.card("a").status, h.card("b").status, h.card("c").status]).toEqual(["Transcribing", "Generating Metadata", "Queued"]);
+    expect(h.card("c").activeStep, "a queued card keeps the step it starts from").toBe("structured");
+    expect(executeCardPipeline).toHaveBeenCalledTimes(2);
   });
 
-  it("starts immediately when a transcription slot is free", async () => {
-    const card = makeCard({ id: "a" });
-    const { coordinator, persistState } = harness([card]);
+  it("saves a start's status before its run exists, and a failed save starts nothing and restores the card", async () => {
+    const h = harness([makeCard({ id: "a", status: "Error" })]);
+    const failure = new Error("disk full");
+    h.persistState.mockRejectedValueOnce(failure);
 
-    await coordinator.startOrEnqueue("a", "generate", "transcription");
+    await expect(h.start("a")).rejects.toBe(failure);
 
-    expect(card.status).toBe("Transcribing");
-    expect(card.activeStep).toBe("transcription");
-    expect(coordinator.hasRun("a")).toBe(true);
-    expect(persistState).toHaveBeenCalled();
+    expect(h.card("a").status).toBe("Error");
+    expect(h.card("a").activeStep).toBeNull();
+    expect(executeCardPipeline).not.toHaveBeenCalled();
+    expect(h.coordinator.hasRun("a")).toBe(false);
   });
 
-  it("queues the card when every slot is taken", async () => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b" });
-    const { coordinator } = harness([first, second], 1);
+  it("keeps a run's place through its outline, title and slug, then starts the earliest queued card", async () => {
+    const h = harness([makeCard({ id: "a" }), makeCard({ id: "late" }), makeCard({ id: "early" })]);
+    await h.start("a", "structured");
+    await h.command(() => h.coordinator.startOrEnqueue("early", "generate", "transcription"));
+    h.card("early").queuedAtUtc = 1;
+    await h.start("late");
+    h.card("late").queuedAtUtc = 2;
 
-    await coordinator.startOrEnqueue("a", "generate", "transcription");
-    await coordinator.startOrEnqueue("b", "generate", "transcription");
+    stubRun("a").end();
+    await stubRun("early").started;
 
-    expect(second.status).toBe("Queued");
-    expect(second.queuedMode).toBe("generate");
-    expect(second.updatedAtUtc, "queueing is not a content edit").toBe(1);
-    expect(coordinator.hasRun("b")).toBe(false);
+    expect(h.card("early").status).toBe("Transcribing");
+    expect(h.card("late").status).toBe("Queued");
+    expect(h.card("a").status).toBe("Ready to Save");
   });
 
-  it("starts a metadata-only step without taking a transcription slot", async () => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b" });
-    const { coordinator } = harness([first, second], 1);
+  it("leaves queued cards queued when saving their start fails", async () => {
+    const h = harness([makeCard({ id: "b", status: "Queued", activeStep: "transcription", queuedMode: "generate", queuedAtUtc: 1 })]);
+    h.persistState.mockRejectedValueOnce(new Error("disk full"));
 
-    await coordinator.startOrEnqueue("a", "generate", "transcription");
-    // The lone slot is held by "a", yet a structured-only run needs none.
-    await coordinator.startOrEnqueue("b", "generate", "structured");
+    await h.command(() => h.coordinator.drainQueued());
 
-    expect(second.status).toBe("Generating Metadata");
-    expect(coordinator.hasRun("b")).toBe(true);
+    expect(h.card("b")).toMatchObject({ status: "Queued", queuedMode: "generate", queuedAtUtc: 1 });
+    expect(executeCardPipeline).not.toHaveBeenCalled();
+    await h.command(() => h.coordinator.drainQueued());
+    await stubRun("b").started;
+    expect(h.card("b").status).toBe("Transcribing");
   });
 
-  it.each(["success", "failure"] as const)("holds queued admission until its initial publication settles with %s", async (outcome) => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b" });
-    const { coordinator, persistState } = harness([first, second], 1);
-    await coordinator.startOrEnqueue("a", "generate");
-    let release!: () => void;
-    let refuse!: (error: Error) => void;
-    const held = new Promise<void>((resolve, reject) => { release = resolve; refuse = reject; });
-    persistState.mockReturnValueOnce(held);
-    const failure = new Error("queue publication refused");
-    const pending = coordinator.startOrEnqueue("b", "generate");
-    const result = pending.catch((error: unknown) => error);
-    try {
-      await settle("a");
-      expect(coordinator.hasRun("b"), "uncommitted Generate cannot use a freed slot").toBe(false);
-      expect(pipelineDeferreds.has("b")).toBe(false);
-      if (outcome === "success") release();
-      else refuse(failure);
-      expect(await result).toBe(outcome === "failure" ? failure : undefined);
-      expect(coordinator.hasRun("b")).toBe(outcome === "success");
-      if (outcome === "failure") {
-        expect(second).toMatchObject({ status: "Imported", queuedMode: null, queuedAtUtc: null });
-        await coordinator.drainQueued();
-        expect(pipelineDeferreds.has("b")).toBe(false);
-      }
-    } finally {
-      release();
-      await result;
-    }
+  it("refuses a busy card and a missing one", async () => {
+    const h = harness([makeCard({ id: "a", status: "Saving" })]);
+    await expect(h.start("a")).rejects.toThrow(OperationError);
+    await expect(h.start("missing")).rejects.toThrow("does not exist");
   });
 
-  it("does not revive a rejected queued request when capacity later becomes free", async () => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b", status: "Cancelled" });
-    const { coordinator, persistState } = harness([first, second], 1);
-    await coordinator.startOrEnqueue("a", "generate");
-    const failure = new Error("queue publication refused");
-    persistState.mockRejectedValueOnce(failure);
-    await expect(coordinator.startOrEnqueue("b", "generate")).rejects.toBe(failure);
-    await settle("a");
-    expect(second.status).toBe("Cancelled");
-    expect(pipelineDeferreds.has("b")).toBe(false);
+  it("detaches a cancelled run at once, keeping its place until its upload settles", async () => {
+    const upload = deferred();
+    untrackedWork.set("a", upload.promise);
+    const h = harness([makeCard({ id: "a" }), makeCard({ id: "b" })]);
+    await h.start("a");
+    await stubRun("a").started;
+
+    expect(h.coordinator.detachAndAbort("a")).toBe(true);
+    h.card("a").status = "Cancelled";
+    expect(h.coordinator.hasRun("a")).toBe(false);
+    await h.start("a");
+    expect(h.card("a").status, "the upload still holds the only place").toBe("Queued");
+    expect(h.card("a").activeStep).toBe("transcription");
+
+    upload.resolve();
+    await stubRun("a", 1).started;
+    expect(h.card("a").status).toBe("Transcribing");
   });
 
-  it("retains a replacement's cancelled state when a queued publication fails", async () => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b" });
-    const { state, coordinator, persistState } = harness([first, second], 1);
-    await coordinator.startOrEnqueue("a", "generate");
-    let refuse!: (error: Error) => void;
-    const held = new Promise<void>((_resolve, reject) => { refuse = reject; });
-    persistState.mockReturnValueOnce(held);
-    const failure = new Error("queue publication refused");
-    const pending = coordinator.startOrEnqueue("b", "generate").catch((error: unknown) => error);
-    const replacement = { ...second, status: "Cancelled" as const, queuedMode: null, queuedAtUtc: null };
-    state.cards[1] = replacement;
-    refuse(failure);
-    expect(await pending).toBe(failure);
-    await settle("a");
-    expect(state.cards[1]).toBe(replacement);
-    expect(pipelineDeferreds.has("b")).toBe(false);
+  it("drops what a detached run reports", async () => {
+    const h = harness([makeCard({ id: "a" })]);
+    await h.start("a");
+    await stubRun("a").started;
+    h.coordinator.detachAndAbort("a");
+    h.card("a").status = "Cancelled";
+    await h.command(async () => undefined);
+    await h.command(async () => undefined);
+    expect(h.card("a").status).toBe("Cancelled");
   });
 
-  it("an old recovery cannot release a newer queued claim on the same card", async () => {
-    const { coordinator, persistState } = harness([makeCard({ id: "a" }), makeCard({ id: "b" })], 1);
-    await coordinator.startOrEnqueue("a", "generate");
-    let recoveryEntered!: () => void;
-    const entered = new Promise<void>((resolve) => { recoveryEntered = resolve; });
-    let releaseRecovery!: () => void;
-    let publishNew!: () => void;
-    const recovery = new Promise<void>((resolve) => { releaseRecovery = resolve; });
-    const newPublication = new Promise<void>((resolve) => { publishNew = resolve; });
-    const failure = new Error("old queue write failed");
-    persistState.mockRejectedValueOnce(failure).mockImplementationOnce(async () => { recoveryEntered(); await recovery; });
-    const old = coordinator.startOrEnqueue("b", "generate").catch((error: unknown) => error);
-    let replacement: Promise<void> | undefined;
-    try {
-      await entered;
-      persistState.mockReturnValueOnce(newPublication);
-      replacement = coordinator.startOrEnqueue("b", "generate");
-      releaseRecovery();
-      expect(await old).toBe(failure);
-      await settle("a");
-      expect(coordinator.hasRun("b"), "the new intent still awaits its own write").toBe(false);
-      publishNew();
-      await replacement;
-      expect(coordinator.hasRun("b")).toBe(true);
-    } finally {
-      releaseRecovery(); publishNew();
-      await Promise.allSettled([old, ...(replacement ? [replacement] : [])]);
-    }
-  });
+  it("stops every run at quit, admits nothing more, and starts queued cards again on resume", async () => {
+    const h = harness([makeCard({ id: "a" }), makeCard({ id: "b" })]);
+    await h.start("a");
+    await h.start("b");
+    await stubRun("a").started;
 
-  it("refuses a busy card and a missing card", async () => {
-    const busy = makeCard({ id: "a", status: "Queued", queuedMode: "generate", queuedAtUtc: 1 });
-    const { coordinator } = harness([busy]);
+    const stopped = await h.command(async () => h.coordinator.stop());
+    await stopped.settled;
+    expect(h.card("a").status).toBe("Cancelled");
+    expect(h.card("b").status, "a queued card stays queued for the next launch").toBe("Queued");
+    await expect(h.start("a")).rejects.toThrow("closing");
 
-    await expect(coordinator.startOrEnqueue("a", "generate")).rejects.toThrow(OperationError);
-    await expect(coordinator.startOrEnqueue("missing", "generate")).rejects.toThrow(
-      "Card to process does not exist.",
-    );
-  });
-
-  it("claims the card before its first await, so nothing can slip in between check and claim", async () => {
-    const card = makeCard({ id: "a" });
-    const { coordinator } = harness([card]);
-
-    const start = coordinator.startOrEnqueue("a", "generate", "transcription");
-    try {
-      expect(card.status).toBe("Transcribing");
-      expect(() => coordinator.assertCardCanStart(card)).toThrow(OperationError);
-    } finally {
-      await start;
-    }
-  });
-
-  it.each(["transcription", "structured"] as const)("settles a failed %s prestart claim without launching it", async (step) => {
-    const first = makeCard({ id: "a", status: "Cancelled" });
-    const second = makeCard({ id: "b" });
-    const { coordinator, persistState } = harness([first, second], 1);
-    const failure = new Error("prestart save failed");
-    persistState.mockRejectedValueOnce(failure);
-    await expect(coordinator.startOrEnqueue("a", "generate", step)).rejects.toBe(failure);
-    expect(first).toMatchObject({ status: "Cancelled", activeStep: null, queuedMode: null, queuedAtUtc: null });
-    expect(first.updatedAtUtc).toBe(1);
-    expect(coordinator.hasRun("a")).toBe(false);
-    expect(pipelineDeferreds.has("a")).toBe(false);
-    await coordinator.startOrEnqueue("b", "generate", "transcription");
-    expect(coordinator.hasRun("b")).toBe(true);
-    expect(second.status).toBe("Transcribing");
-    await coordinator.startOrEnqueue("a", "generate", step);
-    expect(first.status).toBe(step === "transcription" ? "Queued" : "Generating Metadata");
-  });
-
-  it("retains the initial save failure when persisting the settled state also fails", async () => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b" });
-    const { coordinator, persistState } = harness([first, second], 1);
-    const initial = new Error("initial save failed");
-    const recovery = new Error("settled save failed");
-    persistState.mockRejectedValueOnce(initial).mockRejectedValueOnce(recovery);
-    const diagnostic = vi.spyOn(noopLogger, "error");
-    try {
-      await expect(coordinator.startOrEnqueue("a", "generate", "transcription")).rejects.toBe(initial);
-      expect(first.status).toBe("Imported");
-      expect(diagnostic).toHaveBeenCalledWith(
-        "pipeline.prestart-recovery-failed",
-        expect.any(String), recovery, { cardId: "a", startStep: "transcription" },
-      );
-      await coordinator.startOrEnqueue("b", "generate", "transcription");
-      expect(coordinator.hasRun("b")).toBe(true);
-    } finally {
-      diagnostic.mockRestore();
-    }
-  });
-
-  it("releases a failed prestart slot and admits a card queued during its save", async () => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b" });
-    const { coordinator, persistState } = harness([first, second], 1);
-    let reject!: (error: Error) => void;
-    const held = new Promise<void>((_resolve, fail) => { reject = fail; });
-    persistState.mockReturnValueOnce(held);
-    const pending = coordinator.startOrEnqueue("a", "generate", "transcription");
-    const failure = new Error("held prestart failed");
-    const rejected = expect(pending).rejects.toBe(failure);
-    try {
-      await coordinator.startOrEnqueue("b", "generate", "transcription");
-      expect(second.status).toBe("Queued");
-      reject(failure);
-      await rejected;
-      expect(first.status).toBe("Imported");
-      expect(coordinator.hasRun("a")).toBe(false);
-      expect(coordinator.hasRun("b")).toBe(true);
-    } finally {
-      reject(failure);
-      await Promise.allSettled([pending, rejected]);
-    }
-  });
-
-  it("does not restore a failed prestart claim over a replacement card", async () => {
-    const first = makeCard({ id: "a" });
-    const { state, coordinator, persistState } = harness([first]);
-    let reject!: (error: Error) => void;
-    const held = new Promise<void>((_resolve, fail) => { reject = fail; });
-    persistState.mockReturnValueOnce(held);
-    const pending = coordinator.startOrEnqueue("a", "generate", "transcription");
-    const failure = new Error("prestart failed after replacement");
-    const rejected = expect(pending).rejects.toBe(failure);
-    try {
-      const replacement = { ...first, status: "Cancelled" as const, activeStep: null };
-      state.cards[0] = replacement;
-      reject(failure);
-      await rejected;
-      expect(state.cards[0]).toBe(replacement);
-      expect(state.cards[0].status).toBe("Cancelled");
-    } finally {
-      reject(failure);
-      await Promise.allSettled([pending, rejected]);
-    }
-  });
-
-});
-
-describe("PipelineCoordinator drain on completion", () => {
-  it("keeps a settled run's capacity until its unfinished provider work settles", async () => {
-    const { coordinator } = harness([makeCard({ id: "a" }), makeCard({ id: "b" })], 1);
-    let release!: () => void;
-    const physical = new Promise<void>((resolve) => { release = resolve; });
-    untrackedWork.set("a", physical);
-    try {
-      await coordinator.startOrEnqueue("a", "generate");
-      await coordinator.startOrEnqueue("b", "generate");
-      await settle("a");
-      expect(coordinator.hasRun("a")).toBe(false);
-      expect(coordinator.hasRun("b")).toBe(false);
-      release();
-      await physical;
-      await vi.waitFor(() => expect(coordinator.hasRun("b")).toBe(true));
-    } finally { release(); untrackedWork.delete("a"); }
-  });
-
-  it("admits the earliest queued card when a running pipeline settles", async () => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b" });
-    const { coordinator } = harness([first, second], 1);
-
-    await coordinator.startOrEnqueue("a", "generate", "transcription");
-    await coordinator.startOrEnqueue("b", "generate", "transcription");
-    expect(second.status).toBe("Queued");
-
-    await settle("a");
-
-    // Finalize released a's slot and the drain spawned b's pipeline.
-    expect(coordinator.hasRun("a")).toBe(false);
-    expect(coordinator.hasRun("b")).toBe(true);
-  });
-});
-
-describe("PipelineCoordinator.detachAndAbort", () => {
-  it("reports a card with no active run", () => {
-    const { coordinator } = harness([makeCard({ id: "a" })]);
-    expect(coordinator.detachAndAbort("a")).toBe(false);
-  });
-
-  it("takes the card from its run at once, and frees the slot only when the provider work it started settles", async () => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b" });
-    const { coordinator } = harness([first, second], 1);
-    let uploaded!: () => void;
-    untrackedWork.set("a", new Promise<void>((resolve) => { uploaded = resolve; }));
-    try {
-      await coordinator.startOrEnqueue("a", "generate", "transcription");
-      await coordinator.startOrEnqueue("b", "generate", "transcription");
-
-      expect(coordinator.detachAndAbort("a")).toBe(true);
-      expect(coordinator.hasRun("a")).toBe(false);
-      await settle("a");
-      expect(coordinator.hasRun("b"), "the upload the cancelled run started still holds the slot").toBe(false);
-
-      uploaded();
-      await vi.waitFor(() => expect(coordinator.hasRun("b")).toBe(true));
-    } finally { untrackedWork.delete("a"); }
-  });
-});
-
-describe("PipelineCoordinator.shutdown", () => {
-  it.each(["saved", "failed"] as const)("shutdown owns a %s prestart and prevents late pipeline admission", async (result) => {
-    const card = makeCard({ id: "a" });
-    const { coordinator, persistState } = harness([card]);
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    const primary = new Error("prestart failed");
-    persistState.mockImplementationOnce(async () => {
-      await held;
-      if (result === "failed") throw primary;
-    });
-    const work = coordinator.startOrEnqueue("a", "generate", "transcription");
-    const outcome = work.catch((error: unknown) => error);
-    const shutdown = coordinator.shutdown();
-    let settled = false;
-    void shutdown.then(() => { settled = true; });
-    try {
-      await Promise.resolve();
-      expect(settled).toBe(false);
-      await expect(coordinator.startOrEnqueue("a", "generate", "structured")).rejects.toThrow("closing");
-      release();
-      expect(await outcome).toBe(result === "failed" ? primary : undefined);
-      await shutdown;
-      expect(card.status).toBe(result === "failed" ? "Imported" : "Cancelled");
-      expect(coordinator.hasRun("a")).toBe(false);
-      expect(pipelineDeferreds.has("a")).toBe(false);
-      await coordinator.resume();
-      await coordinator.startOrEnqueue("a", "generate", "transcription");
-      expect(coordinator.hasRun("a")).toBe(true);
-    } finally {
-      release();
-      await Promise.allSettled([work, shutdown]);
-    }
-  });
-
-  it("shutdown settles an owned run held in key lookup before executing a pipeline", async () => {
-    const card = makeCard({ id: "a" });
-    const { coordinator, resolveApiKey, persistState } = harness([card]);
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    resolveApiKey.mockImplementationOnce(async () => { await held; return "test key"; });
-    await coordinator.startOrEnqueue("a", "generate", "transcription");
-    const shutdown = coordinator.shutdown();
-    let settled = false;
-    void shutdown.then(() => { settled = true; });
-    try {
-      await Promise.resolve();
-      expect(settled).toBe(false);
-      release();
-      await shutdown;
-      expect(card).toMatchObject({ status: "Cancelled", activeStep: null, lastError: null });
-      expect(persistState).toHaveBeenCalledTimes(2);
-      expect(pipelineDeferreds.has("a")).toBe(false);
-    } finally {
-      release();
-      await shutdown;
-    }
-  });
-
-  it("resuming before an old prestart settles cannot revive that stopped claim", async () => {
-    const card = makeCard({ id: "a" });
-    const { coordinator, persistState } = harness([card]);
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    persistState.mockImplementationOnce(async () => held);
-    const work = coordinator.startOrEnqueue("a", "generate", "transcription");
-    const shutdown = coordinator.shutdown();
-    try {
-      await coordinator.resume();
-      release();
-      await Promise.all([work, shutdown]);
-      expect(card.status).toBe("Cancelled");
-      expect(pipelineDeferreds.has("a")).toBe(false);
-      await coordinator.startOrEnqueue("a", "generate", "transcription");
-      expect(coordinator.hasRun("a")).toBe(true);
-    } finally {
-      release();
-      await Promise.allSettled([work, shutdown]);
-    }
-  });
-
-  it("shutdown releases a stopped prestart even when saving Cancelled fails", async () => {
-    const card = makeCard({ id: "a" });
-    const { coordinator, persistState } = harness([card]);
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    const primary = new Error("cancel save failed");
-    persistState.mockImplementationOnce(async () => held).mockRejectedValueOnce(primary);
-    const work = coordinator.startOrEnqueue("a", "generate", "transcription");
-    const outcome = work.catch((error: unknown) => error);
-    const shutdown = coordinator.shutdown();
-    try {
-      release();
-      expect(await outcome).toBe(primary);
-      await shutdown;
-      expect(card.status).toBe("Cancelled");
-      expect(pipelineDeferreds.has("a")).toBe(false);
-      await coordinator.resume();
-      await coordinator.startOrEnqueue("a", "generate", "transcription");
-      expect(coordinator.hasRun("a")).toBe(true);
-    } finally {
-      release();
-      await Promise.allSettled([work, shutdown]);
-    }
-  });
-
-  it("waits for pipeline finalization before shutdown settles", async () => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b" });
-    const { coordinator } = harness([first, second], 1);
-    await coordinator.startOrEnqueue("a", "generate", "transcription");
-    await coordinator.startOrEnqueue("b", "generate", "transcription");
-    const lifecycle = coordinator as unknown as {
-      finalizeCardPipeline(cardId: string, run: unknown): Promise<void>;
-    };
-    const finalize = lifecycle.finalizeCardPipeline;
-    let enter!: () => void;
-    let release!: () => void;
-    const entered = new Promise<void>((resolve) => { enter = resolve; });
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    const finalizer = vi.spyOn(lifecycle, "finalizeCardPipeline").mockImplementation(async (...args) => {
-      enter();
-      await held;
-      await finalize.apply(coordinator, args);
-    });
-    const shutdown = coordinator.shutdown();
-    let settled = false;
-    void shutdown.then(() => { settled = true; });
-    try {
-      await entered;
-      expect(settled).toBe(false);
-      release();
-      await shutdown;
-      expect(coordinator.hasRun("a")).toBe(false);
-      expect(coordinator.hasRun("b")).toBe(false);
-      expect(second.status).toBe("Queued");
-    } finally {
-      release();
-      await shutdown;
-      finalizer.mockRestore();
-    }
-  });
-
-  it("stops the drain from admitting queued cards", async () => {
-    const first = makeCard({ id: "a" });
-    const second = makeCard({ id: "b" });
-    const { coordinator } = harness([first, second], 1);
-
-    await coordinator.startOrEnqueue("a", "generate", "transcription");
-    await coordinator.startOrEnqueue("b", "generate", "transcription");
-
-    // Shutdown aborts "a"; settle its stubbed pipeline so shutdown's await of
-    // in-flight chains completes. The queued "b" must stay queued.
-    const shutdown = coordinator.shutdown();
-    await settle("a");
-    await shutdown;
-
-    expect(coordinator.hasRun("b")).toBe(false);
-    expect(second.status).toBe("Queued");
+    await h.command(() => h.coordinator.resume());
+    await stubRun("b").started;
+    expect(h.card("b").status).toBe("Transcribing");
   });
 });

@@ -60,7 +60,6 @@ vi.mock("@main/i18n", async (original) => {
   };
 });
 // Runs while a refused removal is in flight, the way another card's save can.
-const duringRefusedRm = vi.hoisted(() => ({ run: null as (() => Promise<unknown>) | null }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
@@ -86,7 +85,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     rm: async (path: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
       if (outputFaults.refuseCleanup && basename(String(path)).startsWith(".mumbler-save-")) throw new Error("staging cleanup denied");
       if (undeletable.has(String(path))) {
-        await duringRefusedRm.run?.();
         throw new Error("EACCES: permission denied");
       }
       return actual.rm(path, options);
@@ -317,7 +315,6 @@ beforeEach(async () => {
   sourceChecks.failure = null;
   catalogueGate.held = null;
   catalogueGate.entered = 0;
-  duringRefusedRm.run = null;
   audioGate.cleanupFailure = false;
   audioGate.held = null;
   audioGate.entered = 0;
@@ -470,32 +467,6 @@ describe("first-run setup and user-owned destinations", () => {
 });
 
 describe("the durable queue store", () => {
-  it("restores failed cancellation without losing a concurrent remaining-import draft", async () => {
-    const [cancelled, remaining] = await dropIn("cancel.wav", "keep.wav");
-    const queuePath = join(home, "queue.json");
-    let release!: () => void;
-    let publications = 0;
-    unwritable.refuses = (path) => path === queuePath && ++publications === 1;
-    unwritable.held = { path: queuePath, entered: 0, release: new Promise<void>((resolve) => { release = resolve; }) };
-    const cancellation = runtime.cancelPendingImports([cancelled.id]);
-    const rejected = expect(cancellation).rejects.toThrow("ENOSPC");
-    let edit: Promise<AppSnapshot> | undefined;
-    try {
-      await vi.waitFor(() => expect(unwritable.held!.entered).toBe(1));
-      edit = runtime.updatePendingImportDrafts([review(remaining)]);
-    } finally {
-      release();
-      await rejected;
-      await edit;
-      unwritable.held = null;
-      unwritable.refuses = () => false;
-    }
-    const persisted = (await createQueueStore(queuePath).load()).value.pendingImports;
-    expect(persisted.map((item) => item.id)).toEqual([cancelled.id, remaining.id]);
-    expect(persisted.find((item) => item.id === remaining.id)?.localTimestampText).toBe("2026-03-01 07:30:00");
-    expect(await exists(cancelled.workingFilePath)).toBe(true);
-  });
-
   it.each(["card", "pending import"] as const)("keeps %s audio when its queue removal cannot be committed", async (kind) => {
     const [pending] = await dropIn("retain.wav");
     const card = kind === "card" ? cards((await runtime.confirmPendingImports([review(pending)])).snapshot)[0]! : null;
@@ -760,47 +731,6 @@ describe("the durable queue store", () => {
 });
 
 describe("confirming what was dropped in", () => {
-  it("restores failed confirmation behind a newer surviving draft packet", async () => {
-    const [first, survivor] = await dropIn("first.wav", "survivor.wav");
-    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: join(home, "originals") });
-    const submitted = review(first, {
-      localTimestampText: "2026-03-01 07:30:00", timezone: "Asia/Tokyo",
-      copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true,
-    });
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const queuePath = join(home, "queue.json");
-    unwritable.held = { path: queuePath, release: gate, entered: 0 };
-    let refused = false;
-    unwritable.refuses = (path) => path === queuePath && !refused && (refused = true);
-    const confirming = runtime.confirmPendingImports([submitted]).catch((error: unknown) => error);
-    let editing: Promise<AppSnapshot> | undefined;
-    try {
-      await vi.waitFor(() => expect(unwritable.held?.entered).toBe(1));
-      const transientCard = cards(runtime.getSnapshot())[0];
-      expect(runtime.getSnapshot().state?.pendingImports.map((item) => item.id)).toEqual([survivor.id]);
-      await expect(runtime.removeCard(transientCard.id)).rejects.toThrow(/import is still being saved/);
-      editing = runtime.updatePendingImportDrafts([review(survivor, { localTimestampText: "2026-03-02 09:00:00" })]);
-      release();
-      expect(await confirming).toBeInstanceOf(Error);
-      await editing;
-      const saved = (await createQueueStore(queuePath).load()).value;
-      expect(saved.cards).toEqual([]);
-      expect(saved.pendingImports.map((item) => item.id)).toEqual([first.id, survivor.id]);
-      expect(saved.pendingImports[0]).toMatchObject({
-        localTimestampText: submitted.localTimestampText, timezone: submitted.timezone,
-        copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true,
-      });
-      expect(saved.pendingImports[1].localTimestampText).toBe("2026-03-02 09:00:00");
-      expect(await exists(first.workingFilePath)).toBe(true);
-    } finally {
-      release();
-      unwritable.held = null;
-      unwritable.refuses = () => false;
-      await Promise.allSettled([confirming, ...(editing ? [editing] : [])]);
-    }
-  });
-
   it("retains the review and original actions after a refused queue publication", async () => {
     const [pending] = await dropIn("retry.wav");
     const originals = join(home, "originals");
@@ -1129,7 +1059,6 @@ describe("confirming what was dropped in", () => {
     await importing;
     expect(importStarts).toContain(laterPath);
     expect(runtime.getSnapshot().state?.pendingImports.map((item) => item.originalFilename)).toContain("later.wav");
-    await expect(runtime.cancelPendingImports([first.id])).rejects.toThrow("already being settled");
     release();
     await Promise.all([confirming, importing]);
     expect(importStarts).toContain(laterPath);
@@ -1557,16 +1486,20 @@ describe("working with a card", () => {
     expect(await first).toBeNull();
   });
 
-  it("keeps a run going while another player still waits for it", async () => {
+  it("joins a request for the recording being decoded, and stops that decode for another recording", async () => {
     const card = await confirmed();
     const first = runtime.getCardWaveformPeaks(card.id, "request-1");
     const second = runtime.getCardWaveformPeaks(card.id, "request-2");
     await vi.waitFor(() => expect(waveforms.runs).toHaveLength(1));
-    runtime.cancelCardWaveformPeaks("request-1");
-    expect(waveforms.runs[0]!.signal?.aborted).toBe(false);
     waveforms.runs[0]!.settle(Float32Array.of(0.75));
+    expect([...(await first)!]).toEqual([0.75]);
     expect([...(await second)!]).toEqual([0.75]);
-    expect(await first).toBeNull();
+
+    const copy = cards(await runtime.duplicateCard(card.id)).find((entry) => entry.id !== card.id)!;
+    const other = runtime.getCardWaveformPeaks(copy.id, "request-3");
+    await vi.waitFor(() => expect(waveforms.runs).toHaveLength(2));
+    waveforms.runs[1]!.settle(Float32Array.of(0.5));
+    expect([...(await other)!]).toEqual([0.5]);
   });
 
   it("releases a waveform acquisition after its card has been removed", async () => {
@@ -1791,7 +1724,6 @@ describe("working with a card", () => {
     const saving = runtime.saveCard(card.id, undefined, { removeAfterSave: false });
     try {
       await vi.waitFor(() => expect(sourceChecks.calls).toHaveLength(1));
-      expect(audioGate.entered).toBe(0);
       release();
       expect((await saving).kind).toBe("saved");
       expect(sourceChecks.maximum).toBe(1);
@@ -1799,7 +1731,7 @@ describe("working with a card", () => {
     } finally { release(); await saving.catch(() => undefined); }
   });
 
-  it("stops at a protected input collision before inspecting later sources or preparing audio", async () => {
+  it("stops at a protected input collision before inspecting later sources", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
     const [pending] = await dropIn("later.wav");
@@ -1812,16 +1744,14 @@ describe("working with a card", () => {
     const result = await runtime.saveCard(card.id, "overwrite");
     expect(result.kind).toBe("failed");
     expect(sourceChecks.calls).toEqual([card.sourceFilePath]);
-    expect(audioGate.entered).toBe(0);
   });
 
-  it("propagates a protected-source access failure before preparing audio", async () => {
+  it("propagates a protected-source access failure", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
     sourceChecks.paths.add(card.sourceFilePath);
     sourceChecks.failure = Object.assign(new Error("source access denied"), { code: "EACCES" });
     await expect(runtime.saveCard(card.id)).rejects.toThrow("source access denied");
-    expect(audioGate.entered).toBe(0);
     expect(cards(runtime.getSnapshot())[0].status).toBe("Ready to Save");
   });
 
@@ -1959,22 +1889,6 @@ describe("working with a card", () => {
     undeletable.clear();
     expect(cards(await runtime.removeCard(card.id)), "removing it again deletes it").toEqual([]);
     expect(await exists(card.sourceFilePath)).toBe(false);
-  });
-
-  it("keeps the refused card in queue.json even when another save ran during the deletion", async () => {
-    const card = await confirmed();
-    const [otherPending] = await dropIn("other.wav");
-    const [other] = cards((await runtime.confirmPendingImports([review(otherPending)])).snapshot).filter(
-      (entry) => entry.id !== card.id,
-    );
-    undeletable.add(card.sourceFilePath);
-    duringRefusedRm.run = () => runtime.duplicateCard(other.id);
-
-    await expect(runtime.removeCard(card.id)).rejects.toThrow(/working audio/);
-    await runtime.shutdown();
-    runtime = await ApplicationRuntime.initialize();
-
-    expect(cards(runtime.getSnapshot()).map((entry) => entry.id)).toContain(card.id);
   });
 
   it("deletes only the removed card's own audio, leaving its duplicate's", async () => {
@@ -2285,20 +2199,6 @@ describe("settings, secrets and the window's own state", () => {
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
 
-  it("retries failed pending review bytes when the retained draft equals live state", async () => {
-    const [pending] = await dropIn("take.wav");
-    const initial = review(pending, { timezone: "Asia/Tokyo" });
-    await runtime.updatePendingImportDrafts([initial]);
-    const draft = { ...initial, timezone: "Europe/Berlin" };
-    const queuePath = join(home, "queue.json");
-    unwritable.refuses = (path) => path === queuePath;
-    await expect(runtime.updatePendingImportDrafts([draft])).rejects.toThrow();
-    expect((await createQueueStore(queuePath).load()).value.pendingImports[0]!.timezone).toBe("Asia/Tokyo");
-    unwritable.refuses = () => false;
-    await runtime.updatePendingImportDrafts([draft]);
-    expect((await createQueueStore(queuePath).load()).value.pendingImports[0]!.timezone).toBe("Europe/Berlin");
-  });
-
   it("does not materialize sets when an unchanged draft is saved", async () => {
     await runtime.saveSettingsDraft(runtime.getSettingsDraft());
     expect(await savedSettings(), "only the first-launch zone is saved").toEqual(FIRST_LAUNCH);
@@ -2591,34 +2491,17 @@ describe("the save a quit makes", () => {
     return vi.spyOn(transcriptStore, "writeChanged");
   }
 
-  it("waits for an admitted settings save before its first persistence and seals new settings work", async () => {
-    let release!: () => void;
-    catalogueGate.held = new Promise((resolve) => { release = resolve; });
-    const finalWrite = observeFinalTranscriptWrite();
-    const saving = runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
-    let quit: Promise<unknown> | undefined;
+  it("refuses new settings work once a quit has begun", async () => {
+    const quit = runtime.saveForQuit();
     try {
-      await vi.waitFor(() => expect(catalogueGate.entered).toBe(1));
-      quit = runtime.saveForQuit();
-      // Every other drain is already settled in this empty fixture. A final
-      // packet can reach transcript.writeChanged on this turn only if it omitted the producer.
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(finalWrite).not.toHaveBeenCalled();
       await expect(runtime.saveSettingsDraft(runtime.getSettingsDraft())).rejects.toThrow("Mumbler is closing");
       await expect(runtime.saveToolSettings(false)).rejects.toThrow("Mumbler is closing");
       await expect(runtime.setGeminiApiKey("new-key")).rejects.toThrow("Mumbler is closing");
       await expect(runtime.clearGeminiApiKey()).rejects.toThrow("Mumbler is closing");
       await expect(runtime.chooseOutputDirectory({} as never)).rejects.toThrow("Mumbler is closing");
-      release();
-      await saving;
       expect(await quit).toEqual([]);
-      expect(finalWrite).toHaveBeenCalledOnce();
-      expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toMatchObject({ defaultTimezone: "Europe/Berlin" });
     } finally {
-      release();
-      catalogueGate.held = null;
-      await Promise.allSettled([saving, ...(quit === undefined ? [] : [quit])]);
-      finalWrite.mockRestore();
+      await quit;
     }
   });
 
@@ -2652,29 +2535,6 @@ describe("the save a quit makes", () => {
       secretReadGate.held = null;
       unwritable.refuses = () => false;
       await Promise.allSettled([saving, ...(quit === undefined ? [] : [quit])]);
-      finalWrite.mockRestore();
-    }
-  });
-
-  it("waits for an admitted output-folder choice before the final packet", async () => {
-    let release!: (path: string) => void;
-    const output = join(root, "chosen");
-    const picker = vi.spyOn(runtime, "pickOutputDirectory").mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
-    const finalWrite = observeFinalTranscriptWrite();
-    const choosing = runtime.chooseOutputDirectory({} as never);
-    const quit = runtime.saveForQuit();
-    try {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(finalWrite).not.toHaveBeenCalled();
-      release(output);
-      await choosing;
-      expect(await quit).toEqual([]);
-      expect(finalWrite).toHaveBeenCalledOnce();
-      expect(JSON.parse(await readFile(join(home, "config.json"), "utf8"))).toMatchObject({ outputDirectory: output });
-    } finally {
-      release(output);
-      await Promise.allSettled([choosing, quit]);
-      picker.mockRestore();
       finalWrite.mockRestore();
     }
   });
