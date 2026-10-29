@@ -92,7 +92,7 @@ import { extractFileFromZip } from "@main/core/binaries/archive";
 import { downloadToFile, fetchText } from "@main/core/binaries/http";
 import * as installedVersion from "@main/core/binaries/installed-version";
 import { verifySha256 } from "@main/core/binaries/integrity";
-import { TOOL_INSTALL_WHOLE_TIMEOUT_MS, ToolManager } from "@main/core/binaries/manager";
+import { ToolManager } from "@main/core/binaries/manager";
 import { TOOL_EXTRACTED_MAX_BYTES, resolveLatest } from "@main/core/binaries/registry";
 import { createDependenciesStore } from "@main/core/binaries/store";
 import { JsonStore } from "@main/core/json-store";
@@ -277,26 +277,6 @@ describe("installTool", () => {
       TOOL_EXTRACTED_MAX_BYTES,
       expect.any(AbortSignal),
     );
-  });
-
-  it("settles a peer that trickles forever at the whole-operation deadline", async () => {
-    const manager = await makeManager();
-    vi.useFakeTimers();
-    vi.mocked(resolveLatest).mockImplementationOnce(
-      async (_platform, _arch, signal) =>
-        new Promise<never>((_resolve, reject) => {
-          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-        }),
-    );
-
-    const installing = manager.installTool("ffmpeg");
-    await vi.advanceTimersByTimeAsync(TOOL_INSTALL_WHOLE_TIMEOUT_MS + 1);
-    await installing;
-
-    expect(manager.listStatuses().find((status) => status.name === "ffmpeg")?.transient).toMatchObject({
-      kind: "failed",
-      error: /timed out/,
-    });
   });
 
   it("emits a running transient with progress while downloading", async () => {

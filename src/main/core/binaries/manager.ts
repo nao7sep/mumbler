@@ -37,11 +37,6 @@ import { launchCheckDue, type DependenciesValue } from "./store";
 // and trim analysis, ffmpeg at trim/save).
 const REQUIRED = true;
 
-// The largest Windows archive is allowed 200 MiB. Six hours still permits a
-// very slow healthy connection while ensuring that a peer which keeps the idle
-// watchdog alive with a trickle cannot own an install forever.
-export const TOOL_INSTALL_WHOLE_TIMEOUT_MS = 6 * 60 * 60 * 1000;
-
 // Orchestrates the managed audio tools: their persisted facts, the on-disk
 // presence and installed version, the transient status of an in-flight operation,
 // and the two operations — provision (Install/Update: acquire the latest and verify
@@ -89,9 +84,8 @@ export class ToolManager {
   // reads what this recorded, so rendering never probes the filesystem or runs a
   // binary.
   async reconcile(): Promise<void> {
-    // Concurrently: this sits on the awaited startup path, and the two tools'
-    // probes are independent subprocesses.
-    await Promise.all(TOOL_NAMES.map((name) => this.readFromDisk(name)));
+    // One tool at a time: each probe is a short local subprocess.
+    for (const name of TOOL_NAMES) await this.readFromDisk(name);
   }
 
   // The one place the artifact is read. Presence first — an absent tool has no
@@ -180,15 +174,8 @@ export class ToolManager {
     }
     this.busy.add(name);
     const userController = new AbortController();
-    const deadlineController = new AbortController();
-    const deadline = setTimeout(
-      () =>
-        deadlineController.abort(
-          new Error("Audio tool installation timed out after 6 hours."),
-        ),
-      TOOL_INSTALL_WHOLE_TIMEOUT_MS,
-    );
-    const signal = AbortSignal.any([userController.signal, deadlineController.signal]);
+    // Each network and subprocess step holds its own bound.
+    const signal = userController.signal;
     this.installControllers.set(name, userController);
     let published = false;
     let stagedVersion: string | null = null;
@@ -343,7 +330,6 @@ export class ToolManager {
         error: message("tools.provisionFailed", { tool: name }),
       });
     } finally {
-      clearTimeout(deadline);
       this.busy.delete(name);
       if (this.installControllers.get(name) === userController) {
         this.installControllers.delete(name);

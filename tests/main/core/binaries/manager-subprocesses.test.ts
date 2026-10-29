@@ -177,10 +177,11 @@ describe.skipIf(process.platform === "win32")("managed-tool subprocess settlemen
 
     const reconciling = tools.reconcile();
     const { child, closed } = await childFor(tool);
-    await (await childFor(join(binDir, "ffprobe"))).closed;
     await vi.advanceTimersByTimeAsync(250);
-    await reconciling;
     await closed;
+    // The tools are probed one at a time.
+    await (await childFor(join(binDir, "ffprobe"))).closed;
+    await reconciling;
 
     expect(child.signalCode).toBe("SIGKILL");
     expectProcessGone(child.pid);

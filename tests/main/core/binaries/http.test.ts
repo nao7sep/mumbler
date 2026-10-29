@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { downloadToFile, fetchText, resolveRedirectLocation } from "@main/core/binaries/http";
+import { DOWNLOAD_WHOLE_TIMEOUT_MS, downloadToFile, fetchText, resolveRedirectLocation } from "@main/core/binaries/http";
 
 let root = "";
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "mumbler-http-")); });
@@ -206,6 +206,25 @@ describe("managed tool HTTPS transport", () => {
     await vi.advanceTimersByTimeAsync(26);
 
     await timedOut;
+  });
+
+  it("ends a download that keeps its idle watchdog alive at its whole bound", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const signal = init?.signal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+        },
+      });
+      return responseAt(URL, body);
+    }));
+
+    const downloading = downloadToFile({ url: URL, destPath: join(root, "tool.zip"), maxBytes: 10, idleTimeoutMs: 2 * DOWNLOAD_WHOLE_TIMEOUT_MS });
+    const ended = expect(downloading).rejects.toThrow(/did not finish within/);
+    await vi.advanceTimersByTimeAsync(DOWNLOAD_WHOLE_TIMEOUT_MS);
+
+    await ended;
   });
 
   it("rejects an oversized advertised metadata body before reading it", async () => {

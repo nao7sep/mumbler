@@ -1,5 +1,3 @@
-import { appendFileSync, mkdirSync } from "node:fs";
-import path from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import type {
@@ -100,7 +98,8 @@ export type RecordsWorkerRequest =
   | { type: "close" };
 
 export type RecordsWorkerResponse =
-  // `stored` is false when the entry went to the fallback file instead.
+  // `stored` is false when the database could not take the entry; main then
+  // writes it to the fallback file.
   | { type: "written"; id: number; stored: boolean }
   | { type: "read"; id: number; ok: true; value: RecordsReadResults[RecordsRead["op"]] }
   | { type: "read"; id: number; ok: false; error: string }
@@ -179,7 +178,6 @@ export class RecordsEngine {
         try { db?.exec("ROLLBACK"); } catch { /* The insert error is primary. */ }
       }
       this.report(recordsFailureText(error));
-      this.writeFallback(entry);
       return false;
     }
   }
@@ -234,15 +232,6 @@ export class RecordsEngine {
     );
   }
 
-  private writeFallback(entry: RecordEntry): void {
-    const line = fallbackLine(entry);
-    try {
-      mkdirSync(path.dirname(this.target.fallbackPath), { recursive: true });
-      appendFileSync(this.target.fallbackPath, line, "utf8");
-    } catch (error: unknown) {
-      this.report(recordsFailureText(error, line));
-    }
-  }
 }
 
 function likePattern(search: string): string | null {

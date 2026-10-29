@@ -234,13 +234,11 @@ describe("SQLite engine admission at open", () => {
     expect(db.prepare("SELECT name FROM sqlite_master").all()).toEqual([]);
   });
 
-  it("falls back from a newer records store at open and refuses to read it", () => {
+  it("refuses writes and reads of a newer records store at open, leaving it untouched", () => {
     connect().exec("PRAGMA user_version = 2");
-    const fallback = join(root, "fallback.log");
-    const engine = new RecordsEngine({ databasePath: file, fallbackPath: fallback }, vi.fn());
+    const engine = new RecordsEngine({ databasePath: file, fallbackPath: join(root, "fallback.log") }, vi.fn());
     engines.push(engine);
-    expect(engine.write(entry("refused"))).toBe(false);
-    expect(JSON.parse(readFileSync(fallback, "utf8"))).toMatchObject({ message: "refused" });
+    expect(engine.write(entry("refused")), "the caller writes it to the fallback file").toBe(false);
     expect(() => engine.read({ op: "sources" })).toThrow("records database is unavailable");
     expect(connect().prepare("SELECT name FROM sqlite_master").all()).toEqual([]);
   });

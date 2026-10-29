@@ -71,7 +71,6 @@ export interface LoggerPaths {
   logsDir: string;
 }
 
-const RECORD_TIMEOUT_MS = 5_000;
 
 // Captures the full exception — type, message, stack — and follows the whole
 // `cause` chain for wrapped errors, so a log line carries enough to reconstruct
@@ -138,8 +137,8 @@ function cardIdOf(details: unknown): string | null {
 
 // Every entry of this process launch goes to the records database through one
 // worker thread (logging-conventions, Where logs go); a write it cannot make
-// lands in this session's text file under logs/. A stalled optional record is
-// reported and releases its caller; its physical fallback remains ordered.
+// lands in this session's text file under logs/, which main alone appends to,
+// in order.
 export function createLogger(paths: LoggerPaths | null, options: LoggerOptions): SessionLogger {
   const sessionStart = new Date();
   const session = sessionStart.toISOString();
@@ -225,19 +224,6 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
     worker = null;
   };
 
-  // A timeout releases only the optional waiter, never the physical append
-  // tail. Later appends cannot overtake a still-running earlier one.
-  const boundedWrite = (work: Promise<void>, timeoutMs: number, onTimeout: () => void): Promise<void> => {
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => { onTimeout(); resolve(); }, timeoutMs);
-      void work.then(() => { clearTimeout(timer); resolve(); }, (error) => {
-        clearTimeout(timer);
-        reportRecordsFailure(error);
-        resolve();
-      });
-    });
-  };
-
   const ensureWorker = (): Worker => {
     if (worker !== null) return worker;
     // Tests run the source with Node's TypeScript stripping; the app runs
@@ -247,10 +233,16 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
     created.unref();
     created.on("message", (message: RecordsWorkerResponse) => {
       if (message.type === "written") {
-        pending.get(message.id)?.resolve();
+        const written = pending.get(message.id);
         pending.delete(message.id);
-        if (message.stored) storedListener?.(missingRecords);
-        else markMissing();
+        if (message.stored) {
+          written?.resolve();
+          storedListener?.(missingRecords);
+        } else if (written !== undefined) {
+          // The database could not take it: main, the fallback file's one
+          // writer, appends it there.
+          void appendFallback(written.entry).then(written.resolve);
+        }
       } else if (message.type === "read") {
         const read = reads.get(message.id);
         reads.delete(message.id);
@@ -279,10 +271,11 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
       return Promise.resolve();
     }
     if (workerFailed || closing !== null) {
-      return boundedWrite(appendFallback(entry), RECORD_TIMEOUT_MS, () =>
-        reportRecordsFailure(new Error("Records fallback timed out; the entry may still be written."), fallbackLine(entry)));
+      return appendFallback(entry);
     }
-    const write = new Promise<void>((resolve) => {
+    // No deadline: the records worker owns the database, and a stalled disk
+    // holds the entry until it recovers or the exit deadline ends the session.
+    return new Promise<void>((resolve) => {
       const id = nextId++;
       pending.set(id, { entry, resolve });
       try {
@@ -291,8 +284,6 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
         failWorker(error);
       }
     });
-    return boundedWrite(write, RECORD_TIMEOUT_MS, () =>
-      failWorker(new Error("Records write timed out; its database outcome is unconfirmed.")));
   };
 
   const readRecords = <R extends RecordsRead>(read: R): Promise<RecordsReadResults[R["op"]]> => {
@@ -301,11 +292,7 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
     }
     return new Promise((resolve, reject) => {
       const id = nextId++;
-      const timer = setTimeout(() => failWorker(new Error("Records read timed out.")), RECORD_TIMEOUT_MS);
-      reads.set(id, {
-        resolve: (value) => { clearTimeout(timer); resolve(value); },
-        reject: (error) => { clearTimeout(timer); reject(error); },
-      });
+      reads.set(id, { resolve, reject });
       try {
         ensureWorker().postMessage({ type: "read", id, read } satisfies RecordsWorkerRequest);
       } catch (error: unknown) {

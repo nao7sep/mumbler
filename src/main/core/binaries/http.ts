@@ -153,13 +153,23 @@ export interface DownloadOptions {
   onProgress?: (received: number, total: number) => void;
 }
 
+// The largest Windows archive is allowed 200 MiB. Six hours still permits a
+// very slow healthy connection while ensuring that a peer which keeps the idle
+// watchdog alive with a trickle cannot own a download forever.
+export const DOWNLOAD_WHOLE_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+
 // Download a URL to destPath. The idle watchdog aborts if no bytes arrive within
-// idleTimeoutMs (covers a stalled connect and a stalled transfer); the byte cap
-// aborts if the response advertises or streams more than maxBytes.
+// idleTimeoutMs (covers a stalled connect and a stalled transfer), the whole
+// bound ends a download that trickles on; the byte cap aborts if the response
+// advertises or streams more than maxBytes.
 export async function downloadToFile(opts: DownloadOptions): Promise<void> {
   assertHttps(opts.url);
   const idleTimeoutMs = opts.idleTimeoutMs ?? 120_000;
   const controller = new AbortController();
+  const whole = setTimeout(
+    () => controller.abort(new Error(`download did not finish within ${DOWNLOAD_WHOLE_TIMEOUT_MS}ms for ${opts.url}`)),
+    DOWNLOAD_WHOLE_TIMEOUT_MS,
+  );
   const combinedSignal = opts.signal
     ? AbortSignal.any([controller.signal, opts.signal])
     : controller.signal;
@@ -204,5 +214,6 @@ export async function downloadToFile(opts: DownloadOptions): Promise<void> {
   } finally {
     if (!pipelineOwnsBody) await discardResponseBody(res);
     if (idle) clearTimeout(idle);
+    clearTimeout(whole);
   }
 }

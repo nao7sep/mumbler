@@ -275,8 +275,8 @@ function callRecorder(params: { apiKey: string; endpoint?: string; recordCall?: 
 }
 
 // Removing the upload is best-effort: Gemini expires uploads by itself. So the
-// delete runs beside the result instead of in front of it, and its own bound
-// ends it on a stalled connection rather than leaving it pending.
+// delete runs beside the result instead of in front of it, and the client's
+// timeout, its one clock, ends it on a stalled connection.
 async function deleteUploadedFile(
   ai: GoogleGenAI,
   name: string,
@@ -288,7 +288,7 @@ async function deleteUploadedFile(
     await record("files.delete", null, { name, config: { httpOptions } }, () =>
       ai.files.delete({
         name,
-        config: { abortSignal: AbortSignal.timeout(FILES_API_CLEANUP_TIMEOUT_MS), httpOptions },
+        config: { httpOptions },
       }),
     );
   } catch (cleanupError: unknown) {

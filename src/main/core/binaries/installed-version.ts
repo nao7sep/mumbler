@@ -71,11 +71,6 @@ interface VersionSidecar {
   binarySha256: string;
 }
 
-function hashSignal(signal?: AbortSignal): AbortSignal {
-  const deadline = AbortSignal.timeout(PROBE_TIMEOUT_MS);
-  return signal ? AbortSignal.any([signal, deadline]) : deadline;
-}
-
 // Record a just-published binary's version beside it. Called only for a
 // sidecar-read tool, and only AFTER the binary itself has landed: a crash between
 // the two leaves a present binary reading version-unknown (which offers a
@@ -93,7 +88,7 @@ export async function writeVersionSidecar(
     formatVersion: FORMAT_VERSIONS.toolVersion,
     version,
     installedAt: formatUtcIsoCompact(nowUtc),
-    binarySha256: await sha256OfFile(toolPath, hashSignal(signal)),
+    binarySha256: await sha256OfFile(toolPath, signal),
   };
   const target = versionSidecarPath(binDir, name);
   // Atomic replace through a same-directory temp, per the storage-path conventions.
@@ -138,7 +133,7 @@ async function readSidecar(binDir: string, name: ToolName, toolPath: string): Pr
     const sidecar = raw as Partial<VersionSidecar>;
     if (typeof sidecar.version !== "string" || !FFMPEG_BUILD_TAG.test(sidecar.version)
       || typeof sidecar.binarySha256 !== "string" || !/^[a-f0-9]{64}$/.test(sidecar.binarySha256)) return null;
-    return await sha256OfFile(toolPath, hashSignal()) === sidecar.binarySha256 ? sidecar.version : null;
+    return await sha256OfFile(toolPath) === sidecar.binarySha256 ? sidecar.version : null;
   } catch (error) {
     if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;

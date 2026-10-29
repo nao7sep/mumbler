@@ -56,12 +56,6 @@ function open(): SessionLogger {
   opened.push(logger);
   return logger;
 }
-function hold(): { wait: Promise<void>; release: () => void } {
-  let release!: () => void;
-  const wait = new Promise<void>((resolve) => { release = resolve; });
-  releases.push(release);
-  return { wait, release };
-}
 beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
@@ -92,6 +86,7 @@ describe("optional records lifetime", () => {
     const request = workers[0]!.requests[0]!;
     workers[0]!.emit("message", { type: "written", id: "id" in request ? request.id : -1, stored: false });
     await first;
+    expect(fallback.completed, "main writes the refused entry to the fallback file").toEqual(["missing"]);
     expect(logger.recordsMissing()).toBe(true);
     expect(changed).toHaveBeenLastCalledWith(true);
     const second = logger.info("test", "stored");
@@ -114,53 +109,5 @@ describe("optional records lifetime", () => {
     expect(fallback.completed).toEqual(["first", "second"]);
     expect(logger.recordsMissing()).toBe(true);
     expect(changed).toHaveBeenCalledExactlyOnceWith(true);
-  });
-
-  it("releases a timed-out writer while keeping late fallback appends physically ordered", async () => {
-    const firstGate = hold();
-    fallback.held.set("first", firstGate.wait);
-    const logger = open();
-    let firstDone = false;
-    const first = logger.info("test", "first").then(() => { firstDone = true; });
-    await vi.advanceTimersByTimeAsync(4_999);
-    expect(firstDone).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    await first;
-    expect(workers[0]!.terminate).toHaveBeenCalledOnce();
-    expect(fallback.started).toEqual(["first"]);
-    const second = logger.info("test", "second");
-    await vi.advanceTimersByTimeAsync(5_000);
-    await second;
-    expect(fallback.started).toEqual(["first"]);
-    firstGate.release();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(fallback.completed).toEqual(["first", "second"]);
-    expect(vi.mocked(process.stderr.write).mock.calls.some(([text]) => String(text).includes("unconfirmed"))).toBe(true);
-  });
-
-  it("uses the original write deadline after an early worker error and a stalled fallback", async () => {
-    fallback.held.set("held", hold().wait);
-    const logger = open();
-    let done = false;
-    const write = logger.info("test", "held").then(() => { done = true; });
-    await vi.advanceTimersByTimeAsync(2_000);
-    workers[0]!.emit("error", new Error("worker failed"));
-    await vi.advanceTimersByTimeAsync(2_999);
-    expect(done).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    await write;
-    expect(fallback.started).toEqual(["held"]);
-    expect(fallback.completed).toEqual([]);
-  });
-
-  it("bounds reads and observes termination rejection", async () => {
-    const logger = open();
-    const read = logger.readRecords({ op: "sources" }).catch((error: unknown) => error);
-    workers[0]!.termination = Promise.reject(new Error("termination refused"));
-    // Attach the rejection observer before advancing the timeout that invokes terminate.
-    void workers[0]!.termination.catch(() => undefined);
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(await read).toMatchObject({ message: "The records database could not be read." });
-    expect(vi.mocked(process.stderr.write).mock.calls.some(([text]) => String(text).includes("termination refused"))).toBe(true);
   });
 });

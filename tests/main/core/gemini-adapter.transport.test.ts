@@ -241,7 +241,6 @@ describe("transcribeWithGemini transport selection", () => {
     expect(deleteFile).toHaveBeenCalledWith({
       name: "files/abc",
       config: {
-        abortSignal: expect.any(AbortSignal),
         httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } },
       },
     });
@@ -256,7 +255,6 @@ describe("transcribeWithGemini transport selection", () => {
     expect(deleteFile).toHaveBeenCalledWith({
       name: "files/xyz",
       config: {
-        abortSignal: expect.any(AbortSignal),
         httpOptions: { timeout: 30_000, retryOptions: { attempts: 1 } },
       },
     });
@@ -266,16 +264,11 @@ describe("transcribeWithGemini transport selection", () => {
     stat.mockResolvedValue({ size: SAFE + 1 });
     upload.mockResolvedValue({ name: "files/slow", uri: "gs://u" });
     generateContent.mockResolvedValue({ text: "kept", modelVersion: "v1", usageMetadata: null });
-    let deleteSignal: AbortSignal | undefined;
-    deleteFile.mockImplementation(({ config }: { config: { abortSignal: AbortSignal } }) => {
-      deleteSignal = config.abortSignal;
-      return new Promise(() => undefined);
-    });
+    deleteFile.mockImplementation(() => new Promise(() => undefined));
 
     const result = await transcribeWithGemini(baseParams());
 
     expect(result.text).toBe("kept");
-    expect(deleteSignal?.aborted, "the delete carries its own bound").toBe(false);
   });
 });
 
