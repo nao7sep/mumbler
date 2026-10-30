@@ -276,7 +276,7 @@ async function savedSettings(): Promise<unknown> {
 
 /** The queue as its files hold it; instants stay ISO text. */
 function savedQueue(): ReturnType<typeof readSavedQueue> {
-  return readSavedQueue({ queuePath: join(home, "queue.json"), inboxPath: join(home, "inbox.json"), cardsDir: join(home, "cards") });
+  return readSavedQueue({ cardsDir: join(home, "cards"), inboxDir: join(home, "inbox") });
 }
 
 /** The queue's own store on this test's data folder, for seeding saved state
@@ -295,14 +295,13 @@ async function loadDisk(): Promise<{ cards: MumblerCard[]; pendingImports: Pendi
   return (await diskStore().load(quietLogger())).state;
 }
 
-/** Writes each card's file, creating its folder, then the order. */
+/** Writes each card's file, creating its folder. */
 async function saveDiskCards(saved: MumblerCard[]): Promise<void> {
   const store = diskStore();
   for (const card of saved) {
     await mkdir(join(home, "cards", card.id), { recursive: true });
     await store.writeCard(card);
   }
-  await store.writeOrder(saved);
 }
 
 /** A card's own file as it is on disk. */
@@ -507,44 +506,50 @@ describe("first-run setup and user-owned destinations", () => {
 });
 
 describe("the durable queue store", () => {
-  // A card's removal commits in queue.json, a pending import's in inbox.json.
-  const listFile = (kind: "card" | "pending import") => join(home, kind === "card" ? "queue.json" : "inbox.json");
+  // A card's or pending import's folder, which a removal renames aside.
+  const folderOf = (kind: "card" | "pending import", id: string) => join(home, kind === "card" ? "cards" : "inbox", id);
 
-  it.each(["card", "pending import"] as const)("keeps %s audio when its list's removal cannot be committed", async (kind) => {
+  it.each(["card", "pending import"] as const)("keeps %s audio when its folder cannot be renamed aside", async (kind) => {
     const [pending] = await dropIn("retain.wav");
     const card = kind === "card" ? cards((await runtime.confirmPendingImports([review(pending)])).snapshot)[0]! : null;
     const audio = card?.sourceFilePath ?? pending.workingFilePath;
-    const list = listFile(kind);
-    const before = await readFile(list, "utf8");
-    unwritable.refuses = (path) => path === list;
+    unmovable.add(folderOf(kind, pending.id));
     try {
       const removal = card ? runtime.removeCard(card.id) : runtime.cancelPendingImports([pending.id]);
       await expect(removal).rejects.toThrow();
-      expect(await readFile(list, "utf8")).toBe(before);
       expect(await readFile(audio, "utf8")).toBe("audio for retain.wav");
       expect(card ? cards(runtime.getSnapshot()).some((entry) => entry.id === card.id)
         : runtime.getSnapshot().state?.pendingImports.some((entry) => entry.id === pending.id)).toBe(true);
-    } finally { unwritable.refuses = () => false; }
+    } finally { unmovable.clear(); }
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+    expect(card ? cards(runtime.getSnapshot()).map((entry) => entry.id)
+      : runtime.getSnapshot().state?.pendingImports.map((entry) => entry.id), "a relaunch still has it").toEqual([pending.id]);
   });
 
-  it.each(["card", "pending import"] as const)("does not delete %s audio while its list's publication is still pending", async (kind) => {
+  it.each(["card", "pending import"] as const)("keeps %s audio until its folder's rename aside lands, then deletes the folder", async (kind) => {
     const [pending] = await dropIn("retain.wav");
     const card = kind === "card" ? cards((await runtime.confirmPendingImports([review(pending)])).snapshot)[0]! : null;
     const audio = card?.sourceFilePath ?? pending.workingFilePath;
     let release!: () => void;
-    unwritable.held = { path: listFile(kind), entered: 0, release: new Promise<void>((resolve) => { release = resolve; }) };
+    const aside = join(dirname(folderOf(kind, pending.id)), `.removed-${pending.id}`);
+    unwritable.held = { path: aside, entered: 0, release: new Promise<void>((resolve) => { release = resolve; }) };
     const removal = card ? runtime.removeCard(card.id) : runtime.cancelPendingImports([pending.id]);
     try {
       await until(() => expect(unwritable.held!.entered).toBe(1));
       expect(await readFile(audio, "utf8")).toBe("audio for retain.wav");
     } finally { release(); await removal; unwritable.held = null; }
     expect(await exists(dirname(audio)), "the whole folder goes").toBe(false);
+    expect(await exists(aside)).toBe(false);
   });
 
   it("restores audio-tool availability and surviving key presence after Reset from failed startup", async () => {
     await runtime.setGeminiApiKey("retained-test-key");
     await runtime.shutdown();
-    await writeFile(join(home, "queue.json"), "broken queue");
+    // No queue file halts launch as damaged any longer; the store stands in.
+    const { QueueStore } = await import("@main/core/queue-store");
+    const { CorruptStateError } = await import("@main/core/json-store");
+    vi.spyOn(QueueStore.prototype, "load").mockRejectedValueOnce(new CorruptStateError(join(home, "cards"), "damaged"));
     runtime = await ApplicationRuntime.initialize();
     expect(runtime.getSnapshot().startupDiagnostic?.canReset).toBe(true);
     expect(runtime.getSnapshot().dependencies).toBeNull();
@@ -618,32 +623,65 @@ describe("the durable queue store", () => {
     },
   );
 
-  it("sets the queue's lists and folders aside together on reset", async () => {
-    const [pending] = await dropIn("take.wav");
+  it("sets the queue's folders aside together on reset", async () => {
+    const [pending, other] = await dropIn("take.wav", "other.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    const original = await readFile(join(home, "queue.json"), "utf8");
     await runtime.resetState();
-    expect(await exists(join(home, "queue.json"))).toBe(false);
     expect(await exists(join(home, "cards"))).toBe(false);
+    expect(await exists(join(home, "inbox"))).toBe(false);
     const preserved = (await readdir(home)).find((name) => /^queue-.*\.invalid$/.test(name));
     expect(preserved).toBeDefined();
-    expect(await readFile(join(home, preserved!, "queue.json"), "utf8")).toBe(original);
     expect(await readFile(join(home, preserved!, "cards", card.id, basename(card.sourceFilePath)), "utf8")).toBe("audio for take.wav");
+    expect(await exists(join(home, preserved!, "inbox", other.id, "import.json"))).toBe(true);
   });
 
   it.each([
     ["unparseable", "broken queue"],
     ["without its format version", JSON.stringify({ pendingImports: [], cards: [] })],
-  ])("halts on a queue.json that is %s, leaves it untouched and offers Reset", async (_kind, bytes) => {
+  ])("names a queue.json that is %s at launch, leaves it untouched and loads the cards", async (_kind, bytes) => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
     await writeFile(join(home, "queue.json"), bytes);
     runtime = await ApplicationRuntime.initialize();
-    expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({
-      title: { key: "diagnostic.corruptTitle" },
-      message: { key: "diagnostic.corruptBody", values: { path: join(home, "queue.json") } },
-      canReset: true,
+    expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+    expect(runtime.getSnapshot().appWideError).toEqual({
+      title: { key: "diagnostic.queueUnreadableTitle" },
+      message: { key: "diagnostic.queueUnreadableBody", values: { items: [join(home, "queue.json")] } },
     });
+    expect(cards(runtime.getSnapshot()).map((entry) => entry.id)).toEqual([card.id]);
     expect(await readFile(join(home, "queue.json"), "utf8")).toBe(bytes);
+  });
+
+  it("names a damaged card at launch with its path, leaves it untouched and loads the others", async () => {
+    const [first, second] = await dropIn("take.wav", "next.wav");
+    const [kept, damaged] = cards((await runtime.confirmPendingImports([review(first), review(second, { localTimestampText: "2026-03-01 08:30:00" })])).snapshot);
+    await runtime.shutdown();
+    const path = join(home, "cards", damaged.id, "card.json");
+    await writeFile(path, "{ half a card");
+    runtime = await ApplicationRuntime.initialize();
+    expect(cards(runtime.getSnapshot()).map((entry) => entry.id)).toEqual([kept.id]);
+    expect(runtime.getSnapshot().appWideError?.message).toEqual({ key: "diagnostic.queueUnreadableBody", values: { items: [path] } });
+    expect(await readFile(path, "utf8")).toBe("{ half a card");
+    expect(await readFile(damaged.sourceFilePath, "utf8")).toBe("audio for next.wav");
+    await runtime.dismissAppWideError();
+    expect(runtime.getSnapshot().appWideError).toBeNull();
+  });
+
+  it("shows the unreadable files after the settings notice, one after the other", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+    await runtime.shutdown();
+    const config = JSON.parse(await readFile(join(home, "config.json"), "utf8"));
+    await writeFile(join(home, "config.json"), JSON.stringify({ ...config, concurrencyLimit: "future" }));
+    await writeFile(join(home, "cards", card.id, "card.json"), "{ half a card");
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(runtime.getSnapshot().appWideError?.title).toEqual({ key: "diagnostic.settingsUnusableTitle" });
+    await runtime.dismissAppWideError();
+    expect(runtime.getSnapshot().appWideError?.title).toEqual({ key: "diagnostic.queueUnreadableTitle" });
+    await runtime.dismissAppWideError();
+    expect(runtime.getSnapshot().appWideError).toBeNull();
   });
 
   it("halts on a queue.json it cannot read, moving nothing and offering no Reset", async () => {
@@ -664,18 +702,18 @@ describe("the durable queue store", () => {
     const [pending] = await dropIn("retained.wav");
     await runtime.shutdown();
     const folder = dirname(pending.workingFilePath);
-    const before = await readFile(join(home, "inbox.json"), "utf8");
+    const before = await readFile(join(folder, "import.json"), "utf8");
     await chmod(folder, 0o000);
     try {
       runtime = await ApplicationRuntime.initialize();
       expect(runtime.getSnapshot().startupDiagnostic).toEqual({
         title: { key: "diagnostic.unreadableTitle" },
-        message: { key: "diagnostic.unreadableBody", values: { path: pending.workingFilePath } },
+        message: { key: "diagnostic.unreadableBody", values: { path: join(folder, "import.json") } },
         canReset: false,
       });
       expect(runtime.getSnapshot().state).toBeNull();
     } finally { await chmod(folder, 0o700); }
-    expect(await readFile(join(home, "inbox.json"), "utf8")).toBe(before);
+    expect(await readFile(join(folder, "import.json"), "utf8")).toBe(before);
     expect(await readFile(pending.workingFilePath, "utf8")).toBe("audio for retained.wav");
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
@@ -697,7 +735,7 @@ describe("the durable queue store", () => {
     const [pending] = await dropIn("missing.wav");
     await runtime.shutdown();
     await rm(pending.workingFilePath);
-    const before = await readFile(join(home, "inbox.json"), "utf8");
+    const before = await readFile(join(dirname(pending.workingFilePath), "import.json"), "utf8");
     const { QueueStore } = await import("@main/core/queue-store");
     const load = QueueStore.prototype.load;
     const loggerFailure = await access(join(home, "records.sqlite3", "blocked-log"))
@@ -716,7 +754,7 @@ describe("the durable queue store", () => {
         message: { key: "diagnostic.startupBody" },
         canReset: false,
       });
-      expect(await readFile(join(home, "inbox.json"), "utf8")).toBe(before);
+      expect(await readFile(join(dirname(pending.workingFilePath), "import.json"), "utf8")).toBe(before);
     } finally { restoreWarn(); failingLogger.mockRestore(); }
   });
 
@@ -728,27 +766,40 @@ describe("the durable queue store", () => {
     });
   });
 
-  it("removes at launch every card folder the order does not list, and keeps the listed ones", async () => {
+  it("keeps every card whatever an earlier build's queue.json lists, then deletes that file", async () => {
     const [first, second] = await dropIn("take.wav", "next.wav");
-    const [kept, dropped] = cards((await runtime.confirmPendingImports([review(first), review(second, { localTimestampText: "2026-03-01 08:30:00" })])).snapshot);
+    const [earlier, later] = cards((await runtime.confirmPendingImports([review(first), review(second, { localTimestampText: "2026-03-01 08:30:00" })])).snapshot);
     await runtime.shutdown();
-    await writeFile(join(home, "queue.json"), JSON.stringify({ formatVersion: 2, cardIds: [kept.id] }));
+    await writeFile(join(home, "queue.json"), JSON.stringify({ formatVersion: 2, cardIds: [later.id] }));
 
     runtime = await ApplicationRuntime.initialize();
 
-    expect(cards(runtime.getSnapshot()).map((card) => card.id)).toEqual([kept.id]);
-    expect(await exists(kept.sourceFilePath)).toBe(true);
-    expect(await exists(join(home, "cards", dropped.id)), "a folder no list names is removed").toBe(false);
+    expect(cards(runtime.getSnapshot()).map((card) => card.id), "in effective-time order").toEqual([earlier.id, later.id]);
+    expect(await exists(join(home, "queue.json"))).toBe(false);
   });
 
-  it("removes at launch an import folder the pending imports do not list, such as a copy a quit cut short", async () => {
+  it("loses no card or pending import when queue.json and inbox.json are deleted", async () => {
+    const [first, second] = await dropIn("take.wav", "next.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(first)])).snapshot);
+    await runtime.shutdown();
+    await rm(join(home, "queue.json"), { force: true });
+    await rm(join(home, "inbox.json"), { force: true });
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(cards(runtime.getSnapshot()).map((entry) => entry.id)).toEqual([card.id]);
+    expect(runtime.getSnapshot().state!.pendingImports.map((entry) => entry.id)).toEqual([second.id]);
+  });
+
+  it("leaves an import folder a quit cut short in place at launch, and lists nothing from it", async () => {
     await runtime.shutdown();
     await mkdir(join(home, "inbox", "cutshort"), { recursive: true });
     await writeFile(join(home, "inbox", "cutshort", "take.wav"), "partial copy");
 
     runtime = await ApplicationRuntime.initialize();
 
-    expect(await exists(join(home, "inbox", "cutshort"))).toBe(false);
+    expect(runtime.getSnapshot().state!.pendingImports).toEqual([]);
+    expect(await readFile(join(home, "inbox", "cutshort", "take.wav"), "utf8")).toBe("partial copy");
   });
 });
 
@@ -776,16 +827,16 @@ describe("a crash between the queue's writes", () => {
   }
 
   it.each([
-    ["after the import's folder moved and before its card file was written", "card.json"],
-    ["after the card file was written and before the order", "queue.json"],
+    ["while its card file is staged in the import's folder", "card"],
+    ["after its card file was staged and before the folder's rename", "folder"],
   ] as const)("keeps an import for review when a confirmation is cut short %s", async (_moment, held) => {
     const [pending] = await dropIn("take.wav");
-    const release = holdWrite(held === "card.json" ? join(home, "cards", pending.id, "card.json") : join(home, "queue.json"));
+    const release = holdWrite(held === "card" ? join(home, "inbox", pending.id, "card.json") : join(home, "cards", pending.id));
     const confirming = runtime.confirmPendingImports([review(pending)]);
     let crashed: string;
     try {
       await until(() => expect(unwritable.held!.entered).toBe(1));
-      expect(await exists(join(home, "inbox", pending.id)), "the folder has moved").toBe(false);
+      expect(await exists(join(home, "cards", pending.id)), "the folder has not moved").toBe(false);
       crashed = await crashHere();
     } finally { release(); await confirming.catch(() => undefined); }
 
@@ -796,56 +847,52 @@ describe("a crash between the queue's writes", () => {
     expect(state.pendingImports.map((item) => item.id)).toEqual([pending.id]);
     expect(state.pendingImports[0].workingFilePath).toBe(join(crashed, "inbox", pending.id, "take.wav"));
     expect(await readFile(state.pendingImports[0].workingFilePath, "utf8")).toBe("audio for take.wav");
-    expect(await readdir(join(crashed, "inbox", pending.id)), "no card file is left with the review").toEqual(["take.wav"]);
+    expect((await readdir(join(crashed, "inbox", pending.id))).sort(), "no card file is left with the review").toEqual(["import.json", "take.wav"]);
     expect(await readdir(join(crashed, "cards")).catch(() => [])).toEqual([]);
     expect(cards((await runtime.confirmPendingImports([review(state.pendingImports[0])])).snapshot)).toHaveLength(1);
   });
 
-  it("keeps the card when a confirmation is cut short after its order was written and before the pending imports", async () => {
+  it("keeps the card when a confirmation is cut short after the folder's rename and before the import's file is removed", async () => {
     const [pending] = await dropIn("take.wav");
-    const release = holdWrite(join(home, "inbox.json"));
-    const confirming = runtime.confirmPendingImports([review(pending)]);
-    let crashed: string;
+    const leftover = join(home, "cards", pending.id, "import.json");
+    undeletable.add(leftover);
     try {
-      await until(() => expect(unwritable.held!.entered).toBe(1));
-      crashed = await crashHere();
-    } finally { release(); await confirming; }
+      expect(cards((await runtime.confirmPendingImports([review(pending)])).snapshot).map((card) => card.id)).toEqual([pending.id]);
+      expect(await exists(leftover)).toBe(true);
+    } finally { undeletable.clear(); }
 
-    await launchOn(crashed);
+    await launchOn(await crashHere());
 
     expect(cards(runtime.getSnapshot()).map((card) => card.id)).toEqual([pending.id]);
     expect(runtime.getSnapshot().state!.pendingImports).toEqual([]);
-    expect(await readFile(cards(runtime.getSnapshot())[0].sourceFilePath, "utf8")).toBe("audio for take.wav");
-    expect(JSON.parse(await readFile(join(crashed, "inbox.json"), "utf8")).pendingImports).toEqual([]);
+    expect((await readdir(join(home, "cards", pending.id))).sort(), "the import's file is cleared").toEqual(["card.json", "take.wav"]);
   });
 
-  it("keeps an import whose accepted folder could not be moved back after a refused save, in memory and on disk", async () => {
+  it("keeps the import for review when its folder cannot be renamed into cards/", async () => {
     const [pending] = await dropIn("take.wav");
-    unwritable.refuses = (path) => path === join(home, "queue.json");
-    unmovable.add(join(home, "cards", pending.id));
+    unmovable.add(join(home, "inbox", pending.id));
     try {
       await expect(runtime.confirmPendingImports([review(pending)])).rejects.toThrow();
-    } finally { unwritable.refuses = () => false; unmovable.clear(); }
+    } finally { unmovable.clear(); }
 
     const [kept] = runtime.getSnapshot().state!.pendingImports;
-    expect(kept.workingFilePath, "the review plays it where it is").toBe(join(home, "cards", pending.id, "take.wav"));
-    expect(await readFile(kept.workingFilePath, "utf8")).toBe("audio for take.wav");
+    expect(kept.workingFilePath).toBe(pending.workingFilePath);
+    expect((await readdir(join(home, "inbox", pending.id))).sort(), "the staged card file is gone").toEqual(["import.json", "take.wav"]);
     expect(cards((await runtime.confirmPendingImports([review(kept)])).snapshot).map((card) => card.id), "confirming again works").toEqual([pending.id]);
   });
 
-  it("moves an import back for review at launch when a refused save could not move it back", async () => {
-    const [pending] = await dropIn("take.wav");
-    unwritable.refuses = (path) => path === join(home, "queue.json");
-    unmovable.add(join(home, "cards", pending.id));
+  it("makes cards of the imports accepted before one that fails, and keeps that one and the rest for review", async () => {
+    const [first, second, third] = await dropIn("one.wav", "two.wav", "three.wav");
+    unmovable.add(join(home, "inbox", second.id));
     try {
-      await expect(runtime.confirmPendingImports([review(pending)])).rejects.toThrow();
-    } finally { unwritable.refuses = () => false; unmovable.clear(); }
-    const crashed = await crashHere();
-
-    await launchOn(crashed);
-
-    expect(runtime.getSnapshot().state!.pendingImports.map((item) => item.workingFilePath)).toEqual([join(crashed, "inbox", pending.id, "take.wav")]);
-    expect(await exists(join(crashed, "cards", pending.id))).toBe(false);
+      await expect(runtime.confirmPendingImports([review(first), review(second), review(third)])).rejects.toThrow();
+    } finally { unmovable.clear(); }
+    expect(cards(runtime.getSnapshot()).map((card) => card.id)).toEqual([first.id]);
+    expect(runtime.getSnapshot().state!.pendingImports.map((item) => item.id)).toEqual([second.id, third.id]);
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+    expect(cards(runtime.getSnapshot()).map((card) => card.id)).toEqual([first.id]);
+    expect(runtime.getSnapshot().state!.pendingImports.map((item) => item.id).sort()).toEqual([second.id, third.id].sort());
   });
 
   it("clears scratch and staged card files a crash left in a listed card's folder, and nothing else", async () => {
@@ -867,7 +914,7 @@ describe("a crash between the queue's writes", () => {
     const [first, second] = await dropIn("one.wav", "two.wav");
     const [a, b] = cards((await runtime.confirmPendingImports([review(first), review(second, { localTimestampText: "2026-03-01 08:30:00" })])).snapshot);
     await runtime.setGeminiApiKey("test-key");
-    const others = [join(home, "queue.json"), join(home, "inbox.json"), join(home, "cards", b.id, "card.json")];
+    const others = [join(home, "cards", b.id, "card.json")];
     const before = await Promise.all(others.map((path) => readFile(path, "utf8")));
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
@@ -888,19 +935,19 @@ describe("a crash between the queue's writes", () => {
 });
 
 describe("confirming what was dropped in", () => {
-  it("retains the review and original actions after a refused queue publication", async () => {
+  it("retains the review and original actions after a refused acceptance", async () => {
     const [pending] = await dropIn("retry.wav");
     const originals = join(home, "originals");
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), backupDirectory: originals });
     const edited = review(pending, { copyToBackupOnConfirm: true, deleteOriginalOnConfirm: true });
-    unwritable.refuses = (path) => path === join(home, "queue.json");
+    unmovable.add(join(home, "inbox", pending.id));
     try {
       await expect(runtime.confirmPendingImports([edited])).rejects.toThrow();
       expect(runtime.getSnapshot().state?.pendingImports.map((item) => item.id)).toEqual([pending.id]);
       expect(cards(runtime.getSnapshot())).toEqual([]);
       expect(await readFile(pending.originalSourcePath, "utf8")).toBe("audio for retry.wav");
       expect(await readdir(originals).catch(() => []), "no output copy precedes the failed primary import").toEqual([]);
-    } finally { unwritable.refuses = () => false; }
+    } finally { unmovable.clear(); }
     const result = await runtime.confirmPendingImports([edited]);
     expect(result.snapshot.state?.pendingImports).toEqual([]);
     expect(cards(result.snapshot)).toHaveLength(1);
@@ -1099,9 +1146,9 @@ describe("confirming what was dropped in", () => {
   it("preserves sources from an older pending review without identity evidence", async () => {
     const [pending] = await dropIn("old-review.wav");
     await runtime.shutdown();
-    const path = join(home, "inbox.json");
+    const path = join(home, "inbox", pending.id, "import.json");
     const saved = JSON.parse(await readFile(path, "utf8"));
-    delete saved.pendingImports[0].sourceIdentity;
+    delete saved.sourceIdentity;
     await writeFile(path, JSON.stringify(saved));
     runtime = await ApplicationRuntime.initialize();
     const { originalWarnings } = await runtime.confirmPendingImports([review(pending, { deleteOriginalOnConfirm: true })]);
@@ -1179,9 +1226,9 @@ describe("confirming what was dropped in", () => {
     expect(snapshot.state?.pendingImports.map((item) => item.id)).toEqual([pending[1].id]);
   });
 
-  it("moves an import's updated time and rewrites the pending imports only when the review changes it", async () => {
+  it("moves an import's updated time and rewrites its file only when the review changes it", async () => {
     const [pending] = await dropIn("take.wav");
-    const queueFile = join(home, "inbox.json");
+    const queueFile = join(home, "inbox", pending.id, "import.json");
     const stored = await readFile(queueFile, "utf8");
 
     const editedAt = pending.updatedAtUtc + 60_000;
@@ -1501,19 +1548,24 @@ describe("working with a card", () => {
     await expect(runtime.saveCard(card.id), "no save starts while closing").rejects.toThrow(/closing/);
   });
 
-  it("reports a save as saved once its files are out, and keeps the working audio when the queue then cannot be written", async () => {
+  it("reports a save as saved once its files are out, and keeps the card ready when its folder then cannot be removed", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
-    const queueStore = (runtime as unknown as { runtime: { queueStore: InstanceType<typeof QueueStore> } }).runtime.queueStore;
-    // The order dropping the saved card is written once publication is done.
-    vi.spyOn(queueStore, "writeOrder").mockRejectedValueOnce(new Error("disk full"));
-
-    const result = await runtime.saveCard(card.id);
+    // Renaming the card's folder aside is the removal; a cards/ that cannot
+    // be written refuses it.
+    await chmod(join(home, "cards"), 0o500);
+    let result;
+    try {
+      result = await runtime.saveCard(card.id);
+    } finally {
+      await chmod(join(home, "cards"), 0o700);
+    }
 
     expect(result.kind).toBe("saved");
-    expect(cards(result.snapshot), "the saved card is out of the queue").toEqual([]);
     expect((await readdir(join(home, "output"))).length).toBe(3);
-    expect(await exists(card.sourceFilePath), "a relaunch still finds the card's audio").toBe(true);
+    expect(cards(result.snapshot).map((entry) => [entry.id, entry.status]), "the card stays, ready to save again").toEqual([[card.id, "Ready to Save"]]);
+    expect(await exists(card.sourceFilePath)).toBe(true);
+    expect((await savedQueue()).cards.map((entry) => entry.status)).toEqual(["Ready to Save"]);
   });
 
   it("preserves the primary save rejection when persisting its ready state also fails", async () => {
@@ -2025,13 +2077,13 @@ describe("working with a card", () => {
     expect(cards(await runtime.removeCard(card.id))).toEqual([]);
   });
 
-  it("removes the card when its folder cannot be deleted, and the next launch removes the folder", async () => {
+  it("removes the card when its renamed folder cannot be deleted, and the next launch deletes the folder", async () => {
     const card = await confirmed();
-    const folder = dirname(card.sourceFilePath);
+    const folder = join(home, "cards", `.removed-${card.id}`);
     undeletable.add(folder);
 
     expect(cards(await runtime.removeCard(card.id))).toEqual([]);
-    expect(await exists(card.sourceFilePath), "the folder waits for the next launch").toBe(true);
+    expect(await exists(join(folder, basename(card.sourceFilePath))), "the folder waits for the next launch").toBe(true);
     undeletable.clear();
     await runtime.shutdown();
     runtime = await ApplicationRuntime.initialize();
@@ -2059,7 +2111,7 @@ describe("working with a card", () => {
 });
 
 describe("each card in its own folder", () => {
-  it("keeps the whole card, its text included, in its folder's card.json, and the order alone in queue.json", async () => {
+  it("keeps the whole card, its text included, in its folder's card.json, with no list beside it", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
@@ -2071,7 +2123,7 @@ describe("each card in its own folder", () => {
       transcription: { text: "every word that was said" },
       metadata: { structured: "## what it was about" },
     });
-    expect(JSON.parse(await readFile(join(home, "queue.json"), "utf8"))).toEqual({ formatVersion: 2, cardIds: [card.id] });
+    expect(await exists(join(home, "queue.json")), "the cards list themselves").toBe(false);
     expect(await savedCard(card.id)).toMatchObject({ formatVersion: 1, id: card.id, transcription: { text: "every word that was said" } });
     expect((await readdir(join(home, "cards", card.id))).sort()).toEqual(["card.json", "take.wav"]);
   });
@@ -2079,14 +2131,14 @@ describe("each card in its own folder", () => {
   it("writes only the changed card when one card changes", async () => {
     const [first, second] = await dropIn("one.wav", "two.wav");
     const [a, b] = cards((await runtime.confirmPendingImports([review(first), review(second, { localTimestampText: "2026-03-01 08:30:00" })])).snapshot);
-    const others = [join(home, "queue.json"), join(home, "inbox.json"), join(home, "cards", b.id, "card.json")];
+    const others = [join(home, "cards", b.id, "card.json")];
     const times = async () => Promise.all(others.map(async (path) => (await stat(path)).mtimeMs));
     const before = await times();
 
     await runtime.updateCardTrim(a.id, { frontMarkerSec: null, backMarkerSec: 100 });
 
     expect((await savedCard(a.id)).trim.backMarkerSec).toBe(100);
-    expect(await times(), "the order, the pending imports and the other card were not written").toEqual(before);
+    expect(await times(), "the other card was not written").toEqual(before);
   });
 
   it("deletes a removed card's whole folder", async () => {
@@ -2096,7 +2148,6 @@ describe("each card in its own folder", () => {
     await runtime.removeCard(card.id);
 
     expect(await readdir(join(home, "cards"))).toEqual([]);
-    expect(JSON.parse(await readFile(join(home, "queue.json"), "utf8")).cardIds).toEqual([]);
   });
 });
 
@@ -2143,7 +2194,7 @@ describe("a store in a newer format", () => {
     return card;
   }
 
-  it.each(["queue.json", "inbox.json", "config.json"])(
+  it.each(["config.json"])(
     "halts launch naming %s, leaves it untouched and offers no reset",
     async (name) => {
       await confirmedCard();
@@ -2166,18 +2217,21 @@ describe("a store in a newer format", () => {
     },
   );
 
-  it("halts launch naming a card's file and leaves it untouched", async () => {
+  it.each(["queue.json", "inbox.json", "card", "pending import"])("names a %s from a newer build at launch, leaves it untouched and loads the rest", async (name) => {
     const card = await confirmedCard();
+    const [pending] = await dropIn("waiting.wav");
     await runtime.shutdown();
-    const path = join(home, "cards", card.id, "card.json");
+    const path = name === "card" ? join(home, "cards", card.id, "card.json")
+      : name === "pending import" ? join(home, "inbox", pending.id, "import.json") : join(home, name);
     const newer = await makeNewer(path);
 
     runtime = await ApplicationRuntime.initialize();
 
-    expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({
-      message: { key: "diagnostic.newerBody", values: { path } },
-      canReset: false,
-    });
+    expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+    expect(runtime.getSnapshot().appWideError?.message).toEqual({ key: "diagnostic.queueUnreadableBody", values: { items: [path] } });
+    expect(cards(runtime.getSnapshot()).map((entry) => entry.id)).toEqual(name === "card" ? [] : [card.id]);
+    expect(runtime.getSnapshot().state!.pendingImports.map((entry) => entry.id)).toEqual(name === "pending import" ? [] : [pending.id]);
+    await runtime.shutdown();
     expect(await readFile(path, "utf8")).toBe(newer);
   });
 
@@ -2524,7 +2578,7 @@ describe("settings, secrets and the window's own state", () => {
     expect(await exists(pending.originalSourcePath), "the user's own file is untouched").toBe(true);
   });
 
-  it("moves every card and pending import aside together with the queue's lists, and deletes none", async () => {
+  it("moves every card and pending import aside together, and deletes none", async () => {
     const [kept, waiting] = await dropIn("take.wav", "waiting.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(kept)])).snapshot);
 
@@ -2534,7 +2588,7 @@ describe("settings, secrets and the window's own state", () => {
     expect(setAside, "the queue is set aside").toBeDefined();
     expect(await readFile(join(home, setAside!, "cards", card.id, basename(card.sourceFilePath)), "utf8")).toBe("audio for take.wav");
     expect(await readFile(join(home, setAside!, "inbox", waiting.id, basename(waiting.workingFilePath)), "utf8")).toBe("audio for waiting.wav");
-    expect((await readdir(join(home, setAside!))).sort()).toEqual(["cards", "inbox", "inbox.json", "queue.json"]);
+    expect((await readdir(join(home, setAside!))).sort()).toEqual(["cards", "inbox"]);
     expect(await exists(join(home, "cards")), "the new queue starts with no cards").toBe(false);
   });
 
@@ -2548,7 +2602,7 @@ describe("settings, secrets and the window's own state", () => {
 
     expect(snapshot.startupDiagnostic).toEqual({
       title: { key: "diagnostic.resetTitle" },
-      message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json", "queue.json", "inbox.json"], folder: home } },
+      message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json"], folder: home } },
       canReset: true,
     });
     const names = await readdir(home);
@@ -2570,17 +2624,18 @@ describe("settings, secrets and the window's own state", () => {
 });
 
 describe("an unreadable work store", () => {
-  it("halts launch on a queue.json holding the JSON literal null and keeps the working recordings", async () => {
+  it("names a card.json holding the JSON literal null at launch and keeps the working recording", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
-    await writeFile(join(home, "queue.json"), "null", "utf8");
+    const path = join(home, "cards", card.id, "card.json");
+    await writeFile(path, "null", "utf8");
 
     runtime = await ApplicationRuntime.initialize();
 
-    expect(runtime.getSnapshot().startupDiagnostic?.title).toEqual({ key: "diagnostic.corruptTitle" });
-    expect(runtime.getSnapshot().state).toBeNull();
-    expect(await readFile(join(home, "queue.json"), "utf8")).toBe("null");
+    expect(runtime.getSnapshot().appWideError?.title).toEqual({ key: "diagnostic.queueUnreadableTitle" });
+    expect(cards(runtime.getSnapshot())).toEqual([]);
+    expect(await readFile(path, "utf8")).toBe("null");
     expect(await exists(card.sourceFilePath), "the working recording is kept").toBe(true);
   });
 });
@@ -2642,7 +2697,7 @@ describe("the save a quit makes", () => {
 
   it("writes the queue its last save could not write, and reports it while it still cannot", async () => {
     const [pending] = await dropIn("take.wav");
-    unwritable.refuses = (path) => path === join(home, "inbox.json");
+    unwritable.refuses = (path) => path === join(home, "inbox", pending.id, "import.json");
     await expect(runtime.updatePendingImportDrafts([review(pending)])).rejects.toThrow();
 
     expect(await runtime.saveForQuit()).toEqual(["queue"]);
@@ -2675,12 +2730,13 @@ describe("the save a quit makes", () => {
 
   it("writes nothing when everything is already on disk", async () => {
     const [pending] = await dropIn("take.wav");
-    await runtime.confirmPendingImports([review(pending)]);
-    const before = await stat(join(home, "queue.json"));
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
+    const file = join(home, "cards", card.id, "card.json");
+    const before = await stat(file);
 
     expect(await runtime.saveForQuit()).toEqual([]);
 
-    expect((await stat(join(home, "queue.json"))).mtimeMs).toBe(before.mtimeMs);
+    expect((await stat(file)).mtimeMs).toBe(before.mtimeMs);
   });
 
   it("retries a settings change that fails while the quit runs, with the value the user saved", async () => {
@@ -2706,7 +2762,7 @@ describe("the save a quit makes", () => {
 
   it.each(["targeted", "full"] as const)("keeps a retried %s settings commit authoritative after cancelling a failed quit", async (intent) => {
     const [pending] = await dropIn("take.wav");
-    const queuePath = join(home, "inbox.json");
+    const queuePath = join(home, "inbox", pending.id, "import.json");
     const configPath = join(home, "config.json");
     let settingsWrites = 0;
     unwritable.refuses = (path) => path === queuePath || (path === configPath && ++settingsWrites === 1);
@@ -2771,7 +2827,7 @@ describe("the save a quit makes", () => {
 
   it("takes work again after a cancelled quit", async () => {
     const [pending] = await dropIn("take.wav");
-    unwritable.refuses = (path) => path === join(home, "inbox.json");
+    unwritable.refuses = (path) => path === join(home, "inbox", pending.id, "import.json");
     await expect(runtime.updatePendingImportDrafts([review(pending)])).rejects.toThrow();
     expect(await runtime.saveForQuit()).toEqual(["queue"]);
 

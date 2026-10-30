@@ -4,12 +4,14 @@
 export const FORMAT_VERSIONS = {
   /** config.json */
   config: 1,
-  /** queue.json; 2 holds only the card order, each card in its own folder */
+  /** queue.json, an earlier build's card order, read once and deleted; 2 holds only the ids */
   queue: 2,
-  /** inbox.json, the pending imports */
+  /** inbox.json, an earlier build's pending imports, moved into their folders once */
   inbox: 1,
   /** cards/<id>/card.json */
   card: 1,
+  /** inbox/<id>/import.json, a pending import's review choices */
+  pendingImport: 1,
   /** layout.json */
   layout: 1,
   /** api-keys.json */

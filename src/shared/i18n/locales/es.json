@@ -95,6 +95,8 @@
   "diagnostic.settingsResetBody": "Mumbler no pudo leer su archivo de configuración y lo movió a {path}. Se inició con la configuración predeterminada; tu cola y tus grabaciones no se modificaron.",
   "diagnostic.settingsUnusableTitle": "No se pudieron usar algunos valores de configuración",
   "diagnostic.settingsUnusableBody": "No se pudieron usar estos valores de configuración guardados: {items}. Mumbler usa para ellos los valores predeterminados y ha conservado los guardados en config.json. Al guardar la Configuración, se sustituyen por los valores que muestra la Configuración.",
+  "diagnostic.queueUnreadableTitle": "No se pudieron leer algunas grabaciones",
+  "diagnostic.queueUnreadableBody": "Mumbler no pudo leer estos archivos de la cola y los dejó como estaban: {items}. Sus grabaciones no están en la cola. Un archivo de un Mumbler más reciente se abre en esa versión; uno dañado se puede reparar o eliminar su carpeta a mano.",
   "diagnostic.startupTitle": "Error al iniciar",
   "diagnostic.startupBody": "Mumbler no pudo terminar de preparar su almacenamiento. Vuelve a abrir la app para intentarlo de nuevo; los archivos guardados no se modificaron.",
   "diagnostic.resetTitle": "Error al restablecer",

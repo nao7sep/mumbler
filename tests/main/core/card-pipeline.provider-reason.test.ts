@@ -121,7 +121,6 @@ describe("provider reasons published by the pipeline", () => {
     settings["gemini.outline"] = "custom";
     const persistState = async (): Promise<void> => {
       await queue.writeCard(card);
-      await queue.writeOrder(state.cards);
       publications.push(JSON.stringify(state));
     };
     const ctx: CardPipelineContext = {

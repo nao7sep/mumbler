@@ -95,6 +95,8 @@
   "diagnostic.settingsResetBody": "Mumbler non è riuscito a leggere il file delle impostazioni e lo ha spostato in {path}. L’app è stata avviata con le impostazioni predefinite; la coda e le registrazioni non sono state modificate.",
   "diagnostic.settingsUnusableTitle": "Impossibile usare alcune impostazioni",
   "diagnostic.settingsUnusableBody": "Non è stato possibile usare queste impostazioni salvate: {items}. Mumbler usa per esse i valori predefiniti e ha conservato quelle salvate in config.json. Salvando le Impostazioni, vengono sostituite dai valori che le Impostazioni mostrano.",
+  "diagnostic.queueUnreadableTitle": "Impossibile leggere alcune registrazioni",
+  "diagnostic.queueUnreadableBody": "Mumbler non è riuscito a leggere questi file della coda e li ha lasciati invariati: {items}. Le loro registrazioni non sono nella coda. Un file di un Mumbler più recente si apre in quella versione; uno danneggiato può essere riparato o la sua cartella rimossa a mano.",
   "diagnostic.startupTitle": "Avvio non riuscito",
   "diagnostic.startupBody": "Mumbler non è riuscito a completare la preparazione dell’archiviazione. Riapri l’app per riprovare; i file salvati non sono stati modificati.",
   "diagnostic.resetTitle": "Ripristino non riuscito",

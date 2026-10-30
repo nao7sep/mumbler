@@ -562,13 +562,18 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("retains the original and durable pending import, its folder back in inbox/, when queue publication fails", async () => {
+  it("retains the original and the pending import in inbox/ when its folder cannot be moved into cards/", async () => {
     await withImport(async (runtime, item) => {
-      const saveFailure = new Error("queue publication failed");
-      vi.spyOn(QueueStore.prototype, "writeOrder").mockRejectedValueOnce(saveFailure);
+      const cardsDir = getAppPaths().cardsDir;
+      await mkdir(cardsDir, { recursive: true });
+      await chmod(cardsDir, 0o500);
       const deletion = vi.spyOn(workingFiles, "deleteImportedSource");
 
-      await expect(runtime.confirmPendingImports([item])).rejects.toBe(saveFailure);
+      try {
+        await expect(runtime.confirmPendingImports([item])).rejects.toMatchObject({ code: "EACCES" });
+      } finally {
+        await chmod(cardsDir, 0o700);
+      }
 
       expect(deletion).not.toHaveBeenCalled();
       expect(await readFile(item.originalSourcePath, "utf8")).toBe("original recording");
@@ -576,7 +581,8 @@ describe("ApplicationRuntime confirmed import commit", () => {
       expect(persisted.cards).toEqual([]);
       expect(persisted.pendingImports.map((pending) => pending.id)).toEqual([item.id]);
       expect(await readFile(item.workingFilePath, "utf8")).toBe("original recording");
-      expect(await readdir(join(getAppPaths().inboxDir, item.id)), "no card file is left with the review").toEqual([basename(item.workingFilePath)]);
+      expect((await readdir(join(getAppPaths().inboxDir, item.id))).sort(), "no card file is left with the review")
+        .toEqual([basename(item.workingFilePath), "import.json"].sort());
       expect(runtime.getSnapshot().state!.pendingImports.map((pending) => pending.id)).toEqual([item.id]);
     });
   });
@@ -599,10 +605,9 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("keeps import success after pending-import, selection and observer failures, and writes the pending imports at quit", async () => {
+  it("keeps import success after selection and observer failures", async () => {
     await withImport(async (runtime, item) => {
       const warnings = vi.spyOn(runtime.currentLogger(), "warn");
-      failWriteOnce(getAppPaths().inboxPath, new Error("inbox write failed"));
       const save = JsonStore.prototype.save;
       vi.spyOn(JsonStore.prototype, "save").mockImplementation(function (this: typeof JsonStore.prototype, value) {
         if (typeof value === "object" && value !== null && "selectedCardId" in value) {
@@ -617,11 +622,11 @@ describe("ApplicationRuntime confirmed import commit", () => {
       expect(result.snapshot.state!.cards).toHaveLength(1);
       expect(result.originalWarnings).toEqual([]);
       const persisted = (await readSavedQueue(getAppPaths()));
-      expect(persisted.pendingImports.map((pending) => pending.id), "the inbox write failed").toEqual([item.id]);
+      expect(persisted.pendingImports).toEqual([]);
       expect(persisted.cards).toHaveLength(1);
       await expect(stat(item.originalSourcePath)).rejects.toMatchObject({ code: "ENOENT" });
       expect(warnings.mock.calls.map(([operation]) => operation)).toEqual([
-        "queue.select-card", "queue.progress", "import.confirm-inbox", "import.select-card",
+        "queue.select-card", "queue.progress", "import.select-card",
       ]);
       expect(warnings.mock.calls.every(([, , details]) =>
         (details as { error: { stack?: string } }).error.stack !== undefined,
@@ -712,7 +717,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("quit waits for a removal whose folder deletion fails, which leaves the card removed and its folder for launch", async () => {
+  it("quit waits for a removal whose deletion fails after the rename, which leaves the card removed and its renamed folder for launch", async () => {
     await withCard(async (runtime, card) => {
       const held = gate();
       const entered = gate();
@@ -721,12 +726,10 @@ describe("ApplicationRuntime confirmed import commit", () => {
         await held.promise;
         throw new Error("folder deletion failed");
       });
-      const warnings = vi.spyOn(runtime.currentLogger(), "warn");
       const work = runtime.removeCard(card.id);
       let quit: Promise<unknown> | undefined;
       try {
         await entered.promise;
-        expect(runtime.getSnapshot().state!.cards).toHaveLength(0);
         quit = runtime.saveForQuit();
         let settled = false;
         void quit.then(() => { settled = true; });
@@ -735,10 +738,10 @@ describe("ApplicationRuntime confirmed import commit", () => {
         held.release();
         await expect(refused).rejects.toThrow("closing");
         await expect(work).resolves.toMatchObject({ state: { cards: [] } });
-        expect(warnings).toHaveBeenCalledWith("card.remove-cleanup", expect.any(String), expect.objectContaining({ cardId: card.id }));
         expect(await quit).toEqual([]);
         expect((await readSavedQueue(getAppPaths())).cards).toEqual([]);
-        expect(await readFile(card.sourceFilePath, "utf8"), "the folder stays until the next launch").toBe("original recording");
+        const renamed = join(getAppPaths().cardsDir, `.removed-${card.id}`, basename(card.sourceFilePath));
+        expect(await readFile(renamed, "utf8"), "the renamed folder stays until the next launch").toBe("original recording");
       } finally {
         held.release();
         await Promise.allSettled([work, ...(quit ? [quit] : [])]);
@@ -931,12 +934,12 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it.each(["card", "order"] as const)("reports a %s file quit could not write as the queue, and writes what the app holds on retry", async (failed) => {
+  it("reports a card file quit could not write as the queue, and writes what the app holds on retry", async () => {
     await withCard(async (runtime, card) => {
       card.metadata.title = "unsaved title";
-      const path = failed === "card" ? cardFile(card) : getAppPaths().queuePath;
+      const path = cardFile(card);
       failWriteOnce(path, new Error("initial save failure"));
-      await expect(persistence(runtime).persist(failed === "card" ? { cards: [card] } : { order: true })).rejects.toThrow("initial save failure");
+      await expect(persistence(runtime).persist({ cards: [card] })).rejects.toThrow("initial save failure");
       vi.restoreAllMocks();
       card.transcription.text = "unsaved transcript";
       failWriteOnce(path, new Error("quit failure"));
@@ -947,10 +950,8 @@ describe("ApplicationRuntime confirmed import commit", () => {
       expect(writes, "only the failed file is written again").toHaveBeenCalledOnce();
       expect(await runtime.saveForQuit()).toEqual([]);
       expect(writes, "a landed retry is not repeated").toHaveBeenCalledOnce();
-      if (failed === "card") {
-        expect((await savedCard(card)).metadata.title).toBe("unsaved title");
-        expect((await savedCard(card)).transcription.text).toBe("unsaved transcript");
-      } else expect((await readSavedQueue(getAppPaths())).cards.map((entry) => entry.id)).toEqual([card.id]);
+      expect((await savedCard(card)).metadata.title).toBe("unsaved title");
+      expect((await savedCard(card)).transcription.text).toBe("unsaved transcript");
     });
   });
 

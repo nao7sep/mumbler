@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
 import { NewerFormatError } from "@main/core/format-versions";
-import { CorruptStateError } from "@main/core/json-store";
 import type { AppLogger } from "@main/core/logger";
 import { newItemId, QueueStore, recoverInterruptedCard } from "@main/core/queue-store";
 
@@ -92,25 +91,25 @@ function pending(id: string, overrides: Partial<PendingImportReviewItem> = {}): 
   };
 }
 
-/** A card on disk as a command leaves it: its folder, audio and file, listed in the order. */
+/** A card on disk as a command leaves it: its folder, audio and file. */
 async function saveCards(cards: MumblerCard[]): Promise<void> {
   for (const entry of cards) {
     await mkdir(join(dir, "cards", entry.id), { recursive: true });
     await writeFile(entry.sourceFilePath, "audio");
     await store.writeCard(entry);
   }
-  await store.writeOrder(cards);
 }
 
 async function savePending(items: PendingImportReviewItem[]): Promise<void> {
   for (const item of items) {
     await mkdir(join(dir, "inbox", item.id), { recursive: true });
     await writeFile(item.workingFilePath, "audio");
+    await store.writeImport(item);
   }
-  await store.writeInbox(items);
 }
 
 const cardPath = (id: string) => join(dir, "cards", id, "card.json");
+const importPath = (id: string) => join(dir, "inbox", id, "import.json");
 
 describe("the queue on disk", () => {
   it("starts empty when nothing is saved, and writes nothing", async () => {
@@ -119,22 +118,26 @@ describe("the queue on disk", () => {
     expect(await readdir(dir)).toEqual([]);
   });
 
-  it("keeps the order in queue.json and each whole card, text included, in its own folder", async () => {
-    const first = card({ id: "a", transcription: { text: "every word of an hour" }, metadata: { structured: "## outline", title: "Title", slug: "title" } });
-    const second = card({ id: "b" });
-    await saveCards([second, first]);
+  it("keeps each whole card, text included, in its own folder, and orders the cards by effective time", async () => {
+    const at = (minute: number) => ({ ...card().timestamps, effectiveUtc: Date.UTC(2026, 3, 22, 0, minute, 0) });
+    const first = card({ id: "z", timestamps: at(1), transcription: { text: "every word of an hour" }, metadata: { structured: "## outline", title: "Title", slug: "title" } });
+    const second = card({ id: "a", timestamps: at(2) });
+    // Same effective time: the earlier-made card comes first.
+    const third = card({ id: "b", timestamps: at(2), createdAtUtc: Date.UTC(2026, 3, 21) });
+    await saveCards([second, first, third]);
 
-    expect(JSON.parse(await readFile(join(dir, "queue.json"), "utf8"))).toEqual({ formatVersion: 2, cardIds: ["b", "a"] });
-    const raw = JSON.parse(await readFile(cardPath("a"), "utf8"));
-    expect(raw).toMatchObject({ formatVersion: 1, id: "a", transcription: { text: "every word of an hour" }, metadata: { structured: "## outline" } });
+    expect(await readdir(dir)).toEqual(["cards"]);
+    const raw = JSON.parse(await readFile(cardPath("z"), "utf8"));
+    expect(raw).toMatchObject({ formatVersion: 1, id: "z", transcription: { text: "every word of an hour" }, metadata: { structured: "## outline" } });
 
     const { state } = await store.load(logger);
-    expect(state.cards.map((entry) => entry.id)).toEqual(["b", "a"]);
-    expect(state.cards[1]).toEqual(first);
+    expect(state.cards.map((entry) => entry.id)).toEqual(["z", "b", "a"]);
+    expect(state.cards[0]).toEqual(first);
   });
 
-  it("keeps the pending imports in inbox.json, each copy in its own folder", async () => {
-    await savePending([pending("p1"), pending("p2")]);
+  it("keeps each pending import's choices in its own folder beside its copy, ordered by when it was imported", async () => {
+    await savePending([pending("p2", { createdAtUtc: Date.UTC(2026, 3, 23) }), pending("p1")]);
+    expect(JSON.parse(await readFile(importPath("p1"), "utf8"))).toMatchObject({ formatVersion: 1, id: "p1" });
     const { state } = await store.load(logger);
     expect(state.pendingImports.map((item) => item.id)).toEqual(["p1", "p2"]);
     expect(state.pendingImports[0]).toEqual(pending("p1"));
@@ -170,47 +173,45 @@ describe("the queue on disk", () => {
     expect(loaded.status).toBe("Imported");
   });
 
-  it("removes every folder neither list names, and keeps the listed ones", async () => {
+  it("leaves a folder that holds no item file in place, and deletes no folder but a removed one", async () => {
     await saveCards([card({ id: "kept" })]);
     await savePending([pending("waiting")]);
-    await mkdir(join(dir, "cards", "orphan", "temp"), { recursive: true });
+    await mkdir(join(dir, "cards", "orphan"), { recursive: true });
     await writeFile(join(dir, "cards", "orphan", "a.m4a"), "audio");
     await mkdir(join(dir, "inbox", "abandoned"), { recursive: true });
+    await mkdir(join(dir, "cards", ".removed-gone", "temp"), { recursive: true });
+    await writeFile(join(dir, "inbox", ".removed-gone"), "not a folder");
+    await mkdir(join(dir, "inbox", ".removed-went"), { recursive: true });
 
     const loaded = await store.load(logger);
 
+    expect(loaded.unlistedFolders).toBe(2);
     expect(loaded.removedFolders).toBe(2);
-    expect(await readdir(join(dir, "cards"))).toEqual(["kept"]);
-    expect(await readdir(join(dir, "inbox"))).toEqual(["waiting"]);
+    expect(loaded.state.cards.map((entry) => entry.id)).toEqual(["kept"]);
+    expect(loaded.state.pendingImports.map((entry) => entry.id)).toEqual(["waiting"]);
+    expect((await readdir(join(dir, "cards"))).sort()).toEqual(["kept", "orphan"]);
+    expect((await readdir(join(dir, "inbox"))).sort()).toEqual([".removed-gone", "abandoned", "waiting"]);
+    expect(await readFile(join(dir, "cards", "orphan", "a.m4a"), "utf8")).toBe("audio");
+    expect(logger.warn).toHaveBeenCalledWith("startup.folder-unlisted", expect.any(String), expect.objectContaining({ path: join(dir, "cards", "orphan") }));
   });
 
-  it("drops a pending import whose copy is gone and errors a card whose audio is gone, writing only those", async () => {
+  it("errors a card whose audio is gone and leaves an import whose copy is gone in place, writing only the card", async () => {
     await saveCards([card({ id: "intact" }), card({ id: "lost" })]);
     await savePending([pending("p-intact"), pending("p-lost")]);
     await rm(join(dir, "cards", "lost", "a.m4a"));
     await rm(join(dir, "inbox", "p-lost", "a.m4a"));
     const intactBefore = await readFile(cardPath("intact"), "utf8");
+    const lostImport = await readFile(importPath("p-lost"), "utf8");
 
     const loaded = await store.load(logger);
 
     expect(loaded.missingWorkingCards).toBe(1);
-    expect(loaded.droppedPendingImports).toBe(1);
+    expect(loaded.unlistedFolders).toBe(1);
     expect(loaded.state.cards.find((entry) => entry.id === "lost")).toMatchObject({ status: "Error", lastError: { failedStep: "startup-recovery" } });
     expect(JSON.parse(await readFile(cardPath("lost"), "utf8")).status).toBe("Error");
     expect(await readFile(cardPath("intact"), "utf8")).toBe(intactBefore);
-    expect(JSON.parse(await readFile(join(dir, "inbox.json"), "utf8")).pendingImports.map((item: { id: string }) => item.id)).toEqual(["p-intact"]);
-    expect(await readdir(join(dir, "inbox")), "the dropped import's empty folder goes too").toEqual(["p-intact"]);
-  });
-
-  it("drops a listed card whose file is missing and rewrites the order", async () => {
-    await saveCards([card({ id: "a" }), card({ id: "b" })]);
-    await rm(cardPath("b"));
-
-    const loaded = await store.load(logger);
-
-    expect(loaded.droppedCards).toBe(1);
-    expect(loaded.state.cards.map((entry) => entry.id)).toEqual(["a"]);
-    expect(JSON.parse(await readFile(join(dir, "queue.json"), "utf8")).cardIds).toEqual(["a"]);
+    expect(loaded.state.pendingImports.map((item) => item.id)).toEqual(["p-intact"]);
+    expect(await readFile(importPath("p-lost"), "utf8"), "its choices stay").toBe(lostImport);
   });
 
   it("recovers a card a previous session left mid-step, rewriting only that card", async () => {
@@ -226,38 +227,54 @@ describe("the queue on disk", () => {
     expect(await readFile(cardPath("idle"), "utf8")).toBe(idleBefore);
   });
 
-  it("refuses an order from the previous layout, which held whole cards, and leaves it untouched", async () => {
-    const old = JSON.stringify({ formatVersion: 1, pendingImports: [], cards: [card()] });
-    await writeFile(join(dir, "queue.json"), old);
-    await expect(store.load(logger)).rejects.toBeInstanceOf(CorruptStateError);
-    expect(await readFile(join(dir, "queue.json"), "utf8")).toBe(old);
-  });
-
   it.each([
-    ["an order that is not a list", { cardIds: { a: 1 } }],
-    ["an order naming an id twice", { cardIds: ["a", "a"] }],
-    ["an order naming an id that cannot be a folder", { cardIds: ["../x"] }],
-    ["an order naming a mixed-case id", { cardIds: ["Ab"] }],
-  ])("refuses %s as damaged, and leaves it untouched", async (_name, shape) => {
-    const text = JSON.stringify({ formatVersion: 2, ...shape });
+    ["an earlier build's layout, which held whole cards", { formatVersion: 1, pendingImports: [], cards: [{ id: "c1" }] }],
+    ["an order that is not a list", { formatVersion: 2, cardIds: { a: 1 } }],
+    ["an order naming an id twice", { formatVersion: 2, cardIds: ["a", "a"] }],
+    ["a queue.json from a newer Mumbler", { formatVersion: 99 }],
+  ])("reports a queue.json with %s and leaves it untouched, loading the cards", async (_name, shape) => {
+    await saveCards([card()]);
+    const text = JSON.stringify(shape);
     await writeFile(join(dir, "queue.json"), text);
-    await expect(store.load(logger)).rejects.toBeInstanceOf(CorruptStateError);
+    const loaded = await store.load(logger);
+    expect(loaded.state.cards.map((entry) => entry.id)).toEqual(["c1"]);
+    expect(loaded.unreadable.map((file) => file.path)).toEqual([join(dir, "queue.json")]);
     expect(await readFile(join(dir, "queue.json"), "utf8")).toBe(text);
   });
 
+  it("deletes an earlier build's queue.json once the cards' folders are read, losing no card", async () => {
+    await saveCards([card({ id: "a" }), card({ id: "b" })]);
+    await writeFile(join(dir, "queue.json"), JSON.stringify({ formatVersion: 2, cardIds: ["b", "a", "gone"] }));
+    const loaded = await store.load(logger);
+    expect(loaded.state.cards.map((entry) => entry.id).sort()).toEqual(["a", "b"]);
+    expect(await readdir(dir)).toEqual(["cards"]);
+    expect(logger.warn).toHaveBeenCalledWith("startup.order-missing", expect.any(String), { cardIds: ["gone"] });
+  });
+
+  it("loses no card when queue.json is deleted", async () => {
+    await saveCards([card({ id: "a" }), card({ id: "b" })]);
+    await writeFile(join(dir, "queue.json"), JSON.stringify({ formatVersion: 2, cardIds: ["a", "b"] }));
+    await rm(join(dir, "queue.json"));
+    const loaded = await store.load(logger);
+    expect(loaded.state.cards.map((entry) => entry.id).sort()).toEqual(["a", "b"]);
+    expect(loaded.unreadable).toEqual([]);
+  });
+
   it.each([
-    ["pending imports that are not a list", { pendingImports: "none" }],
-    ["an empty pending import identity", { pendingImports: [pending("")] }],
-    ["duplicate pending import identities", { pendingImports: [pending("p"), pending("p")] }],
-    ["an invalid source identity", { pendingImports: [{ ...pending("p"), sourceIdentity: { dev: "disk", ino: 1, size: 1, mtimeMs: 1, ctimeMs: 1 } }] }],
-    ["a null source identity", { pendingImports: [{ ...pending("p"), sourceIdentity: null }] }],
-    ["an unknown timestamp basis", { pendingImports: [{ ...pending("p"), timestampBasis: "unknown" }] }],
-    ["a delete choice that is not true or false", { pendingImports: [{ ...pending("p"), deleteOriginalOnConfirm: "false" }] }],
-  ])("refuses an inbox with %s as damaged, and leaves it untouched", async (_name, shape) => {
+    ["an empty identity", { ...pending("p1"), id: "" }],
+    ["an id that is not its folder's", { ...pending("p1"), id: "other" }],
+    ["an invalid source identity", { ...pending("p1"), sourceIdentity: { dev: "disk", ino: 1, size: 1, mtimeMs: 1, ctimeMs: 1 } }],
+    ["a null source identity", { ...pending("p1"), sourceIdentity: null }],
+    ["an unknown timestamp basis", { ...pending("p1"), timestampBasis: "unknown" }],
+    ["a delete choice that is not true or false", { ...pending("p1"), deleteOriginalOnConfirm: "false" }],
+  ])("reports a pending import with %s as unreadable, leaves it untouched and loads the rest", async (_name, shape) => {
+    await savePending([pending("p1"), pending("p2")]);
     const text = JSON.stringify({ formatVersion: 1, ...shape });
-    await writeFile(join(dir, "inbox.json"), text);
-    await expect(store.load(logger)).rejects.toBeInstanceOf(CorruptStateError);
-    expect(await readFile(join(dir, "inbox.json"), "utf8")).toBe(text);
+    await writeFile(importPath("p1"), text);
+    const loaded = await store.load(logger);
+    expect(loaded.state.pendingImports.map((item) => item.id)).toEqual(["p2"]);
+    expect(loaded.unreadable.map((file) => file.path)).toEqual([importPath("p1")]);
+    expect(await readFile(importPath("p1"), "utf8")).toBe(text);
   });
 
   it.each([
@@ -282,29 +299,29 @@ describe("the queue on disk", () => {
     ["an object trim reason", { trimDecision: { kind: "reencode", reason: {} } }],
     ["an object AI model", { ai: { ...card().ai, title: { model: {} } } }],
     ["an object front trim offset", { timestamps: { ...card().timestamps, frontTrimOffsetSec: {} } }],
-  ])("refuses a card file with %s as damaged, and leaves it untouched", async (_name, change) => {
-    await saveCards([card()]);
+  ])("reports a card file with %s as unreadable, leaves it untouched and loads the rest", async (_name, change) => {
+    await saveCards([card(), card({ id: "c2" })]);
     const text = JSON.stringify({ ...JSON.parse(await readFile(cardPath("c1"), "utf8")), ...change });
     await writeFile(cardPath("c1"), text);
-    await expect(store.load(logger)).rejects.toBeInstanceOf(CorruptStateError);
+    const loaded = await store.load(logger);
+    expect(loaded.state.cards.map((entry) => entry.id)).toEqual(["c2"]);
+    expect(loaded.unreadable.map((file) => file.path)).toEqual([cardPath("c1")]);
     expect(await readFile(cardPath("c1"), "utf8")).toBe(text);
   });
 
-  it("refuses a card file whose trim number overflows, without rewriting it", async () => {
+  it.each([
+    ["damaged JSON", "{ not json"],
+    ["a trim number that overflows", null],
+    ["a newer format", JSON.stringify({ formatVersion: 99 })],
+  ])("reports a card file with %s with its path, without rewriting it", async (_name, replacement) => {
     await saveCards([card()]);
-    const text = (await readFile(cardPath("c1"), "utf8")).replace('"frontMarkerSec": null', '"frontMarkerSec": 1e400');
+    const text = replacement ?? (await readFile(cardPath("c1"), "utf8")).replace('"frontMarkerSec": null', '"frontMarkerSec": 1e400');
     await writeFile(cardPath("c1"), text);
-    await expect(store.load(logger)).rejects.toBeInstanceOf(CorruptStateError);
+    const loaded = await store.load(logger);
+    expect(loaded.state.cards).toEqual([]);
+    expect(loaded.unreadable).toEqual([{ path: cardPath("c1"), reason: expect.any(String) }]);
     expect(await readFile(cardPath("c1"), "utf8")).toBe(text);
-  });
-
-  it.each(["queue.json", "inbox.json", "card.json"])("leaves a %s from a newer Mumbler untouched and stops", async (name) => {
-    await saveCards([card()]);
-    const path = name === "card.json" ? cardPath("c1") : join(dir, name);
-    const newer = JSON.stringify({ formatVersion: 99 });
-    await writeFile(path, newer);
-    await expect(store.load(logger)).rejects.toBeInstanceOf(NewerFormatError);
-    expect(await readFile(path, "utf8")).toBe(newer);
+    expect(await readFile(card().sourceFilePath, "utf8"), "its audio stays").toBe("audio");
   });
 
   it("retains usable nested details and absent optional error fields without rewriting", async () => {
@@ -387,10 +404,9 @@ describe("the queue on disk", () => {
 
     it("takes a pending import's missing time from its other one", async () => {
       await savePending([pending("a"), pending("b")]);
-      const inbox = JSON.parse(await readFile(join(dir, "inbox.json"), "utf8"));
-      inbox.pendingImports[0] = { ...inbox.pendingImports[0], createdAtUtc: "garbled", updatedAtUtc: new Date(UPDATED).toISOString() };
-      inbox.pendingImports[1] = { ...inbox.pendingImports[1], createdAtUtc: new Date(UPDATED).toISOString(), updatedAtUtc: undefined };
-      await writeFile(join(dir, "inbox.json"), JSON.stringify(inbox));
+      const saved = async (id: string) => JSON.parse(await readFile(importPath(id), "utf8"));
+      await writeFile(importPath("a"), JSON.stringify({ ...await saved("a"), createdAtUtc: "garbled", updatedAtUtc: new Date(UPDATED).toISOString() }));
+      await writeFile(importPath("b"), JSON.stringify({ ...await saved("b"), createdAtUtc: new Date(UPDATED).toISOString(), updatedAtUtc: undefined }));
 
       const { pendingImports } = (await store.load(logger)).state;
       expect(pendingImports.map((entry) => [entry.createdAtUtc, entry.updatedAtUtc])).toEqual([[UPDATED, UPDATED], [UPDATED, UPDATED]]);
@@ -399,26 +415,93 @@ describe("the queue on disk", () => {
 });
 
 describe("accepting, removing and retrying", () => {
-  it("moves an accepted import's folder into cards/ under the same id, and back when it could not be saved", async () => {
+  it("accepts an import by writing its card into its folder and renaming the folder into cards/ under the same id", async () => {
     const item = pending("p1");
     await savePending([item]);
-
-    const audio = await store.acceptImport(item);
+    const audio = store.acceptedAudioPath(item);
     expect(audio).toBe(join(dir, "cards", "p1", "a.m4a"));
-    expect(await readFile(audio, "utf8")).toBe("audio");
-    await store.writeCard(card({ id: "p1", sourceFilePath: audio }));
 
-    await store.returnImport(item);
-    expect(await readdir(join(dir, "inbox", "p1"))).toEqual(["a.m4a"]);
-    expect(await readdir(join(dir, "cards"))).toEqual([]);
+    await store.acceptImport(item, card({ id: "p1", sourceFilePath: audio }));
+
+    expect(await readdir(join(dir, "inbox"))).toEqual([]);
+    expect((await readdir(join(dir, "cards", "p1"))).sort()).toEqual(["a.m4a", "card.json"]);
+    const loaded = await store.load(logger);
+    expect(loaded.state.cards.map((entry) => entry.id)).toEqual(["p1"]);
+    expect(loaded.state.pendingImports).toEqual([]);
   });
 
-  it("deletes a card's whole folder, its scratch included", async () => {
+  it("keeps the import as it was when its folder cannot be renamed into cards/", async () => {
+    const item = pending("p1");
+    await savePending([item]);
+    await mkdir(join(dir, "cards"));
+    await chmod(join(dir, "cards"), 0o500);
+    try {
+      await expect(store.acceptImport(item, card({ id: "p1" }))).rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      await chmod(join(dir, "cards"), 0o700);
+    }
+    expect((await readdir(join(dir, "inbox", "p1"))).sort(), "the staged card file is gone").toEqual(["a.m4a", "import.json"]);
+    expect((await store.load(logger)).state.pendingImports.map((entry) => entry.id)).toEqual(["p1"]);
+  });
+
+  it("keeps the import when a crash cut its acceptance short before the rename, and the card after it", async () => {
+    await savePending([pending("before")]);
+    // Before the rename: the card file is staged in the import's folder.
+    await saveCards([card({ id: "before" })]);
+    await rename(cardPath("before"), join(dir, "inbox", "before", "card.json"));
+    await rm(join(dir, "cards", "before"), { recursive: true });
+    // After the rename: the import's file is left beside the card's.
+    await saveCards([card({ id: "after" })]);
+    await writeFile(join(dir, "cards", "after", "import.json"), await readFile(importPath("before"), "utf8"));
+
+    const loaded = await store.load(logger);
+
+    expect(loaded.state.pendingImports.map((entry) => entry.id)).toEqual(["before"]);
+    expect(loaded.state.cards.map((entry) => entry.id)).toEqual(["after"]);
+    expect((await readdir(join(dir, "inbox", "before"))).sort()).toEqual(["a.m4a", "import.json"]);
+    expect((await readdir(join(dir, "cards", "after"))).sort()).toEqual(["a.m4a", "card.json"]);
+  });
+
+  it("removes a card by renaming its folder aside, then deleting it, scratch included", async () => {
     await saveCards([card()]);
     await mkdir(join(dir, "cards", "c1", "temp"), { recursive: true });
     await writeFile(join(dir, "cards", "c1", "temp", "trim.m4a"), "scratch");
-    await store.removeCardFolder("c1");
+    await store.removeCard("c1");
     expect(await readdir(join(dir, "cards"))).toEqual([]);
+  });
+
+  it("keeps a card whose folder cannot be renamed aside, and reports why", async () => {
+    await saveCards([card()]);
+    await chmod(join(dir, "cards"), 0o500);
+    try {
+      await expect(store.removeCard("c1")).rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      await chmod(join(dir, "cards"), 0o700);
+    }
+    expect((await store.load(logger)).state.cards.map((entry) => entry.id)).toEqual(["c1"]);
+  });
+
+  it("leaves no damaged card when a removal is cut short after the rename or during the delete", async () => {
+    await saveCards([card({ id: "renamed" }), card({ id: "halfway" }), card({ id: "kept" })]);
+    // Cut short after the rename: the whole folder is aside.
+    await rename(join(dir, "cards", "renamed"), join(dir, "cards", ".removed-renamed"));
+    // Cut short during the delete: the card file went first, the audio stays.
+    await rename(join(dir, "cards", "halfway"), join(dir, "cards", ".removed-halfway"));
+    await rm(join(dir, "cards", ".removed-halfway", "card.json"));
+
+    const loaded = await store.load(logger);
+
+    expect(loaded.state.cards.map((entry) => entry.id)).toEqual(["kept"]);
+    expect(loaded.unreadable).toEqual([]);
+    expect(loaded.unlistedFolders).toBe(0);
+    expect(loaded.removedFolders).toBe(2);
+    expect(await readdir(join(dir, "cards"))).toEqual(["kept"]);
+  });
+
+  it("removes a pending import the same way, its copy included", async () => {
+    await savePending([pending("p1")]);
+    await store.removeImport("p1");
+    expect(await readdir(join(dir, "inbox"))).toEqual([]);
   });
 
   it("writes again, from the state it is given, only the files whose latest write failed", async () => {
@@ -437,14 +520,15 @@ describe("accepting, removing and retrying", () => {
     expect(await readFile(cardPath("a"), "utf8"), "a card whose write landed is not rewritten").toBe(aBefore);
   });
 
-  it("sets the lists and both folders aside for Reset, and refuses one from a newer Mumbler", async () => {
+  it("sets both folders, and any earlier list, aside for Reset, and refuses one from a newer Mumbler", async () => {
     await saveCards([card()]);
     await savePending([pending("p")]);
+    await writeFile(join(dir, "queue.json"), "{}");
     const moved = await store.preserveExistingFiles();
-    expect(moved).toHaveLength(4);
+    expect(moved).toHaveLength(3);
     const [aside] = await readdir(dir);
     expect(aside).toMatch(/^queue-.*\.invalid$/);
-    expect((await readdir(join(dir, aside))).sort()).toEqual(["cards", "inbox", "inbox.json", "queue.json"]);
+    expect((await readdir(join(dir, aside))).sort()).toEqual(["cards", "inbox", "queue.json"]);
 
     await saveCards([card()]);
     await writeFile(cardPath("c1"), JSON.stringify({ formatVersion: 99 }));
@@ -454,6 +538,66 @@ describe("accepting, removing and retrying", () => {
 
   it("makes ids in one case, so no two name the same folder on any filesystem", () => {
     for (let i = 0; i < 50; i++) expect(newItemId()).toMatch(/^[0-9a-z]{21}$/);
+  });
+});
+
+describe("an earlier build's inbox.json", () => {
+  async function earlierInbox(items: PendingImportReviewItem[]): Promise<void> {
+    for (const item of items) {
+      await mkdir(join(dir, "inbox", item.id), { recursive: true });
+      await writeFile(item.workingFilePath, "audio");
+    }
+    const iso = (item: PendingImportReviewItem) => ({ ...item, createdAtUtc: new Date(item.createdAtUtc).toISOString(), updatedAtUtc: new Date(item.updatedAtUtc).toISOString() });
+    await writeFile(join(dir, "inbox.json"), JSON.stringify({ formatVersion: 1, pendingImports: items.map(iso) }));
+  }
+
+  it("moves each pending import's choices into its folder, then deletes it, losing no pending import", async () => {
+    await earlierInbox([pending("p1", { timezone: "Asia/Tokyo" }), pending("p2")]);
+
+    const loaded = await store.load(logger);
+
+    expect(loaded.state.pendingImports).toEqual([pending("p1", { timezone: "Asia/Tokyo" }), pending("p2")]);
+    expect(await readdir(dir)).toEqual(["inbox"]);
+    expect(JSON.parse(await readFile(importPath("p1"), "utf8"))).toMatchObject({ formatVersion: 1, timezone: "Asia/Tokyo" });
+    expect((await store.load(logger)).state.pendingImports.map((item) => item.id), "a later launch reads them from the folders").toEqual(["p1", "p2"]);
+  });
+
+  it("keeps inbox.json until every choice is written, so an interrupted move loses no choice", async () => {
+    await earlierInbox([pending("p1", { timezone: "Asia/Tokyo" }), pending("p2", { timezone: "Europe/Paris" })]);
+    await chmod(join(dir, "inbox", "p2"), 0o500);
+    try {
+      await expect(store.load(logger)).rejects.toThrow();
+    } finally {
+      await chmod(join(dir, "inbox", "p2"), 0o700);
+    }
+    expect(JSON.parse(await readFile(join(dir, "inbox.json"), "utf8")).pendingImports).toHaveLength(2);
+    // The choice written before the stop is changed in a later session.
+    await writeFile(importPath("p1"), JSON.stringify({ ...JSON.parse(await readFile(importPath("p1"), "utf8")), timezone: "UTC" }));
+
+    const loaded = await store.load(logger);
+
+    expect(loaded.state.pendingImports.map((item) => [item.id, item.timezone])).toEqual([["p1", "UTC"], ["p2", "Europe/Paris"]]);
+    expect(await readdir(dir)).toEqual(["inbox"]);
+  });
+
+  it("brings back an import an earlier build's interrupted confirmation had moved into cards/", async () => {
+    await earlierInbox([pending("p1")]);
+    await mkdir(join(dir, "cards"));
+    await rename(join(dir, "inbox", "p1"), join(dir, "cards", "p1"));
+
+    const loaded = await store.load(logger);
+
+    expect(loaded.state.pendingImports.map((item) => item.id)).toEqual(["p1"]);
+    expect(loaded.state.cards).toEqual([]);
+    expect((await readdir(join(dir, "inbox", "p1"))).sort()).toEqual(["a.m4a", "import.json"]);
+  });
+
+  it("reports a damaged inbox.json and leaves it untouched, loading what the folders hold", async () => {
+    await savePending([pending("p1")]);
+    await writeFile(join(dir, "inbox.json"), JSON.stringify({ formatVersion: 1, pendingImports: [pending("p"), pending("p")] }));
+    const loaded = await store.load(logger);
+    expect(loaded.state.pendingImports.map((item) => item.id)).toEqual(["p1"]);
+    expect(loaded.unreadable.map((file) => file.path)).toEqual([join(dir, "inbox.json")]);
   });
 });
 

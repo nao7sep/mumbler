@@ -83,6 +83,8 @@
   "diagnostic.settingsResetBody": "Mumbler could not read its settings file and moved it to {path}. It started with the built-in settings; your queue and recordings are unchanged.",
   "diagnostic.settingsUnusableTitle": "Some Settings Could Not Be Used",
   "diagnostic.settingsUnusableBody": "These saved settings could not be used: {items}. Mumbler is using the built-in values for them and kept the saved ones in config.json. Saving Settings replaces them with the values Settings shows.",
+  "diagnostic.queueUnreadableTitle": "Some Recordings Could Not Be Read",
+  "diagnostic.queueUnreadableBody": "Mumbler could not read these queue files and left them as they are: {items}. Their recordings are not in the queue. A file from a newer Mumbler opens there; a damaged one can be repaired or its folder removed by hand.",
   "diagnostic.startupTitle": "Startup Failed",
   "diagnostic.startupBody": "Mumbler could not finish preparing its storage. Reopen the app to try again; saved files were left unchanged.",
   "diagnostic.resetTitle": "Reset Failed",

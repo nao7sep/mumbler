@@ -76,7 +76,7 @@ import { NewerFormatError } from "./format-versions";
 import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, sourceFileIdentity } from "./working-files";
-import { cardScratchFolder, createEmptyQueue, newItemId, QueueStore } from "./queue-store";
+import { cardScratchFolder, compareCards, createEmptyQueue, newItemId, QueueStore } from "./queue-store";
 import {
   buildMarkdownContent,
   buildOutputPayload,
@@ -214,12 +214,14 @@ interface AppRuntimeState {
   // leniently: a corrupt layout file self-heals rather than failing startup.
   layout: MumblerLayout | null;
   settingsStore: SettingsStore | null;
-  // The card order, each card's own folder and the pending imports.
+  // Each card's and pending import's own folder.
   queueStore: QueueStore | null;
   layoutStore: JsonStore<MumblerLayout> | null;
   logger: SessionLogger;
   startupDiagnostic: AppSnapshot["startupDiagnostic"];
   appWideError: AppSnapshot["appWideError"];
+  // Launch notices shown one after another as each is dismissed.
+  laterNotices: NonNullable<AppSnapshot["appWideError"]>[];
   recoveredInterruptedCards: number;
   shellReadyAtUtc: number;
   // The managed audio-tool (ffmpeg/ffprobe) controller; null on a failed startup.
@@ -317,6 +319,7 @@ export class ApplicationRuntime {
           canReset: false,
         },
         appWideError: null,
+        laterNotices: [],
         recoveredInterruptedCards: 0,
         shellReadyAtUtc,
         toolManager: null,
@@ -394,8 +397,8 @@ export class ApplicationRuntime {
         makeApiKeyWarn(logger),
       );
 
-      // Reads the order, the pending imports and each listed card, settling
-      // what a previous session left; only what changed is written.
+      // Reads each card and pending import from its folder, settling what a
+      // previous session left; only what changed is written.
       const queueLoad = await queueStore.load(logger);
 
       // Presentation state (disposable, volatile). No layout problem halts launch:
@@ -437,11 +440,21 @@ export class ApplicationRuntime {
         pendingImportCount: queueLoad.state.pendingImports.length,
         recoveredInterruptedCards: queueLoad.recoveredInterruptedCards,
         restoredSavingCards: queueLoad.restoredSavingCards,
-        droppedPendingImports: queueLoad.droppedPendingImports,
-        droppedCards: queueLoad.droppedCards,
         missingWorkingCards: queueLoad.missingWorkingCards,
+        unreadableQueueFiles: queueLoad.unreadable.length,
+        unlistedFolders: queueLoad.unlistedFolders,
         removedFolders: queueLoad.removedFolders,
       });
+
+      // A card or import whose file cannot be read is left as it is, and the
+      // user is told where it is.
+      const notices = settingsNotice === null ? [] : [settingsNotice];
+      if (queueLoad.unreadable.length > 0) {
+        notices.push({
+          title: message("diagnostic.queueUnreadableTitle"),
+          message: message("diagnostic.queueUnreadableBody", { items: queueLoad.unreadable.map((file) => file.path) }),
+        });
+      }
 
       if (queueLoad.recoveredInterruptedCards > 0) {
         await logger.warn(
@@ -472,7 +485,8 @@ export class ApplicationRuntime {
         layoutStore,
         logger,
         startupDiagnostic: null,
-        appWideError: settingsNotice,
+        appWideError: notices[0] ?? null,
+        laterNotices: notices.slice(1),
         recoveredInterruptedCards: queueLoad.recoveredInterruptedCards,
         shellReadyAtUtc,
         toolManager: null,
@@ -504,6 +518,7 @@ export class ApplicationRuntime {
         logger,
         startupDiagnostic: startupFailureDiagnostic(error),
         appWideError: null,
+        laterNotices: [],
         recoveredInterruptedCards: 0,
         shellReadyAtUtc,
         toolManager: null,
@@ -792,7 +807,7 @@ export class ApplicationRuntime {
 
   async dismissAppWideError(): Promise<AppSnapshot> {
     const title = this.runtime.appWideError?.title.key ?? null;
-    this.runtime.appWideError = null;
+    this.runtime.appWideError = this.runtime.laterNotices.shift() ?? null;
     await this.runtime.logger.info("app.error-dismissed", "App-wide error dismissed by user.", {
       dismissedTitle: title,
     });
@@ -856,6 +871,7 @@ export class ApplicationRuntime {
       if (this.runtime.toolManager === null) await this.initializeTools();
       this.runtime.startupDiagnostic = null;
       this.runtime.appWideError = null;
+      this.runtime.laterNotices = [];
       this.runtime.recoveredInterruptedCards = 0;
       applyThemePreference(settings.theme);
       this.followLanguageChange(previousPreference, previousLanguage);
@@ -940,9 +956,8 @@ export class ApplicationRuntime {
       });
       // A draft that could not be saved stays as the user's latest input; the
       // next save of the queue, or the quit's, writes it.
-      if (state.pendingImports.some((item, index) => item !== current[index])) {
-        await this.persist({ inbox: true });
-      }
+      const changed = state.pendingImports.filter((item, index) => item !== current[index]);
+      if (changed.length > 0) await this.persist({ imports: changed });
       return this.getSnapshot();
     });
   }
@@ -1004,54 +1019,31 @@ export class ApplicationRuntime {
       if (reviewed.some(({ merged }) => merged.copyToBackupOnConfirm) && backupDir === null) {
         throw new OperationError("Choose a Recordings folder before adding recordings to it.");
       }
-      // Each accepted import's folder becomes its card's, under the same id;
-      // the order then lists the cards and the inbox drops them.
+      // Each accepted import's folder becomes its card's, under the same id,
+      // one at a time: each rename commits that card. When one fails, those
+      // before it are cards and the rest stay for review, with the choices
+      // just submitted.
       const store = this.runtime.queueStore!;
-      const accepted: PendingImportReviewItem[] = [];
       const cardsToAdd: MumblerCard[] = [];
-      const confirmedIds = new Set(reviewed.map(({ pendingImport }) => pendingImport.id));
-      const previousPending = state.pendingImports;
-      const previousCards = state.cards;
-      try {
-        for (const { pendingImport, timestamps } of reviewed) {
-          const sourceFilePath = await store.acceptImport(pendingImport);
-          accepted.push(pendingImport);
-          cardsToAdd.push(createConfirmedCard(pendingImport, sourceFilePath, timestamps, probes.get(pendingImport.id) ?? { durationSec: null, audioProfile: null }));
+      let failure: unknown = null;
+      for (const { pendingImport, timestamps } of reviewed) {
+        const card = createConfirmedCard(pendingImport, store.acceptedAudioPath(pendingImport), timestamps, probes.get(pendingImport.id) ?? { durationSec: null, audioProfile: null });
+        try {
+          await store.acceptImport(pendingImport, card);
+        } catch (error: unknown) {
+          failure = error;
+          break;
         }
-        state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
-          left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
-        );
-        state.pendingImports = state.pendingImports.filter((item) => !confirmedIds.has(item.id));
-        await this.persist({ cards: cardsToAdd, order: true });
-      } catch (error: unknown) {
-        // The review stays, with the choices just submitted. A folder that
-        // cannot be moved back stays in cards/, and the review plays and
-        // confirms it from there; a launch moves it back.
-        state.cards = previousCards;
-        const stranded = new Map<string, string>();
-        for (const [index, pendingImport] of accepted.entries()) {
-          try {
-            await store.returnImport(pendingImport);
-          } catch (returnError: unknown) {
-            stranded.set(pendingImport.id, cardsToAdd[index].sourceFilePath);
-            await this.runtime.logger.error("import.confirm-return", "An accepted recording could not be moved back for review.", returnError, {
-              pendingImportId: pendingImport.id,
-            });
-          }
-        }
-        const submitted = new Map(reviewed.map(({ pendingImport, merged }) => [pendingImport.id, merged]));
-        state.pendingImports = previousPending.map((item) => {
-          const restored = submitted.get(item.id) ?? item;
-          const location = stranded.get(item.id);
-          return location === undefined ? restored : { ...restored, workingFilePath: location };
-        });
-        throw error;
+        cardsToAdd.push(card);
       }
-      // The order is the commit: an inbox still naming an accepted import is
-      // written again at quit, and a launch drops it, its folder being gone.
-      await store.writeInbox(state.pendingImports).catch((error: unknown) => this.runtime.logger.warn(
-        "import.confirm-inbox", "Import committed, but the pending imports could not be saved.", { error: serializeError(error) },
-      ));
+      const acceptedIds = new Set(cardsToAdd.map((card) => card.id));
+      const submitted = new Map(reviewed.map(({ pendingImport, merged }) => [pendingImport.id, merged]));
+      state.cards = [...state.cards, ...cardsToAdd].sort(compareCards);
+      state.pendingImports = state.pendingImports
+        .filter((item) => !acceptedIds.has(item.id))
+        .map((item) => submitted.get(item.id) ?? item);
+      await this.persist({});
+      if (failure !== null) throw failure;
       if (cardsToAdd.length > 0) {
         try {
           await this.persistSelectedCard(cardsToAdd[0].id);
@@ -1150,25 +1142,18 @@ export class ApplicationRuntime {
       const state = this.runtime.state!;
       const cancelIds = new Set(ids);
       const cancelled = state.pendingImports.filter((item) => cancelIds.has(item.id));
-      const previousPending = state.pendingImports;
-      state.pendingImports = state.pendingImports.filter((item) => !cancelIds.has(item.id));
-      // Keep every recording until the inbox no longer lists it.
-      try {
-        await this.persist({ inbox: true });
-      } catch (error: unknown) {
-        state.pendingImports = previousPending;
-        throw error;
-      }
+      // An import whose folder cannot be renamed aside stays for review.
+      let failure: unknown = null;
       for (const pendingImport of cancelled) {
         try {
-          await this.runtime.queueStore!.removeImportFolder(pendingImport.id);
+          await this.runtime.queueStore!.removeImport(pendingImport.id);
         } catch (error: unknown) {
-          await this.runtime.logger.warn("import.cancel-cleanup", "Failed to delete working file on cancel; launch removes it.", {
-            workingFilePath: pendingImport.workingFilePath,
-            error: error instanceof Error ? error.message : String(error),
-          });
+          failure ??= error;
+          continue;
         }
+        state.pendingImports = state.pendingImports.filter((item) => item.id !== pendingImport.id);
       }
+      if (failure !== null) throw failure;
 
       await this.runtime.logger.info("import.cancelled", "Cancelled pending imports.", {
         cancelledCount: cancelled.length,
@@ -1211,21 +1196,19 @@ export class ApplicationRuntime {
       await mkdir(store.cardFolder(duplicateId), { recursive: true });
       await copyIntoWorking(source.sourceFilePath, duplicatePath);
     } catch (error: unknown) {
-      await store.removeCardFolder(duplicateId).catch(() => undefined);
+      await store.removeCard(duplicateId).catch(() => undefined);
       throw error;
     }
     return this.command(async () => {
       const state = this.runtime.state!;
       const duplicate = createDuplicatedCard(source, duplicateId, duplicatePath);
       const previousCards = state.cards;
-      state.cards = [...state.cards, duplicate].sort((left, right) =>
-        left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
-      );
+      state.cards = [...state.cards, duplicate].sort(compareCards);
       try {
-        await this.persist({ cards: [duplicate], order: true });
+        await this.persist({ cards: [duplicate] });
       } catch (error: unknown) {
         state.cards = previousCards;
-        await store.removeCardFolder(duplicateId).catch(() => undefined);
+        await store.removeCard(duplicateId).catch(() => undefined);
         throw error;
       }
       await this.persistSelectedCard(duplicate.id);
@@ -1303,13 +1286,10 @@ export class ApplicationRuntime {
 
     // The front trim moves the recording's start, which can move it in the order.
     const previousOrder = [...state.cards];
-    state.cards.sort((left, right) =>
-      left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
-    );
-    const reordered = state.cards.some((entry, index) => entry !== previousOrder[index]);
+    state.cards.sort(compareCards);
 
     try {
-      await this.persist({ cards: [card], order: reordered });
+      await this.persist({ cards: [card] });
     } catch (error: unknown) {
       Object.assign(card, previous);
       state.cards = previousOrder;
@@ -1940,11 +1920,9 @@ export class ApplicationRuntime {
           // Publication is the commit point: once the files are out, the save
           // has succeeded, and removing the card from the queue is cleanup that
           // reports its own failure to the log.
-          if (outcome?.kind === "saved" && options.removeAfterSave) {
-            await this.discardWorkingCard(card);
-            return;
-          }
-          // A recording kept after its save stays ready to be saved again.
+          if (outcome?.kind === "saved" && options.removeAfterSave && await this.discardWorkingCard(card)) return;
+          // A recording kept after its save, or one that could not be
+          // removed, stays ready to be saved again.
           card.status = "Ready to Save";
           await this.persist({ cards: [card] }).catch((error: unknown) =>
             this.runtime.logger.error("card.save-settlement-failed", "Could not persist the recording's ready state after saving stopped.", error, {
@@ -2138,7 +2116,7 @@ export class ApplicationRuntime {
   }
 
   // These are actual deletion owners: removing a card or import deletes its
-  // folder, launch removes unlisted ones, and launch clears temp. Resolve
+  // folder, launch deletes removed folders and scratch, and clears temp. Resolve
   // directory aliases and existing hard links once; private staging needs no
   // identity/rollback machinery.
   private async isSafeSaveLocation(targets: SaveTargetPaths, preparedAudioPath: string): Promise<boolean> {
@@ -2190,24 +2168,11 @@ export class ApplicationRuntime {
         missing: "Card to remove does not exist.",
         busy: "Cannot remove a card while it is being processed.",
       });
-      const previousCards = state.cards;
+      // Renaming the folder aside is the removal; a folder that cannot be
+      // renamed keeps the card, and the error is reported.
+      await this.runtime.queueStore!.removeCard(cardId);
       state.cards = state.cards.filter((entry) => entry.id !== cardId);
-
-      // The order no longer listing the card is the removal; its folder goes
-      // after, and one that cannot be deleted now is removed by the next launch.
-      try {
-        await this.persist({ order: true });
-      } catch (error: unknown) {
-        state.cards = previousCards;
-        throw error;
-      }
-      try {
-        await this.runtime.queueStore!.removeCardFolder(cardId);
-      } catch (error: unknown) {
-        await this.runtime.logger.warn("card.remove-cleanup", "Removed the card, but its folder could not be deleted; launch removes it.", {
-          cardId, error: serializeError(error),
-        });
-      }
+      await this.persist({});
       await this.runtime.logger.info("card.remove", "Deleted card working audio and removed card.", {
         cardId,
         sourceFilePath: card.sourceFilePath,
@@ -2282,7 +2247,7 @@ export class ApplicationRuntime {
         // Once the queue holds the copy, a failed queue save retains it for retry.
         await this.command(async () => {
           this.runtime.state!.pendingImports.push(pending);
-          await this.persist({ inbox: true });
+          await this.persist({ imports: [pending] });
         });
         importedCount += 1;
       } catch (error: unknown) {
@@ -2408,7 +2373,7 @@ export class ApplicationRuntime {
 
       return pendingImport;
     } catch (error) {
-      await store.removeImportFolder(id);
+      await store.removeImport(id).catch(() => undefined);
       throw error;
     }
   }
@@ -2441,16 +2406,12 @@ export class ApplicationRuntime {
     return card;
   }
 
-  // Called inside queue commands, which take turns: writes the files the
-  // command changed and nothing else. Each changed card's card.json first, then
-  // the order, then the pending imports, so a list never names a card whose
-  // file is not yet written.
-  private async persist(change: { cards?: readonly MumblerCard[]; order?: boolean; inbox?: boolean }): Promise<void> {
+  // Called inside queue commands, which take turns: writes the files of the
+  // cards and pending imports the command changed and nothing else.
+  private async persist(change: { cards?: readonly MumblerCard[]; imports?: readonly PendingImportReviewItem[] }): Promise<void> {
     const store = this.runtime.queueStore!;
-    const state = this.runtime.state!;
     for (const card of change.cards ?? []) await store.writeCard(card);
-    if (change.order === true) await store.writeOrder(state.cards);
-    if (change.inbox === true) await store.writeInbox(state.pendingImports);
+    for (const item of change.imports ?? []) await store.writeImport(item);
     const selectedCardId = selectExistingCardId(
       this.runtime.state!.cards.map((card) => card.id),
       this.runtime.layout?.selectedCardId ?? null,
@@ -2497,39 +2458,24 @@ export class ApplicationRuntime {
     await this.runtime.logger.error("app.unhandled", createTranslator("en").text(title), error, details);
   }
 
-  // Never throws: it runs after a save has published its files. The order is
-  // saved first and the card's folder deleted only once it no longer lists the
-  // card: deleting first would bring the card back at the next launch as an
-  // error with its audio missing. When the order cannot be saved the folder
-  // stays, so a relaunch shows the card intact; a folder a later order drops is
-  // removed by the launch after.
-  private async discardWorkingCard(card: MumblerCard): Promise<void> {
-    this.runtime.state!.cards = this.runtime.state!.cards.filter((entry) => entry.id !== card.id);
+  // Never throws: it runs after a save has published its files. Renaming the
+  // card's folder aside is the removal; when that fails the card stays in the
+  // queue ready to save again, and the user can remove it. Says whether it went.
+  private async discardWorkingCard(card: MumblerCard): Promise<boolean> {
     try {
-      await this.persist({ order: true });
+      await this.runtime.queueStore!.removeCard(card.id);
     } catch (error: unknown) {
       await this.runtime.logger.error(
         "card.cleanup",
-        "Saved card was removed from the queue, but the queue could not be saved; its working audio is kept.",
+        "Saved card could not be removed from the queue; it and its working audio are kept.",
         error,
-        { cardId: card.id },
+        { cardId: card.id, sourceFilePath: card.sourceFilePath },
       );
-      return;
+      return false;
     }
-
-    try {
-      await this.runtime.queueStore!.removeCardFolder(card.id);
-    } catch (error: unknown) {
-      await this.runtime.logger.warn(
-        "card.cleanup",
-        "Saved card was removed from the queue, but its folder could not be deleted; launch removes it.",
-        {
-          cardId: card.id,
-          sourceFilePath: card.sourceFilePath,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      );
-    }
+    this.runtime.state!.cards = this.runtime.state!.cards.filter((entry) => entry.id !== card.id);
+    await this.persist({}).catch(() => undefined);
+    return true;
   }
 }
 

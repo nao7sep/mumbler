@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import type { MumblerCard } from "@shared/app-shell";
+import type { MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
 
 const { backupRecord } = vi.hoisted(() => ({ backupRecord: vi.fn() }));
 vi.mock("@main/core/backupStore", () => ({ record: backupRecord }));
@@ -34,13 +34,12 @@ it("records a settings save", async () => {
   expect(backupRecord).toHaveBeenCalledWith(path, expect.any(Buffer));
 });
 
-it("does not record the order, the pending imports or a card", async () => {
+it("does not record a pending import or a card", async () => {
   const store = new QueueStore({
     queuePath: join(dir, "queue.json"), inboxPath: join(dir, "inbox.json"), cardsDir: join(dir, "cards"), inboxDir: join(dir, "inbox"),
   });
   const card = { id: "take", transcription: { text: "words" }, metadata: { structured: null, title: null, slug: null } } as MumblerCard;
   await store.writeCard(card);
-  await store.writeOrder([card]);
-  await store.writeInbox([]);
+  await store.writeImport({ id: "pending" } as PendingImportReviewItem);
   expect(backupRecord).not.toHaveBeenCalled();
 });
