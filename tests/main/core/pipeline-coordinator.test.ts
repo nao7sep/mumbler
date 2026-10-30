@@ -53,7 +53,8 @@ vi.mock("@main/core/card-pipeline", async (importOriginal) => {
 
 const { PipelineCoordinator } = await import("@main/core/pipeline-coordinator");
 const { executeCardPipeline } = await import("@main/core/card-pipeline");
-const { createDefaultSettings, createEmptyQueue } = await import("@main/core/settings-schema");
+const { createDefaultSettings } = await import("@main/core/settings-schema");
+const { createEmptyQueue } = await import("@main/core/queue-store");
 const { OperationError } = await import("@main/core/operation-error");
 
 const noopLogger: AppLogger = {
@@ -113,7 +114,7 @@ function harness(cards: MumblerCard[], concurrencyLimit = 1) {
   };
   const coordinator = new PipelineCoordinator(
     { state, settings, paths: null, logger: noopLogger },
-    { persistState, resolveApiKey, command },
+    { persistCards: persistState, resolveApiKey, command },
   );
   const card = (id: string): MumblerCard => state.cards.find((entry) => entry.id === id)!;
   const start = (id: string, step: "transcription" | "structured" | "title" | "slug" = "transcription") =>

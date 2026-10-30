@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,7 +24,8 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
 });
 
 import { executeCardPipeline, type CardPipelineContext } from "@main/core/card-pipeline";
-import { createDefaultSettings, createEmptyQueue, createQueueStore } from "@main/core/settings-schema";
+import { createDefaultSettings } from "@main/core/settings-schema";
+import { createEmptyQueue, QueueStore } from "@main/core/queue-store";
 
 const API_KEY = "fixture-key.$[exact]";
 const ECHOED_REASON = `The credential ${API_KEY} was refused. Replace ${API_KEY}, then retry.`;
@@ -103,25 +104,29 @@ describe("provider reasons published by the pipeline", () => {
     { step: "structured", response: promptRefusal, reason: ECHOED_REASON, expected: MASKED_REASON, refused: true, kind: "prompt refusal" },
     { step: "structured", response: structuredError, reason: USEFUL_REASON, expected: USEFUL_REASON, refused: false, kind: "ordinary useful reason" },
   ] as const)("publishes and persists the safe $kind reason for $step", async ({ step, response, reason, expected, refused }) => {
-    const source = join(dir, "rec.m4a");
+    // The working audio sits in its card's folder, where a reload looks for it.
+    const source = join(dir, "cards", "card-1", "rec.m4a");
+    await mkdir(join(dir, "cards", "card-1"), { recursive: true });
     await writeFile(source, "audio");
     const card = makeCard(source);
     const state = createEmptyQueue();
     state.cards = [card];
-    const queuePath = join(dir, "queue.json");
-    const queue = createQueueStore(queuePath);
+    const queuePaths = { queuePath: join(dir, "queue.json"), inboxPath: join(dir, "inbox.json"), cardsDir: join(dir, "cards"), inboxDir: join(dir, "inbox") };
+    const queue = new QueueStore(queuePaths);
+    const cardPath = join(dir, "cards", card.id, "card.json");
     const publications: string[] = [];
     const settings = createDefaultSettings();
     settings["gemini.endpoint"] = "https://proxy.example/gemini";
     settings["gemini.transcription"] = "custom";
     settings["gemini.outline"] = "custom";
     const persistState = async (): Promise<void> => {
-      await queue.save(state);
+      await queue.writeCard(card);
+      await queue.writeOrder(state.cards);
       publications.push(JSON.stringify(state));
     };
     const ctx: CardPipelineContext = {
       settings,
-      paths: { homeDir: dir, workingDir: join(dir, "working"), queuePath } as AppPaths,
+      paths: { homeDir: dir, ...queuePaths } as AppPaths,
       logger: makeLogger(),
       signal: new AbortController().signal,
       apiKey: API_KEY,
@@ -142,10 +147,10 @@ describe("provider reasons published by the pipeline", () => {
     expect(publications.length).toBeGreaterThan(0);
     expect(publications.at(-1)).toContain(expected);
     expect(publications.every((snapshot) => !snapshot.includes(API_KEY))).toBe(true);
-    const persisted = await readFile(queuePath, "utf8");
+    const persisted = await readFile(cardPath, "utf8");
     expect(persisted).toContain(expected);
     expect(persisted).not.toContain(API_KEY);
-    const reloaded = (await createQueueStore(queuePath).load()).value;
+    const reloaded = (await new QueueStore(queuePaths).load(makeLogger())).state;
     expect(reloaded.cards[0]?.lastError?.providerReason).toBe(expected);
   });
 });

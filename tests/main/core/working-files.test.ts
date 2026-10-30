@@ -5,8 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppLogger } from "@main/core/logger";
-import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem } from "@shared/app-shell";
-import { createQueueStore } from "@main/core/settings-schema";
+
 
 // The filesystem is real throughout — these functions are about what actually
 // lands on disk. The single exception is a removal the OS refuses: `rm` fails
@@ -40,7 +39,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     open: async (...args: Parameters<typeof actual.open>) => {
       if (args[1] === "wx" && basename(dirname(String(args[0]))) === "working") await backupFaults.beforeCopy?.(String(args[0]));
       const handle = await actual.open(...args);
-      if (args[1] === "w" && basename(dirname(String(args[0]))) === "working") {
+      if (args[1] === "wx" && basename(dirname(String(args[0]))) === "working") {
         const sync = handle.sync.bind(handle);
         const close = handle.close.bind(handle);
         handle.sync = async () => {
@@ -71,21 +70,18 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const {
-  claimWorkingPath,
-  cleanupDerivedFiles,
   copyIntoWorking,
   copyOriginalToBackup,
   deleteImportedSource,
   sourceFileIdentity,
-  listDerivedFiles,
-  reconcileWorkingState,
 } = await import("@main/core/working-files");
 
 let dir: string;
 
-/** What an import does: the queue claims the name, then the copy fills it. */
-async function copyToWorking(source: string, workingDir: string, name: string): Promise<string> {
-  const path = await claimWorkingPath(workingDir, name);
+/** What an import does: the copy goes into the import's own new folder. */
+async function copyToWorking(source: string, folder: string, name: string): Promise<string> {
+  await mkdir(folder, { recursive: true });
+  const path = join(folder, name);
   await copyIntoWorking(source, path);
   return path;
 }
@@ -98,74 +94,6 @@ function makeLogger(): AppLogger {
     error: vi.fn().mockResolvedValue(undefined),
     providerCall: vi.fn().mockResolvedValue(undefined),
   };
-}
-
-async function exists(path: string): Promise<boolean> {
-  return stat(path).then(() => true, () => false);
-}
-
-/** Only workingDir matters here; the rest of the paths are never read. */
-function makePaths(workingDir: string): AppPaths {
-  return { workingDir } as AppPaths;
-}
-
-function makePendingImport(overrides: Partial<PendingImportReviewItem> = {}): PendingImportReviewItem {
-  return {
-    id: "pending-1",
-    originalFilename: "rec.m4a",
-    importSource: "file-picker",
-    originalSourcePath: "/tmp/rec.m4a",
-    workingFilePath: "/tmp/working/rec.m4a",
-    fileSizeBytes: 1024,
-    localTimestampText: "2026-04-22 09:44:00",
-    timezone: "Asia/Tokyo",
-    utcTimestampText: "2026-04-22T00:44:00Z",
-    parseStatus: "parsed",
-    timeCandidates: [],
-    deleteOriginalOnConfirm: false,
-    copyToBackupOnConfirm: false,
-    createdAtUtc: 1,
-    updatedAtUtc: 1,
-    ...overrides,
-  };
-}
-
-function makeCard(overrides: Partial<MumblerCard> = {}): MumblerCard {
-  return {
-    id: "card-1",
-    originalFilename: "rec.m4a",
-    importSource: "file-picker",
-    sourceFilePath: "/tmp/working/rec.m4a",
-    audioProfile: null,
-    durationSec: 60,
-    fileSizeBytes: 1024,
-    timestamps: {
-      confirmedLocal: "2026-04-22 09:44:00",
-      confirmedUtc: Date.UTC(2026, 3, 22, 0, 44, 0),
-      timezone: "Asia/Tokyo",
-      frontTrimOffsetSec: 0,
-      effectiveLocal: "2026-04-22 09:44:00",
-      effectiveUtc: Date.UTC(2026, 3, 22, 0, 44, 0),
-    },
-    trim: { frontMarkerSec: null, backMarkerSec: null },
-    trimDecision: null,
-    transcribedTrim: null,
-    transcription: { text: "hello world" },
-    metadata: { structured: null, title: null, slug: null },
-    ai: { transcription: null, structured: null, title: null, slug: null },
-    status: "Imported",
-    activeStep: null,
-    queuedMode: null,
-    queuedAtUtc: null,
-    lastError: null,
-    createdAtUtc: 1,
-    updatedAtUtc: 1,
-    ...overrides,
-  };
-}
-
-function makeState(overrides: Partial<MumblerQueue> = {}): MumblerQueue {
-  return { pendingImports: [], cards: [], ...overrides };
 }
 
 beforeEach(async () => {
@@ -208,27 +136,14 @@ describe("working audio copies", () => {
     expect(await readdir(working)).toEqual([]);
   });
 
-  it("copies imported audio under a case-insensitively unique working path", async () => {
-    const source = join(dir, "source.wav");
-    const working = join(dir, "working");
-    await writeFile(source, "audio", "utf8");
-    await mkdir(working, { recursive: true });
-    await writeFile(join(working, "Clip.wav"), "existing", "utf8");
-
-    const copied = await copyToWorking(source, working, "clip.wav");
-
-    expect(basename(copied).toLowerCase()).not.toBe("clip.wav");
-    expect(await readFile(copied, "utf8")).toBe("audio");
-  });
-
-  it("neither overwrites nor removes a file that takes the chosen name after the folder was read", async () => {
+  it("neither overwrites nor removes a file already at the copy's path", async () => {
     const source = join(dir, "source.wav");
     const working = join(dir, "working");
     await writeFile(source, "audio", "utf8");
     let claimed = "";
     backupFaults.beforeCopy = async (target) => { claimed = target; await writeFile(target, "someone else's", "utf8"); };
 
-    await expect(copyToWorking(source, working, "clip.wav")).rejects.toMatchObject({ code: "EEXIST" });
+    await expect(copyToWorking(source, working, "clip.wav")).rejects.toMatchObject({ cause: { code: "EEXIST" } });
 
     expect(await readFile(claimed, "utf8")).toBe("someone else's");
   });
@@ -431,191 +346,5 @@ describe("working audio copies", () => {
     await deleteImportedSource(source, identity);
 
     await expect(access(source)).rejects.toThrow();
-  });
-});
-
-describe("the derived audio listing", () => {
-  it("lists only the files directly in derived/, never a recording in working/ itself", async () => {
-    const working = join(dir, "working");
-    await mkdir(join(working, "derived", "nested"), { recursive: true });
-    await mkdir(join(working, "scratch"), { recursive: true });
-    await writeFile(join(working, "rec.m4a"), "audio", "utf8");
-    await writeFile(join(working, "derived", "rec.wav"), "audio", "utf8");
-    await writeFile(join(working, "scratch", "ignored.tmp"), "junk", "utf8");
-    await writeFile(join(working, "derived", "nested", "ignored.wav"), "audio", "utf8");
-
-    expect(await listDerivedFiles(working)).toEqual([join(working, "derived", "rec.wav")]);
-  });
-
-  it("lists nothing when no pipeline has made derived/ yet", async () => {
-    const working = join(dir, "working");
-    await mkdir(working, { recursive: true });
-
-    expect(await listDerivedFiles(working)).toEqual([]);
-  });
-});
-
-describe("leftover derived audio", () => {
-  it("deletes every derived file, keeps every recording, and traces each deletion", async () => {
-    const working = join(dir, "working");
-    await mkdir(join(working, "derived"), { recursive: true });
-    const recording = join(working, "unreferenced.m4a");
-    const derived = join(working, "derived", "leftover.wav");
-    for (const file of [recording, derived]) await writeFile(file, "audio", "utf8");
-    const logger = makeLogger();
-
-    const result = await cleanupDerivedFiles(makePaths(working), logger);
-
-    expect(result).toEqual({ deletedDerivedFiles: 1, retainedDerivedFiles: 0 });
-    expect(await exists(recording), "a recording no queue refers to is still the user's audio").toBe(true);
-    expect(await exists(derived)).toBe(false);
-    expect(logger.debug).toHaveBeenCalledExactlyOnceWith("working.cleanup", expect.any(String), { filePath: derived });
-  });
-
-  it("counts and warns about a derived file the filesystem refuses to delete, and keeps going", async () => {
-    const working = join(dir, "working");
-    await mkdir(join(working, "derived"), { recursive: true });
-    const stuck = join(working, "derived", "stuck.wav");
-    const leftover = join(working, "derived", "leftover.wav");
-    await writeFile(stuck, "audio", "utf8");
-    await writeFile(leftover, "audio", "utf8");
-    undeletable.add(stuck);
-    const logger = makeLogger();
-
-    const result = await cleanupDerivedFiles(makePaths(working), logger);
-
-    expect(result).toEqual({ deletedDerivedFiles: 1, retainedDerivedFiles: 1 });
-    expect(await listDerivedFiles(working), "the file it could not delete is still there").toEqual([stuck]);
-    expect(logger.warn).toHaveBeenCalledExactlyOnceWith("working.cleanup-failed", expect.any(String), {
-      filePath: stuck,
-      error: expect.stringContaining("EACCES"),
-    });
-  });
-});
-
-describe("reconciling saved state with the working directory", () => {
-  it("leaves intact state untouched", async () => {
-    const working = join(dir, "working");
-    await mkdir(working, { recursive: true });
-    const pendingFile = join(working, "pending.m4a");
-    const cardFile = join(working, "card.m4a");
-    await writeFile(pendingFile, "audio", "utf8");
-    await writeFile(cardFile, "audio", "utf8");
-    const state = makeState({
-      pendingImports: [makePendingImport({ workingFilePath: pendingFile })],
-      cards: [makeCard({ sourceFilePath: cardFile })],
-    });
-    const logger = makeLogger();
-
-    const result = await reconcileWorkingState(makePaths(working), state, logger);
-
-    expect(result).toEqual({
-      state,
-      droppedPendingImports: 0,
-      missingWorkingCards: 0,
-      deletedDerivedFiles: 0,
-      retainedDerivedFiles: 0,
-    });
-    expect(result.state, "the same state is handed back, not a rewritten copy").toBe(state);
-    expect(logger.warn).not.toHaveBeenCalled();
-  });
-
-  // POSIX directory search permissions are the subject; Windows uses ACLs.
-  it.skipIf(process.platform === "win32").each(["pending import", "card"] as const)(
-    "preserves saved review and card facts when a %s cannot be accessed",
-    async (inaccessible) => {
-      const working = join(dir, "working");
-      const blocked = join(working, "blocked");
-      await mkdir(blocked, { recursive: true });
-      await mkdir(join(working, "derived"));
-      const derived = join(working, "derived", "leftover.wav");
-      await writeFile(derived, "derived audio");
-      const pendingFile = join(inaccessible === "pending import" ? blocked : working, "pending.m4a");
-      const cardFile = join(inaccessible === "card" ? blocked : working, "card.m4a");
-      await writeFile(pendingFile, "pending audio");
-      await writeFile(cardFile, "card audio");
-      const state = makeState({
-        pendingImports: [makePendingImport({
-          workingFilePath: pendingFile,
-          localTimestampText: "2026-04-22 10:15:00",
-          deleteOriginalOnConfirm: true,
-          copyToBackupOnConfirm: true,
-        })],
-        cards: [makeCard({
-          sourceFilePath: cardFile,
-          status: "Queued",
-          queuedMode: "generate",
-          queuedAtUtc: 42,
-          trim: { frontMarkerSec: 2, backMarkerSec: 50 },
-        })],
-      });
-      const before = structuredClone(state);
-      const pending = state.pendingImports[0];
-      const card = state.cards[0];
-      const queuePath = join(dir, "queue.json");
-      await createQueueStore(queuePath).save(state);
-      const savedBytes = await readFile(queuePath);
-      const logger = makeLogger();
-
-      await chmod(blocked, 0o000);
-      try {
-        const inaccessibleFile = inaccessible === "pending import" ? pendingFile : cardFile;
-        const failure = await access(inaccessibleFile).catch((error: unknown) => error);
-        expect(failure).toBeInstanceOf(Error);
-        expect(failure).toMatchObject({ code: "EACCES", path: inaccessibleFile });
-
-        await expect(reconcileWorkingState(makePaths(working), state, logger)).rejects.toEqual(failure);
-
-        expect(state).toEqual(before);
-        expect(state.pendingImports[0]).toBe(pending);
-        expect(state.cards[0]).toBe(card);
-        expect(await readFile(queuePath)).toEqual(savedBytes);
-        expect(await readFile(derived, "utf8")).toBe("derived audio");
-        expect(logger.warn).not.toHaveBeenCalled();
-        expect(logger.debug).not.toHaveBeenCalled();
-      } finally {
-        await chmod(blocked, 0o700);
-      }
-      expect(await readFile(pendingFile, "utf8")).toBe("pending audio");
-      expect(await readFile(cardFile, "utf8")).toBe("card audio");
-    },
-  );
-
-  it("drops a pending import whose audio is gone, errors a card whose audio is gone, and keeps every recording", async () => {
-    const working = join(dir, "working");
-    await mkdir(working, { recursive: true });
-    const survivingCardFile = join(working, "card.m4a");
-    const orphan = join(working, "orphan.m4a");
-    await writeFile(survivingCardFile, "audio", "utf8");
-    await writeFile(orphan, "audio", "utf8");
-    const survivor = makeCard({ id: "card-kept", sourceFilePath: survivingCardFile });
-    const state = makeState({
-      pendingImports: [makePendingImport({ id: "pending-gone", workingFilePath: join(working, "gone.m4a") })],
-      cards: [survivor, makeCard({ id: "card-gone", sourceFilePath: join(working, "also-gone.m4a") })],
-    });
-    const logger = makeLogger();
-
-    const result = await reconcileWorkingState(makePaths(working), state, logger);
-
-    expect(result).toMatchObject({
-      droppedPendingImports: 1,
-      missingWorkingCards: 1,
-      deletedDerivedFiles: 0,
-      retainedDerivedFiles: 0,
-    });
-    expect(result.state.pendingImports).toEqual([]);
-    expect(result.state.cards[0], "the card whose audio is still there is untouched").toBe(survivor);
-    expect(result.state.cards[1]).toMatchObject({
-      id: "card-gone",
-      status: "Error",
-      activeStep: null,
-      queuedMode: null,
-      queuedAtUtc: null,
-      lastError: { failedStep: "startup-recovery", message: expect.stringContaining("missing") },
-      updatedAtUtc: 1,
-    });
-    expect(await exists(orphan), "a recording the queue does not refer to is kept").toBe(true);
-    expect(logger.warn).toHaveBeenCalledWith("startup.pending-missing", expect.any(String), expect.objectContaining({ pendingImportId: "pending-gone" }));
-    expect(logger.warn).toHaveBeenCalledWith("startup.card-missing", expect.any(String), expect.objectContaining({ cardId: "card-gone" }));
   });
 });

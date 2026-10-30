@@ -14,6 +14,7 @@ import {
   cleanupPreparedAudio,
   prepareAudioForTranscription,
 } from "./audio-tools";
+import { cardScratchFolder } from "./queue-store";
 import {
   generateTextWithGemini,
   geminiProviderReason,
@@ -113,7 +114,7 @@ export async function executeCardPipeline(
       // time, on a ten-core Mac), so several side by side use otherwise idle cores.
       const preparedAudio = await prepareAudioForTranscription({
         sourceFilePath,
-        workingDir: ctx.paths.workingDir,
+        scratchDir: cardScratchFolder(ctx.paths.cardsDir, cardId),
         trim: runTrim,
         trimDecision,
         durationSec,

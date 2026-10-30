@@ -469,7 +469,7 @@ describe("the recording time a save writes", () => {
           for (const frontMarkerSec of [null, 1]) {
             const trimmed = await tools.prepareAudioForTranscription({
               sourceFilePath: source,
-              workingDir: home,
+              scratchDir: join(home, "scratch"),
               trim: { frontMarkerSec, backMarkerSec: null },
               trimDecision: null,
               durationSec: null,
@@ -478,7 +478,7 @@ describe("the recording time a save writes", () => {
             const utcMs = startUtcMs + (frontMarkerSec ?? 0) * 1000;
             const tagArgs = times.recordingTimeWriteArgs(extname(source), utcMs, "Asia/Tokyo");
             if (tagArgs === null) { mismatches.push(`${basename(source)}: no place for a time`); continue; }
-            const saved = await tools.rewriteAudioTags({ sourceFilePath: trimmed.filePath, workingDir: home, tagArgs });
+            const saved = await tools.rewriteAudioTags({ sourceFilePath: trimmed.filePath, scratchDir: join(home, "scratch"), tagArgs });
             const tags = await tools.probeRecordingTags(saved.filePath);
             if (!times.carriesOnlyRecordingTime(times.recordingTimesFromTags(tags), utcMs, "Asia/Tokyo")) {
               mismatches.push(`${basename(source)}, front trim ${frontMarkerSec ?? 0} s: ${JSON.stringify(tags)}`);

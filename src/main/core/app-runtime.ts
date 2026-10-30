@@ -3,7 +3,6 @@ import { mkdir, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { homedir } from "node:os";
 
-import { nanoid } from "nanoid";
 import { getAppPaths } from "./app-paths";
 import { admitStorageRoot, type StorageAdmission } from "./storage-admission";
 import { WaveformCache } from "./waveform-cache";
@@ -76,9 +75,8 @@ import { abandonBackupStore, closeBackupStore, setBackupStoreSession, setBackupS
 import { NewerFormatError } from "./format-versions";
 import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
-import { TranscriptStore } from "./transcript-store";
-import { formatError, preserveAside } from "./file-io";
-import { claimWorkingPath, copyIntoWorking, copyOriginalToBackup, deleteImportedSource, reconcileWorkingState, sourceFileIdentity } from "./working-files";
+import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, sourceFileIdentity } from "./working-files";
+import { cardScratchFolder, createEmptyQueue, newItemId, QueueStore } from "./queue-store";
 import {
   buildMarkdownContent,
   buildOutputPayload,
@@ -92,7 +90,7 @@ import {
   type SaveTargetPaths,
 } from "./file-output";
 
-import { resolveSettingsDirectory, applySettingsDraft, buildSettingsDraft, createDefaultSettings, importTimezone, createEmptyQueue, createSettingsStore, createQueueStore, recoverInterruptedCards, summarizeSettings, type QueueStore, type SettingsStore } from "./settings-schema";
+import { resolveSettingsDirectory, applySettingsDraft, buildSettingsDraft, createDefaultSettings, importTimezone, createSettingsStore, summarizeSettings, type SettingsStore } from "./settings-schema";
 import {
   clampQueueWidth,
   clampRecordsListWidth,
@@ -190,7 +188,7 @@ class ImportAdmissionError extends Error {
 export type WithSnapshot<T> = T & { snapshot: AppSnapshot };
 
 /** The user's own work a quit could not save. */
-export type QuitSaveFailure = "queue" | "transcripts" | "settings";
+export type QuitSaveFailure = "queue" | "settings";
 
 /** The app-owned work still running that a quit would stop. */
 export interface RunningWork {
@@ -216,9 +214,8 @@ interface AppRuntimeState {
   // leniently: a corrupt layout file self-heals rather than failing startup.
   layout: MumblerLayout | null;
   settingsStore: SettingsStore | null;
+  // The card order, each card's own folder and the pending imports.
   queueStore: QueueStore | null;
-  // Each card's transcription and structured outline, in its own file.
-  transcriptStore: TranscriptStore | null;
   layoutStore: JsonStore<MumblerLayout> | null;
   logger: SessionLogger;
   startupDiagnostic: AppSnapshot["startupDiagnostic"];
@@ -254,7 +251,6 @@ export class ApplicationRuntime {
   // Long work (copies, probes, analyses, runs, saves) runs outside a command
   // and reports its result through another.
   private queueTail: Promise<void> = Promise.resolve();
-  private persistenceTail: Promise<void> = Promise.resolve();
   private onPipelineProgressCallback: (() => void) | null = null;
   private onLanguageChangedCallback: (() => void) | null = null;
   private onDependenciesChangedCallback: (() => void) | null = null;
@@ -280,7 +276,7 @@ export class ApplicationRuntime {
   private constructor(runtime: AppRuntimeState) {
     this.runtime = runtime;
     this.pipeline = new PipelineCoordinator(runtime, {
-      persistState: () => this.persistState(),
+      persistCards: (cards) => this.persist({ cards }),
       resolveApiKey: () => this.resolveGeminiApiKey(),
       command: (work) => this.command(work),
     });
@@ -313,7 +309,6 @@ export class ApplicationRuntime {
         layout: null,
         settingsStore: null,
         queueStore: null,
-        transcriptStore: null,
         layoutStore: null,
         logger,
         startupDiagnostic: {
@@ -340,7 +335,7 @@ export class ApplicationRuntime {
     setBackupStoreSession(logger.session);
 
     const settingsStore = createLoggedSettingsStore(paths.settingsPath, logger);
-    const queueStore = createQueueStore(paths.queuePath);
+    const queueStore = new QueueStore(paths);
 
     try {
       await ensureDirectories(paths);
@@ -399,49 +394,9 @@ export class ApplicationRuntime {
         makeApiKeyWarn(logger),
       );
 
-      const stateLoad = await queueStore.load();
-      const recovered = recoverInterruptedCards(stateLoad.value);
-      const reconciliation = await reconcileWorkingState(paths, recovered.state, logger).catch((error: unknown) => {
-        // Failed presence/directory reads say nothing about whether saved work
-        // is missing. Name that path without treating it as damaged/resettable.
-        if (error instanceof Error) {
-          const failure = error as NodeJS.ErrnoException;
-          if (typeof failure.path === "string" && failure.path.length > 0 &&
-            typeof failure.code === "string" && failure.code.length > 0) {
-            const checkedAudio = failure.syscall === "access" && (
-              recovered.state.pendingImports.some((item) => item.workingFilePath === failure.path) ||
-              recovered.state.cards.some((card) => card.sourceFilePath === failure.path)
-            );
-            const scannedDerived = failure.syscall === "scandir" && failure.path === join(paths.workingDir, "derived");
-            if (checkedAudio || scannedDerived) throw new UnreadableStoreError(failure.path, { cause: error });
-          }
-        }
-        throw error;
-      });
-
-      // Each card's text lives in its own file.
-      const transcriptStore = new TranscriptStore(paths.transcriptsDir);
-      const transcripts = await transcriptStore.open(reconciliation.state.cards.map((card) => card.id));
-      for (const card of reconciliation.state.cards) {
-        const transcript = transcripts.get(card.id);
-        if (transcript !== undefined) {
-          card.transcription = { text: transcript.transcription };
-          card.metadata = { ...card.metadata, structured: transcript.structured };
-        }
-      }
-
-      // Persist startup fix-ups (interrupted-card recovery and working-file
-      // reconciliation) only. queue.json holds precious queue/work data, so a
-      // fresh empty queue has nothing to materialize and an unchanged existing
-      // store is never rewritten.
-      const stateChanged =
-        recovered.recoveredInterruptedCards > 0 ||
-        recovered.restoredSavingCards > 0 ||
-        reconciliation.droppedPendingImports > 0 ||
-        reconciliation.missingWorkingCards > 0;
-      if (stateChanged) {
-        await queueStore.save(reconciliation.state);
-      }
+      // Reads the order, the pending imports and each listed card, settling
+      // what a previous session left; only what changed is written.
+      const queueLoad = await queueStore.load(logger);
 
       // Presentation state (disposable, volatile). No layout problem halts launch:
       // the session runs on defaults, and nothing is set aside. A missing or
@@ -466,7 +421,7 @@ export class ApplicationRuntime {
       layout = {
         ...layout,
         selectedCardId: selectExistingCardId(
-          reconciliation.state.cards.map((card) => card.id),
+          queueLoad.state.cards.map((card) => card.id),
           layout.selectedCardId,
         ),
       };
@@ -478,20 +433,21 @@ export class ApplicationRuntime {
         // Key effective configuration: summarizeSettings reports
         // the API key only as a presence boolean, never the value.
         config: summarizeSettings(settings, paths.outputDir, paths.originalsDir, hasGeminiApiKey),
-        cardCount: reconciliation.state.cards.length,
-        pendingImportCount: reconciliation.state.pendingImports.length,
-        recoveredInterruptedCards: recovered.recoveredInterruptedCards,
-        droppedPendingImports: reconciliation.droppedPendingImports,
-        missingWorkingCards: reconciliation.missingWorkingCards,
-        deletedDerivedFiles: reconciliation.deletedDerivedFiles,
-        retainedDerivedFiles: reconciliation.retainedDerivedFiles,
+        cardCount: queueLoad.state.cards.length,
+        pendingImportCount: queueLoad.state.pendingImports.length,
+        recoveredInterruptedCards: queueLoad.recoveredInterruptedCards,
+        restoredSavingCards: queueLoad.restoredSavingCards,
+        droppedPendingImports: queueLoad.droppedPendingImports,
+        droppedCards: queueLoad.droppedCards,
+        missingWorkingCards: queueLoad.missingWorkingCards,
+        removedFolders: queueLoad.removedFolders,
       });
 
-      if (recovered.recoveredInterruptedCards > 0) {
+      if (queueLoad.recoveredInterruptedCards > 0) {
         await logger.warn(
           "app.startup-recovery",
           "Recovered interrupted cards from previous session.",
-          { recoveredInterruptedCards: recovered.recoveredInterruptedCards },
+          { recoveredInterruptedCards: queueLoad.recoveredInterruptedCards },
         );
       }
 
@@ -509,16 +465,15 @@ export class ApplicationRuntime {
       const runtime = new ApplicationRuntime({
         paths,
         settings,
-        state: reconciliation.state,
+        state: queueLoad.state,
         layout,
         settingsStore,
         queueStore,
-        transcriptStore,
         layoutStore,
         logger,
         startupDiagnostic: null,
         appWideError: settingsNotice,
-        recoveredInterruptedCards: recovered.recoveredInterruptedCards,
+        recoveredInterruptedCards: queueLoad.recoveredInterruptedCards,
         shellReadyAtUtc,
         toolManager: null,
         hasGeminiApiKey,
@@ -545,7 +500,6 @@ export class ApplicationRuntime {
         layout: null,
         settingsStore: null,
         queueStore: null,
-        transcriptStore: null,
         layoutStore: null,
         logger,
         startupDiagnostic: startupFailureDiagnostic(error),
@@ -852,9 +806,8 @@ export class ApplicationRuntime {
     const previousLanguage = this.interfaceLanguage().language;
     const paths = this.runtime.paths ?? getAppPaths();
     const settingsStore = createLoggedSettingsStore(paths.settingsPath, this.runtime.logger);
-    const queueStore = createQueueStore(paths.queuePath);
+    const queueStore = new QueueStore(paths);
     const layoutStore = createLayoutStore(paths.layoutPath);
-    const transcriptStore = new TranscriptStore(paths.transcriptsDir);
     const settings = createDefaultSettings();
     const state = createEmptyQueue();
     const layout = createDefaultLayout();
@@ -875,17 +828,13 @@ export class ApplicationRuntime {
         if (error instanceof NewerFormatError) return true;
         throw error;
       });
-      await transcriptStore.admitReset();
       await loadInterfaceCatalogue(settings.language);
       await ensureDirectories(paths);
       // Preserve each store before the user-commanded reset returns to built-ins.
       const preservedSettingsFiles = moved(paths.settingsPath, await settingsStore.preserveExistingFiles());
-      const preservedStateFiles = moved(paths.queuePath, await queueStore.preserveExistingFiles());
-      // The preserved queue.json keeps its cards' text and recordings beside it;
-      // a reset deletes no user audio.
-      const preservedTranscripts = moved(paths.transcriptsDir, await transcriptStore.preserveExistingFiles());
-      const preservedRecordings = moved(paths.workingDir, await preserveAside(paths.workingDir));
-      await mkdir(paths.workingDir, { recursive: true });
+      // The queue's lists and folders are set aside together, so the cards'
+      // text and recordings stay beside their order; a reset deletes no audio.
+      const preservedStateFiles = await queueStore.preserveExistingFiles((path) => movedAside.push(basename(path)));
       const preservedLayoutFiles = layoutNewer ? [] : moved(paths.layoutPath, await layoutStore.preserveExistingFiles());
       // Reuse the per-launch session logger rather than building a new one, so a
       // reset keeps writing to the same file as the rest of the launch.
@@ -893,8 +842,6 @@ export class ApplicationRuntime {
       await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
         preservedSettingsFiles,
         preservedStateFiles,
-        preservedTranscripts,
-        preservedRecordings,
         preservedLayoutFiles,
       });
 
@@ -904,7 +851,6 @@ export class ApplicationRuntime {
       this.runtime.layout = layout;
       this.runtime.settingsStore = settingsStore;
       this.runtime.queueStore = queueStore;
-      this.runtime.transcriptStore = new TranscriptStore(paths.transcriptsDir);
       this.runtime.layoutStore = layoutNewer ? null : layoutStore;
       this.runtime.hasGeminiApiKey = await hasApiKey(paths.apiKeysPath, "gemini", makeApiKeyWarn(logger));
       if (this.runtime.toolManager === null) await this.initializeTools();
@@ -995,7 +941,7 @@ export class ApplicationRuntime {
       // A draft that could not be saved stays as the user's latest input; the
       // next save of the queue, or the quit's, writes it.
       if (state.pendingImports.some((item, index) => item !== current[index])) {
-        await this.persistState();
+        await this.persist({ inbox: true });
       }
       return this.getSnapshot();
     });
@@ -1058,25 +1004,42 @@ export class ApplicationRuntime {
       if (reviewed.some(({ merged }) => merged.copyToBackupOnConfirm) && backupDir === null) {
         throw new OperationError("Choose a Recordings folder before adding recordings to it.");
       }
-      const cardsToAdd = reviewed.map(({ pendingImport, timestamps }) =>
-        createConfirmedCard(pendingImport, timestamps, probes.get(pendingImport.id) ?? { durationSec: null, audioProfile: null }));
-
+      // Each accepted import's folder becomes its card's, under the same id;
+      // the order then lists the cards and the inbox drops them.
+      const store = this.runtime.queueStore!;
+      const accepted: PendingImportReviewItem[] = [];
+      const cardsToAdd: MumblerCard[] = [];
       const confirmedIds = new Set(reviewed.map(({ pendingImport }) => pendingImport.id));
       const previousPending = state.pendingImports;
       const previousCards = state.cards;
-      state.pendingImports = state.pendingImports.filter((item) => !confirmedIds.has(item.id));
-      state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
-        left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
-      );
       try {
-        await this.persistState();
+        for (const { pendingImport, timestamps } of reviewed) {
+          const sourceFilePath = await store.acceptImport(pendingImport);
+          accepted.push(pendingImport);
+          cardsToAdd.push(createConfirmedCard(pendingImport, sourceFilePath, timestamps, probes.get(pendingImport.id) ?? { durationSec: null, audioProfile: null }));
+        }
+        state.cards = [...state.cards, ...cardsToAdd].sort((left, right) =>
+          left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
+        );
+        state.pendingImports = state.pendingImports.filter((item) => !confirmedIds.has(item.id));
+        await this.persist({ cards: cardsToAdd, order: true });
       } catch (error: unknown) {
         // The review stays, with the choices just submitted.
+        state.cards = previousCards;
+        for (const pendingImport of accepted) {
+          await store.returnImport(pendingImport).catch((returnError: unknown) => this.runtime.logger.error(
+            "import.confirm-return", "An accepted recording could not be moved back for review.", returnError, { pendingImportId: pendingImport.id },
+          ));
+        }
         const submitted = new Map(reviewed.map(({ pendingImport, merged }) => [pendingImport.id, merged]));
         state.pendingImports = previousPending.map((item) => submitted.get(item.id) ?? item);
-        state.cards = previousCards;
         throw error;
       }
+      // The order is the commit: an inbox still naming an accepted import is
+      // written again at quit, and a launch drops it, its folder being gone.
+      await store.writeInbox(state.pendingImports).catch((error: unknown) => this.runtime.logger.warn(
+        "import.confirm-inbox", "Import committed, but the pending imports could not be saved.", { error: serializeError(error) },
+      ));
       if (cardsToAdd.length > 0) {
         try {
           await this.persistSelectedCard(cardsToAdd[0].id);
@@ -1086,7 +1049,8 @@ export class ApplicationRuntime {
           });
         }
       }
-      return { reviewed, cardsToAdd, backupDir };
+      const filed = reviewed.map((entry, index) => ({ ...entry, workingFilePath: cardsToAdd[index].sourceFilePath }));
+      return { reviewed: filed, cardsToAdd, backupDir };
     });
 
     // Original copies/deletions are optional consequences of the committed
@@ -1104,11 +1068,11 @@ export class ApplicationRuntime {
   // A backup or deletion of the original that did not happen is a warning on
   // the confirmed import, never its failure (error-handling-conventions).
   private async fileOriginals(
-    reviewed: { pendingImport: PendingImportReviewItem; merged: PendingImportReviewItem; timestamps: MumblerCard["timestamps"] }[],
+    reviewed: { pendingImport: PendingImportReviewItem; merged: PendingImportReviewItem; timestamps: MumblerCard["timestamps"]; workingFilePath: string }[],
     backupDir: string | null,
   ): Promise<ImportOriginalWarning[]> {
     const originalWarnings: ImportOriginalWarning[] = [];
-    for (const { pendingImport, merged, timestamps } of reviewed) {
+    for (const { pendingImport, merged, timestamps, workingFilePath } of reviewed) {
       let backupSucceeded = true;
       let sourceIsArchive = false;
       const file = pendingImport.originalSourcePath;
@@ -1117,7 +1081,7 @@ export class ApplicationRuntime {
           // Named by its settled recording time alone (timestamp-conventions,
           // Filenames); the card keeps the original name.
           const archivedName = `${formatUtcMarker(new Date(timestamps.confirmedUtc))}${extname(file).toLowerCase()}`;
-          const filed = await copyOriginalToBackup(pendingImport.workingFilePath, backupDir!, archivedName, this.runtime.logger);
+          const filed = await copyOriginalToBackup(workingFilePath, backupDir!, archivedName, this.runtime.logger);
           sourceIsArchive = await realpath(file) === await realpath(filed.path);
           // Only an independent source entry can be removed after deduplication;
           // the archive itself must survive reimport and path aliases.
@@ -1176,18 +1140,18 @@ export class ApplicationRuntime {
       const cancelled = state.pendingImports.filter((item) => cancelIds.has(item.id));
       const previousPending = state.pendingImports;
       state.pendingImports = state.pendingImports.filter((item) => !cancelIds.has(item.id));
-      // Keep every recording until the durable queue no longer references it.
+      // Keep every recording until the inbox no longer lists it.
       try {
-        await this.persistState();
+        await this.persist({ inbox: true });
       } catch (error: unknown) {
         state.pendingImports = previousPending;
         throw error;
       }
       for (const pendingImport of cancelled) {
         try {
-          await rm(pendingImport.workingFilePath, { force: true });
+          await this.runtime.queueStore!.removeImportFolder(pendingImport.id);
         } catch (error: unknown) {
-          await this.runtime.logger.warn("import.cancel-cleanup", "Failed to delete working file on cancel.", {
+          await this.runtime.logger.warn("import.cancel-cleanup", "Failed to delete working file on cancel; launch removes it.", {
             workingFilePath: pendingImport.workingFilePath,
             error: error instanceof Error ? error.message : String(error),
           });
@@ -1217,32 +1181,39 @@ export class ApplicationRuntime {
     return this.getSnapshot();
   }
 
-  // The queue claims the copy's name in its turn, the copy runs outside it,
+  // The copy runs outside the queue's turn into the duplicate's own folder,
   // and the duplicate joins the queue in a second turn. The copy is
   // independent audio, so the source may change or go meanwhile.
   async duplicateCard(cardId: string): Promise<AppSnapshot> {
-    const { source, duplicatePath } = await this.command(async () => {
+    const source = await this.command(async () => {
       this.ensureAcceptingWork();
-      const source = this.requireIdleCard(cardId, {
+      return structuredClone(this.requireIdleCard(cardId, {
         missing: "Card to duplicate does not exist.",
         busy: "Cannot duplicate a card while it is being processed.",
-      });
-      const duplicatePath = await claimWorkingPath(this.runtime.paths!.workingDir, basename(source.sourceFilePath));
-      return { source: structuredClone(source), duplicatePath };
+      }));
     });
-    await copyIntoWorking(source.sourceFilePath, duplicatePath);
+    const store = this.runtime.queueStore!;
+    const duplicateId = newItemId();
+    const duplicatePath = join(store.cardFolder(duplicateId), basename(source.sourceFilePath));
+    try {
+      await mkdir(store.cardFolder(duplicateId), { recursive: true });
+      await copyIntoWorking(source.sourceFilePath, duplicatePath);
+    } catch (error: unknown) {
+      await store.removeCardFolder(duplicateId).catch(() => undefined);
+      throw error;
+    }
     return this.command(async () => {
       const state = this.runtime.state!;
-      const duplicate = createDuplicatedCard(source, duplicatePath);
+      const duplicate = createDuplicatedCard(source, duplicateId, duplicatePath);
       const previousCards = state.cards;
       state.cards = [...state.cards, duplicate].sort((left, right) =>
         left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
       );
       try {
-        await this.persistState();
+        await this.persist({ cards: [duplicate], order: true });
       } catch (error: unknown) {
         state.cards = previousCards;
-        await rm(duplicatePath, { force: true }).catch(() => undefined);
+        await store.removeCardFolder(duplicateId).catch(() => undefined);
         throw error;
       }
       await this.persistSelectedCard(duplicate.id);
@@ -1318,14 +1289,18 @@ export class ApplicationRuntime {
     card.timestamps = applyFrontTrimOffset(card.timestamps, normalizedTrim.frontMarkerSec ?? 0);
     card.updatedAtUtc = editedAtUtc;
 
+    // The front trim moves the recording's start, which can move it in the order.
+    const previousOrder = [...state.cards];
     state.cards.sort((left, right) =>
       left.timestamps.effectiveUtc - right.timestamps.effectiveUtc,
     );
+    const reordered = state.cards.some((entry, index) => entry !== previousOrder[index]);
 
     try {
-      await this.persistState();
+      await this.persist({ cards: [card], order: reordered });
     } catch (error: unknown) {
       Object.assign(card, previous);
+      state.cards = previousOrder;
       throw error;
     }
     await this.runtime.logger.info("trim.analyze", "Analyzed trim decision.", {
@@ -1465,7 +1440,7 @@ export class ApplicationRuntime {
         },
       };
 
-      await this.persistState();
+      await this.persist({ cards: [state.cards[cardIndex]] });
 
       await this.runtime.logger.info("pipeline.cancel-immediate", "Immediately detached and cancelled card pipeline.", {
         cardId,
@@ -1743,9 +1718,10 @@ export class ApplicationRuntime {
   // The quit's save (unsaved-edits conventions, Quitting). Stops new pipelines
   // and saves, aborts in-flight ones and lets them unwind (a cancelled save
   // rolls back and leaves its card Ready to Save; a cancelled run leaves its
-  // card Cancelled), drains the store write-queues, then writes the user's own
-  // work that is not on disk: the queue and the transcripts from what the app
-  // holds, and any settings write that failed, during the quit or before it.
+  // card Cancelled), drains the settings writes, then writes the user's own
+  // work that is not on disk: each queue file whose latest write failed, from
+  // what the app holds, and any settings write that failed, during the quit or
+  // before it.
   // Returns what could not be saved; a call while one runs joins it.
   saveForQuit(): Promise<QuitSaveFailure[]> {
     this.quitSave ??= this.runQuitSave().finally(() => { this.quitSave = null; });
@@ -1753,7 +1729,7 @@ export class ApplicationRuntime {
   }
 
   private async runQuitSave(): Promise<QuitSaveFailure[]> {
-    const { queueStore, transcriptStore, settingsStore, logger } = this.runtime;
+    const { queueStore, settingsStore, logger } = this.runtime;
     this.closing = true;
     this.exportsAbort.abort();
     this.runtime.toolManager?.cancelAll();
@@ -1761,8 +1737,6 @@ export class ApplicationRuntime {
     // report as they unwind. A cancelled save leaves its card Ready to Save.
     const runs = this.runtime.state === null ? null : await this.command(async () => this.pipeline.stop());
     await Promise.all([runs?.settled, this.exportsTail, this.settingsTail, this.keyTail]);
-    await queueStore?.flush();
-    await transcriptStore?.flush();
     await settingsStore?.flush();
 
     const failures: QuitSaveFailure[] = [];
@@ -1788,26 +1762,11 @@ export class ApplicationRuntime {
       }
     };
     const state = this.runtime.state;
-    if (state !== null && queueStore !== null && transcriptStore !== null) {
-      // The queue as the app holds it is always written: the transcripts first,
-      // then queue.json.
-      await this.command(async () => {
-        const snapshot = structuredClone(state);
-        const transcriptsSaved = await attempt("transcripts", () => transcriptStore.writeChanged(snapshot.cards));
-        if (transcriptsSaved) {
-          await attempt("queue", () => queueStore.save(snapshot));
-        }
-        const packetSaved = failures.length === 0;
-        await retrySettings();
-        if (packetSaved) {
-          // Cleanup of removed cards' files, not the user's work: logged only.
-          await transcriptStore.removeAbsent(snapshot.cards).catch((error: unknown) => {
-            void logger.warn("quit.transcript-cleanup-failed", "Could not delete a removed card's text file.", {
-              error: serializeError(error),
-            }).catch(() => undefined);
-          });
-        }
-      });
+    if (state !== null && queueStore !== null) {
+      // Each queue file whose latest write failed is written again from what
+      // the app holds; every other one is already on disk.
+      await this.command(() => attempt("queue", () => queueStore.retryFailedWrites(state)));
+      await retrySettings();
     } else await retrySettings();
     await this.runtime.layoutStore?.flush();
     return failures;
@@ -1952,7 +1911,7 @@ export class ApplicationRuntime {
       }
       card.status = "Saving";
       try {
-        await this.persistState();
+        await this.persist({ cards: [card] });
       } catch (error: unknown) {
         card.status = "Ready to Save";
         throw error;
@@ -1975,7 +1934,7 @@ export class ApplicationRuntime {
           }
           // A recording kept after its save stays ready to be saved again.
           card.status = "Ready to Save";
-          await this.persistState().catch((error: unknown) =>
+          await this.persist({ cards: [card] }).catch((error: unknown) =>
             this.runtime.logger.error("card.save-settlement-failed", "Could not persist the recording's ready state after saving stopped.", error, {
               cardId: card.id,
             }).catch(() => undefined));
@@ -2028,7 +1987,7 @@ export class ApplicationRuntime {
 
     const trimmedAudio = await prepareAudioForTranscription({
       sourceFilePath: card.sourceFilePath,
-      workingDir: this.runtime.paths!.workingDir,
+      scratchDir: cardScratchFolder(this.runtime.paths!.cardsDir, card.id),
       trim: card.trim,
       trimDecision: card.trimDecision,
       durationSec: card.durationSec,
@@ -2121,7 +2080,7 @@ export class ApplicationRuntime {
       if (stamped !== null && stamped.audio !== trimmedAudio) cleaned = await cleanupPreparedAudio(stamped.audio, logger);
       if (!await cleanupPreparedAudio(trimmedAudio, logger)) cleaned = false;
       if (!cleaned) {
-        committed?.warnings?.push(message("notice.saveCleanupFailed", { folder: pathValue(this.runtime.paths!.workingDir) }));
+        committed?.warnings?.push(message("notice.saveCleanupFailed", { folder: pathValue(cardScratchFolder(this.runtime.paths!.cardsDir, card.id)) }));
       }
     }
   }
@@ -2147,7 +2106,7 @@ export class ApplicationRuntime {
     }
     let rewritten: PreparedAudioInput | null = null;
     try {
-      rewritten = await rewriteAudioTags({ sourceFilePath: audio.filePath, workingDir: this.runtime.paths!.workingDir, tagArgs, signal, logger: this.runtime.logger });
+      rewritten = await rewriteAudioTags({ sourceFilePath: audio.filePath, scratchDir: cardScratchFolder(this.runtime.paths!.cardsDir, card.id), tagArgs, signal, logger: this.runtime.logger });
       const tags = await probeRecordingTags(rewritten.filePath, signal);
       if (carriesOnlyRecordingTime(recordingTimesFromTags(tags), utcMs, timezone)) return { audio: rewritten, warning: null };
       await this.runtime.logger.warn("save.time-mismatch", "The saved audio did not read back with its recording time.", {
@@ -2166,14 +2125,14 @@ export class ApplicationRuntime {
     return { audio, warning: notWritten };
   }
 
-  // These are actual deletion owners: card/import disposal removes input paths,
-  // and startup cleans working/derived and temp. Resolve directory aliases and existing
-  // hard links once; private staging needs no identity/rollback machinery.
+  // These are actual deletion owners: removing a card or import deletes its
+  // folder, launch removes unlisted ones, and launch clears temp. Resolve
+  // directory aliases and existing hard links once; private staging needs no
+  // identity/rollback machinery.
   private async isSafeSaveLocation(targets: SaveTargetPaths, preparedAudioPath: string): Promise<boolean> {
-    const working = await realpath(this.runtime.paths!.workingDir);
-    const derivedPath = join(working, "derived");
     const output = await realpath(dirname(targets.audioPath));
-    for (const disposablePath of [derivedPath, this.runtime.paths!.tempDir]) {
+    const paths = this.runtime.paths!;
+    for (const disposablePath of [paths.cardsDir, paths.inboxDir, paths.tempDir]) {
       const disposable = await realpath(disposablePath).catch((error: unknown) => {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return disposablePath;
         throw error;
@@ -2222,25 +2181,20 @@ export class ApplicationRuntime {
       const previousCards = state.cards;
       state.cards = state.cards.filter((entry) => entry.id !== cardId);
 
-      // Commit removal before deleting the recording. A failed queue publication
-      // must leave the working audio intact; a crash after publication may leave
-      // an unreferenced recording, which launch deliberately never sweeps.
+      // The order no longer listing the card is the removal; its folder goes
+      // after, and one that cannot be deleted now is removed by the next launch.
       try {
-        await this.persistState();
+        await this.persist({ order: true });
       } catch (error: unknown) {
         state.cards = previousCards;
         throw error;
       }
       try {
-        await rm(card.sourceFilePath, { force: true });
+        await this.runtime.queueStore!.removeCardFolder(cardId);
       } catch (error: unknown) {
-        state.cards = previousCards;
-        // Restore retry information, including the transcript removed by the
-        // committed queue change. persistState writes text before the queue.
-        try { await this.persistState(); } catch (restoreError: unknown) {
-          await this.runtime.logger.error("card.remove-restore", "Removal failed and the retained card could not be saved; working audio remains intact.", restoreError, { cardId });
-        }
-        throw new Error(`Failed to delete the working audio of card ${cardId}: ${formatError(error)}`, { cause: error });
+        await this.runtime.logger.warn("card.remove-cleanup", "Removed the card, but its folder could not be deleted; launch removes it.", {
+          cardId, error: serializeError(error),
+        });
       }
       await this.runtime.logger.info("card.remove", "Deleted card working audio and removed card.", {
         cardId,
@@ -2316,7 +2270,7 @@ export class ApplicationRuntime {
         // Once the queue holds the copy, a failed queue save retains it for retry.
         await this.command(async () => {
           this.runtime.state!.pendingImports.push(pending);
-          await this.persistState();
+          await this.persist({ inbox: true });
         });
         importedCount += 1;
       } catch (error: unknown) {
@@ -2364,7 +2318,6 @@ export class ApplicationRuntime {
   }
 
   private async prepareImport(sourcePath: string, importSource: ImportSource): Promise<PendingImportReviewItem> {
-    const paths = this.runtime.paths!;
     const settings = this.runtime.settings!;
     if (!isSupportedAudioImportName(sourcePath)) {
       throw new ImportAdmissionError("import.unsupportedType");
@@ -2377,9 +2330,12 @@ export class ApplicationRuntime {
 
     const originalFilename = basename(sourcePath);
     const sourceIdentity = sourceFileIdentity(sourceStats);
-    // The queue claims the copy's name in its turn; the copy runs outside it.
-    const workingFilePath = await this.command(() => claimWorkingPath(paths.workingDir, originalFilename));
+    // The copy goes into the import's own folder, outside the queue's turn.
+    const store = this.runtime.queueStore!;
+    const id = newItemId();
+    const workingFilePath = join(store.importFolder(id), originalFilename);
     try {
+      await mkdir(store.importFolder(id), { recursive: true });
       await copyIntoWorking(sourcePath, workingFilePath);
 
       await this.runtime.logger.debug("import.file", "Staged file to working storage.", {
@@ -2419,7 +2375,7 @@ export class ApplicationRuntime {
       const timestampDraft = prefilledRecordingTime(timeCandidates, importZone);
 
       const pendingImport: PendingImportReviewItem = {
-        id: nanoid(),
+        id,
         originalFilename,
         importSource,
         originalSourcePath: sourcePath,
@@ -2440,7 +2396,7 @@ export class ApplicationRuntime {
 
       return pendingImport;
     } catch (error) {
-      await rm(workingFilePath, { force: true });
+      await store.removeImportFolder(id);
       throw error;
     }
   }
@@ -2473,28 +2429,16 @@ export class ApplicationRuntime {
     return card;
   }
 
-  private enqueuePersistence(work: () => Promise<void>): Promise<void> {
-    const run = this.persistenceTail.then(work);
-    this.persistenceTail = run.then(() => undefined, () => undefined);
-    return run;
-  }
-
-  // Called inside queue commands: the transcripts, then queue.json, from the
-  // queue as the command left it.
-  private async persistState(): Promise<void> {
-    const snapshot = structuredClone(this.runtime.state!);
-    await this.enqueuePersistence(async () => {
-      await this.runtime.transcriptStore!.writeChanged(snapshot.cards);
-      await this.runtime.queueStore!.save(snapshot);
-      // Error-handling-conventions: secondary failures cannot deny the queue commit.
-      try {
-        await this.runtime.transcriptStore!.removeAbsent(snapshot.cards);
-      } catch (error: unknown) {
-        await this.runtime.logger.warn("queue.cleanup-transcripts", "Queue committed, but transcript cleanup failed.", {
-          error: serializeError(error),
-        });
-      }
-    });
+  // Called inside queue commands, which take turns: writes the files the
+  // command changed and nothing else. Each changed card's card.json first, then
+  // the order, then the pending imports, so a list never names a card whose
+  // file is not yet written.
+  private async persist(change: { cards?: readonly MumblerCard[]; order?: boolean; inbox?: boolean }): Promise<void> {
+    const store = this.runtime.queueStore!;
+    const state = this.runtime.state!;
+    for (const card of change.cards ?? []) await store.writeCard(card);
+    if (change.order === true) await store.writeOrder(state.cards);
+    if (change.inbox === true) await store.writeInbox(state.pendingImports);
     const selectedCardId = selectExistingCardId(
       this.runtime.state!.cards.map((card) => card.id),
       this.runtime.layout?.selectedCardId ?? null,
@@ -2541,17 +2485,16 @@ export class ApplicationRuntime {
     await this.runtime.logger.error("app.unhandled", createTranslator("en").text(title), error, details);
   }
 
-  // Never throws: it runs after a save has published its files. The queue is
-  // saved first and the working audio deleted only once it no longer lists the
+  // Never throws: it runs after a save has published its files. The order is
+  // saved first and the card's folder deleted only once it no longer lists the
   // card: deleting first would bring the card back at the next launch as an
-  // error with its audio missing. When the queue cannot be saved the audio stays,
-  // so a relaunch shows the card intact; if a later queue save drops it, its
-  // working copy remains in working/ unreferenced (launch never deletes a
-  // recording).
+  // error with its audio missing. When the order cannot be saved the folder
+  // stays, so a relaunch shows the card intact; a folder a later order drops is
+  // removed by the launch after.
   private async discardWorkingCard(card: MumblerCard): Promise<void> {
     this.runtime.state!.cards = this.runtime.state!.cards.filter((entry) => entry.id !== card.id);
     try {
-      await this.persistState();
+      await this.persist({ order: true });
     } catch (error: unknown) {
       await this.runtime.logger.error(
         "card.cleanup",
@@ -2563,11 +2506,11 @@ export class ApplicationRuntime {
     }
 
     try {
-      await rm(card.sourceFilePath, { force: true });
+      await this.runtime.queueStore!.removeCardFolder(card.id);
     } catch (error: unknown) {
       await this.runtime.logger.warn(
         "card.cleanup",
-        "Saved card was removed from the queue, but working audio could not be deleted.",
+        "Saved card was removed from the queue, but its folder could not be deleted; launch removes it.",
         {
           cardId: card.id,
           sourceFilePath: card.sourceFilePath,
@@ -2603,7 +2546,6 @@ function makeApiKeyWarn(
 }
 
 async function ensureDirectories(paths: AppPaths): Promise<void> {
-  await mkdir(paths.workingDir, { recursive: true });
   await mkdir(paths.binDir, { recursive: true });
   // temp/ is disposable download staging: clear it on launch so a download
   // interrupted by a crash leaves no stale partial behind, then recreate it.
@@ -2683,16 +2625,18 @@ export function applyPendingImportDraft(
   return differs(flags) ? { ...authoritative, ...flags } : authoritative;
 }
 
+// The card keeps its import's id, whose folder became the card's.
 function createConfirmedCard(
   pendingImport: PendingImportReviewItem,
+  sourceFilePath: string,
   timestamps: MumblerCard["timestamps"],
   probed: Awaited<ReturnType<typeof probeAudioProfile>>,
 ): MumblerCard {
   return {
-    id: nanoid(),
+    id: pendingImport.id,
     originalFilename: pendingImport.originalFilename,
     importSource: pendingImport.importSource,
-    sourceFilePath: pendingImport.workingFilePath,
+    sourceFilePath,
     audioProfile: probed.audioProfile,
     durationSec: probed.durationSec,
     fileSizeBytes: pendingImport.fileSizeBytes,
@@ -2713,10 +2657,10 @@ function createConfirmedCard(
   };
 }
 
-function createDuplicatedCard(source: MumblerCard, sourceFilePath: string): MumblerCard {
+function createDuplicatedCard(source: MumblerCard, id: string, sourceFilePath: string): MumblerCard {
   return {
     ...source,
-    id: nanoid(),
+    id,
     sourceFilePath,
     trim: {
       frontMarkerSec: null,

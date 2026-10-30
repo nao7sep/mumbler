@@ -2,19 +2,11 @@ import { link, mkdir, mkdtemp, open, readdir, rm, stat, unlink } from "node:fs/p
 import { createReadStream } from "node:fs";
 import { basename, extname, join } from "node:path";
 
-import type { AppPaths, MumblerCard, MumblerQueue, PendingImportReviewItem, SourceFileIdentity } from "@shared/app-shell";
-import { fileExists, formatError, isMissingFileError, uniquePathInDirectory } from "./file-io";
+import type { SourceFileIdentity } from "@shared/app-shell";
+import { formatError, isMissingFileError, uniquePathInDirectory } from "./file-io";
 
 import { sha256OfFile } from "./binaries/integrity";
 import { type AppLogger, serializeError } from "./logger";
-
-export interface WorkingReconciliationResult {
-  state: MumblerQueue;
-  droppedPendingImports: number;
-  missingWorkingCards: number;
-  deletedDerivedFiles: number;
-  retainedDerivedFiles: number;
-}
 
 export function sourceFileIdentity(info: SourceFileIdentity): SourceFileIdentity {
   const { dev, ino, size, mtimeMs, ctimeMs } = info;
@@ -36,20 +28,14 @@ export async function deleteImportedSource(sourcePath: string, expected: SourceF
   await unlink(sourcePath);
 }
 
-/** Claims a free name in working/ for a recording by creating it, empty and
- * owner-only; the queue calls this in its turn, so no two copies get one name. */
-export async function claimWorkingPath(workingDir: string, preferredName: string): Promise<string> {
-  await mkdir(workingDir, { recursive: true });
-  const workingFilePath = await uniquePathInDirectory(workingDir, preferredName);
-  await (await open(workingFilePath, "wx", 0o600)).close();
-  return workingFilePath;
-}
-
-/** Copies a recording into the working path the queue claimed for it, keeping
- * the source's times and mode; a failed copy removes the claimed file. */
+/** Copies a recording to `workingFilePath`, a new file in its card's or
+ * import's own folder, keeping the source's times and mode; a failed copy
+ * removes what it wrote. */
 export async function copyIntoWorking(sourcePath: string, workingFilePath: string): Promise<void> {
+  let created = false;
   try {
-    const handle = await open(workingFilePath, "w", 0o600);
+    const handle = await open(workingFilePath, "wx", 0o600);
+    created = true;
     const stream = createReadStream(sourcePath);
     stream.on("error", () => undefined);
     let primary: unknown;
@@ -70,7 +56,7 @@ export async function copyIntoWorking(sourcePath: string, workingFilePath: strin
     }
     if (primary !== undefined) throw primary;
   } catch (error: unknown) {
-    await rm(workingFilePath, { force: true }).catch(() => undefined);
+    if (created) await rm(workingFilePath, { force: true }).catch(() => undefined);
     throw new Error(`Failed to create a readable working copy for ${basename(workingFilePath)}: ${formatError(error)}`, { cause: error });
   }
 }
@@ -176,134 +162,4 @@ export async function copyOriginalToBackup(
       }
     }
   }
-}
-
-// Startup cleanup deletes only what is temporary by location: derived/ holds
-// the trimmed audio a pipeline or save prepares and removes when it ends, so a
-// file left there was cut short by a crash. A recording in working/ itself is
-// never swept, whatever the queue says: a lost or reset queue is no reason to
-// delete user audio, and a card's own audio is deleted when the card is.
-export async function cleanupDerivedFiles(
-  paths: AppPaths,
-  logger: AppLogger,
-): Promise<{ deletedDerivedFiles: number; retainedDerivedFiles: number }> {
-  let deletedDerivedFiles = 0;
-  let retainedDerivedFiles = 0;
-
-  for (const candidate of await listDerivedFiles(paths.workingDir)) {
-    try {
-      await rm(candidate, { force: true });
-      deletedDerivedFiles += 1;
-      await logger.debug("working.cleanup", "Deleted leftover derived audio.", {
-        filePath: candidate,
-      });
-    } catch (error: unknown) {
-      retainedDerivedFiles += 1;
-      await logger.warn("working.cleanup-failed", "Failed to delete leftover derived audio.", {
-        filePath: candidate,
-        error: formatError(error),
-      });
-    }
-  }
-
-  return {
-    deletedDerivedFiles,
-    retainedDerivedFiles,
-  };
-}
-
-export async function listDerivedFiles(workingDir: string): Promise<string[]> {
-  const derivedDir = join(workingDir, "derived");
-  let entries;
-  try {
-    entries = await readdir(derivedDir, { withFileTypes: true });
-  } catch (error: unknown) {
-    if (isMissingFileError(error)) return [];
-    throw error;
-  }
-  return entries.filter((entry) => entry.isFile()).map((entry) => join(derivedDir, entry.name));
-}
-
-export async function reconcileWorkingState(
-  paths: AppPaths,
-  state: MumblerQueue,
-  logger: AppLogger,
-): Promise<WorkingReconciliationResult> {
-  const nextPendingImports: PendingImportReviewItem[] = [];
-  let droppedPendingImports = 0;
-
-  for (const pendingImport of state.pendingImports) {
-    if (await fileExists(pendingImport.workingFilePath)) {
-      nextPendingImports.push(pendingImport);
-      continue;
-    }
-
-    droppedPendingImports += 1;
-    await logger.warn(
-      "startup.pending-missing",
-      "Dropped pending import because its working file is missing.",
-      {
-        pendingImportId: pendingImport.id,
-        originalFilename: pendingImport.originalFilename,
-        workingFilePath: pendingImport.workingFilePath,
-      },
-    );
-  }
-
-  let missingWorkingCards = 0;
-  const nextCards: MumblerCard[] = [];
-
-  for (const card of state.cards) {
-    if (await fileExists(card.sourceFilePath)) {
-      nextCards.push(card);
-      continue;
-    }
-
-    missingWorkingCards += 1;
-    nextCards.push(markCardWorkingFileMissing(card));
-    await logger.warn(
-      "startup.card-missing",
-      "Marked card as errored because its working file is missing.",
-      {
-        cardId: card.id,
-        originalFilename: card.originalFilename,
-        sourceFilePath: card.sourceFilePath,
-      },
-    );
-  }
-
-  const cleanupResult = await cleanupDerivedFiles(paths, logger);
-  const changed = droppedPendingImports > 0 || missingWorkingCards > 0;
-
-  const nextState =
-    !changed
-      ? state
-      : {
-          ...state,
-          pendingImports: nextPendingImports,
-          cards: nextCards,
-        };
-
-  return {
-    state: nextState,
-    droppedPendingImports,
-    missingWorkingCards,
-    deletedDerivedFiles: cleanupResult.deletedDerivedFiles,
-    retainedDerivedFiles: cleanupResult.retainedDerivedFiles,
-  };
-}
-
-function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
-  return {
-    ...card,
-    status: "Error",
-    activeStep: null,
-    queuedMode: null,
-    queuedAtUtc: null,
-    lastError: {
-      message: "Working audio is missing from working storage — remove this card or re-import the source audio.",
-      occurredAtUtc: Date.now(),
-      failedStep: "startup-recovery",
-    },
-  };
 }

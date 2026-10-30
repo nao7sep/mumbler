@@ -10,7 +10,7 @@ const cleanupFault = vi.hoisted(() => ({ refused: false }));
 vi.mock("node:fs/promises", async (original) => {
   const actual = await original<typeof import("node:fs/promises")>();
   return { ...actual, rm: (...args: Parameters<typeof actual.rm>) => {
-    if (cleanupFault.refused && /[\\/]derived[\\/]/.test(String(args[0]))) return Promise.reject(new Error("removal refused"));
+    if (cleanupFault.refused && /[\\/]temp[\\/]/.test(String(args[0]))) return Promise.reject(new Error("removal refused"));
     return actual.rm(...args);
   } };
 });
@@ -34,18 +34,18 @@ import { isCancelledError } from "@main/core/cancellation";
 import type { TrimDecision } from "@shared/app-shell";
 
 let directory: string;
-let workingDir: string;
+let scratchDir: string;
 let sourceFilePath: string;
 
 beforeEach(async () => {
   cleanupFault.refused = false;
   directory = await mkdtemp(join(tmpdir(), "mumbler-preparation-owner-"));
-  workingDir = join(directory, "working");
+  scratchDir = join(directory, "cards", "c1", "temp");
   sourceFilePath = join(directory, "recording.wav");
   const script = join(directory, "ffmpeg.cjs");
   await writeFile(sourceFilePath, "original recording");
-  await mkdir(join(workingDir, "derived"), { recursive: true });
-  await writeFile(join(workingDir, "derived", "other.wav"), "another preparation's audio");
+  await mkdir(scratchDir, { recursive: true });
+  await writeFile(join(scratchDir, "other.wav"), "another preparation's audio");
   await writeFile(script, [
     "const { existsSync, writeFileSync } = require('node:fs');",
     "const output = process.argv.at(-1);",
@@ -88,7 +88,7 @@ describe("audio preparation owns unsuccessful derived files", () => {
         };
       });
       const pending = prepareAudioForTranscription({
-        sourceFilePath, workingDir,
+        sourceFilePath, scratchDir,
         trim: { frontMarkerSec: 1, backMarkerSec: 2 },
         trimDecision: { kind: mode, chosenStartBoundarySec: 1, chosenEndBoundarySec: 2 } as TrimDecision,
         durationSec: 3, audioProfile: null, signal: controller.signal, logger,
@@ -108,14 +108,14 @@ describe("audio preparation owns unsuccessful derived files", () => {
           expect((error as Error).message).toContain("encoder failure sentinel");
         }
         if (refused) {
-          expect(await readdir(join(workingDir, "derived"))).toContain(outputPath.split(/[\\/]/).at(-1));
+          expect(await readdir(scratchDir)).toContain(outputPath.split(/[\\/]/).at(-1));
           expect(logger.warn).toHaveBeenCalledExactlyOnceWith("audio.cleanup-failed", expect.any(String), expect.objectContaining({ error: expect.objectContaining({ message: "removal refused" }) }));
         } else {
-          expect(await readdir(join(workingDir, "derived"))).toEqual(["other.wav"]);
+          expect(await readdir(scratchDir)).toEqual(["other.wav"]);
           expect(logger.warn).not.toHaveBeenCalled();
         }
         expect(await readFile(sourceFilePath, "utf8")).toBe("original recording");
-        expect(await readFile(join(workingDir, "derived", "other.wav"), "utf8")).toBe("another preparation's audio");
+        expect(await readFile(join(scratchDir, "other.wav"), "utf8")).toBe("another preparation's audio");
       } finally {
         controller.abort();
         await pending;

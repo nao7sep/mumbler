@@ -41,7 +41,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { executeCardPipeline, type CardPipelineContext, GEMINI_ATTEMPTS } from "@main/core/card-pipeline";
-import { createDefaultSettings, createEmptyQueue } from "@main/core/settings-schema";
+import { createDefaultSettings } from "@main/core/settings-schema";
+import { createEmptyQueue } from "@main/core/queue-store";
 import { CancelledError } from "@main/core/cancellation";
 import { until } from "../../support/until";
 
@@ -95,12 +96,13 @@ function makePaths(): AppPaths {
     profileDir: "/tmp/.mumbler/electron",
     settingsPath: "/tmp/.mumbler/config.json",
     queuePath: "/tmp/.mumbler/queue.json",
-    transcriptsDir: "/tmp/.mumbler/transcripts",
+    cardsDir: "/tmp/.mumbler/cards",
+    inboxPath: "/tmp/.mumbler/inbox.json",
+    inboxDir: "/tmp/.mumbler/inbox",
     layoutPath: "/tmp/.mumbler/layout.json",
     apiKeysPath: "/tmp/.mumbler/api-keys.json",
     recordsPath: "/tmp/.mumbler/records.sqlite3",
     logsDir: "/tmp/.mumbler/logs",
-    workingDir: "/tmp/.mumbler/working",
     outputDir: "/tmp/.mumbler/output",
     originalsDir: "/tmp/.mumbler/originals",
     binDir: "/tmp/.mumbler/bin",

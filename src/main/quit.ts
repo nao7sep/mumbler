@@ -216,7 +216,6 @@ export function createQuitController(steps: QuitSteps): QuitController {
 
 const FAILURE_NAMES = {
   queue: "quit.queue",
-  transcripts: "quit.transcripts",
   settings: "quit.settings",
   edits: "quit.edits",
 } as const satisfies Record<QuitSaveFailure | "edits", string>;

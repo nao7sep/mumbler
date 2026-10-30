@@ -33,7 +33,8 @@ export interface PipelineRuntimeView {
 
 // The runtime owns the queue, its persistence and secret resolution.
 export interface PipelineHooks {
-  persistState(): Promise<void>;
+  /** Writes the given cards' files; called inside a queue command. */
+  persistCards(cards: readonly MumblerCard[]): Promise<void>;
   resolveApiKey(): Promise<string | null>;
   /** Runs `work` as a queue command, after every earlier one. */
   command<T>(work: () => Promise<T>): Promise<T>;
@@ -122,7 +123,7 @@ export class PipelineCoordinator {
     card.queuedMode = queued ? mode : null;
     card.queuedAtUtc = queued ? Date.now() : null;
     try {
-      await this.hooks.persistState();
+      await this.hooks.persistCards([card]);
     } catch (error: unknown) {
       Object.assign(card, previous);
       throw error;
@@ -157,7 +158,7 @@ export class PipelineCoordinator {
     }
     if (starting.length === 0) return;
     try {
-      await this.hooks.persistState();
+      await this.hooks.persistCards(starting.map(({ card }) => card));
     } catch (error: unknown) {
       for (const { card, mode, queuedAtUtc } of starting) {
         card.status = "Queued";
@@ -203,13 +204,13 @@ export class PipelineCoordinator {
           const current = card();
           if (current === undefined || !ownsCard() || controller.signal.aborted) throw new CancelledError();
           change(current);
-          await this.hooks.persistState();
+          await this.hooks.persistCards([current]);
         }),
         settle: (change) => this.hooks.command(async () => {
           const current = card();
           if (current === undefined || !ownsCard()) return;
           change(current);
-          await this.hooks.persistState();
+          await this.hooks.persistCards([current]);
         }),
         trackWork: (work) => {
           run.work.add(work);

@@ -4,10 +4,12 @@
 export const FORMAT_VERSIONS = {
   /** config.json */
   config: 1,
-  /** queue.json */
-  queue: 1,
-  /** transcripts/<card>.json */
-  transcript: 1,
+  /** queue.json; 2 holds only the card order, each card in its own folder */
+  queue: 2,
+  /** inbox.json, the pending imports */
+  inbox: 1,
+  /** cards/<id>/card.json */
+  card: 1,
   /** layout.json */
   layout: 1,
   /** api-keys.json */

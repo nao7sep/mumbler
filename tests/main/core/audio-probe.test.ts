@@ -262,7 +262,7 @@ describe("deciding how a trim can be cut", () => {
 });
 
 describe("preparing audio for transcription", () => {
-  let workingDir = "";
+  let scratchDir = "";
   const streamCopy = {
     kind: "stream-copy",
     chosenStartBoundarySec: 9.75,
@@ -270,17 +270,17 @@ describe("preparing audio for transcription", () => {
   } as unknown as TrimDecision;
 
   beforeEach(async () => {
-    workingDir = await mkdtemp(join(tmpdir(), "mumbler-prepare-"));
+    scratchDir = await mkdtemp(join(tmpdir(), "mumbler-prepare-"));
   });
 
   afterEach(async () => {
-    await rm(workingDir, { recursive: true, force: true });
+    await rm(scratchDir, { recursive: true, force: true });
   });
 
   it("sends the recording itself when nothing is trimmed away", async () => {
     const prepared = await prepareAudioForTranscription({
       sourceFilePath: "/recordings/take.m4a",
-      workingDir,
+      scratchDir,
       trim: { frontMarkerSec: null, backMarkerSec: null },
       trimDecision: null,
       durationSec: 300,
@@ -294,7 +294,7 @@ describe("preparing audio for transcription", () => {
   it("copies the chosen span out at the packet boundary, without re-encoding it", async () => {
     const prepared = await prepareAudioForTranscription({
       sourceFilePath: "/recordings/take.m4a",
-      workingDir,
+      scratchDir,
       trim: { frontMarkerSec: 10, backMarkerSec: 20 },
       trimDecision: streamCopy,
       durationSec: 300,
@@ -306,7 +306,7 @@ describe("preparing audio for transcription", () => {
     expect(args).toContain("copy");
     expect(args.join(" "), "the span runs from the boundary to the back mark").toContain("-t 10.250");
     expect(prepared.wasDerived).toBe(true);
-    expect(prepared.filePath.startsWith(join(workingDir, "derived"))).toBe(true);
+    expect(prepared.filePath.startsWith(scratchDir)).toBe(true);
     expect(prepared.filePath.endsWith(".m4a"), "the derived file keeps the source's type").toBe(true);
     expect(existsSync(prepared.filePath)).toBe(true);
 
@@ -318,7 +318,7 @@ describe("preparing audio for transcription", () => {
   it("re-encodes from the user's own marks when the boundaries did not line up", async () => {
     const prepared = await prepareAudioForTranscription({
       sourceFilePath: "/recordings/take.mp3",
-      workingDir,
+      scratchDir,
       trim: { frontMarkerSec: 10, backMarkerSec: 20 },
       trimDecision: { kind: "reencode" } as unknown as TrimDecision,
       durationSec: 300,
@@ -336,7 +336,7 @@ describe("preparing audio for transcription", () => {
   it("re-encodes when no decision was recorded at all", async () => {
     const prepared = await prepareAudioForTranscription({
       sourceFilePath: "/recordings/take.wav",
-      workingDir,
+      scratchDir,
       trim: { frontMarkerSec: 5, backMarkerSec: null },
       trimDecision: null,
       durationSec: 300,

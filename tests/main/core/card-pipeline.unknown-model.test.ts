@@ -79,7 +79,7 @@ function makeContext(card: MumblerCard, dir: string): CardPipelineContext {
   settings["gemini.transcription"] = UNKNOWN_MODEL;
   return {
     settings,
-    paths: { homeDir: dir, workingDir: join(dir, "working") } as AppPaths,
+    paths: { homeDir: dir, cardsDir: join(dir, "cards") } as AppPaths,
     logger: makeLogger(),
     signal: new AbortController().signal,
     apiKey: "fixture-key",

@@ -322,10 +322,12 @@ export interface AppPaths {
   profileDir: string;
   homeDir: string;
   settingsPath: string;
+  // The card order; each card lives in its own folder under cardsDir.
   queuePath: string;
-  // One file per card holding its transcription and structured outline, kept out
-  // of queuePath so the queue's frequent saves stay small.
-  transcriptsDir: string;
+  cardsDir: string;
+  // The pending imports; each one's working copy lives in its folder under inboxDir.
+  inboxPath: string;
+  inboxDir: string;
   // Disposable presentation state (pane width and last selection). Its own file,
   // apart from settingsPath/queuePath, so it self-heals independently.
   layoutPath: string;
@@ -335,7 +337,6 @@ export interface AppPaths {
   recordsPath: string;
   // Only for records the database could not take.
   logsDir: string;
-  workingDir: string;
   outputDir: string;
   originalsDir: string;
   // Managed audio tools: the installed executables live in binDir; their persisted
@@ -343,8 +344,8 @@ export interface AppPaths {
   binDir: string;
   dependenciesPath: string;
   // Disposable download staging for managed dependencies — a root-level sibling of
-  // bin/, holding nothing precious (cleared each launch). NOT under working/, which
-  // holds semi-persisted session data; temp/ declares it is safe to delete.
+  // bin/, holding nothing precious (cleared each launch); temp/ declares it is
+  // safe to delete. A card's own scratch lives in its folder instead.
   tempDir: string;
 }
 

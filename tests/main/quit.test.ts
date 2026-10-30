@@ -134,7 +134,7 @@ describe("a quit the user started", () => {
 
   it("exits without what failed on Quit anyway, and logs that it did", async () => {
     const quit = harness();
-    quit.steps.save = failingSave(["transcripts"], Infinity, quit.calls);
+    quit.steps.save = failingSave(["queue"], Infinity, quit.calls);
     createQuitController(quit.steps).request("user");
     await vi.advanceTimersByTimeAsync(0);
 
@@ -408,10 +408,10 @@ describe("the failed-save question", () => {
   beforeAll(() => loadCatalogue("ja"));
 
   it("names what failed, offers Cancel, Retry and Quit anyway in that order, and focuses Retry", () => {
-    const dialog = quitFailureDialog(createTranslator("en"), ["queue", "transcripts"]);
+    const dialog = quitFailureDialog(createTranslator("en"), ["queue", "settings"]);
 
     expect(dialog.body).toBe(
-      "Mumbler could not save the queue and the transcriptions. Retry, or quit anyway and lose what could not be saved.",
+      "Mumbler could not save the queue and the settings. Retry, or quit anyway and lose what could not be saved.",
     );
     expect(dialog.actions.map((action) => [action.choice, action.label, action.tone])).toEqual([
       ["cancel", "Cancel", undefined],

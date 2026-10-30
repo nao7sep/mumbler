@@ -267,7 +267,7 @@ export async function cleanupPreparedAudio(audio: Pick<PreparedAudioInput, "clea
     return true;
   } catch (error) {
     try {
-      await logger?.warn("audio.cleanup-failed", "Could not remove derived audio; startup cleanup will retry.", { error: serializeError(error) });
+      await logger?.warn("audio.cleanup-failed", "Could not remove derived audio; it goes with its card's folder.", { error: serializeError(error) });
     } catch { /* Preserve the primary operation's outcome. */ }
     return false;
   }
@@ -285,20 +285,19 @@ export async function probeRecordingTags(filePath: string, signal?: AbortSignal)
   return { ...data.streams?.[0]?.tags, ...data.format?.tags };
 }
 
-/** Re-packs `sourceFilePath`'s audio unchanged into the working folder, with
- * its tags kept except as `tagArgs` set or clear them. */
+/** Re-packs `sourceFilePath`'s audio unchanged into the card's scratch folder,
+ * with its tags kept except as `tagArgs` set or clear them. */
 export async function rewriteAudioTags(params: {
   sourceFilePath: string;
-  workingDir: string;
+  scratchDir: string;
   tagArgs: string[];
   logger?: AppLogger;
   signal?: AbortSignal;
 }): Promise<PreparedAudioInput> {
-  const derivedDir = join(params.workingDir, "derived");
-  await mkdir(derivedDir, { recursive: true });
+  await mkdir(params.scratchDir, { recursive: true });
   const extension = extname(params.sourceFilePath) || ".audio";
-  // not recorded: derived/ holds disposable audio, as for a trim.
-  const outputPath = join(derivedDir, `${nanoid()}${extension}`);
+  // not recorded: the scratch folder holds disposable audio, as for a trim.
+  const outputPath = join(params.scratchDir, `${nanoid()}${extension}`);
   try {
     await runTool(resolveFfmpegPath(), [
       "-hide_banner", "-loglevel", "error", "-y",
@@ -434,7 +433,8 @@ export async function analyzeTrimDecision(
 
 export async function prepareAudioForTranscription(params: {
   sourceFilePath: string;
-  workingDir: string;
+  // The card's own scratch folder, removed with the card.
+  scratchDir: string;
   trim: CardTrim;
   trimDecision: TrimDecision | null;
   durationSec: number | null;
@@ -453,14 +453,12 @@ export async function prepareAudioForTranscription(params: {
     };
   }
 
-  const derivedDir = join(params.workingDir, "derived");
-  await mkdir(derivedDir, { recursive: true });
+  await mkdir(params.scratchDir, { recursive: true });
 
   const extension = extname(params.sourceFilePath) || ".audio";
-  // not recorded: derived/ holds disposable audio binaries produced for the
-  // current pipeline; decisions remain in queue.json and transcript bodies in
-  // TranscriptStore.
-  const outputPath = join(derivedDir, `${nanoid()}${extension}`);
+  // not recorded: the scratch folder holds disposable audio produced for the
+  // current pipeline or save; the decisions and text stay in card.json.
+  const outputPath = join(params.scratchDir, `${nanoid()}${extension}`);
 
   const streamCopy = params.trimDecision?.kind === "stream-copy" ? params.trimDecision : null;
   try {

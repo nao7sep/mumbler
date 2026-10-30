@@ -1,13 +1,14 @@
 import { createTranslator, pathValue } from "@shared/i18n/translate";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, parse } from "node:path";
+import { basename, join, parse } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
 import type { PipelineCoordinator } from "@main/core/pipeline-coordinator";
 
 import type { MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
+import { readSavedQueue } from "../../support/saved-queue";
 import { until } from "../../support/until";
 
 // app-runtime imports electron at module load; stub it so the module's exported
@@ -60,9 +61,9 @@ const {
   resetFailureDiagnostic,
 } = await import("@main/core/app-runtime");
 
-const { createQueueStore, QueueStore } = await import("@main/core/settings-schema");
-const { TranscriptStore } = await import("@main/core/transcript-store");
+const { QueueStore } = await import("@main/core/queue-store");
 const { JsonStore } = await import("@main/core/json-store");
+const fileIo = await import("@main/core/file-io");
 const workingFiles = await import("@main/core/working-files");
 const audioTools = await import("@main/core/audio-tools");
 const cardPipeline = await import("@main/core/card-pipeline");
@@ -77,11 +78,11 @@ describe("reset failure presentation", () => {
   });
 
   it("names what a reset set aside before it failed, instead of claiming nothing changed", () => {
-    const presentation = resetFailureDiagnostic(["config.json", "queue.json", "transcripts"], "/home/me/.mumbler");
+    const presentation = resetFailureDiagnostic(["config.json", "queue.json", "cards"], "/home/me/.mumbler");
 
     const text = createTranslator("en").text(presentation.message);
     expect(text).toContain("it set these aside in /home/me/.mumbler");
-    expect(text).toContain("config.json, queue.json, transcripts.");
+    expect(text).toContain("config.json, queue.json, cards.");
     expect(text).not.toContain("unchanged");
   });
 });
@@ -447,8 +448,12 @@ describe("ApplicationRuntime dropped-path import authority", () => {
         expect((await stat(item.workingFilePath)).isFile()).toBe(true);
       }
 
-      const persisted = await createQueueStore(join(process.env.MUMBLER_DATA_DIR, "queue.json")).load();
-      expect(persisted.value.pendingImports.map((item) => item.originalSourcePath).sort()).toEqual([firstAudio, secondAudio].sort());
+      const persisted = await readSavedQueue(getAppPaths());
+      expect(persisted.pendingImports.map((item) => item.originalSourcePath).sort()).toEqual([firstAudio, secondAudio].sort());
+      for (const item of pending) {
+        expect(item.workingFilePath, "each copy sits in its import's own folder")
+          .toBe(join(getAppPaths().inboxDir, item.id, basename(item.originalSourcePath)));
+      }
     } finally {
       await runtime?.shutdown();
       if (previousRoot === undefined) delete process.env.MUMBLER_DATA_DIR;
@@ -460,7 +465,7 @@ describe("ApplicationRuntime dropped-path import authority", () => {
 
 describe("ApplicationRuntime confirmed import commit", () => {
   async function withImport(
-    run: (runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>>, item: PendingImportReviewItem, queuePath: string) => Promise<void>,
+    run: (runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>>, item: PendingImportReviewItem) => Promise<void>,
   ): Promise<void> {
     const root = await mkdtemp(join(tmpdir(), "mumbler-confirm-import-"));
     const previousRoot = process.env.MUMBLER_DATA_DIR;
@@ -480,7 +485,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
         timezone: "Asia/Tokyo",
         deleteOriginalOnConfirm: true,
         copyToBackupOnConfirm: false,
-      }, getAppPaths().queuePath);
+      });
     } finally {
       vi.restoreAllMocks();
       try {
@@ -493,12 +498,30 @@ describe("ApplicationRuntime confirmed import commit", () => {
     }
   }
 
-  // Exercise the actual persistence owner without involving providers or output publication.
+  // Exercise the actual persistence owner, inside a queue command as every
+  // caller runs it, without involving providers or output publication.
   function persistence(runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>>): {
-    persistState(): Promise<void>;
+    persist(change: { cards?: MumblerCard[]; order?: boolean; inbox?: boolean }): Promise<void>;
   } {
-    return runtime as unknown as { persistState(): Promise<void> };
+    const control = runtime as unknown as {
+      command<T>(work: () => Promise<T>): Promise<T>;
+      persist(change: { cards?: MumblerCard[]; order?: boolean; inbox?: boolean }): Promise<void>;
+    };
+    return { persist: (change) => control.command(() => control.persist(change)) };
   }
+
+  const cardFile = (card: MumblerCard) => join(getAppPaths().cardsDir, card.id, "card.json");
+  // The store's own write fails, as a full or failing disk would make it, so
+  // the store sees the failure it tracks for quit.
+  const failWriteOnce = (path: string, failure: Error) => {
+    const write = fileIo.writeJsonFile;
+    let failed = false;
+    return vi.spyOn(fileIo, "writeJsonFile").mockImplementation(async (target, ...rest) => {
+      if (!failed && target === path) { failed = true; throw failure; }
+      return write(target, ...rest);
+    });
+  };
+  const savedCard = async (card: MumblerCard) => JSON.parse(await readFile(cardFile(card), "utf8")) as MumblerCard;
 
   function gate(): { promise: Promise<void>; release(): void } {
     let release!: () => void;
@@ -507,22 +530,23 @@ describe("ApplicationRuntime confirmed import commit", () => {
   }
 
   async function withCard(
-    run: (runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>>, card: MumblerCard, queuePath: string) => Promise<void>,
+    run: (runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>>, card: MumblerCard) => Promise<void>,
   ): Promise<void> {
-    await withImport(async (runtime, item, queuePath) => {
+    await withImport(async (runtime, item) => {
       const result = await runtime.confirmPendingImports([{ ...item, deleteOriginalOnConfirm: false }]);
-      await run(runtime, result.snapshot.state!.cards[0], queuePath);
+      await run(runtime, result.snapshot.state!.cards[0]);
     });
   }
 
   it("publishes the confirmed queue before deleting the original source", async () => {
-    await withImport(async (runtime, item, queuePath) => {
+    await withImport(async (runtime, item) => {
       const deleteSource = workingFiles.deleteImportedSource;
       const deletion = vi.spyOn(workingFiles, "deleteImportedSource").mockImplementation(async (file, identity) => {
-        const committed = (await createQueueStore(queuePath).load()).value;
+        const committed = (await readSavedQueue(getAppPaths()));
         expect(committed.pendingImports).toEqual([]);
         expect(committed.cards).toHaveLength(1);
-        expect(committed.cards[0].sourceFilePath).toBe(item.workingFilePath);
+        expect(committed.cards[0].sourceFilePath, "the import's folder became the card's")
+          .toBe(join(getAppPaths().cardsDir, item.id, basename(item.workingFilePath)));
         expect(await readFile(file, "utf8")).toBe("original recording");
         await deleteSource(file, identity);
       });
@@ -533,28 +557,32 @@ describe("ApplicationRuntime confirmed import commit", () => {
       expect(result.snapshot.state!.cards).toHaveLength(1);
       expect(deletion).toHaveBeenCalledOnce();
       await expect(stat(item.originalSourcePath)).rejects.toMatchObject({ code: "ENOENT" });
-      expect(await readFile(item.workingFilePath, "utf8")).toBe("original recording");
+      expect(await readFile(result.snapshot.state!.cards[0].sourceFilePath, "utf8")).toBe("original recording");
+      await expect(stat(join(getAppPaths().inboxDir, item.id))).rejects.toMatchObject({ code: "ENOENT" });
     });
   });
 
-  it("retains the original and durable pending import when queue publication fails", async () => {
-    await withImport(async (runtime, item, queuePath) => {
+  it("retains the original and durable pending import, its folder back in inbox/, when queue publication fails", async () => {
+    await withImport(async (runtime, item) => {
       const saveFailure = new Error("queue publication failed");
-      vi.spyOn(QueueStore.prototype, "save").mockRejectedValueOnce(saveFailure);
+      vi.spyOn(QueueStore.prototype, "writeOrder").mockRejectedValueOnce(saveFailure);
       const deletion = vi.spyOn(workingFiles, "deleteImportedSource");
 
       await expect(runtime.confirmPendingImports([item])).rejects.toBe(saveFailure);
 
       expect(deletion).not.toHaveBeenCalled();
       expect(await readFile(item.originalSourcePath, "utf8")).toBe("original recording");
-      const persisted = (await createQueueStore(queuePath).load()).value;
+      const persisted = (await readSavedQueue(getAppPaths()));
       expect(persisted.cards).toEqual([]);
       expect(persisted.pendingImports.map((pending) => pending.id)).toEqual([item.id]);
+      expect(await readFile(item.workingFilePath, "utf8")).toBe("original recording");
+      expect(await readdir(join(getAppPaths().inboxDir, item.id)), "no card file is left with the review").toEqual([basename(item.workingFilePath)]);
+      expect(runtime.getSnapshot().state!.pendingImports.map((pending) => pending.id)).toEqual([item.id]);
     });
   });
 
   it("returns a warning on the committed import when original deletion fails", async () => {
-    await withImport(async (runtime, item, queuePath) => {
+    await withImport(async (runtime, item) => {
       vi.spyOn(workingFiles, "deleteImportedSource").mockRejectedValueOnce(new Error("deletion failed"));
 
       const result = await runtime.confirmPendingImports([item]);
@@ -564,17 +592,17 @@ describe("ApplicationRuntime confirmed import commit", () => {
         message: { key: "import.deleteFailed", values: { file: pathValue(item.originalSourcePath) } },
       }]);
       expect(result.snapshot.state!.cards).toHaveLength(1);
-      const persisted = (await createQueueStore(queuePath).load()).value;
+      const persisted = (await readSavedQueue(getAppPaths()));
       expect(persisted.pendingImports).toEqual([]);
       expect(persisted.cards).toHaveLength(1);
       expect(await readFile(item.originalSourcePath, "utf8")).toBe("original recording");
     });
   });
 
-  it("keeps import success after transcript cleanup, selection and observer failures", async () => {
-    await withImport(async (runtime, item, queuePath) => {
+  it("keeps import success after pending-import, selection and observer failures, and writes the pending imports at quit", async () => {
+    await withImport(async (runtime, item) => {
       const warnings = vi.spyOn(runtime.currentLogger(), "warn");
-      vi.spyOn(TranscriptStore.prototype, "removeAbsent").mockRejectedValueOnce(new Error("cleanup failed"));
+      failWriteOnce(getAppPaths().inboxPath, new Error("inbox write failed"));
       const save = JsonStore.prototype.save;
       vi.spyOn(JsonStore.prototype, "save").mockImplementation(function (this: typeof JsonStore.prototype, value) {
         if (typeof value === "object" && value !== null && "selectedCardId" in value) {
@@ -588,16 +616,18 @@ describe("ApplicationRuntime confirmed import commit", () => {
 
       expect(result.snapshot.state!.cards).toHaveLength(1);
       expect(result.originalWarnings).toEqual([]);
-      const persisted = (await createQueueStore(queuePath).load()).value;
-      expect(persisted.pendingImports).toEqual([]);
+      const persisted = (await readSavedQueue(getAppPaths()));
+      expect(persisted.pendingImports.map((pending) => pending.id), "the inbox write failed").toEqual([item.id]);
       expect(persisted.cards).toHaveLength(1);
       await expect(stat(item.originalSourcePath)).rejects.toMatchObject({ code: "ENOENT" });
       expect(warnings.mock.calls.map(([operation]) => operation)).toEqual([
-        "queue.cleanup-transcripts", "queue.select-card", "queue.progress", "import.select-card",
+        "queue.select-card", "queue.progress", "import.confirm-inbox", "import.select-card",
       ]);
       expect(warnings.mock.calls.every(([, , details]) =>
         (details as { error: { stack?: string } }).error.stack !== undefined,
       )).toBe(true);
+      expect(await runtime.saveForQuit()).toEqual([]);
+      expect((await readSavedQueue(getAppPaths())).pendingImports).toEqual([]);
     });
   });
 
@@ -625,7 +655,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
       await control.command(() => control.pipeline.startOrEnqueue(card.id, "generate", "transcription"));
       await started.promise;
       const failure = new Error("cancel queue save failed");
-      if (saveFails) vi.spyOn(QueueStore.prototype, "save").mockRejectedValueOnce(failure);
+      if (saveFails) vi.spyOn(QueueStore.prototype, "writeCard").mockRejectedValueOnce(failure);
       try {
         const cancel = runtime.cancelCardProcessing(card.id);
         if (saveFails) await expect(cancel).rejects.toBe(failure);
@@ -644,24 +674,22 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("captures queue fields and both transcript bodies before its first wait", async () => {
-    await withCard(async (runtime, card, queuePath) => {
-      const state = runtime.getSnapshot().state!;
+  it("writes a card as it was when its write began, whatever changes while the write waits", async () => {
+    await withCard(async (runtime, card) => {
       card.transcription.text = "first transcript";
       card.metadata.structured = "first outline";
       card.metadata.title = "first title";
       card.ai.title = { provider: "gemini", model: "first model", generatedAtUtc: 1_700_000_000_000 };
-      state.pendingImports.push({ ...authoritativeItem(), id: "pending", workingFilePath: card.sourceFilePath });
-      const before = structuredClone(state);
+      const before = structuredClone(card);
       const entered = gate();
       const release = gate();
-      const write = TranscriptStore.prototype.writeChanged;
-      vi.spyOn(TranscriptStore.prototype, "writeChanged").mockImplementationOnce(async function (this: typeof TranscriptStore.prototype, cards) {
+      const write = fileIo.writeJsonFile;
+      vi.spyOn(fileIo, "writeJsonFile").mockImplementationOnce(async (...args) => {
         entered.release();
         await release.promise;
-        return write.call(this, cards);
+        return write(...args);
       });
-      const pending = persistence(runtime).persistState();
+      const pending = persistence(runtime).persist({ cards: [card] });
       try {
         await entered.promise;
         card.transcription.text = "later transcript";
@@ -669,17 +697,13 @@ describe("ApplicationRuntime confirmed import commit", () => {
         card.metadata.title = "later title";
         card.ai.title!.model = "later model";
         card.trim.frontMarkerSec = 2;
-        state.pendingImports[0].timezone = "Europe/Berlin";
         release.release();
         await pending;
-        const saved = (await createQueueStore(queuePath).load()).value;
-        expect(saved.cards[0].metadata.title).toBe("first title");
-        expect(saved.cards[0].ai.title).toEqual(before.cards[0].ai.title);
-        expect(saved.cards[0].trim).toEqual(before.cards[0].trim);
-        expect(saved.pendingImports[0].timezone).toBe(before.pendingImports[0].timezone);
-        const transcripts = await new TranscriptStore(getAppPaths().transcriptsDir).open([card.id]);
-        expect(transcripts.get(card.id)).toEqual({ transcription: "first transcript", structured: "first outline" });
-        expect(runtime.getSnapshot().state).toBe(state);
+        const saved = await savedCard(card);
+        expect(saved.transcription.text).toBe("first transcript");
+        expect(saved.metadata).toEqual({ structured: "first outline", title: "first title", slug: null });
+        expect(saved.ai.title?.model).toBe("first model");
+        expect(saved.trim).toEqual(before.trim);
         expect(card.metadata.title).toBe("later title");
       } finally {
         release.release();
@@ -688,62 +712,27 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("orders complete packets so old cleanup cannot remove a newer card's text", async () => {
-    await withCard(async (runtime, card, queuePath) => {
-      const state = runtime.getSnapshot().state!;
-      const entered = gate();
-      const release = gate();
-      const operations: string[] = [];
-      const write = TranscriptStore.prototype.writeChanged;
-      const cleanup = TranscriptStore.prototype.removeAbsent;
-      const save = QueueStore.prototype.save;
-      vi.spyOn(TranscriptStore.prototype, "writeChanged").mockImplementation(async function (this: typeof TranscriptStore.prototype, cards) {
-        operations.push(`text:${cards.length}`);
-        if (cards.length === 0) { entered.release(); await release.promise; }
-        return write.call(this, cards);
-      });
-      vi.spyOn(QueueStore.prototype, "save").mockImplementation(function (this: typeof QueueStore.prototype, queue) {
-        operations.push(`queue:${queue.cards.length}`);
-        return save.call(this, queue);
-      });
-      vi.spyOn(TranscriptStore.prototype, "removeAbsent").mockImplementation(function (this: typeof TranscriptStore.prototype, cards) {
-        operations.push(`cleanup:${cards.length}`);
-        return cleanup.call(this, cards);
-      });
-      state.cards = [];
-      const older = persistence(runtime).persistState();
-      let newer: Promise<void> | undefined;
-      try {
-        await entered.promise;
-        card.transcription.text = "newer durable text";
-        state.cards = [card];
-        newer = persistence(runtime).persistState();
-        release.release();
-        await Promise.all([older, newer]);
-        expect(operations).toEqual(["text:0", "queue:0", "cleanup:0", "text:1", "queue:1", "cleanup:1"]);
-        expect((await createQueueStore(queuePath).load()).value.cards.map((entry) => entry.id)).toEqual([card.id]);
-        expect((await new TranscriptStore(getAppPaths().transcriptsDir).open([card.id])).get(card.id)?.transcription)
-          .toBe("newer durable text");
-        expect(runtime.getSnapshot().layout!.selectedCardId).toBe(card.id);
-      } finally {
-        release.release();
-        await Promise.allSettled([older, ...(newer ? [newer] : [])]);
-      }
+  it("writes only the card a change touched, leaving the order and every other card as they are", async () => {
+    await withCard(async (runtime, card) => {
+      const writes = vi.spyOn(fileIo, "writeJsonFile");
+      card.metadata.title = "touched";
+      await persistence(runtime).persist({ cards: [card] });
+      expect(writes.mock.calls.map(([path]) => path)).toEqual([cardFile(card)]);
+      expect((await savedCard(card)).metadata.title).toBe("touched");
     });
   });
 
-  it("quit waits for failed working deletion to restore and persist its card", async () => {
-    await withCard(async (runtime, card, queuePath) => {
+  it("quit waits for a removal whose folder deletion fails, which leaves the card removed and its folder for launch", async () => {
+    await withCard(async (runtime, card) => {
       const held = gate();
       const entered = gate();
-      const primary = new Error("working deletion failed");
       vi.mocked(rm).mockImplementationOnce(async () => {
         entered.release();
         await held.promise;
-        throw primary;
+        throw new Error("folder deletion failed");
       });
+      const warnings = vi.spyOn(runtime.currentLogger(), "warn");
       const work = runtime.removeCard(card.id);
-      const outcome = work.catch((error: unknown) => error);
       let quit: Promise<unknown> | undefined;
       try {
         await entered.promise;
@@ -755,10 +744,11 @@ describe("ApplicationRuntime confirmed import commit", () => {
         expect(settled).toBe(false);
         held.release();
         await expect(refused).rejects.toThrow("closing");
-        expect(await outcome).toMatchObject({ cause: primary });
+        await expect(work).resolves.toMatchObject({ state: { cards: [] } });
+        expect(warnings).toHaveBeenCalledWith("card.remove-cleanup", expect.any(String), expect.objectContaining({ cardId: card.id }));
         expect(await quit).toEqual([]);
-        expect((await createQueueStore(queuePath).load()).value.cards.map((entry) => entry.id)).toEqual([card.id]);
-        expect(await readFile(card.sourceFilePath, "utf8")).toBe("original recording");
+        expect((await readSavedQueue(getAppPaths())).cards).toEqual([]);
+        expect(await readFile(card.sourceFilePath, "utf8"), "the folder stays until the next launch").toBe("original recording");
       } finally {
         held.release();
         await Promise.allSettled([work, ...(quit ? [quit] : [])]);
@@ -767,7 +757,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
   });
 
   it("quit drains a failed copy without changing its original error", async () => {
-    await withCard(async (runtime, card, queuePath) => {
+    await withCard(async (runtime, card) => {
       const held = gate();
       const entered = gate();
       const primary = new Error("working copy failed");
@@ -789,7 +779,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
         held.release();
         expect(await outcome).toBe(primary);
         expect(await quit).toEqual([]);
-        expect((await createQueueStore(queuePath).load()).value.cards).toHaveLength(1);
+        expect((await readSavedQueue(getAppPaths())).cards).toHaveLength(1);
       } finally {
         held.release();
         await Promise.allSettled([work, ...(quit ? [quit] : [])]);
@@ -798,7 +788,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
   });
 
   it("quit drains confirmation held in audio probing before queue admission", async () => {
-    await withImport(async (runtime, item, queuePath) => {
+    await withImport(async (runtime, item) => {
       const held = gate();
       const entered = gate();
       vi.mocked(audioTools.probeAudioProfile).mockImplementationOnce(async () => {
@@ -818,7 +808,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
         held.release();
         await work;
         expect(await quit).toEqual([]);
-        expect((await createQueueStore(queuePath).load()).value.cards[0].durationSec).toBe(5);
+        expect((await readSavedQueue(getAppPaths())).cards[0].durationSec).toBe(5);
       } finally {
         held.release();
         await Promise.allSettled([work, ...(quit ? [quit] : [])]);
@@ -827,7 +817,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
   });
 
   it.each([false, true])("quit drains trim analysis, including superseded=%s work", async (superseded) => {
-    await withCard(async (runtime, card, queuePath) => {
+    await withCard(async (runtime, card) => {
       const decision = await audioTools.analyzeTrimDecision(card.sourceFilePath, { frontMarkerSec: null, backMarkerSec: null }, null);
       const held = gate();
       const entered = gate();
@@ -849,7 +839,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
         held.release();
         await work;
         expect(await quit).toEqual([]);
-        expect((await createQueueStore(queuePath).load()).value.cards[0].trim.frontMarkerSec).toBe(superseded ? 2 : 1);
+        expect((await readSavedQueue(getAppPaths())).cards[0].trim.frontMarkerSec).toBe(superseded ? 2 : 1);
       } finally {
         held.release();
         await Promise.allSettled([work, ...(quit ? [quit] : [])]);
@@ -889,26 +879,25 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("drains an admitted packet before quit's final snapshot", async () => {
-    await withCard(async (runtime, card, queuePath) => {
+  it("drains admitted card writes before quit finishes", async () => {
+    await withCard(async (runtime, card) => {
       const entered = gate();
       const release = gate();
-      const write = TranscriptStore.prototype.writeChanged;
-      vi.spyOn(TranscriptStore.prototype, "writeChanged").mockImplementationOnce(async function (this: typeof TranscriptStore.prototype, cards) {
+      const write = fileIo.writeJsonFile;
+      vi.spyOn(fileIo, "writeJsonFile").mockImplementationOnce(async (...args) => {
         entered.release();
         await release.promise;
-        return write.call(this, cards);
+        return write(...args);
       });
       card.metadata.title = "admitted title";
-      const pending = persistence(runtime).persistState();
+      const pending = persistence(runtime).persist({ cards: [card] });
       let quit: Promise<unknown> | undefined;
       let newer: Promise<void> | undefined;
       try {
         await entered.promise;
         card.metadata.title = "quit title";
         card.transcription.text = "quit transcript";
-        // A newer accepted packet makes the final queue snapshot dirty while the older one waits.
-        newer = persistence(runtime).persistState();
+        newer = persistence(runtime).persist({ cards: [card] });
         quit = runtime.saveForQuit();
         let settled = false;
         void quit.then(() => { settled = true; });
@@ -917,9 +906,9 @@ describe("ApplicationRuntime confirmed import commit", () => {
         release.release();
         await Promise.all([pending, newer]);
         expect(await quit).toEqual([]);
-        expect((await createQueueStore(queuePath).load()).value.cards[0].metadata.title).toBe("quit title");
-        expect((await new TranscriptStore(getAppPaths().transcriptsDir).open([card.id])).get(card.id)?.transcription)
-          .toBe("quit transcript");
+        const saved = await savedCard(card);
+        expect(saved.metadata.title).toBe("quit title");
+        expect(saved.transcription.text).toBe("quit transcript");
       } finally {
         release.release();
         await Promise.allSettled([pending, ...(newer ? [newer] : []), ...(quit ? [quit] : [])]);
@@ -927,18 +916,16 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("attempts required stores before held layout work and does not await optional error logging", async () => {
+  it("attempts a failed card write again before held layout work and does not await optional error logging", async () => {
     await withCard(async (runtime, card) => {
-      type Stores = {
-        transcriptStore: InstanceType<typeof TranscriptStore>;
-        queueStore: ReturnType<typeof createQueueStore>;
-        layoutStore: { flush(): Promise<void> };
-      };
-      const stores = (runtime as unknown as { runtime: Stores }).runtime;
+      const stores = (runtime as unknown as { runtime: { layoutStore: { flush(): Promise<void> } } }).runtime;
       card.transcription.text = "required before optional";
+      failWriteOnce(cardFile(card), new Error("first failure"));
+      await expect(persistence(runtime).persist({ cards: [card] })).rejects.toThrow("first failure");
+      vi.restoreAllMocks();
       const held = gate();
       const layout = vi.spyOn(stores.layoutStore, "flush").mockImplementation(() => held.promise);
-      const text = vi.spyOn(stores.transcriptStore, "writeChanged").mockRejectedValueOnce(new Error("text failure"));
+      const text = failWriteOnce(cardFile(card), new Error("text failure"));
       const diagnostic = vi.spyOn(runtime.currentLogger(), "error").mockImplementation(() => held.promise);
       const quit = runtime.saveForQuit();
       try {
@@ -946,7 +933,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
         expect(text).toHaveBeenCalledOnce();
         expect(diagnostic).toHaveBeenCalledOnce();
         held.release();
-        expect(await quit).toEqual(["transcripts"]);
+        expect(await quit).toEqual(["queue"]);
       } finally {
         held.release(); await quit;
         layout.mockRestore(); text.mockRestore(); diagnostic.mockRestore();
@@ -954,27 +941,26 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it.each(["transcripts", "queue"] as const)("preserves quit's %s failure category and retries through the owner", async (failedStore) => {
-    await withCard(async (runtime, card, queuePath) => {
+  it.each(["card", "order"] as const)("reports a %s file quit could not write as the queue, and writes what the app holds on retry", async (failed) => {
+    await withCard(async (runtime, card) => {
       card.metadata.title = "unsaved title";
-      vi.spyOn(QueueStore.prototype, "save").mockRejectedValueOnce(new Error("initial save failure"));
-      await expect(persistence(runtime).persistState()).rejects.toThrow("initial save failure");
+      const path = failed === "card" ? cardFile(card) : getAppPaths().queuePath;
+      failWriteOnce(path, new Error("initial save failure"));
+      await expect(persistence(runtime).persist(failed === "card" ? { cards: [card] } : { order: true })).rejects.toThrow("initial save failure");
       vi.restoreAllMocks();
       card.transcription.text = "unsaved transcript";
-      const queueSave = vi.spyOn(QueueStore.prototype, "save");
-      const cleanup = vi.spyOn(TranscriptStore.prototype, "removeAbsent");
-      if (failedStore === "transcripts") {
-        vi.spyOn(TranscriptStore.prototype, "writeChanged").mockRejectedValueOnce(new Error("quit transcript failure"));
-      } else {
-        queueSave.mockRejectedValueOnce(new Error("quit queue failure"));
-      }
-      expect(await runtime.saveForQuit()).toEqual([failedStore]);
-      expect(cleanup).not.toHaveBeenCalled();
-      if (failedStore === "transcripts") expect(queueSave).not.toHaveBeenCalled();
+      failWriteOnce(path, new Error("quit failure"));
+      expect(await runtime.saveForQuit()).toEqual(["queue"]);
+      vi.restoreAllMocks();
+      const writes = vi.spyOn(fileIo, "writeJsonFile");
       expect(await runtime.saveForQuit()).toEqual([]);
-      expect((await createQueueStore(queuePath).load()).value.cards[0].metadata.title).toBe("unsaved title");
-      expect((await new TranscriptStore(getAppPaths().transcriptsDir).open([card.id])).get(card.id)?.transcription)
-        .toBe("unsaved transcript");
+      expect(writes, "only the failed file is written again").toHaveBeenCalledOnce();
+      expect(await runtime.saveForQuit()).toEqual([]);
+      expect(writes, "a landed retry is not repeated").toHaveBeenCalledOnce();
+      if (failed === "card") {
+        expect((await savedCard(card)).metadata.title).toBe("unsaved title");
+        expect((await savedCard(card)).transcription.text).toBe("unsaved transcript");
+      } else expect((await readSavedQueue(getAppPaths())).cards.map((entry) => entry.id)).toEqual([card.id]);
     });
   });
 

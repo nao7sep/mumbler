@@ -1,4 +1,4 @@
-import { access, link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { access, chmod, link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { dialog, shell } from "electron";
@@ -10,6 +10,7 @@ import { CancelledError } from "@main/core/cancellation";
 import type { AppSnapshot, MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
 import { hasStaleResults } from "@shared/card-status";
 import { formatUtcMarker, getSystemTimezone, recomputeLocalFromUtc } from "@shared/timestamps";
+import { readSavedQueue } from "../../support/saved-queue";
 import { until } from "../../support/until";
 
 // The card list as the user builds it: confirm what was dropped in, duplicate a
@@ -186,7 +187,8 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
       }
       const prepared = await actual.prepareAudioForTranscription(params);
       if (audioGate.cleanupFailure) {
-        const preparedPath = join(params.workingDir, "prepared-save.wav");
+        await mkdir(params.scratchDir, { recursive: true });
+        const preparedPath = join(params.scratchDir, "prepared-save.wav");
         await writeFile(preparedPath, await readFile(prepared.filePath));
         return { ...prepared, filePath: preparedPath, cleanup: async () => {
           throw new Error("prepared audio cleanup refused");
@@ -211,7 +213,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
       signal?.addEventListener("abort", () => reject(new CancelledError("stopped")), { once: true });
     }),
     probeRecordingTags: async (path: string, signal?: AbortSignal) =>
-      tagWrites.readBack.get(path) ?? actual.probeRecordingTags(path, signal),
+      tagWrites.readBack.get(path) ?? tagWrites.readBack.get(basename(path)) ?? actual.probeRecordingTags(path, signal),
     probeAudioProfile: async () => {
       probeGate.entered += 1;
       probeGate.onEnter?.();
@@ -242,8 +244,8 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
 });
 
 const { ApplicationRuntime, startupFailureDiagnostic } = await import("@main/core/app-runtime");
-const { createDefaultSettings, createQueueStore } = await import("@main/core/settings-schema");
-const { TranscriptStore } = await import("@main/core/transcript-store");
+const { createDefaultSettings } = await import("@main/core/settings-schema");
+const { QueueStore } = await import("@main/core/queue-store");
 const backupStore = await import("@main/core/backupStore");
 
 type Runtime = Awaited<ReturnType<typeof ApplicationRuntime.initialize>>;
@@ -269,6 +271,42 @@ const FIRST_LAUNCH = { formatVersion: 1, defaultTimezone: getSystemTimezone() };
 
 async function savedSettings(): Promise<unknown> {
   return JSON.parse(await readFile(join(home, "config.json"), "utf8"));
+}
+
+/** The queue as its files hold it; instants stay ISO text. */
+function savedQueue(): ReturnType<typeof readSavedQueue> {
+  return readSavedQueue({ queuePath: join(home, "queue.json"), inboxPath: join(home, "inbox.json"), cardsDir: join(home, "cards") });
+}
+
+/** The queue's own store on this test's data folder, for seeding saved state
+ * while the app is shut down. */
+function diskStore(): InstanceType<typeof QueueStore> {
+  return new QueueStore({ queuePath: join(home, "queue.json"), inboxPath: join(home, "inbox.json"), cardsDir: join(home, "cards"), inboxDir: join(home, "inbox") });
+}
+
+const quietLogger = () => ({
+  debug: vi.fn(async () => undefined), info: vi.fn(async () => undefined), warn: vi.fn(async () => undefined),
+  error: vi.fn(async () => undefined), providerCall: vi.fn(async () => undefined),
+});
+
+/** The saved queue as a launch reads it. */
+async function loadDisk(): Promise<{ cards: MumblerCard[]; pendingImports: PendingImportReviewItem[] }> {
+  return (await diskStore().load(quietLogger())).state;
+}
+
+/** Writes each card's file, creating its folder, then the order. */
+async function saveDiskCards(saved: MumblerCard[]): Promise<void> {
+  const store = diskStore();
+  for (const card of saved) {
+    await mkdir(join(home, "cards", card.id), { recursive: true });
+    await store.writeCard(card);
+  }
+  await store.writeOrder(saved);
+}
+
+/** A card's own file as it is on disk. */
+async function savedCard(cardId: string): Promise<MumblerCard> {
+  return JSON.parse(await readFile(join(home, "cards", cardId, "card.json"), "utf8")) as MumblerCard;
 }
 
 function cards(snapshot: AppSnapshot): MumblerCard[] {
@@ -468,33 +506,38 @@ describe("first-run setup and user-owned destinations", () => {
 });
 
 describe("the durable queue store", () => {
-  it.each(["card", "pending import"] as const)("keeps %s audio when its queue removal cannot be committed", async (kind) => {
+  // A card's removal commits in queue.json, a pending import's in inbox.json.
+  const listFile = (kind: "card" | "pending import") => join(home, kind === "card" ? "queue.json" : "inbox.json");
+
+  it.each(["card", "pending import"] as const)("keeps %s audio when its list's removal cannot be committed", async (kind) => {
     const [pending] = await dropIn("retain.wav");
     const card = kind === "card" ? cards((await runtime.confirmPendingImports([review(pending)])).snapshot)[0]! : null;
-    const queuePath = join(home, "queue.json");
-    const before = await readFile(queuePath, "utf8");
-    unwritable.refuses = (path) => path === queuePath;
+    const audio = card?.sourceFilePath ?? pending.workingFilePath;
+    const list = listFile(kind);
+    const before = await readFile(list, "utf8");
+    unwritable.refuses = (path) => path === list;
     try {
       const removal = card ? runtime.removeCard(card.id) : runtime.cancelPendingImports([pending.id]);
       await expect(removal).rejects.toThrow();
-      expect(await readFile(queuePath, "utf8")).toBe(before);
-      expect(await readFile(pending.workingFilePath, "utf8")).toBe("audio for retain.wav");
+      expect(await readFile(list, "utf8")).toBe(before);
+      expect(await readFile(audio, "utf8")).toBe("audio for retain.wav");
       expect(card ? cards(runtime.getSnapshot()).some((entry) => entry.id === card.id)
         : runtime.getSnapshot().state?.pendingImports.some((entry) => entry.id === pending.id)).toBe(true);
     } finally { unwritable.refuses = () => false; }
   });
 
-  it.each(["card", "pending import"] as const)("does not delete %s audio while queue publication is still pending", async (kind) => {
+  it.each(["card", "pending import"] as const)("does not delete %s audio while its list's publication is still pending", async (kind) => {
     const [pending] = await dropIn("retain.wav");
     const card = kind === "card" ? cards((await runtime.confirmPendingImports([review(pending)])).snapshot)[0]! : null;
+    const audio = card?.sourceFilePath ?? pending.workingFilePath;
     let release!: () => void;
-    unwritable.held = { path: join(home, "queue.json"), entered: 0, release: new Promise<void>((resolve) => { release = resolve; }) };
+    unwritable.held = { path: listFile(kind), entered: 0, release: new Promise<void>((resolve) => { release = resolve; }) };
     const removal = card ? runtime.removeCard(card.id) : runtime.cancelPendingImports([pending.id]);
     try {
       await until(() => expect(unwritable.held!.entered).toBe(1));
-      expect(await readFile(pending.workingFilePath, "utf8")).toBe("audio for retain.wav");
+      expect(await readFile(audio, "utf8")).toBe("audio for retain.wav");
     } finally { release(); await removal; unwritable.held = null; }
-    expect(await exists(pending.workingFilePath)).toBe(false);
+    expect(await exists(dirname(audio)), "the whole folder goes").toBe(false);
   });
 
   it("restores audio-tool availability and surviving key presence after Reset from failed startup", async () => {
@@ -519,7 +562,7 @@ describe("the durable queue store", () => {
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
     const path = join(home, "queue.json");
-    const newer = JSON.stringify({ formatVersion: 2, cards: [] });
+    const newer = JSON.stringify({ formatVersion: 99, cardIds: [] });
     afterResetMove.run = () => writeFile(path, newer);
     try {
       const snapshot = await runtime.resetState();
@@ -549,14 +592,14 @@ describe("the durable queue store", () => {
     expect(await readFile(path, "utf8")).toBe(newer);
   });
 
-  it.each(["config.json", "queue.json", "transcripts/6c6f7374.json"])(
+  it.each(["config.json", "queue.json", "inbox.json", "cards/lost/card.json"])(
     "refuses reset before moving any sibling when %s is newer", async (name) => {
       const [pending] = await dropIn("take.wav");
       const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
       await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
       const newerPath = join(home, name);
       await mkdir(dirname(newerPath), { recursive: true });
-      const text = JSON.stringify({ formatVersion: 2, cardId: "lost", transcription: "future words" });
+      const text = JSON.stringify({ formatVersion: 99, id: "lost", transcription: { text: "future words" } });
       await writeFile(newerPath, text);
       const storePaths = ["config.json", "queue.json", "layout.json"].map((file) => join(home, file));
       const before = await Promise.all(storePaths.map((path) => readFile(path, "utf8").catch(() => null)));
@@ -574,15 +617,17 @@ describe("the durable queue store", () => {
     },
   );
 
-  it("sets queue.json aside on reset", async () => {
+  it("sets the queue's lists and folders aside together on reset", async () => {
     const [pending] = await dropIn("take.wav");
-    await runtime.confirmPendingImports([review(pending)]);
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     const original = await readFile(join(home, "queue.json"), "utf8");
     await runtime.resetState();
     expect(await exists(join(home, "queue.json"))).toBe(false);
+    expect(await exists(join(home, "cards"))).toBe(false);
     const preserved = (await readdir(home)).find((name) => /^queue-.*\.invalid$/.test(name));
     expect(preserved).toBeDefined();
-    expect(await readFile(join(home, preserved!), "utf8")).toBe(original);
+    expect(await readFile(join(home, preserved!, "queue.json"), "utf8")).toBe(original);
+    expect(await readFile(join(home, preserved!, "cards", card.id, basename(card.sourceFilePath)), "utf8")).toBe("audio for take.wav");
   });
 
   it.each([
@@ -614,52 +659,54 @@ describe("the durable queue store", () => {
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
 
-  it.each(["working audio", "derived folder"] as const)("preserves saved work and names unreadable %s when its real filesystem read fails", async (kind) => {
+  it.skipIf(process.platform === "win32")("preserves saved work and names an import folder it cannot read", async () => {
     const [pending] = await dropIn("retained.wav");
     await runtime.shutdown();
-    const queuePath = join(home, "queue.json");
-    const path = kind === "working audio"
-      ? join(pending.workingFilePath, "blocked-child.wav")
-      : join(home, "working", "derived");
-    if (kind === "working audio") {
-      const queued = JSON.parse(await readFile(queuePath, "utf8"));
-      queued.pendingImports[0].workingFilePath = path;
-      await writeFile(queuePath, JSON.stringify(queued));
-    } else {
-      // readdir on a file returns the real Node ENOTDIR/scandir error.
-      await writeFile(path, "retained derived bytes");
-    }
-    const before = await readFile(queuePath, "utf8");
-
-    runtime = await ApplicationRuntime.initialize();
-
-    expect(runtime.getSnapshot().startupDiagnostic).toEqual({
-      title: { key: "diagnostic.unreadableTitle" },
-      message: { key: "diagnostic.unreadableBody", values: { path } },
-      canReset: false,
-    });
-    expect(runtime.getSnapshot().state).toBeNull();
-    expect(await readFile(queuePath, "utf8")).toBe(before);
+    const folder = dirname(pending.workingFilePath);
+    const before = await readFile(join(home, "inbox.json"), "utf8");
+    await chmod(folder, 0o000);
+    try {
+      runtime = await ApplicationRuntime.initialize();
+      expect(runtime.getSnapshot().startupDiagnostic).toEqual({
+        title: { key: "diagnostic.unreadableTitle" },
+        message: { key: "diagnostic.unreadableBody", values: { path: pending.workingFilePath } },
+        canReset: false,
+      });
+      expect(runtime.getSnapshot().state).toBeNull();
+    } finally { await chmod(folder, 0o700); }
+    expect(await readFile(join(home, "inbox.json"), "utf8")).toBe(before);
     expect(await readFile(pending.workingFilePath, "utf8")).toBe("audio for retained.wav");
-    if (kind === "derived folder") expect(await readFile(path, "utf8")).toBe("retained derived bytes");
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
 
-  it("does not classify a reconciliation logger failure carrying a path as an unreadable saved file", async () => {
+  it("names a cards folder it cannot list, removing nothing", async () => {
+    await runtime.shutdown();
+    // readdir on a file returns the real Node ENOTDIR/scandir error.
+    await writeFile(join(home, "cards"), "not a folder");
+    runtime = await ApplicationRuntime.initialize();
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual({
+      title: { key: "diagnostic.unreadableTitle" },
+      message: { key: "diagnostic.unreadableBody", values: { path: join(home, "cards") } },
+      canReset: false,
+    });
+    expect(await readFile(join(home, "cards"), "utf8")).toBe("not a folder");
+  });
+
+  it("does not classify a logger failure carrying a path during the queue load as an unreadable saved file", async () => {
     const [pending] = await dropIn("missing.wav");
     await runtime.shutdown();
     await rm(pending.workingFilePath);
-    const before = await readFile(join(home, "queue.json"), "utf8");
-    const workingFiles = await import("@main/core/working-files");
-    const reconcile = workingFiles.reconcileWorkingState;
+    const before = await readFile(join(home, "inbox.json"), "utf8");
+    const { QueueStore } = await import("@main/core/queue-store");
+    const load = QueueStore.prototype.load;
     const loggerFailure = await access(join(home, "records.sqlite3", "blocked-log"))
       .then(() => { throw new Error("The logger fixture unexpectedly became a directory."); }, (error: unknown) => error);
     expect(loggerFailure).toMatchObject({ syscall: "access", path: join(home, "records.sqlite3", "blocked-log") });
     let restoreWarn = (): void => undefined;
-    const failingLogger = vi.spyOn(workingFiles, "reconcileWorkingState").mockImplementationOnce(async (...args) => {
-      const warn = vi.spyOn(args[2], "warn").mockRejectedValueOnce(loggerFailure);
+    const failingLogger = vi.spyOn(QueueStore.prototype, "load").mockImplementationOnce(async function (this: InstanceType<typeof QueueStore>, logger) {
+      const warn = vi.spyOn(logger, "warn").mockRejectedValueOnce(loggerFailure);
       restoreWarn = () => warn.mockRestore();
-      return reconcile(...args);
+      return load.call(this, logger);
     });
     try {
       runtime = await ApplicationRuntime.initialize();
@@ -668,7 +715,7 @@ describe("the durable queue store", () => {
         message: { key: "diagnostic.startupBody" },
         canReset: false,
       });
-      expect(await readFile(join(home, "queue.json"), "utf8")).toBe(before);
+      expect(await readFile(join(home, "inbox.json"), "utf8")).toBe(before);
     } finally { restoreWarn(); failingLogger.mockRestore(); }
   });
 
@@ -680,54 +727,41 @@ describe("the durable queue store", () => {
     });
   });
 
-  it("keeps the working recordings at a launch that finds no queue.json", async () => {
+  it("removes at launch every card folder the order does not list, and keeps the listed ones", async () => {
+    const [first, second] = await dropIn("take.wav", "next.wav");
+    const [kept, dropped] = cards((await runtime.confirmPendingImports([review(first), review(second, { localTimestampText: "2026-03-01 08:30:00" })])).snapshot);
+    await runtime.shutdown();
+    await writeFile(join(home, "queue.json"), JSON.stringify({ formatVersion: 2, cardIds: [kept.id] }));
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(cards(runtime.getSnapshot()).map((card) => card.id)).toEqual([kept.id]);
+    expect(await exists(kept.sourceFilePath)).toBe(true);
+    expect(await exists(join(home, "cards", dropped.id)), "a folder no list names is removed").toBe(false);
+  });
+
+  it("removes at launch an import folder the pending imports do not list, such as a copy a quit cut short", async () => {
+    await runtime.shutdown();
+    await mkdir(join(home, "inbox", "cutshort"), { recursive: true });
+    await writeFile(join(home, "inbox", "cutshort", "take.wav"), "partial copy");
+
+    runtime = await ApplicationRuntime.initialize();
+
+    expect(await exists(join(home, "inbox", "cutshort"))).toBe(false);
+  });
+
+  it("keeps a card's scratch across launches and removes it with the card", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
-    await rm(join(home, "queue.json"));
-
-    runtime = await ApplicationRuntime.initialize();
-
-    expect(cards(runtime.getSnapshot())).toEqual([]);
-    expect(await exists(card.sourceFilePath), "a fresh queue deletes no recording").toBe(true);
-  });
-
-  it("keeps a working recording that the queue.json it read does not refer to", async () => {
-    const [pending] = await dropIn("take.wav");
-    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    await runtime.shutdown();
-    const store = createQueueStore(join(home, "queue.json"));
-    await store.save({ ...(await store.load()).value, cards: [] });
-
-    runtime = await ApplicationRuntime.initialize();
-
-    expect(await exists(card.sourceFilePath), "a queue that lost the card deletes no recording").toBe(true);
-  });
-
-  it("keeps the working recordings at a launch after a new queue was saved over a lost one", async () => {
-    const [pending] = await dropIn("take.wav");
-    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    await runtime.shutdown();
-    await rm(join(home, "queue.json"));
-    runtime = await ApplicationRuntime.initialize();
-    const [next] = await dropIn("next.wav");
-    await runtime.confirmPendingImports([review(next)]);
-    await runtime.shutdown();
-
-    runtime = await ApplicationRuntime.initialize();
-
-    expect(await exists(card.sourceFilePath), "the next launch still deletes no recording").toBe(true);
-  });
-
-  it("deletes audio a crash left in derived/ at launch", async () => {
-    await runtime.shutdown();
-    const leftover = join(home, "working", "derived", "cut-short.wav");
-    await mkdir(join(home, "working", "derived"), { recursive: true });
+    const leftover = join(home, "cards", card.id, "temp", "cut-short.wav");
+    await mkdir(dirname(leftover), { recursive: true });
     await writeFile(leftover, "trimmed audio");
 
     runtime = await ApplicationRuntime.initialize();
-
-    expect(await exists(leftover)).toBe(false);
+    expect(await exists(leftover)).toBe(true);
+    await runtime.removeCard(card.id);
+    expect(await exists(join(home, "cards", card.id))).toBe(false);
   });
 });
 
@@ -755,7 +789,8 @@ describe("confirming what was dropped in", () => {
 
   it("preserves an embedded Ogg instant through initial review, confirmation and reopen", async () => {
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "America/New_York" });
-    tagWrites.readBack.set(join(home, "working", "voice.ogg"), { date: "2026-11-01T01:30:00-05:00" });
+    // Keyed by name: the import's folder is named by an id not known yet.
+    tagWrites.readBack.set("voice.ogg", { date: "2026-11-01T01:30:00-05:00" });
     const [pending] = await dropIn("voice.ogg");
     expect(pending).toMatchObject({ timestampBasis: "utc", localTimestampText: "2026-11-01 01:30:00", utcTimestampText: "2026-11-01 06:30:00" });
     const result = await runtime.confirmPendingImports([{ ...pending!, copyToBackupOnConfirm: false, deleteOriginalOnConfirm: false }]);
@@ -776,8 +811,9 @@ describe("confirming what was dropped in", () => {
     expect(cards(snapshot)).toHaveLength(1);
     const [card] = cards(snapshot);
     expect(card).toMatchObject({
+      id: pending.id,
       originalFilename: "take.wav",
-      sourceFilePath: pending.workingFilePath,
+      sourceFilePath: join(home, "cards", pending.id, "take.wav"),
       status: "Imported",
       durationSec: 300,
       audioProfile: { codecName: "pcm_s16le" },
@@ -790,8 +826,11 @@ describe("confirming what was dropped in", () => {
     });
     expect(snapshot.queueSummary?.selectedCardId).toBe(card.id);
 
-    const persisted = await createQueueStore(join(home, "queue.json")).load();
+    const persisted = { value: await savedQueue() };
     expect(persisted.value.cards.map((entry) => entry.id)).toEqual([card.id]);
+    expect(persisted.value.pendingImports).toEqual([]);
+    expect(await readFile(card.sourceFilePath, "utf8"), "the import's folder became the card's").toBe("audio for take.wav");
+    expect(await exists(dirname(pending.workingFilePath))).toBe(false);
   });
 
   it("orders the cards by when they were recorded, not by when they were dropped in", async () => {
@@ -889,10 +928,10 @@ describe("confirming what was dropped in", () => {
   it("deletes the original when the user asked for that", async () => {
     const [pending] = await dropIn("take.wav");
 
-    await runtime.confirmPendingImports([review(pending, { deleteOriginalOnConfirm: true })]);
+    const { snapshot } = await runtime.confirmPendingImports([review(pending, { deleteOriginalOnConfirm: true })]);
 
     expect(await exists(pending.originalSourcePath)).toBe(false);
-    expect(await exists(pending.workingFilePath), "the app's own copy stays").toBe(true);
+    expect(await exists(cards(snapshot)[0].sourceFilePath), "the app's own copy stays").toBe(true);
   });
 
   it.each([
@@ -938,7 +977,7 @@ describe("confirming what was dropped in", () => {
   it("preserves sources from an older pending review without identity evidence", async () => {
     const [pending] = await dropIn("old-review.wav");
     await runtime.shutdown();
-    const path = join(home, "queue.json");
+    const path = join(home, "inbox.json");
     const saved = JSON.parse(await readFile(path, "utf8"));
     delete saved.pendingImports[0].sourceIdentity;
     await writeFile(path, JSON.stringify(saved));
@@ -1018,9 +1057,9 @@ describe("confirming what was dropped in", () => {
     expect(snapshot.state?.pendingImports.map((item) => item.id)).toEqual([pending[1].id]);
   });
 
-  it("moves an import's updated time and rewrites the queue only when the review changes it", async () => {
+  it("moves an import's updated time and rewrites the pending imports only when the review changes it", async () => {
     const [pending] = await dropIn("take.wav");
-    const queueFile = join(home, "queue.json");
+    const queueFile = join(home, "inbox.json");
     const stored = await readFile(queueFile, "utf8");
 
     const editedAt = pending.updatedAtUtc + 60_000;
@@ -1115,9 +1154,8 @@ describe("working with a card", () => {
     await runtime.saveSetupDirectory(join(home, "output"));
     const run = { provider: "gemini" as const, model: "gemini-3.7-flash", generatedAtUtc: Date.now() };
     await runtime.shutdown();
-    const store = createQueueStore(join(home, "queue.json"));
-    const loaded = await store.load();
-    const transcribed = loaded.value.cards.map((card) =>
+    const loaded = await loadDisk();
+    const transcribed = loaded.cards.map((card) =>
         card.id === cardId
           ? {
               ...card,
@@ -1129,9 +1167,7 @@ describe("working with a card", () => {
             }
           : card,
     );
-    // The long text lives in each card's own file, not in queue.json.
-    await new TranscriptStore(join(home, "transcripts")).writeChanged(transcribed);
-    await store.save({ ...loaded.value, cards: transcribed });
+    await saveDiskCards(transcribed);
     runtime = await ApplicationRuntime.initialize();
   }
 
@@ -1148,7 +1184,7 @@ describe("working with a card", () => {
     const saved = cards(runtime.getSnapshot())[0];
     if (missing === "transcription") saved.transcription.text = null;
     else saved.metadata.structured = null;
-    await new TranscriptStore(join(home, "transcripts")).writeChanged([saved]);
+    await diskStore().writeCard(saved);
     runtime = await ApplicationRuntime.initialize();
     await expect(runtime.saveCard(card.id)).rejects.toThrow();
     expect(await exists(saved.sourceFilePath)).toBe(true);
@@ -1262,7 +1298,7 @@ describe("working with a card", () => {
 
     expect(cards(runtime.getSnapshot())[0].trim.frontMarkerSec).toBe(9);
     await runtime.shutdown();
-    const persisted = await createQueueStore(join(home, "queue.json")).load();
+    const persisted = { value: await savedQueue() };
     expect(persisted.value.cards[0].trim.frontMarkerSec).toBe(9);
   });
 
@@ -1279,7 +1315,7 @@ describe("working with a card", () => {
       release();
       await editing;
       expect(cards(runtime.getSnapshot())[0].updatedAtUtc).toBe(editedAtUtc);
-      const stored = await createQueueStore(join(home, "queue.json")).load();
+      const stored = { value: await loadDisk() };
       expect(stored.value.cards[0].updatedAtUtc).toBe(editedAtUtc);
     } finally {
       release();
@@ -1291,7 +1327,7 @@ describe("working with a card", () => {
   it("leaves a card as it was when the trim it already holds is applied again", async () => {
     const card = await confirmed();
     const [trimmed] = cards(await runtime.updateCardTrim(card.id, { frontMarkerSec: 5, backMarkerSec: 200 }));
-    const queueFile = join(home, "queue.json");
+    const queueFile = join(home, "cards", card.id, "card.json");
     const stored = await readFile(queueFile, "utf8");
     const analyses = trimGate.entered;
 
@@ -1336,7 +1372,7 @@ describe("working with a card", () => {
     await runtime.shutdown();
 
     expect(await outcome).toBe("stopped");
-    const persisted = await createQueueStore(join(home, "queue.json")).load();
+    const persisted = { value: await savedQueue() };
     expect(persisted.value.cards.map((entry) => entry.status)).toEqual(["Ready to Save"]);
     expect(await exists(card.sourceFilePath), "the working audio is kept").toBe(true);
     expect(await readdir(join(home, "output")).catch(() => []), "nothing was published").toEqual([]);
@@ -1346,16 +1382,9 @@ describe("working with a card", () => {
   it("reports a save as saved once its files are out, and keeps the working audio when the queue then cannot be written", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
-    const queueStore = (runtime as unknown as { runtime: { queueStore: { save(value: unknown): Promise<void> } } })
-      .runtime.queueStore;
-    const realSave = queueStore.save.bind(queueStore);
-    let saves = 0;
-    vi.spyOn(queueStore, "save").mockImplementation(async (value) => {
-      saves += 1;
-      // The first write claims the card as Saving; the next one follows publication.
-      if (saves === 2) throw new Error("disk full");
-      return realSave(value);
-    });
+    const queueStore = (runtime as unknown as { runtime: { queueStore: InstanceType<typeof QueueStore> } }).runtime.queueStore;
+    // The order dropping the saved card is written once publication is done.
+    vi.spyOn(queueStore, "writeOrder").mockRejectedValueOnce(new Error("disk full"));
 
     const result = await runtime.saveCard(card.id);
 
@@ -1368,24 +1397,24 @@ describe("working with a card", () => {
   it("preserves the primary save rejection when persisting its ready state also fails", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
-    const store = (runtime as unknown as { runtime: { queueStore: { save(value: unknown): Promise<void> } } }).runtime.queueStore;
+    const store = (runtime as unknown as { runtime: { queueStore: InstanceType<typeof QueueStore> } }).runtime.queueStore;
     const primary = new Error("saving claim refused");
-    vi.spyOn(store, "save").mockRejectedValueOnce(primary).mockRejectedValueOnce(new Error("ready settlement refused"));
+    vi.spyOn(store, "writeCard").mockRejectedValueOnce(primary).mockRejectedValueOnce(new Error("ready settlement refused"));
     await expect(runtime.saveCard(card.id)).rejects.toBe(primary);
     expect(cards(runtime.getSnapshot())[0].status).toBe("Ready to Save");
     expect(await exists(card.sourceFilePath)).toBe(true);
     await runtime.shutdown();
-    expect((await createQueueStore(join(home, "queue.json")).load()).value.cards[0].status).toBe("Ready to Save");
+    expect((await savedQueue()).cards[0].status).toBe("Ready to Save");
   });
 
   it("returns the partial publication result when persisting its ready state also fails", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
-    const store = (runtime as unknown as { runtime: { queueStore: { save(value: unknown): Promise<void> } } }).runtime.queueStore;
-    const save = store.save.bind(store);
-    let calls = 0;
-    vi.spyOn(store, "save").mockImplementation((value) => ++calls === 2
-      ? Promise.reject(new Error("ready settlement refused")) : save(value));
+    const file = join(home, "cards", card.id, "card.json");
+    let writes = 0;
+    // The first write claims the card as Saving; the second, handing it back
+    // ready, is refused, and the quit writes it.
+    unwritable.refuses = (path) => path === file && ++writes === 2;
     const ready = cards(runtime.getSnapshot())[0];
     const stem = `${formatUtcMarker(new Date(ready.timestamps.effectiveUtc))}-old-title`;
     outputFaults.failTarget = join(home, "output", `${stem}.md`);
@@ -1398,7 +1427,7 @@ describe("working with a card", () => {
     expect(cards(result.snapshot)[0]).toMatchObject({ status: "Ready to Save", metadata: { title: "Old title" } });
     expect(await exists(card.sourceFilePath)).toBe(true);
     await runtime.shutdown();
-    expect((await createQueueStore(join(home, "queue.json")).load()).value.cards[0].status).toBe("Ready to Save");
+    expect((await savedQueue()).cards[0].status).toBe("Ready to Save");
   });
 
   it("keeps a file that took the save's name after its conflict check", async () => {
@@ -1565,7 +1594,7 @@ describe("working with a card", () => {
     const again = await runtime.saveCard(card.id);
     expect(again.kind, "the same name is taken now").toBe("conflict");
     await runtime.shutdown();
-    expect((await createQueueStore(join(home, "queue.json")).load()).value.cards[0].status).toBe("Ready to Save");
+    expect((await savedQueue()).cards[0].status).toBe("Ready to Save");
   });
 
   it("reports a committed save with cleanup warnings and removes its working card", async () => {
@@ -1583,7 +1612,7 @@ describe("working with a card", () => {
     expect(result.kind).toBe("saved");
     if (result.kind === "saved") {
       expect(result.warnings?.map((warning) => warning.key)).toEqual(["notice.saveCleanupFailed", "notice.saveCleanupFailed"]);
-      expect(result.warnings?.map((warning) => warning.values?.folder)).toEqual([pathValue(join(home, "output")), pathValue(join(home, "working"))]);
+      expect(result.warnings?.map((warning) => warning.values?.folder)).toEqual([pathValue(join(home, "output")), pathValue(join(home, "cards", card.id, "temp"))]);
     }
     expect(cards(result.snapshot)).toEqual([]);
     expect(await exists(card.sourceFilePath)).toBe(false);
@@ -1599,7 +1628,7 @@ describe("working with a card", () => {
     if (result.kind === "saved") expect(result.warnings?.map((warning) => warning.key)).toEqual(["notice.saveCleanupFailed"]);
     expect(cards(result.snapshot)).toEqual([]);
     expect((await readdir(join(home, "output"))).length).toBe(3);
-    expect(await exists(join(home, "working", "prepared-save.wav"))).toBe(true);
+    expect(await exists(join(home, "cards", card.id)), "the scratch the save left goes with the removed card's folder").toBe(false);
   });
 
   it("overwrites output metadata from a newer build when the user chooses Overwrite", async () => {
@@ -1614,21 +1643,12 @@ describe("working with a card", () => {
     expect(JSON.parse(await readFile(`${stem}.json`, "utf8"))).toMatchObject({ formatVersion: 1 });
   });
 
-  it("keeps exports in the working folder when they do not replace a working input", async () => {
-    const card = await confirmed();
-    await transcribedOnDisk(card.id);
-    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), outputDirectory: join(home, "working") });
-    const result = await runtime.saveCard(card.id);
-    expect(result.kind).toBe("saved");
-    if (result.kind === "saved") expect(await readFile(result.audioPath, "utf8")).toBe("audio for take.wav");
-    expect(await exists(card.sourceFilePath)).toBe(false);
-  });
-
   it.each([
-    ["working/derived", false], ["working/derived", true],
+    ["cards", false], ["cards", true],
+    ["inbox", false], ["inbox", true],
     ["temp", false], ["temp", true],
     ["temp/exports", false], ["temp/exports", true],
-  ] as const)("refuses the startup-cleaned %s directory (alias: %s)", async (directory, alias) => {
+  ] as const)("refuses the %s directory, whose contents Mumbler deletes (alias: %s)", async (directory, alias) => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
     const disposable = join(home, directory);
@@ -1639,7 +1659,7 @@ describe("working with a card", () => {
     const result = await runtime.saveCard(card.id, "overwrite");
     expect(result.kind).toBe("failed");
     if (result.kind === "failed") expect(result.message.key).toBe("error.saveOutputLocationUnsafe");
-    expect(await readdir(disposable)).toEqual([]);
+    expect((await readdir(disposable)).filter((name) => name !== card.id)).toEqual([]);
     expect(await exists(card.sourceFilePath)).toBe(true);
     expect(cards(result.snapshot)[0].status).toBe("Ready to Save");
   });
@@ -1666,7 +1686,8 @@ describe("working with a card", () => {
   it("checks newly admitted pending inputs after a held final probe", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
-    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), outputDirectory: join(home, "working") });
+    const output = join(home, "output");
+    await mkdir(output, { recursive: true });
     const saved = cards(runtime.getSnapshot())[0];
     const name = `${formatUtcMarker(new Date(saved.timestamps.effectiveUtc))}-old-title.wav`;
     let release!: () => void;
@@ -1675,7 +1696,8 @@ describe("working with a card", () => {
     try {
       await until(() => expect(probeGate.entered).toBeGreaterThan(0));
       const [pending] = await dropIn(name);
-      expect(basename(pending!.workingFilePath)).toBe(name);
+      // The output the save is about to replace is the new import's copy.
+      await link(pending!.workingFilePath, join(output, name));
       const prior = await readFile(pending!.workingFilePath, "utf8");
       release();
       const result = await saving;
@@ -1689,16 +1711,12 @@ describe("working with a card", () => {
   it("refuses publishing over the card's own working filename, but permits a suffixed retry", async () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
-    await runtime.shutdown();
-    const store = createQueueStore(join(home, "queue.json"));
-    const loaded = await store.load();
-    const saved = loaded.value.cards[0]!;
-    const target = join(home, "working", `${formatUtcMarker(new Date(saved.timestamps.effectiveUtc))}-old-title.wav`);
-    await rename(saved.sourceFilePath, target);
-    saved.sourceFilePath = target;
-    await store.save(loaded.value);
-    runtime = await ApplicationRuntime.initialize();
-    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), outputDirectory: join(home, "working") });
+    const saved = cards(runtime.getSnapshot())[0]!;
+    const output = join(home, "output");
+    await mkdir(output, { recursive: true });
+    // The output name the save takes already names the card's own audio.
+    const target = join(output, `${formatUtcMarker(new Date(saved.timestamps.effectiveUtc))}-old-title.wav`);
+    await link(saved.sourceFilePath, target);
     const refused = await runtime.saveCard(card.id, "overwrite");
     expect(refused.kind).toBe("failed");
     expect(await readFile(target, "utf8")).toBe("audio for take.wav");
@@ -1711,15 +1729,14 @@ describe("working with a card", () => {
     const card = await confirmed();
     await transcribedOnDisk(card.id);
     await runtime.shutdown();
-    const store = createQueueStore(join(home, "queue.json"));
-    const loaded = await store.load();
-    const saved = loaded.value.cards[0]!;
-    loaded.value.cards.push(...Array.from({ length: 256 }, (_, index) => ({
-      ...saved, id: `retained-${index}`, sourceFilePath: join(sourceDir, `missing-${index}.wav`),
+    const loaded = await loadDisk();
+    const saved = loaded.cards[0]!;
+    loaded.cards.push(...Array.from({ length: 256 }, (_, index) => ({
+      ...saved, id: `retained-${index}`, sourceFilePath: join(home, "cards", `retained-${index}`, `missing-${index}.wav`),
     })));
-    await store.save(loaded.value);
+    await saveDiskCards(loaded.cards);
     runtime = await ApplicationRuntime.initialize();
-    for (const entry of loaded.value.cards) sourceChecks.paths.add(entry.sourceFilePath);
+    for (const entry of cards(runtime.getSnapshot())) sourceChecks.paths.add(entry.sourceFilePath);
     let release!: () => void;
     sourceChecks.held = new Promise<void>((resolve) => { release = resolve; });
     const saving = runtime.saveCard(card.id, undefined, { removeAfterSave: false });
@@ -1790,7 +1807,8 @@ describe("working with a card", () => {
     const [, duplicate] = cards(snapshot);
     expect(cards(snapshot)).toHaveLength(2);
     expect(duplicate.sourceFilePath).not.toBe(card.sourceFilePath);
-    expect(basename(duplicate.sourceFilePath)).not.toBe(basename(card.sourceFilePath));
+    expect(dirname(duplicate.sourceFilePath), "in its own folder, under the same name").toBe(join(home, "cards", duplicate.id));
+    expect(basename(duplicate.sourceFilePath)).toBe(basename(card.sourceFilePath));
     expect(await readFile(duplicate.sourceFilePath, "utf8")).toBe("audio for take.wav");
     expect(snapshot.queueSummary?.selectedCardId, "the copy is what the user works on next").toBe(duplicate.id);
     await expect(runtime.duplicateCard("not-a-card")).rejects.toThrow(/does not exist/);
@@ -1810,7 +1828,7 @@ describe("working with a card", () => {
 
     expect(cards(runtime.getSnapshot())).toHaveLength(3);
     await runtime.shutdown();
-    const persisted = await createQueueStore(join(home, "queue.json")).load();
+    const persisted = { value: await savedQueue() };
     expect(persisted.value.cards).toHaveLength(3);
     expect(persisted.value.cards.find((card) => card.id === second.id)?.trim.frontMarkerSec).toBe(1);
   });
@@ -1885,17 +1903,17 @@ describe("working with a card", () => {
     expect(cards(await runtime.removeCard(card.id))).toEqual([]);
   });
 
-  it("keeps the card in the queue when its audio cannot be deleted, so no recording is left behind", async () => {
+  it("removes the card when its folder cannot be deleted, and the next launch removes the folder", async () => {
     const card = await confirmed();
-    undeletable.add(card.sourceFilePath);
+    const folder = dirname(card.sourceFilePath);
+    undeletable.add(folder);
 
-    await expect(runtime.removeCard(card.id)).rejects.toThrow(/working audio/);
-
-    expect(cards(runtime.getSnapshot()).map((entry) => entry.id)).toEqual([card.id]);
-    expect(await exists(card.sourceFilePath)).toBe(true);
+    expect(cards(await runtime.removeCard(card.id))).toEqual([]);
+    expect(await exists(card.sourceFilePath), "the folder waits for the next launch").toBe(true);
     undeletable.clear();
-    expect(cards(await runtime.removeCard(card.id)), "removing it again deletes it").toEqual([]);
-    expect(await exists(card.sourceFilePath)).toBe(false);
+    await runtime.shutdown();
+    runtime = await ApplicationRuntime.initialize();
+    expect(await exists(folder)).toBe(false);
   });
 
   it("deletes only the removed card's own audio, leaving its duplicate's", async () => {
@@ -1918,55 +1936,12 @@ describe("working with a card", () => {
   });
 });
 
-describe("each card's text in its own file", () => {
-  /** Gives the confirmed card text in its own file, the way a finished run leaves it. */
-  async function withTextOnDisk(card: MumblerCard): Promise<void> {
+describe("each card in its own folder", () => {
+  it("keeps the whole card, its text included, in its folder's card.json, and the order alone in queue.json", async () => {
+    const [pending] = await dropIn("take.wav");
+    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
-    await new TranscriptStore(join(home, "transcripts")).writeChanged([
-      { ...card, transcription: { text: "every word that was said" }, metadata: { ...card.metadata, structured: "## what it was about" } },
-    ]);
-    runtime = await ApplicationRuntime.initialize();
-  }
-
-  it("reads a card's text from its own file, never from queue.json", async () => {
-    const [pending] = await dropIn("take.wav");
-    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    await withTextOnDisk(card);
-
-    const [loaded] = cards(runtime.getSnapshot());
-    expect(loaded).toMatchObject({
-      id: card.id,
-      transcription: { text: "every word that was said" },
-      metadata: { structured: "## what it was about" },
-    });
-    expect(await readFile(join(home, "queue.json"), "utf8")).not.toContain("every word that was said");
-    const [file] = (await readdir(join(home, "transcripts"))).filter((name) => name.endsWith(".json"));
-    expect(JSON.parse(await readFile(join(home, "transcripts", file), "utf8"))).toMatchObject({
-      formatVersion: 1,
-      cardId: card.id,
-      transcription: "every word that was said",
-    });
-  });
-
-  it("drops a card's text file when the card is removed", async () => {
-    const [pending] = await dropIn("take.wav");
-    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    await withTextOnDisk(card);
-    expect((await readdir(join(home, "transcripts"))).filter((name) => name.endsWith(".json"))).toHaveLength(1);
-
-    await runtime.removeCard(card.id);
-
-    expect(await readdir(join(home, "transcripts"))).toEqual([]);
-  });
-
-  it("restores transcript and queue retry information when audio removal is refused", async () => {
-    const [pending] = await dropIn("take.wav");
-    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    await withTextOnDisk(card);
-    undeletable.add(card.sourceFilePath);
-
-    await expect(runtime.removeCard(card.id)).rejects.toThrow(/working audio/);
-    await runtime.shutdown();
+    await diskStore().writeCard({ ...card, transcription: { text: "every word that was said" }, metadata: { ...card.metadata, structured: "## what it was about" } });
     runtime = await ApplicationRuntime.initialize();
 
     expect(cards(runtime.getSnapshot())[0]).toMatchObject({
@@ -1974,26 +1949,32 @@ describe("each card's text in its own file", () => {
       transcription: { text: "every word that was said" },
       metadata: { structured: "## what it was about" },
     });
-    expect(await exists(card.sourceFilePath)).toBe(true);
+    expect(JSON.parse(await readFile(join(home, "queue.json"), "utf8"))).toEqual({ formatVersion: 2, cardIds: [card.id] });
+    expect(await savedCard(card.id)).toMatchObject({ formatVersion: 1, id: card.id, transcription: { text: "every word that was said" } });
+    expect((await readdir(join(home, "cards", card.id))).sort()).toEqual(["card.json", "take.wav"]);
   });
 
-  it("keeps a lost queue's text files, at the launch that finds no queue and at every launch after it", async () => {
+  it("writes only the changed card when one card changes", async () => {
+    const [first, second] = await dropIn("one.wav", "two.wav");
+    const [a, b] = cards((await runtime.confirmPendingImports([review(first), review(second, { localTimestampText: "2026-03-01 08:30:00" })])).snapshot);
+    const order = await stat(join(home, "queue.json"));
+    const other = await stat(join(home, "cards", b.id, "card.json"));
+
+    await runtime.updateCardTrim(a.id, { frontMarkerSec: null, backMarkerSec: 100 });
+
+    expect((await savedCard(a.id)).trim.backMarkerSec).toBe(100);
+    expect((await stat(join(home, "queue.json"))).mtimeMs, "the order did not change").toBe(order.mtimeMs);
+    expect((await stat(join(home, "cards", b.id, "card.json"))).mtimeMs, "the other card did not change").toBe(other.mtimeMs);
+  });
+
+  it("deletes a removed card's whole folder", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    await withTextOnDisk(card);
-    const files = await readdir(join(home, "transcripts"));
-    await runtime.shutdown();
-    await rm(join(home, "queue.json"));
 
-    runtime = await ApplicationRuntime.initialize();
-    expect(cards(runtime.getSnapshot())).toEqual([]);
-    expect(await readdir(join(home, "transcripts")), "no queue was read").toEqual(files);
+    await runtime.removeCard(card.id);
 
-    const [next] = await dropIn("next.wav");
-    await runtime.confirmPendingImports([review(next)]);
-    await runtime.shutdown();
-    runtime = await ApplicationRuntime.initialize();
-    expect(await readdir(join(home, "transcripts")), "the new queue never referred to them").toEqual(files);
+    expect(await readdir(join(home, "cards"))).toEqual([]);
+    expect(JSON.parse(await readFile(join(home, "queue.json"), "utf8")).cardIds).toEqual([]);
   });
 });
 
@@ -2029,7 +2010,7 @@ describe("a store in a newer format", () => {
   /** Rewrites a JSON store as a newer build would have left it, returning its bytes. */
   async function makeNewer(path: string): Promise<string> {
     const current = (await exists(path)) ? JSON.parse(await readFile(path, "utf8")) : {};
-    const newer = JSON.stringify({ ...current, formatVersion: 2 });
+    const newer = JSON.stringify({ ...current, formatVersion: 99 });
     await writeFile(path, newer, "utf8");
     return newer;
   }
@@ -2040,7 +2021,7 @@ describe("a store in a newer format", () => {
     return card;
   }
 
-  it.each(["queue.json", "config.json"])(
+  it.each(["queue.json", "inbox.json", "config.json"])(
     "halts launch naming %s, leaves it untouched and offers no reset",
     async (name) => {
       await confirmedCard();
@@ -2063,14 +2044,10 @@ describe("a store in a newer format", () => {
     },
   );
 
-  it("halts launch naming a card's transcript file and leaves it untouched", async () => {
+  it("halts launch naming a card's file and leaves it untouched", async () => {
     const card = await confirmedCard();
     await runtime.shutdown();
-    await new TranscriptStore(join(home, "transcripts")).writeChanged([
-      { ...card, transcription: { text: "words" } },
-    ]);
-    const [file] = (await readdir(join(home, "transcripts"))).filter((name) => name.endsWith(".json"));
-    const path = join(home, "transcripts", file);
+    const path = join(home, "cards", card.id, "card.json");
     const newer = await makeNewer(path);
 
     runtime = await ApplicationRuntime.initialize();
@@ -2425,34 +2402,31 @@ describe("settings, secrets and the window's own state", () => {
     expect(await exists(pending.originalSourcePath), "the user's own file is untouched").toBe(true);
   });
 
-  it("moves every working recording aside beside the set-aside queue, and deletes none", async () => {
+  it("moves every card and pending import aside together with the queue's lists, and deletes none", async () => {
     const [kept, waiting] = await dropIn("take.wav", "waiting.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(kept)])).snapshot);
-    await mkdir(join(home, "working", "derived"), { recursive: true });
-    await writeFile(join(home, "working", "derived", "cut-short.wav"), "trimmed audio");
 
     await runtime.resetState();
 
-    const names = await readdir(home);
-    expect(names.find((name) => /^queue-.*\.invalid$/.test(name)), "the queue is set aside").toBeDefined();
-    const setAside = names.find((name) => /^working-.*\.invalid$/.test(name));
-    expect(setAside, "the recordings are set aside in the same folder as the queue").toBeDefined();
-    expect(await readFile(join(home, setAside!, basename(card.sourceFilePath)), "utf8")).toBe("audio for take.wav");
-    expect(await readFile(join(home, setAside!, basename(waiting.workingFilePath)), "utf8")).toBe("audio for waiting.wav");
-    expect(await readdir(join(home, "working")), "the new queue starts with an empty working folder").toEqual([]);
+    const setAside = (await readdir(home)).find((name) => /^queue-.*\.invalid$/.test(name));
+    expect(setAside, "the queue is set aside").toBeDefined();
+    expect(await readFile(join(home, setAside!, "cards", card.id, basename(card.sourceFilePath)), "utf8")).toBe("audio for take.wav");
+    expect(await readFile(join(home, setAside!, "inbox", waiting.id, basename(waiting.workingFilePath)), "utf8")).toBe("audio for waiting.wav");
+    expect((await readdir(join(home, setAside!))).sort()).toEqual(["cards", "inbox", "inbox.json", "queue.json"]);
+    expect(await exists(join(home, "cards")), "the new queue starts with no cards").toBe(false);
   });
 
   it("says what a reset that failed part-way had already set aside, and keeps the old queue", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
-    unmovable.add(join(home, "working"));
+    unmovable.add(join(home, "cards"));
 
     const snapshot = await runtime.resetState();
 
     expect(snapshot.startupDiagnostic).toEqual({
       title: { key: "diagnostic.resetTitle" },
-      message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json", "queue.json"], folder: home } },
+      message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json", "queue.json", "inbox.json"], folder: home } },
       canReset: true,
     });
     const names = await readdir(home);
@@ -2492,9 +2466,8 @@ describe("an unreadable work store", () => {
 describe("the save a quit makes", () => {
   type Internals = { runtime: { state: { cards: MumblerCard[] } } };
 
-  function observeFinalTranscriptWrite() {
-    const { transcriptStore } = (runtime as unknown as { runtime: { transcriptStore: { writeChanged(cards: MumblerCard[]): Promise<void> } } }).runtime;
-    return vi.spyOn(transcriptStore, "writeChanged");
+  function observeFinalQueueWrite() {
+    return vi.spyOn(QueueStore.prototype, "retryFailedWrites");
   }
 
   it("refuses new settings work once a quit has begun", async () => {
@@ -2518,7 +2491,7 @@ describe("the save a quit makes", () => {
     let release!: () => void;
     secretReadGate.held = { path: secret, release: new Promise((resolve) => { release = resolve; }), entered: 0 };
     if (operation === "failed-clear") unwritable.refuses = (path) => path === secret;
-    const finalWrite = observeFinalTranscriptWrite();
+    const finalWrite = observeFinalQueueWrite();
     const saving = (operation === "set" ? runtime.setGeminiApiKey("new-key") : runtime.clearGeminiApiKey())
       .then(() => "saved", () => "failed");
     let quit: Promise<unknown> | undefined;
@@ -2547,32 +2520,35 @@ describe("the save a quit makes", () => {
 
   it("writes the queue its last save could not write, and reports it while it still cannot", async () => {
     const [pending] = await dropIn("take.wav");
-    unwritable.refuses = (path) => path === join(home, "queue.json");
+    unwritable.refuses = (path) => path === join(home, "inbox.json");
     await expect(runtime.updatePendingImportDrafts([review(pending)])).rejects.toThrow();
 
     expect(await runtime.saveForQuit()).toEqual(["queue"]);
 
     unwritable.refuses = () => false;
     expect(await runtime.saveForQuit(), "Retry").toEqual([]);
-    const saved = await createQueueStore(join(home, "queue.json")).load();
+    const saved = { value: await savedQueue() };
     expect(saved.value.pendingImports).toEqual([expect.objectContaining({ id: pending.id, localTimestampText: "2026-03-01 07:30:00" })]);
   });
 
-  it("writes a card's text that is not in its file yet", async () => {
+  it("writes a card whose last write failed, from what the app holds", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    (runtime as unknown as Internals).runtime.state.cards[0]!.transcription = { text: "words not on disk yet" };
-    unwritable.refuses = (path) => path.startsWith(join(home, "transcripts"));
+    const control = runtime as unknown as Internals & {
+      command<T>(work: () => Promise<T>): Promise<T>;
+      persist(change: { cards: MumblerCard[] }): Promise<void>;
+    };
+    const held = control.runtime.state.cards[0]!;
+    held.transcription = { text: "words not on disk yet" };
+    const file = join(home, "cards", card.id, "card.json");
+    unwritable.refuses = (path) => path === file;
+    await expect(control.command(() => control.persist({ cards: [held] }))).rejects.toThrow();
 
-    expect(await runtime.saveForQuit()).toEqual(["transcripts"]);
+    expect(await runtime.saveForQuit()).toEqual(["queue"]);
 
     unwritable.refuses = () => false;
     expect(await runtime.saveForQuit()).toEqual([]);
-    const [file] = (await readdir(join(home, "transcripts"))).filter((name) => name.endsWith(".json"));
-    expect(JSON.parse(await readFile(join(home, "transcripts", file!), "utf8"))).toMatchObject({
-      cardId: card.id,
-      transcription: "words not on disk yet",
-    });
+    expect(await savedCard(card.id)).toMatchObject({ id: card.id, transcription: { text: "words not on disk yet" } });
   });
 
   it("writes nothing when everything is already on disk", async () => {
@@ -2608,7 +2584,7 @@ describe("the save a quit makes", () => {
 
   it.each(["targeted", "full"] as const)("keeps a retried %s settings commit authoritative after cancelling a failed quit", async (intent) => {
     const [pending] = await dropIn("take.wav");
-    const queuePath = join(home, "queue.json");
+    const queuePath = join(home, "inbox.json");
     const configPath = join(home, "config.json");
     let settingsWrites = 0;
     unwritable.refuses = (path) => path === queuePath || (path === configPath && ++settingsWrites === 1);
@@ -2658,38 +2634,6 @@ describe("the save a quit makes", () => {
     }
   });
 
-  it("retries settings before a held optional transcript cleanup", async () => {
-    const stores = (runtime as unknown as { runtime: {
-      settingsStore: { retryFailedWrite(): Promise<unknown> };
-      transcriptStore: { removeAbsent(cards: MumblerCard[]): Promise<void> };
-    } }).runtime;
-    const configPath = join(home, "config.json");
-    let releaseWrite!: () => void;
-    let releaseCleanup!: () => void;
-    unwritable.held = { path: configPath, release: new Promise((resolve) => { releaseWrite = resolve; }), entered: 0 };
-    unwritable.refuses = (path) => path === configPath;
-    const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
-    const retry = vi.spyOn(stores.settingsStore, "retryFailedWrite");
-    const cleanup = vi.spyOn(stores.transcriptStore, "removeAbsent").mockImplementation(() => cleanupGate);
-    const saving = runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" })
-      .then(() => "saved", () => "failed");
-    let quit: Promise<unknown> | undefined;
-    try {
-      await until(() => expect(unwritable.held?.entered).toBe(1));
-      quit = runtime.saveForQuit();
-      releaseWrite();
-      await until(() => expect(cleanup).toHaveBeenCalledOnce());
-      expect(retry).toHaveBeenCalledOnce();
-      expect(await saving).toBe("failed");
-      releaseCleanup();
-      expect(await quit).toEqual(["settings"]);
-    } finally {
-      releaseWrite(); releaseCleanup();
-      await Promise.allSettled([saving, ...(quit ? [quit] : [])]);
-      retry.mockRestore(); cleanup.mockRestore();
-    }
-  });
-
   it("retries a settings change that failed before the quit, and reports it when it fails again", async () => {
     const configPath = join(home, "config.json");
     unwritable.refuses = (path) => path === configPath;
@@ -2705,7 +2649,7 @@ describe("the save a quit makes", () => {
 
   it("takes work again after a cancelled quit", async () => {
     const [pending] = await dropIn("take.wav");
-    unwritable.refuses = (path) => path === join(home, "queue.json");
+    unwritable.refuses = (path) => path === join(home, "inbox.json");
     await expect(runtime.updatePendingImportDrafts([review(pending)])).rejects.toThrow();
     expect(await runtime.saveForQuit()).toEqual(["queue"]);
 
@@ -2714,7 +2658,7 @@ describe("the save a quit makes", () => {
     const remaining = await dropIn("next.wav");
     await runtime.confirmPendingImports(remaining.map((item) => review(item)));
 
-    const saved = await createQueueStore(join(home, "queue.json")).load();
+    const saved = { value: await savedQueue() };
     expect(saved.value.cards.map((card) => card.originalFilename).sort()).toEqual(["next.wav", "take.wav"]);
   });
 
