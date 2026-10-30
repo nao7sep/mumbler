@@ -738,29 +738,39 @@ describe("RecordsWindow", () => {
     expect(shell.style.getPropertyValue("--records-list-width")).toBe(`${RECORDS_LIST_WIDTH.max}px`);
   });
 
-  it("resizes the list by keyboard, 16 px per arrow and to the bounds with Home and End, saving once on key release", async () => {
+  it("resizes the list by keyboard, 16 px per arrow and to the bounds with Home and End, saving once after the last step", async () => {
     await mount();
     const splitter = document.querySelector<HTMLElement>('[role="separator"]')!;
     const shell = document.querySelector<HTMLElement>(".records-shell")!;
     const key = (type: "keydown" | "keyup", name: string) =>
       act(async () => { splitter.dispatchEvent(new KeyboardEvent(type, { key: name, bubbles: true })); });
+    const press = async (name: string) => { await key("keydown", name); await key("keyup", name); };
     expect(splitter.tabIndex).toBe(0);
     expect(splitter.getAttribute("aria-valuemin")).toBe(String(RECORDS_LIST_WIDTH.min));
 
-    await key("keydown", "ArrowRight");
-    await key("keydown", "ArrowRight");
-    expect(shell.style.getPropertyValue("--records-list-width")).toBe(`${RECORDS_LIST_WIDTH.default + 32}px`);
-    expect(saveRecordsListWidth).not.toHaveBeenCalled();
-    await key("keyup", "ArrowRight");
-    expect(saveRecordsListWidth).toHaveBeenCalledExactlyOnceWith(RECORDS_LIST_WIDTH.default + 32);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await press("ArrowRight");
+      await act(async () => { vi.advanceTimersByTime(400); });
+      await press("ArrowRight");
+      expect(shell.style.getPropertyValue("--records-list-width")).toBe(`${RECORDS_LIST_WIDTH.default + 32}px`);
+      await act(async () => { vi.advanceTimersByTime(400); });
+      expect(saveRecordsListWidth, "each step pushes the save back").not.toHaveBeenCalled();
+      await act(async () => { vi.advanceTimersByTime(100); });
+      expect(saveRecordsListWidth).toHaveBeenCalledExactlyOnceWith(RECORDS_LIST_WIDTH.default + 32);
 
-    await key("keydown", "Home");
-    await act(async () => { splitter.dispatchEvent(new FocusEvent("blur")); splitter.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
-    expect(saveRecordsListWidth).toHaveBeenLastCalledWith(RECORDS_LIST_WIDTH.min);
-    await key("keydown", "End");
-    await key("keyup", "End");
-    expect(saveRecordsListWidth).toHaveBeenLastCalledWith(RECORDS_LIST_WIDTH.max);
-    expect(saveRecordsListWidth).toHaveBeenCalledTimes(3);
+      await press("Home");
+      await act(async () => { splitter.dispatchEvent(new FocusEvent("blur")); splitter.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+      expect(saveRecordsListWidth, "losing focus saves at once").toHaveBeenLastCalledWith(RECORDS_LIST_WIDTH.min);
+      await act(async () => { vi.advanceTimersByTime(1_000); });
+      expect(saveRecordsListWidth).toHaveBeenCalledTimes(2);
+
+      await press("End");
+      await act(async () => root?.unmount());
+      root = null;
+      expect(saveRecordsListWidth, "closing the window saves at once").toHaveBeenLastCalledWith(RECORDS_LIST_WIDTH.max);
+      expect(saveRecordsListWidth).toHaveBeenCalledTimes(3);
+    } finally { vi.useRealTimers(); }
   });
 
   it("narrows the list when the window narrows, saving nothing", async () => {

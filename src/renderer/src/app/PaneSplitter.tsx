@@ -12,9 +12,13 @@ import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type Point
  *
  * With `keyboardStep`, the handle also takes focus and resizes by keyboard (the
  * developer's decision for Records windows): the arrows move it by the step,
- * Home and End to the bounds, and the width is committed once, when the key is
- * released or the handle loses focus. The main window's handle stays pointer-only.
+ * Home and End to the bounds. Stepping is continuous editing, so the width is
+ * committed KEY_COMMIT_DELAY_MS after the last step, each step pushing it back,
+ * and at once when the handle loses focus, its window closes or it unmounts.
+ * The main window's handle stays pointer-only.
  */
+const KEY_COMMIT_DELAY_MS = 500;
+
 export function PaneSplitter({
   label,
   width,
@@ -34,9 +38,20 @@ export function PaneSplitter({
 }): ReactElement {
   // The width the keys moved to and not yet committed.
   const keyed = useRef<number | null>(null);
+  const keyCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishDragRef = useRef<(() => void) | null>(null);
+  const commitKeyedRef = useRef<() => void>(() => undefined);
 
-  useEffect(() => () => finishDragRef.current?.(), []);
+  useEffect(() => {
+    // Closing the window commits a step still waiting out its delay.
+    const commitPending = (): void => commitKeyedRef.current();
+    window.addEventListener("pagehide", commitPending);
+    return () => {
+      window.removeEventListener("pagehide", commitPending);
+      finishDragRef.current?.();
+      commitPending();
+    };
+  }, []);
 
   function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
     if (keyboardStep === undefined) return;
@@ -50,14 +65,19 @@ export function PaneSplitter({
     event.preventDefault();
     keyed.current = Math.max(min, Math.min(max, next));
     onResize(keyed.current);
+    if (keyCommitTimer.current !== null) clearTimeout(keyCommitTimer.current);
+    keyCommitTimer.current = setTimeout(commitKeyed, KEY_COMMIT_DELAY_MS);
   }
 
   function commitKeyed(): void {
+    if (keyCommitTimer.current !== null) clearTimeout(keyCommitTimer.current);
+    keyCommitTimer.current = null;
     if (keyed.current === null) return;
     const committed = keyed.current;
     keyed.current = null;
     onCommit(committed);
   }
+  commitKeyedRef.current = commitKeyed;
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
     event.preventDefault();
@@ -107,7 +127,6 @@ export function PaneSplitter({
         "aria-valuemin": min,
         "aria-valuemax": max,
         onKeyDown,
-        onKeyUp: commitKeyed,
         onBlur: commitKeyed,
       })}
     >
