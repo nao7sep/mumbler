@@ -22,28 +22,21 @@ const observed = vi.hoisted(() => ({
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
-  const { promisify } = await import("node:util");
-  const execute = promisify(actual.execFile);
-  const execFile = vi.fn(actual.execFile);
-  // Only substitute the interpreter: the promise, ChildProcess, timeout options
-  // and physical signals remain Node's real implementation.
-  Object.defineProperty(execFile, promisify.custom, {
-    value: (...args: Parameters<typeof execute>) => {
-      const [tool, toolArgs, options] = args;
-      const pending = execute(process.execPath, [observed.scripts[tool] ?? tool, ...(toolArgs ?? [])], options);
-      const child = pending.child;
-      const entry: ObservedChild = {
-        tool,
-        child,
-        ready: new Promise<void>((resolve) => { child.stdout!.once("data", () => resolve()); }),
-        closed: new Promise<void>((resolve) => { child.once("close", () => resolve()); }),
-      };
-      observed.children.push(entry);
-      observed.onChild?.(entry);
-      return pending;
-    },
+  // Only substitute the interpreter: the ChildProcess, its streams and physical
+  // signals remain Node's real implementation.
+  const spawn = vi.fn((tool: string, toolArgs: readonly string[], options: Parameters<typeof actual.spawn>[2]) => {
+    const child = actual.spawn(process.execPath, [observed.scripts[tool] ?? tool, ...toolArgs], options);
+    const entry: ObservedChild = {
+      tool,
+      child,
+      ready: new Promise<void>((resolve) => { child.stdout!.once("data", () => resolve()); }),
+      closed: new Promise<void>((resolve) => { child.once("close", () => resolve()); }),
+    };
+    observed.children.push(entry);
+    observed.onChild?.(entry);
+    return child;
   });
-  return { ...actual, execFile };
+  return { ...actual, spawn };
 });
 
 vi.mock("@main/core/audio-tools", async (importOriginal) => {

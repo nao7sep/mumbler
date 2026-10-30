@@ -1,7 +1,6 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import { promisify } from "node:util";
 
 import { nanoid } from "nanoid";
 
@@ -10,7 +9,6 @@ import { WAVEFORM_PEAKS_PER_SECOND } from "@shared/waveform";
 import { serializeError, type AppLogger } from "./logger";
 import { CancelledError, isNodeAbortError } from "./cancellation";
 
-const execFileAsync = promisify(execFile);
 const DEFAULT_TRIM_TOLERANCE_SEC = 3;
 
 // Every tool call is bounded, because both of these open a file and read it:
@@ -49,22 +47,18 @@ export class ToolTimeoutError extends Error {
  * Runs a tool with collected output. Shares superviseTool's bound and caller
  * cancellation with streamTool, translating an abort into the pipeline's own
  * CancelledError so a user's Cancel records the card as cancelled rather than
- * failed.
+ * failed. The output is collected without a size limit: a tag probe prints a
+ * file's embedded cover art, which can exceed any fixed buffer, while media
+ * itself never passes through here.
  */
 export async function runTool(
   toolPath: string,
   args: string[],
   options: RunToolOptions,
 ): Promise<{ stdout: string }> {
-  const isAborted = (): boolean => options.signal?.aborted === true;
-  if (isAborted()) throw new CancelledError();
-
-  // The bound and the signal are handled here rather than through execFile's own
-  // `timeout`/`signal` options, because those send ONE signal and never follow
-  // it: a tool that ignores SIGTERM would outlive the bound it was given, and
-  // the await would hang exactly as it did before.
-  const promise = execFileAsync(toolPath, args);
-  return superviseTool(toolPath, promise.child, promise.then(({ stdout }) => ({ stdout })), options);
+  const chunks: Buffer[] = [];
+  await streamTool(toolPath, args, { ...options, onStdout: (chunk) => chunks.push(chunk) });
+  return { stdout: Buffer.concat(chunks).toString("utf8") };
 }
 
 // The bound, the escalation and the cancellation shared by every tool run: the
@@ -133,8 +127,10 @@ async function superviseTool<T>(
   }
 }
 
-// A tool whose output is too large to collect, handed to `onStdout` chunk by
-// chunk as it arrives, under the same bound and cancellation as runTool.
+// A tool whose output is handed to `onStdout` chunk by chunk as it arrives.
+// The bound and the signal are handled by superviseTool rather than through
+// spawn's own `timeout`/`signal` options, because those send ONE signal and
+// never follow it: a tool that ignores SIGTERM would outlive its bound.
 export async function streamTool(
   toolPath: string,
   args: string[],
@@ -152,7 +148,10 @@ export async function streamTool(
     child.once("error", reject);
     child.once("close", (code, signal) => {
       if (code === 0) resolve();
-      else reject(new Error(`${basename(toolPath)} exited with ${signal ?? `code ${code}`}${stderrTail.trim() ? `: ${stderrTail.trim()}` : ""}`));
+      else {
+        const message = `${basename(toolPath)} exited with ${signal ?? `code ${code}`}${stderrTail.trim() ? `: ${stderrTail.trim()}` : ""}`;
+        reject(Object.assign(new Error(message), { code, signal }));
+      }
     });
   });
   return superviseTool(toolPath, child, done, options);

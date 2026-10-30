@@ -12,19 +12,13 @@ const observed = vi.hoisted(() => ({ child: undefined as ChildProcess | undefine
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
-  const { promisify } = await import("node:util");
-  const execute = promisify(actual.execFile);
-  const execFile = vi.fn(actual.execFile);
-  // Preserve Node's own promise adapter and its actual ChildProcess. A plain
-  // function spy loses execFile's custom promisification (including .child).
-  Object.defineProperty(execFile, promisify.custom, {
-    value: (...args: Parameters<typeof execute>) => {
-      const pending = execute(...args);
-      observed.child = pending.child;
-      return pending;
-    },
+  // Node's real spawn and ChildProcess, observed so the test can see the child.
+  const spawn = vi.fn((...args: Parameters<typeof actual.spawn>) => {
+    const child = actual.spawn(...args);
+    observed.child = child;
+    return child;
   });
-  return { ...actual, execFile };
+  return { ...actual, spawn };
 });
 
 // A wedged ffprobe/ffmpeg used to hang the await forever: there was no timeout,
@@ -111,5 +105,14 @@ describe("audio tools are bounded and cancellable", () => {
     await expect(
       runTool(process.execPath, [sleeperScript], { timeoutMs: 30_000, signal: controller.signal }),
     ).rejects.toSatisfy(isCancelledError);
+  });
+
+  // A tag probe prints embedded cover art; Node's collected-output default of
+  // 1 MiB used to fail such a probe outright.
+  it("returns printed output larger than 1 MiB whole", async () => {
+    const printer = join(directory, "printer.cjs");
+    writeFileSync(printer, "process.stdout.write('x'.repeat(3 * 1024 * 1024));\n");
+    const { stdout } = await runTool(process.execPath, [printer], { timeoutMs: 30_000 });
+    expect(stdout.length).toBe(3 * 1024 * 1024);
   });
 });

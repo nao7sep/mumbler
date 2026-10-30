@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { promisify } from "node:util";
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,13 +14,11 @@ vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   const viaNode = (file: string, args: readonly string[]): [string, string[]] =>
     file.endsWith(".cjs") ? [process.execPath, [file, ...args]] : [file, [...args]];
-  const execFile = ((file: string, args: readonly string[], ...rest: unknown[]) =>
-    (actual.execFile as (...all: unknown[]) => unknown)(...viaNode(file, args), ...rest)) as unknown as typeof actual.execFile;
-  const custom = (actual.execFile as unknown as Record<symbol, (...all: unknown[]) => unknown>)[promisify.custom];
-  Object.defineProperty(execFile, promisify.custom, {
-    value: (file: string, args: readonly string[], ...rest: unknown[]) => custom(...viaNode(file, args), ...rest),
-  });
-  return { ...actual, execFile };
+  const spawn = ((file: string, args: readonly string[], options: Parameters<typeof actual.spawn>[2]) => {
+    const child = actual.spawn(...viaNode(file, args), options);
+    return child;
+  }) as typeof actual.spawn;
+  return { ...actual, spawn };
 });
 
 import { analyzeTrimDecision, configureToolResolver, prepareAudioForTranscription, probeAudioProfile, probeRecordingTags } from "@main/core/audio-tools";

@@ -2,7 +2,6 @@ import type { ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,17 +21,12 @@ vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   const viaNode = (file: string, args: readonly string[]): [string, string[]] =>
     file.endsWith(".cjs") ? [process.execPath, [file, ...args]] : [file, [...args]];
-  const execFile = ((file: string, args: readonly string[], ...rest: unknown[]) =>
-    (actual.execFile as (...all: unknown[]) => unknown)(...viaNode(file, args), ...rest)) as unknown as typeof actual.execFile;
-  const custom = (actual.execFile as unknown as Record<symbol, (...all: unknown[]) => unknown>)[promisify.custom];
-  Object.defineProperty(execFile, promisify.custom, {
-    value: (file: string, args: readonly string[], ...rest: unknown[]) => {
-      const pending = custom(...viaNode(file, args), ...rest) as Promise<unknown> & { child: ChildProcess };
-      observed.spawned?.(pending.child);
-      return pending;
-    },
-  });
-  return { ...actual, execFile };
+  const spawn = ((file: string, args: readonly string[], options: Parameters<typeof actual.spawn>[2]) => {
+    const child = actual.spawn(...viaNode(file, args), options);
+    observed.spawned?.(child);
+    return child;
+  }) as typeof actual.spawn;
+  return { ...actual, spawn };
 });
 
 import { configureToolResolver, prepareAudioForTranscription } from "@main/core/audio-tools";
@@ -53,15 +47,17 @@ beforeEach(async () => {
   await mkdir(join(workingDir, "derived"), { recursive: true });
   await writeFile(join(workingDir, "derived", "other.wav"), "another preparation's audio");
   await writeFile(script, [
-    "const { writeFileSync } = require('node:fs');",
+    "const { existsSync, writeFileSync } = require('node:fs');",
     "const output = process.argv.at(-1);",
     "writeFileSync(output, 'partial derived audio');",
-    "process.stdin.on('data', () => {",
+    // The test asks for the failure by creating this file beside the source.
+    `const trigger = ${JSON.stringify(join(directory, "fail-now"))};`,
+    "setInterval(() => {",
+    "  if (!existsSync(trigger)) return;",
     "  writeFileSync(output, 'last bytes before failure');",
     "  process.stderr.write('encoder failure sentinel');",
     "  process.exit(7);",
-    "});",
-    "process.stdin.resume();",
+    "}, 10);",
     "process.stdout.write('partial ready');",
   ].join("\n"));
   configureToolResolver(() => script);
@@ -103,7 +99,7 @@ describe("audio preparation owns unsuccessful derived files", () => {
         expect(await readFile(outputPath, "utf8")).toBe("partial derived audio");
         expect(settled, "the child still owns its output before it is released").toBe(false);
         if (result === "cancel") controller.abort();
-        else child!.stdin!.end("finish\n");
+        else await writeFile(join(directory, "fail-now"), "");
         const error = await pending;
         if (result === "cancel") expect(error).toSatisfy(isCancelledError);
         else {
@@ -123,6 +119,7 @@ describe("audio preparation owns unsuccessful derived files", () => {
       } finally {
         controller.abort();
         await pending;
+        await rm(join(directory, "fail-now"), { force: true });
       }
     }
   });
