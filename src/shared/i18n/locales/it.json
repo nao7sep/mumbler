@@ -502,6 +502,8 @@
   "player.markersOutOfRange": "I marcatori di taglio sono fuori dalla durata di questa registrazione. Reimpostali e riprova.",
   "player.markersSaveFailed": "Impossibile salvare i marcatori di taglio. Restano validi i marcatori precedenti; riprova.",
   "player.markerInvalid": "Inserisci un marcatore compreso nella durata della registrazione, poi riprova.",
+  "player.markerFormat": "Inserisci un tempo come 1:05.3 o 65.3, con secondi inferiori a 60 dopo i due punti e al massimo un decimale.",
+  "player.backMarkerZero": "Lascia vuoto per conservare la registrazione fino alla fine; con 0 non resterebbe nulla.",
   "detail.duplicateFailed": "Impossibile duplicare la registrazione. L’originale non è cambiato; riprova.",
   "player.cursor": "Cursore: {time}",
   "player.duration": "Durata: {time}",

@@ -11,6 +11,14 @@ export function isPositiveIntegerSetting(value: number): boolean {
   return Number.isInteger(value) && value > 0;
 }
 
+// What a whole-number field's text reads as: digits only, surrounding spaces
+// aside. Anything else, a fraction included, reads as NaN so the rule reports it
+// instead of the field cutting it to a whole number.
+export function parseWholeNumberText(text: string): number {
+  const trimmed = text.trim();
+  return /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
+}
+
 // The most transcriptions that may run at once (developer decision, matching
 // TapeBox's downloads).
 export const CONCURRENCY_LIMIT_MAX = 16;

@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useEffect,
+  useId,
   useImperativeHandle,
   useRef,
   useState,
@@ -143,6 +144,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   const drawnPeaksRef = useRef<Float32Array | null>(null);
   const i18n = useI18n();
   const { t, text } = i18n;
+  const markerErrorId = useId();
   const [playerError, setPlayerError] = useState<Message | null>(null);
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -558,9 +560,13 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
   async function handleMarkerInputCommit(side: "front" | "back"): Promise<void> {
     if (disabledRef.current || cardIdRef.current !== card.id) return;
     const rawValue = side === "front" ? frontInput : backInput;
+    const read = readMarkerInput(side, rawValue, resolvedDurationSec);
+    // Invalid text already shows its error under the field and commits nothing,
+    // so the markers saved last stay in force.
+    if (!read.ok) return;
 
     try {
-      const parsed = parseMarkerInput(rawValue);
+      const parsed = read.value;
       const nextTrim =
         side === "front"
           ? { frontMarkerSec: parsed, backMarkerSec: draftTrim.backMarkerSec }
@@ -634,6 +640,11 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
     event.preventDefault();
     void handleMarkerInputCommit(side);
   }
+
+  const frontRead = readMarkerInput("front", frontInput, resolvedDurationSec);
+  const backRead = readMarkerInput("back", backInput, resolvedDurationSec);
+  const frontIssue = frontRead.ok ? null : frontRead.issue;
+  const backIssue = backRead.ok ? null : backRead.issue;
 
   useImperativeHandle(
     ref,
@@ -730,6 +741,8 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
             <span>{t("player.keepFrom")}</span>
             <input
               value={frontInput}
+              aria-invalid={frontIssue === null ? undefined : true}
+              aria-describedby={frontIssue === null ? undefined : `${markerErrorId}-front`}
               onChange={(event) => typeMarker("front", event.target.value)}
               onBlur={() => void handleMarkerInputCommit("front")}
               onCompositionStart={frontComposing.handlers.onCompositionStart}
@@ -739,6 +752,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               disabled={disabled}
             />
           </label>
+          {frontIssue === null ? null : <p className="field-error" id={`${markerErrorId}-front`}>{text(frontIssue)}</p>}
           <div className="nudge-grid">
             <button
               type="button"
@@ -781,6 +795,8 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
             <span>{t("player.discardAfter")}</span>
             <input
               value={backInput}
+              aria-invalid={backIssue === null ? undefined : true}
+              aria-describedby={backIssue === null ? undefined : `${markerErrorId}-back`}
               onChange={(event) => typeMarker("back", event.target.value)}
               onBlur={() => void handleMarkerInputCommit("back")}
               onCompositionStart={backComposing.handlers.onCompositionStart}
@@ -790,6 +806,7 @@ export const WaveformEditor = forwardRef<WaveformEditorHandle, WaveformEditorPro
               disabled={disabled}
             />
           </label>
+          {backIssue === null ? null : <p className="field-error" id={`${markerErrorId}-back`}>{text(backIssue)}</p>}
           <div className="nudge-grid">
             <button
               type="button"
@@ -896,6 +913,9 @@ function regionToTrim(region: Region, durationSec: number): CardTrim {
 function normalizeTrimDraft(trim: CardTrim, durationSec: number | null): CardTrim {
   const frontMarkerSec = normalizeMarker(trim.frontMarkerSec, durationSec);
   const backMarkerSec = normalizeMarker(trim.backMarkerSec, durationSec);
+  if (trim.backMarkerSec !== null && backMarkerSec === null) {
+    throw new Error("The back trim cannot be 0.");
+  }
 
   if (frontMarkerSec !== null && backMarkerSec !== null && frontMarkerSec >= backMarkerSec) {
     throw new Error("Front trim must be earlier than back trim.");
@@ -929,45 +949,30 @@ function normalizeMarker(value: number | null, durationSec: number | null): numb
   return rounded <= 0 ? null : rounded;
 }
 
-function parseMarkerInput(rawValue: string): number | null {
+type MarkerRead = { ok: true; value: number | null } | { ok: false; issue: Message };
+
+// A typed marker: seconds, m:ss or h:mm:ss, the seconds to at most a tenth, and
+// every part after a colon under 60. Empty means no trim on that side. The back
+// marker cannot be 0, which would keep nothing; anything else is refused rather
+// than corrected, with the reason shown under the field.
+function readMarkerInput(side: MarkerSide, rawValue: string, durationSec: number | null): MarkerRead {
   const trimmed = rawValue.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
+  if (trimmed.length === 0) return { ok: true, value: null };
 
   const parts = trimmed.split(":");
-  if (parts.some((part) => part.trim().length === 0)) {
-    throw new Error("Trim markers must use mm:ss.s format.");
-  }
+  const seconds = parts.at(-1)!;
+  const leading = parts.slice(0, -1);
+  const wellFormed = parts.length <= 3
+    && /^\d+(?:\.\d)?$/.test(seconds)
+    && leading.every((part) => /^\d+$/.test(part))
+    && (parts.length === 1 || Number(seconds) < 60)
+    && (parts.length < 3 || Number(parts[1]) < 60);
+  if (!wellFormed) return { ok: false, issue: message("player.markerFormat") };
 
-  if (parts.length === 1) {
-    const seconds = Number(parts[0]);
-    if (!Number.isFinite(seconds)) {
-      throw new Error("Trim marker must be numeric.");
-    }
-    return seconds;
-  }
-
-  if (parts.length === 2) {
-    const minutes = Number(parts[0]);
-    const seconds = Number(parts[1]);
-    if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) {
-      throw new Error("Trim marker must be numeric.");
-    }
-    return minutes * 60 + seconds;
-  }
-
-  if (parts.length === 3) {
-    const hours = Number(parts[0]);
-    const minutes = Number(parts[1]);
-    const seconds = Number(parts[2]);
-    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) {
-      throw new Error("Trim marker must be numeric.");
-    }
-    return hours * 3600 + minutes * 60 + seconds;
-  }
-
-  throw new Error("Trim markers must use mm:ss.s format.");
+  const value = parts.reduce((total, part) => total * 60 + Number(part), 0);
+  if (side === "back" && value === 0) return { ok: false, issue: message("player.backMarkerZero") };
+  if (durationSec !== null && value > durationSec) return { ok: false, issue: message("player.markerInvalid") };
+  return { ok: true, value: roundTenths(value) };
 }
 
 function formatMarkerInput(value: number | null): string {

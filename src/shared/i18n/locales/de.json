@@ -496,6 +496,8 @@
   "player.markersOutOfRange": "Die Schnittmarken liegen außerhalb der Dauer dieser Aufnahme. Setzen Sie sie zurück und versuchen Sie es erneut.",
   "player.markersSaveFailed": "Die Schnittmarken konnten nicht gespeichert werden. Die bisherigen Marken bleiben wirksam; versuchen Sie es erneut.",
   "player.markerInvalid": "Geben Sie eine Marke innerhalb der Dauer der Aufnahme ein und versuchen Sie es erneut.",
+  "player.markerFormat": "Geben Sie eine Zeit wie 1:05.3 oder 65.3 ein: Sekunden nach einem Doppelpunkt unter 60, höchstens eine Nachkommastelle.",
+  "player.backMarkerZero": "Lassen Sie das Feld leer, um die Aufnahme bis zum Ende zu behalten; bei 0 bliebe nichts übrig.",
   "detail.duplicateFailed": "Die Aufnahme konnte nicht dupliziert werden. Das Original ist unverändert; versuchen Sie es erneut.",
   "player.cursor": "Cursor: {time}",
   "player.duration": "Dauer: {time}",

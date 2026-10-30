@@ -102,6 +102,57 @@ describe("SettingsModal results", () => {
       .toBe("Skip interval must be a positive integer.");
   });
 
+
+  it.each(["2.5", "", "1e1", "3 seconds"])("keeps %j typed in a whole-number field, reports it and refuses Save", async (typed) => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const drafts: SettingsDraft[] = [];
+    function Editing(): React.ReactElement {
+      const [current, setCurrent] = React.useState({ ...draft(), skipIntervalSec: 5 });
+      return React.createElement(SettingsModal, {
+        apiKeyInput: "", setApiKeyInput: vi.fn(),
+        draft: current,
+        isDirty: true,
+        isSaving: false,
+        isSavingApiKey: false,
+        isPickingOutputDirectory: false,
+        isPickingBackupDirectory: false,
+        errorMessage: null,
+        onChange: (next: SettingsDraft) => { drafts.push(next); setCurrent(next); },
+        onClose: vi.fn(),
+        onPickOutputDirectory: vi.fn(),
+        onPickBackupDirectory: vi.fn(),
+        onSetApiKey: vi.fn(),
+        onClearApiKey: vi.fn(),
+        onRestoreDefaultPrompts: vi.fn(),
+        onSave: vi.fn(),
+      });
+    }
+    await act(async () => root?.render(React.createElement(Editing)));
+    const input = document.querySelector<HTMLInputElement>('input[value="5"]')!;
+    const save = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Save")!;
+    expect(save.disabled).toBe(false);
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set?.call(input, typed);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(input.value, "the field keeps what was typed").toBe(typed);
+    expect(drafts.at(-1)?.skipIntervalSec).toBeNaN();
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)?.textContent)
+      .toBe("Skip interval must be a positive integer.");
+    expect(save.disabled).toBe(true);
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set?.call(input, "12");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(drafts.at(-1)?.skipIntervalSec).toBe(12);
+    expect(save.disabled).toBe(false);
+  });
 });
 
 describe("SettingsModal theme", () => {

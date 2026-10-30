@@ -502,6 +502,8 @@
   "player.markersOutOfRange": "Os marcadores de corte estão fora da duração desta gravação. Redefina-os e tente novamente.",
   "player.markersSaveFailed": "Não foi possível salvar os marcadores de corte. Os marcadores anteriores continuam valendo; tente novamente.",
   "player.markerInvalid": "Digite um marcador dentro da duração da gravação e tente novamente.",
+  "player.markerFormat": "Digite um tempo como 1:05.3 ou 65.3, com segundos menores que 60 após os dois-pontos e no máximo uma casa decimal.",
+  "player.backMarkerZero": "Deixe vazio para manter a gravação até o fim; com 0 nada seria mantido.",
   "detail.duplicateFailed": "Não foi possível duplicar a gravação. O original não foi alterado; tente novamente.",
   "player.cursor": "Cursor: {time}",
   "player.duration": "Duração: {time}",

@@ -2751,8 +2751,8 @@ function createDuplicatedCard(source: MumblerCard, sourceFilePath: string): Mumb
 
 
 function normalizeTrim(trim: CardTrim, durationSec: number | null): CardTrim {
-  const frontMarkerSec = normalizeMarker(trim.frontMarkerSec);
-  const backMarkerSec = normalizeMarker(trim.backMarkerSec);
+  const frontMarkerSec = normalizeMarker(trim.frontMarkerSec, "front");
+  const backMarkerSec = normalizeMarker(trim.backMarkerSec, "back");
 
   if (
     frontMarkerSec !== null &&
@@ -2776,16 +2776,24 @@ function normalizeTrim(trim: CardTrim, durationSec: number | null): CardTrim {
   };
 }
 
-function normalizeMarker(value: number | null): number | null {
+// The renderer sends markers in tenths of a second, so anything finer or
+// negative is refused rather than rounded. A front marker of 0 is the start,
+// the same as none; a back marker of 0 would keep nothing.
+function normalizeMarker(value: number | null, side: "front" | "back"): number | null {
   if (value === null) {
     return null;
   }
 
-  if (!Number.isFinite(value) || value < 0) {
-    throw new OperationError("Trim markers must be positive numbers.");
+  const tenths = Math.round(value * 10);
+  if (!Number.isFinite(value) || value < 0 || Math.abs(value * 10 - tenths) > 1e-6) {
+    throw new OperationError("Trim markers must be zero or more seconds, in tenths.");
+  }
+  if (tenths === 0) {
+    if (side === "back") throw new OperationError("The back trim cannot be 0.");
+    return null;
   }
 
-  return Math.round(value * 10) / 10;
+  return tenths / 10;
 }
 
 export function applyFrontTrimOffset(

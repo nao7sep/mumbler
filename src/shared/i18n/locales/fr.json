@@ -502,6 +502,8 @@
   "player.markersOutOfRange": "Les repères de découpe sont en dehors de la durée de cet enregistrement. Réinitialisez-les et réessayez.",
   "player.markersSaveFailed": "Les repères de découpe n’ont pas pu être enregistrés. Les repères précédents restent en vigueur\u00a0; réessayez.",
   "player.markerInvalid": "Saisissez un repère compris dans la durée de l’enregistrement, puis réessayez.",
+  "player.markerFormat": "Saisissez une durée comme 1:05.3 ou 65.3, avec des secondes inférieures à 60 après les deux-points et au plus une décimale.",
+  "player.backMarkerZero": "Laissez ce champ vide pour garder l’enregistrement jusqu’à la fin\u00a0; 0 ne garderait rien.",
   "detail.duplicateFailed": "L’enregistrement n’a pas pu être dupliqué. L’original est inchangé\u00a0; réessayez.",
   "player.cursor": "Curseur\u00a0: {time}",
   "player.duration": "Durée\u00a0: {time}",

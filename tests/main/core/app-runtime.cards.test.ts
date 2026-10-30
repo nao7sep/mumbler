@@ -1848,7 +1848,13 @@ describe("working with a card", () => {
     const card = await confirmed();
 
     await expect(runtime.updateCardTrim(card.id, { frontMarkerSec: -5, backMarkerSec: null })).rejects.toThrow(
-      /positive numbers/,
+      /zero or more seconds, in tenths/,
+    );
+    await expect(runtime.updateCardTrim(card.id, { frontMarkerSec: 1.25, backMarkerSec: null })).rejects.toThrow(
+      /in tenths/,
+    );
+    await expect(runtime.updateCardTrim(card.id, { frontMarkerSec: null, backMarkerSec: 0 })).rejects.toThrow(
+      /back trim cannot be 0/,
     );
     await expect(runtime.updateCardTrim(card.id, { frontMarkerSec: null, backMarkerSec: 9_999 })).rejects.toThrow(
       /cannot exceed audio duration/,

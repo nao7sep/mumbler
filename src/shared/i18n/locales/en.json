@@ -486,6 +486,8 @@
   "player.markersOutOfRange": "The trim markers are outside this recording's duration. Reset them and try again.",
   "player.markersSaveFailed": "The trim markers could not be saved. The previous markers remain in effect; try again.",
   "player.markerInvalid": "Enter a marker within the recording's duration, then try again.",
+  "player.markerFormat": "Enter a time such as 1:05.3 or 65.3, with seconds under 60 after a colon and at most one decimal place.",
+  "player.backMarkerZero": "Leave this empty to keep the recording to its end; 0 would keep nothing.",
   "detail.duplicateFailed": "The recording could not be duplicated. The original is unchanged; try again.",
   "player.cursor": "Cursor: {time}",
   "player.duration": "Duration: {time}",

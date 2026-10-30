@@ -388,15 +388,38 @@ describe("setting the markers", () => {
   });
 
   it.each([
-    ["a time past the end of the recording", "9:00.0", /within the recording's duration/],
-    ["a time that is not a time", "half past two", /within the recording's duration/],
-  ])("refuses %s and saves nothing", async (_case, typed, message) => {
+    ["front", "a time past the end of the recording", "9:00.0", /within the recording's duration/],
+    ["front", "a time that is not a time", "half past two", /such as 1:05\.3/],
+    ["front", "seconds of 60 or more after a colon", "1:90", /such as 1:05\.3/],
+    ["front", "negative seconds after a colon", "1:-5", /such as 1:05\.3/],
+    ["front", "minutes of 60 or more between colons", "1:60:00", /such as 1:05\.3/],
+    ["front", "a time finer than a tenth", "1:05.25", /at most one decimal place/],
+    ["back", "a back marker of 0", "0", /Leave this empty to keep the recording to its end/],
+    ["back", "a back marker of 0:00.0", "0:00.0", /Leave this empty/],
+  ] as const)("on the %s marker, refuses %s under the field, keeps the text and saves nothing", async (side, _case, typed, message) => {
     await mountEditor();
 
-    await typeMarker("front", typed);
+    await typeMarker(side, typed);
+    await act(async () => { markerInput(side).dispatchEvent(new FocusEvent("blur", { bubbles: true })); });
 
     expect(onTrimCommit).not.toHaveBeenCalled();
-    expect(text()).toMatch(message);
+    expect(markerInput(side).value).toBe(typed);
+    expect(markerInput(side).getAttribute("aria-invalid")).toBe("true");
+    const error = document.getElementById(markerInput(side).getAttribute("aria-describedby")!);
+    expect(error?.textContent).toMatch(message);
+  });
+
+  it("takes a front marker of 0 as the start, h:mm:ss, and a single seconds digit after a colon", async () => {
+    await mountEditor({ trim: { frontMarkerSec: 30, backMarkerSec: null } });
+
+    await typeMarker("front", "0");
+    expect(onTrimCommit).toHaveBeenLastCalledWith("card-1", { frontMarkerSec: null, backMarkerSec: null });
+
+    await typeMarker("back", "0:04:05.3");
+    expect(onTrimCommit).toHaveBeenLastCalledWith("card-1", { frontMarkerSec: null, backMarkerSec: 245.3 });
+
+    await typeMarker("front", "1:5");
+    expect(onTrimCommit).toHaveBeenLastCalledWith("card-1", { frontMarkerSec: 65, backMarkerSec: 245.3 });
   });
 
   it("refuses a front marker that would sit after the back marker", async () => {

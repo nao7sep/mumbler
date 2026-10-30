@@ -3,8 +3,8 @@ import { useMemo, useRef, useState, type ReactElement } from "react";
 import { THEME_PREFERENCES, type SettingsDraft } from "@shared/app-shell";
 import { rowFor, thinkingAfterModelEdit } from "@shared/ai-models";
 import {
-  CONCURRENCY_LIMIT_MAX,
   getSettingsNumberIssues,
+  parseWholeNumberText,
   getTimestampPatternIssues,
   type NumericSettingField,
 } from "@shared/settings-validation";
@@ -17,6 +17,43 @@ import { ModalShell } from "./modal/ModalShell";
 import { useTablist } from "./useTablist";
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from "./Icon";
 import { InlineError } from "./InlineResult";
+
+// A whole-number field that keeps exactly what was typed. The draft takes the
+// number the text reads as, or NaN when it reads as none (empty, a fraction,
+// letters), which the shared rules report and Save refuses. A value replaced
+// from outside, such as reopening Settings, replaces the text; the user's own
+// typing never does.
+function WholeNumberInput({
+  value,
+  onValue,
+  ...aria
+}: {
+  value: number;
+  onValue: (value: number) => void;
+  "aria-invalid": true | undefined;
+  "aria-describedby": string | undefined;
+}): ReactElement {
+  const [typed, setTyped] = useState(() => (Number.isNaN(value) ? "" : String(value)));
+  const [shown, setShown] = useState(value);
+  if (!Object.is(value, shown)) {
+    setShown(value);
+    if (!Object.is(parseWholeNumberText(typed), value)) setTyped(Number.isNaN(value) ? "" : String(value));
+  }
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={typed}
+      {...aria}
+      onChange={(event) => {
+        const next = parseWholeNumberText(event.target.value);
+        setTyped(event.target.value);
+        setShown(next);
+        onValue(next);
+      }}
+    />
+  );
+}
 
 // One model field: free-typed, with a warning line when the id has no row in
 // SUPPORTED_MODELS, and beside it the role's Thinking field per the
@@ -441,13 +478,10 @@ export function SettingsModal({
                 <div>
                   <label className="field">
                     <span>{t("settings.skipInterval")}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
+                    <WholeNumberInput
                       value={draft.skipIntervalSec}
                       {...numberFieldProps("skipIntervalSec")}
-                      onChange={(e) => onChange({ ...draft, skipIntervalSec: Number.parseInt(e.target.value, 10) })}
+                      onValue={(value) => onChange({ ...draft, skipIntervalSec: value })}
                     />
                   </label>
                   <p className="field-hint">{t("settings.skipIntervalHint")}</p>
@@ -455,13 +489,10 @@ export function SettingsModal({
                 <div>
                   <label className="field">
                     <span>{t("settings.previewDuration")}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
+                    <WholeNumberInput
                       value={draft.previewSnippetSeconds}
                       {...numberFieldProps("previewSnippetSeconds")}
-                      onChange={(e) => onChange({ ...draft, previewSnippetSeconds: Number.parseInt(e.target.value, 10) })}
+                      onValue={(value) => onChange({ ...draft, previewSnippetSeconds: value })}
                     />
                   </label>
                   <p className="field-hint">{t("settings.previewDurationHint")}</p>
@@ -546,14 +577,10 @@ export function SettingsModal({
               <div className="field-stack">
                 <label className="field">
                   <span>{t("settings.concurrentTranscriptions")}</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={CONCURRENCY_LIMIT_MAX}
-                    step={1}
+                  <WholeNumberInput
                     value={draft.concurrencyLimit}
                     {...numberFieldProps("concurrencyLimit")}
-                    onChange={(e) => onChange({ ...draft, concurrencyLimit: Number.parseInt(e.target.value, 10) })}
+                    onValue={(value) => onChange({ ...draft, concurrencyLimit: value })}
                   />
                 </label>
                 <p className="field-hint">{t("settings.concurrentTranscriptionsHint")}</p>

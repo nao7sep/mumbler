@@ -490,6 +490,8 @@
   "player.markersOutOfRange": "トリムマーカーがこの録音の長さを超えています。リセットしてから、もう一度お試しください。",
   "player.markersSaveFailed": "トリムマーカーを保存できませんでした。以前のマーカーが引き続き有効です。もう一度お試しください。",
   "player.markerInvalid": "録音の長さの範囲内でマーカーを入力してから、もう一度お試しください。",
+  "player.markerFormat": "1:05.3 や 65.3 のように入力してください。コロンの後の秒は 60 未満、小数は 1 桁までです。",
+  "player.backMarkerZero": "最後まで残すには空欄にしてください。0 では何も残りません。",
   "detail.duplicateFailed": "録音を複製できませんでした。元の録音は変更されていません。もう一度お試しください。",
   "player.cursor": "カーソル：{time}",
   "player.duration": "長さ：{time}",
