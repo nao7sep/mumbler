@@ -1,4 +1,4 @@
-import { access, chmod, link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { access, chmod, cp, link, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { dialog, shell } from "electron";
@@ -246,6 +246,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
 const { ApplicationRuntime, startupFailureDiagnostic } = await import("@main/core/app-runtime");
 const { createDefaultSettings } = await import("@main/core/settings-schema");
 const { QueueStore } = await import("@main/core/queue-store");
+const cardPipeline = await import("@main/core/card-pipeline");
 const backupStore = await import("@main/core/backupStore");
 
 type Runtime = Awaited<ReturnType<typeof ApplicationRuntime.initialize>>;
@@ -749,19 +750,140 @@ describe("the durable queue store", () => {
 
     expect(await exists(join(home, "inbox", "cutshort"))).toBe(false);
   });
+});
 
-  it("keeps a card's scratch across launches and removes it with the card", async () => {
+describe("a crash between the queue's writes", () => {
+  /** Copies the data folder as it is at this moment, the way a crash leaves
+   * it, and points the next launch at the copy. */
+  async function crashHere(): Promise<string> {
+    const crashed = join(root, `crashed-${Date.now()}`);
+    await cp(home, crashed, { recursive: true });
+    return crashed;
+  }
+
+  async function launchOn(folder: string): Promise<void> {
+    await runtime.shutdown();
+    home = folder;
+    process.env.MUMBLER_DATA_DIR = folder;
+    runtime = await ApplicationRuntime.initialize();
+  }
+
+  /** Holds the atomic write onto `path` at its final rename until released. */
+  function holdWrite(path: string): () => void {
+    let release!: () => void;
+    unwritable.held = { path, entered: 0, release: new Promise<void>((resolve) => { release = resolve; }) };
+    return () => { release(); unwritable.held = null; };
+  }
+
+  it.each([
+    ["after the import's folder moved and before its card file was written", "card.json"],
+    ["after the card file was written and before the order", "queue.json"],
+  ] as const)("keeps an import for review when a confirmation is cut short %s", async (_moment, held) => {
+    const [pending] = await dropIn("take.wav");
+    const release = holdWrite(held === "card.json" ? join(home, "cards", pending.id, "card.json") : join(home, "queue.json"));
+    const confirming = runtime.confirmPendingImports([review(pending)]);
+    let crashed: string;
+    try {
+      await until(() => expect(unwritable.held!.entered).toBe(1));
+      expect(await exists(join(home, "inbox", pending.id)), "the folder has moved").toBe(false);
+      crashed = await crashHere();
+    } finally { release(); await confirming.catch(() => undefined); }
+
+    await launchOn(crashed);
+
+    const state = runtime.getSnapshot().state!;
+    expect(state.cards).toEqual([]);
+    expect(state.pendingImports.map((item) => item.id)).toEqual([pending.id]);
+    expect(state.pendingImports[0].workingFilePath).toBe(join(crashed, "inbox", pending.id, "take.wav"));
+    expect(await readFile(state.pendingImports[0].workingFilePath, "utf8")).toBe("audio for take.wav");
+    expect(await readdir(join(crashed, "inbox", pending.id)), "no card file is left with the review").toEqual(["take.wav"]);
+    expect(await readdir(join(crashed, "cards")).catch(() => [])).toEqual([]);
+    expect(cards((await runtime.confirmPendingImports([review(state.pendingImports[0])])).snapshot)).toHaveLength(1);
+  });
+
+  it("keeps the card when a confirmation is cut short after its order was written and before the pending imports", async () => {
+    const [pending] = await dropIn("take.wav");
+    const release = holdWrite(join(home, "inbox.json"));
+    const confirming = runtime.confirmPendingImports([review(pending)]);
+    let crashed: string;
+    try {
+      await until(() => expect(unwritable.held!.entered).toBe(1));
+      crashed = await crashHere();
+    } finally { release(); await confirming; }
+
+    await launchOn(crashed);
+
+    expect(cards(runtime.getSnapshot()).map((card) => card.id)).toEqual([pending.id]);
+    expect(runtime.getSnapshot().state!.pendingImports).toEqual([]);
+    expect(await readFile(cards(runtime.getSnapshot())[0].sourceFilePath, "utf8")).toBe("audio for take.wav");
+    expect(JSON.parse(await readFile(join(crashed, "inbox.json"), "utf8")).pendingImports).toEqual([]);
+  });
+
+  it("keeps an import whose accepted folder could not be moved back after a refused save, in memory and on disk", async () => {
+    const [pending] = await dropIn("take.wav");
+    unwritable.refuses = (path) => path === join(home, "queue.json");
+    unmovable.add(join(home, "cards", pending.id));
+    try {
+      await expect(runtime.confirmPendingImports([review(pending)])).rejects.toThrow();
+    } finally { unwritable.refuses = () => false; unmovable.clear(); }
+
+    const [kept] = runtime.getSnapshot().state!.pendingImports;
+    expect(kept.workingFilePath, "the review plays it where it is").toBe(join(home, "cards", pending.id, "take.wav"));
+    expect(await readFile(kept.workingFilePath, "utf8")).toBe("audio for take.wav");
+    expect(cards((await runtime.confirmPendingImports([review(kept)])).snapshot).map((card) => card.id), "confirming again works").toEqual([pending.id]);
+  });
+
+  it("moves an import back for review at launch when a refused save could not move it back", async () => {
+    const [pending] = await dropIn("take.wav");
+    unwritable.refuses = (path) => path === join(home, "queue.json");
+    unmovable.add(join(home, "cards", pending.id));
+    try {
+      await expect(runtime.confirmPendingImports([review(pending)])).rejects.toThrow();
+    } finally { unwritable.refuses = () => false; unmovable.clear(); }
+    const crashed = await crashHere();
+
+    await launchOn(crashed);
+
+    expect(runtime.getSnapshot().state!.pendingImports.map((item) => item.workingFilePath)).toEqual([join(crashed, "inbox", pending.id, "take.wav")]);
+    expect(await exists(join(crashed, "cards", pending.id))).toBe(false);
+  });
+
+  it("clears scratch and staged card files a crash left in a listed card's folder, and nothing else", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
-    const leftover = join(home, "cards", card.id, "temp", "cut-short.wav");
-    await mkdir(dirname(leftover), { recursive: true });
-    await writeFile(leftover, "trimmed audio");
+    const folder = join(home, "cards", card.id);
+    await mkdir(join(folder, "temp"), { recursive: true });
+    await writeFile(join(folder, "temp", "cut-short.wav"), "trimmed audio");
+    await writeFile(join(folder, "card-AbC_9-xy.tmp"), "half a card");
 
     runtime = await ApplicationRuntime.initialize();
-    expect(await exists(leftover)).toBe(true);
-    await runtime.removeCard(card.id);
-    expect(await exists(join(home, "cards", card.id))).toBe(false);
+
+    expect((await readdir(folder)).sort()).toEqual(["card.json", "take.wav"]);
+    expect(cards(runtime.getSnapshot())[0].id).toBe(card.id);
+  });
+
+  it("writes only its own card when a pipeline step starts, so an interrupted card recovers", async () => {
+    const [first, second] = await dropIn("one.wav", "two.wav");
+    const [a, b] = cards((await runtime.confirmPendingImports([review(first), review(second, { localTimestampText: "2026-03-01 08:30:00" })])).snapshot);
+    await runtime.setGeminiApiKey("test-key");
+    const others = [join(home, "queue.json"), join(home, "inbox.json"), join(home, "cards", b.id, "card.json")];
+    const before = await Promise.all(others.map((path) => readFile(path, "utf8")));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const run = vi.spyOn(cardPipeline, "executeCardPipeline").mockImplementation(async (_id, _step, _mode, ctx) => {
+      await Promise.race([held, new Promise<void>((resolve) => ctx.signal.addEventListener("abort", () => resolve(), { once: true }))]);
+    });
+    try {
+      await runtime.generateCardStep(a.id, "transcription");
+      await until(() => expect(run).toHaveBeenCalledOnce());
+      expect((await savedCard(a.id)).status).toBe("Transcribing");
+      expect(await Promise.all(others.map((path) => readFile(path, "utf8"))), "nothing else is written").toEqual(before);
+      const crashed = await crashHere();
+      release();
+      await launchOn(crashed);
+      expect(cards(runtime.getSnapshot()).find((card) => card.id === a.id)).toMatchObject({ status: "Error", lastError: { failedStep: "startup-recovery" } });
+    } finally { release(); run.mockRestore(); }
   });
 });
 
@@ -1957,14 +2079,14 @@ describe("each card in its own folder", () => {
   it("writes only the changed card when one card changes", async () => {
     const [first, second] = await dropIn("one.wav", "two.wav");
     const [a, b] = cards((await runtime.confirmPendingImports([review(first), review(second, { localTimestampText: "2026-03-01 08:30:00" })])).snapshot);
-    const order = await stat(join(home, "queue.json"));
-    const other = await stat(join(home, "cards", b.id, "card.json"));
+    const others = [join(home, "queue.json"), join(home, "inbox.json"), join(home, "cards", b.id, "card.json")];
+    const times = async () => Promise.all(others.map(async (path) => (await stat(path)).mtimeMs));
+    const before = await times();
 
     await runtime.updateCardTrim(a.id, { frontMarkerSec: null, backMarkerSec: 100 });
 
     expect((await savedCard(a.id)).trim.backMarkerSec).toBe(100);
-    expect((await stat(join(home, "queue.json"))).mtimeMs, "the order did not change").toBe(order.mtimeMs);
-    expect((await stat(join(home, "cards", b.id, "card.json"))).mtimeMs, "the other card did not change").toBe(other.mtimeMs);
+    expect(await times(), "the order, the pending imports and the other card were not written").toEqual(before);
   });
 
   it("deletes a removed card's whole folder", async () => {

@@ -38,6 +38,8 @@ const ITEM_ID = /^[0-9a-z_-]+$/;
 
 const CARD_FILE = "card.json";
 const SCRATCH_FOLDER = "temp";
+// What an atomic write of card.json stages beside it (writeJsonFile).
+const STAGED_CARD_FILE = /^card-[0-9A-Za-z_-]{8}\.tmp$/;
 
 export function cardFolder(cardsDir: string, cardId: string): string {
   return join(cardsDir, cardId);
@@ -395,7 +397,11 @@ export interface QueueLoad {
   droppedPendingImports: number;
   missingWorkingCards: number;
   droppedCards: number;
+  /** Imports an interrupted acceptance had moved into cards/, moved back for review. */
+  returnedImports: number;
   removedFolders: number;
+  /** Scratch and staged-write leftovers cleared from listed cards' folders. */
+  clearedLeftovers: number;
 }
 
 type FileKey = "order" | "inbox" | `card:${string}`;
@@ -460,13 +466,32 @@ export class QueueStore {
       droppedPendingImports: 0,
       missingWorkingCards: 0,
       droppedCards: 0,
+      returnedImports: 0,
       removedFolders: 0,
+      clearedLeftovers: 0,
     };
+    const listedCards = new Set(cardIds);
+    let acceptedImports = 0;
     const changedCards: MumblerCard[] = [];
 
     for (const raw of rawImports as PendingImportReviewItem[]) {
       // The folder is the authority for where the copy is.
       const workingFilePath = join(this.importFolder(raw.id), basename(raw.workingFilePath));
+      if (!(await this.present(workingFilePath)) && listedCards.has(raw.id)) {
+        // Its acceptance committed in the order before the inbox was saved.
+        acceptedImports += 1;
+        continue;
+      }
+      if (!(await this.present(workingFilePath)) &&
+          await this.present(join(this.cardFolder(raw.id), basename(raw.workingFilePath)))) {
+        // An acceptance moved the folder into cards/ but never listed the
+        // card: the import is still the user's to review.
+        await this.returnToInbox(raw.id);
+        result.returnedImports += 1;
+        await logger.warn("startup.import-returned", "Moved an import an interrupted confirmation had accepted back for review.", {
+          pendingImportId: raw.id, originalFilename: raw.originalFilename,
+        });
+      }
       if (!(await this.present(workingFilePath))) {
         result.droppedPendingImports += 1;
         await logger.warn("startup.pending-missing", "Dropped pending import because its working file is missing.", {
@@ -514,7 +539,25 @@ export class QueueStore {
 
     for (const card of changedCards) await this.writeCard(card);
     if (result.droppedCards > 0) await this.writeOrder(result.state.cards);
-    if (result.droppedPendingImports > 0) await this.writeInbox(result.state.pendingImports);
+    if (result.droppedPendingImports > 0 || acceptedImports > 0) await this.writeInbox(result.state.pendingImports);
+
+    // A listed card's scratch and a staged card.json a crash left behind are
+    // temporary by location; the card's own file and audio are not touched.
+    for (const card of result.state.cards) {
+      const folder = this.cardFolder(card.id);
+      for (const name of await folderEntries(folder)) {
+        if (name !== SCRATCH_FOLDER && !STAGED_CARD_FILE.test(name)) continue;
+        const path = join(folder, name);
+        try {
+          await rm(path, { recursive: true, force: true });
+          result.clearedLeftovers += 1;
+        } catch (error: unknown) {
+          await logger.warn("startup.card-cleanup", "Could not clear a leftover in a card's folder.", {
+            path, error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
 
     // Removal is cleanup: a folder that cannot be removed now is tried again
     // next launch.
@@ -583,18 +626,38 @@ export class QueueStore {
     if (firstError !== null) throw firstError;
   }
 
+  // A pending import's folder is inbox/<id>, or cards/<id> while an
+  // acceptance that could not be saved or undone left it there; no listed card
+  // shares a pending import's id, so both places are the import's own.
+
   /** Moves an import's folder into cards/ under the same id, and returns where its audio is now. */
   async acceptImport(item: PendingImportReviewItem): Promise<string> {
+    const audio = join(this.cardFolder(item.id), basename(item.workingFilePath));
     await mkdir(this.cardsDir, { recursive: true });
-    await rename(this.importFolder(item.id), this.cardFolder(item.id));
-    return join(this.cardFolder(item.id), basename(item.workingFilePath));
+    try {
+      await rename(this.importFolder(item.id), this.cardFolder(item.id));
+    } catch (error: unknown) {
+      // An earlier acceptance that could not be undone left it there already.
+      if (!isMissingFileError(error) || !(await fileExists(audio))) throw error;
+    }
+    return audio;
   }
 
   /** Moves an accepted card's folder back into inbox/, for an acceptance that could not be saved. */
   async returnImport(item: PendingImportReviewItem): Promise<void> {
     this.failed.delete(`card:${item.id}`);
-    await rm(join(this.cardFolder(item.id), CARD_FILE), { force: true });
-    await rename(this.cardFolder(item.id), this.importFolder(item.id));
+    await this.returnToInbox(item.id);
+  }
+
+  private async returnToInbox(id: string): Promise<void> {
+    const folder = this.cardFolder(id);
+    for (const name of await folderEntries(folder)) {
+      if (name === CARD_FILE || name === SCRATCH_FOLDER || STAGED_CARD_FILE.test(name)) {
+        await rm(join(folder, name), { recursive: true, force: true });
+      }
+    }
+    await mkdir(this.inboxDir, { recursive: true });
+    await rename(this.cardFolder(id), this.importFolder(id));
   }
 
   /** Deletes a card's folder: its file, audio and scratch. Call after the order no longer lists it. */
@@ -603,9 +666,10 @@ export class QueueStore {
     await rm(this.cardFolder(cardId), { recursive: true, force: true });
   }
 
-  /** Deletes a pending import's folder. Call after the inbox no longer lists it. */
+  /** Deletes a pending import's folder, wherever it is. Call after the inbox no longer lists it. */
   async removeImportFolder(importId: string): Promise<void> {
     await rm(this.importFolder(importId), { recursive: true, force: true });
+    await rm(this.cardFolder(importId), { recursive: true, force: true });
   }
 
   /** Explicit reset may set damaged files aside, but never a readable newer one. */

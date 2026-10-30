@@ -1024,15 +1024,27 @@ export class ApplicationRuntime {
         state.pendingImports = state.pendingImports.filter((item) => !confirmedIds.has(item.id));
         await this.persist({ cards: cardsToAdd, order: true });
       } catch (error: unknown) {
-        // The review stays, with the choices just submitted.
+        // The review stays, with the choices just submitted. A folder that
+        // cannot be moved back stays in cards/, and the review plays and
+        // confirms it from there; a launch moves it back.
         state.cards = previousCards;
-        for (const pendingImport of accepted) {
-          await store.returnImport(pendingImport).catch((returnError: unknown) => this.runtime.logger.error(
-            "import.confirm-return", "An accepted recording could not be moved back for review.", returnError, { pendingImportId: pendingImport.id },
-          ));
+        const stranded = new Map<string, string>();
+        for (const [index, pendingImport] of accepted.entries()) {
+          try {
+            await store.returnImport(pendingImport);
+          } catch (returnError: unknown) {
+            stranded.set(pendingImport.id, cardsToAdd[index].sourceFilePath);
+            await this.runtime.logger.error("import.confirm-return", "An accepted recording could not be moved back for review.", returnError, {
+              pendingImportId: pendingImport.id,
+            });
+          }
         }
         const submitted = new Map(reviewed.map(({ pendingImport, merged }) => [pendingImport.id, merged]));
-        state.pendingImports = previousPending.map((item) => submitted.get(item.id) ?? item);
+        state.pendingImports = previousPending.map((item) => {
+          const restored = submitted.get(item.id) ?? item;
+          const location = stranded.get(item.id);
+          return location === undefined ? restored : { ...restored, workingFilePath: location };
+        });
         throw error;
       }
       // The order is the commit: an inbox still naming an accepted import is

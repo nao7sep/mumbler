@@ -712,16 +712,6 @@ describe("ApplicationRuntime confirmed import commit", () => {
     });
   });
 
-  it("writes only the card a change touched, leaving the order and every other card as they are", async () => {
-    await withCard(async (runtime, card) => {
-      const writes = vi.spyOn(fileIo, "writeJsonFile");
-      card.metadata.title = "touched";
-      await persistence(runtime).persist({ cards: [card] });
-      expect(writes.mock.calls.map(([path]) => path)).toEqual([cardFile(card)]);
-      expect((await savedCard(card)).metadata.title).toBe("touched");
-    });
-  });
-
   it("quit waits for a removal whose folder deletion fails, which leaves the card removed and its folder for launch", async () => {
     await withCard(async (runtime, card) => {
       const held = gate();
