@@ -12,7 +12,7 @@ import {
   keepReplacedMode,
   sameFileBytes,
 } from "./file-io";
-import { FORMAT_VERSIONS } from "./format-versions";
+import { appWriter, fileHeader, FORMATS } from "./format-versions";
 
 // A save that must not overwrite found one of its targets already taken when
 // it came to publish: someone wrote that name after the conflict check.
@@ -212,8 +212,7 @@ export function buildOutputPayload(params: {
   finalizedAtUtc: number;
 }): Record<string, unknown> {
   return {
-    formatVersion: FORMAT_VERSIONS.outputJson,
-    appVersion: __APP_VERSION__,
+    ...fileHeader(FORMATS.outputJson),
     originalFilename: params.card.originalFilename,
     importSource: params.card.importSource,
     timestamps: {
@@ -275,6 +274,15 @@ export function yamlDoubleQuotedString(value: string): string {
   return `"${escaped}"`;
 }
 
+// The header as the front matter's first two keys, in YAML flow mappings.
+function markdownHeader(): string[] {
+  const { format, writer } = fileHeader(FORMATS.outputMarkdown, appWriter());
+  return [
+    `format: { owner: ${yamlDoubleQuotedString(format.owner)}, kind: ${yamlDoubleQuotedString(format.kind)}, version: ${format.version} }`,
+    `writer: { name: ${yamlDoubleQuotedString(writer.name)}, version: ${yamlDoubleQuotedString(writer.version)} }`,
+  ];
+}
+
 export function buildMarkdownContent(params: {
   card: MumblerCard;
   audioFilename: string;
@@ -288,7 +296,7 @@ export function buildMarkdownContent(params: {
 
   const lines: string[] = [
     "---",
-    `format_version: ${FORMAT_VERSIONS.outputMarkdown}`,
+    ...markdownHeader(),
     `date: ${yamlDoubleQuotedString(date)}`,
     `audio: ${yamlDoubleQuotedString(params.audioFilename)}`,
     `duration: ${duration === null ? "null" : duration}`,

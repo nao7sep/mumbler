@@ -33,6 +33,7 @@ import {
   createSettingsStore,
 } from "@main/core/settings-schema";
 import { until } from "../../support/until";
+import { header } from "../../support/file-header";
 
 let dir: string;
 
@@ -56,7 +57,7 @@ function settingsPath(): string {
 
 describe("settings store", () => {
   it("reads every absent set as its built-in when the file holds only one set", async () => {
-    const raw = JSON.stringify({ formatVersion: 1, concurrencyLimit: 5 });
+    const raw = JSON.stringify({ ...header("config"), concurrencyLimit: 5 });
     await writeFile(settingsPath(), raw, "utf8");
     const store = createSettingsStore(settingsPath());
 
@@ -73,12 +74,12 @@ describe("settings store", () => {
   });
 
   it("keeps the file when its final set is saved equal to its built-in, with only its format version", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, concurrencyLimit: 5 }));
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), concurrencyLimit: 5 }));
     const store = createSettingsStore(settingsPath());
     await store.load();
     await store.save(createDefaultSettings());
 
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config") });
     expect((await store.load()).value).toEqual(createDefaultSettings());
   });
 
@@ -86,31 +87,31 @@ describe("settings store", () => {
     const store = createSettingsStore(settingsPath());
     await store.save(settings({ concurrencyLimit: 5, theme: "dark" }));
     await store.save(settings({ theme: "dark" }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, theme: "dark" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), theme: "dark" });
   });
 
   it("compares a model id with its built-in trimmed and case-insensitively", async () => {
     const store = createSettingsStore(settingsPath());
     await store.save(settings({ "gemini.outline": "custom-model" }));
     await store.save(settings({ "gemini.outline": ` ${createDefaultSettings()["gemini.outline"].toUpperCase()} ` }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config") });
   });
 
   it("stores a role's thinking only while it differs from the default for the role's model", async () => {
     const store = createSettingsStore(settingsPath());
     const defaults = createDefaultSettings();
     await store.save({ ...defaults, "gemini.metadata": "gemini-3.8-flash", "gemini.thinking.metadata": "medium", "gemini.thinking.outline": "high" });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.metadata": "gemini-3.8-flash", "gemini.thinking.outline": "high" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), "gemini.metadata": "gemini-3.8-flash", "gemini.thinking.outline": "high" });
 
     // The default follows the model's tier, not the role's: a fast model on the balanced role starts at minimal.
     await store.save({ ...defaults, "gemini.outline": "gemini-3.5-flash-lite", "gemini.thinking.outline": "minimal" });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.outline": "gemini-3.5-flash-lite" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), "gemini.outline": "gemini-3.5-flash-lite" });
 
     // Under a model with no row the choice is kept, unsent, while it differs from the built-in.
     await store.save({ ...defaults, "gemini.outline": "custom-model", "gemini.thinking.outline": "high" });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.outline": "custom-model", "gemini.thinking.outline": "high" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), "gemini.outline": "custom-model", "gemini.thinking.outline": "high" });
     await store.save({ ...defaults, "gemini.outline": "custom-model" });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.outline": "custom-model" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), "gemini.outline": "custom-model" });
   });
 
   it("keeps a thinking saved under a model with no row through a relaunch, in the settings and the draft", async () => {
@@ -123,14 +124,14 @@ describe("settings store", () => {
   it("reads a thinking the file does not hold as the selected model's own default after a relaunch", async () => {
     // The outline's built-in model is Flash (medium); Flash Lite's own default is minimal, so it is not stored.
     await createSettingsStore(settingsPath()).save(settings({ "gemini.outline": "gemini-3.5-flash-lite", "gemini.thinking.outline": "minimal" }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, "gemini.outline": "gemini-3.5-flash-lite" });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), "gemini.outline": "gemini-3.5-flash-lite" });
     const loaded = (await createSettingsStore(settingsPath()).load()).value;
     expect(loaded["gemini.thinking.outline"]).toBe("minimal");
     expect(buildSettingsDraft(loaded, "", "", false)).toMatchObject({ outlineModel: "gemini-3.5-flash-lite", outlineThinking: "minimal" });
   });
 
   it("writes nothing when the file already holds what the settings store", async () => {
-    const raw = `${JSON.stringify({ formatVersion: 1, concurrencyLimit: 5 }, null, 2)}\n`;
+    const raw = `${JSON.stringify({ ...header("config"), concurrencyLimit: 5 }, null, 2)}\n`;
     await writeFile(settingsPath(), raw, "utf8");
     const earlier = new Date(Date.UTC(2024, 4, 6, 7, 8, 9));
     await utimes(settingsPath(), earlier, earlier);
@@ -146,26 +147,26 @@ describe("settings store", () => {
     expect((await store.load()).value).toEqual(createDefaultSettings());
     await expect(readFile(settingsPath(), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await store.save(settings({ concurrencyLimit: 5 }));
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), concurrencyLimit: 5 });
     expect((await store.load()).value).toEqual(settings({ concurrencyLimit: 5 }));
   });
 
   it("keeps keys this build does not know through every save, as a newer Mumbler wrote them", async () => {
     const future = { added: { by: "a newer Mumbler" }, dictionary: ["mumbler"] };
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, theme: "dark", ...future }));
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), theme: "dark", ...future }));
     const store = createSettingsStore(settingsPath());
     const loaded = await store.load();
     expect(loaded.value).toEqual(settings({ theme: "dark" }));
     expect(loaded.unusable).toEqual([]);
     await store.save({ ...loaded.value, concurrencyLimit: 5 });
     await store.save({ ...loaded.value, concurrencyLimit: 6 }, { replaceUnusable: true });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, theme: "dark", concurrencyLimit: 6, ...future });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), theme: "dark", concurrencyLimit: 6, ...future });
   });
 
   it.each([false, true])("preserves unknown own keys named like object properties during a settings save (%s)", async (replaceUnusable) => {
     // JSON.parse creates an own __proto__ property, unlike an object literal.
     const future = JSON.parse('{"__proto__":{"by":"a newer Mumbler"},"constructor":"future constructor","toString":["future text"]}') as Record<string, unknown>;
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, theme: "dark", ...future }));
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), theme: "dark", ...future }));
     const store = createSettingsStore(settingsPath());
     const loaded = await store.load();
     expect(loaded.value).toEqual(settings({ theme: "dark" }));
@@ -183,18 +184,18 @@ describe("settings store", () => {
   it("builds the file from the settings it is given, not onto the stored bytes, one save after another", async () => {
     const store = createSettingsStore(settingsPath());
     await store.load();
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, theme: "dark" }));
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), theme: "dark" }));
     await Promise.all([store.save(settings({ concurrencyLimit: 5 })), store.save(settings({ skipIntervalSec: 20 }))]);
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, skipIntervalSec: 20 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), skipIntervalSec: 20 });
   });
 
   it("keeps a System or chosen zone for both zone settings, and cannot use anything else", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, defaultTimezone: "system", displayTimezone: "Asia/Tokyo" }));
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), defaultTimezone: "system", displayTimezone: "Asia/Tokyo" }));
     const kept = await createSettingsStore(settingsPath(), dir, () => undefined).load();
     expect(kept.unusable).toEqual([]);
     expect(kept.value).toMatchObject({ defaultTimezone: "system", displayTimezone: "Asia/Tokyo" });
 
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, defaultTimezone: "Mars/Olympus", displayTimezone: "Moon/Tranquility" }));
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), defaultTimezone: "Mars/Olympus", displayTimezone: "Moon/Tranquility" }));
     const unusable = await createSettingsStore(settingsPath(), dir, () => undefined).load();
     expect(unusable.unusable).toEqual(["defaultTimezone", "displayTimezone"]);
   });
@@ -202,7 +203,7 @@ describe("settings store", () => {
   it("uses the built-in for a set it cannot use, names it, keeps it through other saves and replaces it at a Settings save", async () => {
     const warnings: string[] = [];
     await writeFile(settingsPath(), JSON.stringify({
-      formatVersion: 1,
+      ...header("config"),
       prompts: { structured: "custom" },
       skipIntervalSec: 0,
       previewSnippetSeconds: "ten",
@@ -217,7 +218,7 @@ describe("settings store", () => {
     // A save that does not come from the Settings window keeps them as written.
     await store.save({ ...loaded, concurrencyLimit: 5 });
     expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({
-      formatVersion: 1,
+      ...header("config"),
       concurrencyLimit: 5,
       prompts: { structured: "custom" },
       skipIntervalSec: 0,
@@ -227,14 +228,14 @@ describe("settings store", () => {
 
     // Saving the Settings window, which showed the built-ins, replaces them.
     await store.save({ ...loaded, concurrencyLimit: 5 }, { replaceUnusable: true });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 5 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), concurrencyLimit: 5 });
     await store.save({ ...loaded, concurrencyLimit: 6 });
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, concurrencyLimit: 6 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), concurrencyLimit: 6 });
   });
 
   it("keeps unusable-set replacement authoritative for a targeted save queued during its primary write", async () => {
     const future = JSON.parse('{"__proto__":{"keep":"future own key"}}') as Record<string, unknown>;
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, prompts: { structured: "custom" }, ...future }));
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), prompts: { structured: "custom" }, ...future }));
     const store = createSettingsStore(settingsPath(), dir, () => undefined);
     const { value } = await store.load();
     let release!: () => void;
@@ -247,7 +248,7 @@ describe("settings store", () => {
       release();
       await Promise.all([replacement, targeted]);
       expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({
-        formatVersion: 1, theme: "dark", checkUpdatesAtLaunch: false, ...future,
+        ...header("config"), theme: "dark", checkUpdatesAtLaunch: false, ...future,
       });
       expect((await store.load()).unusable).toEqual([]);
     } finally {
@@ -258,7 +259,7 @@ describe("settings store", () => {
   });
 
   it("publishes replacement metadata when failed settings bytes are retried before a targeted save", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, prompts: { structured: "custom" } }));
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), prompts: { structured: "custom" } }));
     const store = createSettingsStore(settingsPath(), dir, () => undefined);
     const { value } = await store.load();
     let release!: () => void;
@@ -274,7 +275,7 @@ describe("settings store", () => {
       await store.retryFailedWrite();
       expect(store.failedWrite).toBeNull();
       await store.save({ ...value, theme: "dark", checkUpdatesAtLaunch: false });
-      expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1, theme: "dark", checkUpdatesAtLaunch: false });
+      expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config"), theme: "dark", checkUpdatesAtLaunch: false });
     } finally {
       release();
       await replacement;
@@ -295,7 +296,7 @@ describe("settings store", () => {
 
     expect(store.failedWrite).toBeNull();
     await store.retryFailedWrite();
-    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ formatVersion: 1 });
+    expect(JSON.parse(await readFile(settingsPath(), "utf8"))).toEqual({ ...header("config") });
   });
 
   it.each([
@@ -311,14 +312,14 @@ describe("settings store", () => {
     ["prompts", { structured: "{transcript}", title: "{structured}", slug: "No placeholder" }],
   ])("reads %s %j, which Save refuses, as its built-in", async (key, value) => {
     const warnings: string[] = [];
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, [key]: value }));
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), [key]: value }));
     expect((await createSettingsStore(settingsPath(), dir, (warned) => warnings.push(warned)).load()).value).toEqual(createDefaultSettings());
     expect(warnings).toEqual([key]);
   });
 
   it("keeps complete clusters without filling members from built-ins", async () => {
     const prompts = { structured: "{transcript}", title: "{structured}", slug: "{title}", extra: "kept" };
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, prompts }));
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), prompts }));
     expect((await createSettingsStore(settingsPath()).load()).value.prompts).toEqual(prompts);
   });
 
@@ -330,7 +331,7 @@ describe("settings store", () => {
   });
 
   it("refuses a config.json in a newer format on load and leaves it untouched", async () => {
-    const newer = JSON.stringify({ formatVersion: 2, theme: "dark" });
+    const newer = JSON.stringify({ ...header("config", 2), theme: "dark" });
     await writeFile(settingsPath(), newer, "utf8");
     const store = createSettingsStore(settingsPath());
     await expect(store.load()).rejects.toBeInstanceOf(NewerFormatError);
@@ -340,7 +341,7 @@ describe("settings store", () => {
   it("normalizes out-of-range settings values on load", async () => {
     await writeFile(
       settingsPath(),
-      JSON.stringify({ formatVersion: 1, concurrencyLimit: -5, skipIntervalSec: "nope" }),
+      JSON.stringify({ ...header("config"), concurrencyLimit: -5, skipIntervalSec: "nope" }),
       "utf8",
     );
     const { value } = await createSettingsStore(settingsPath()).load();
@@ -349,23 +350,23 @@ describe("settings store", () => {
   });
 
   it("defaults the theme to System and keeps a saved Light or Dark", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1 }), "utf8");
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config") }), "utf8");
     expect((await createSettingsStore(settingsPath()).load()).value.theme).toBe("system");
 
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, theme: "dark" }), "utf8");
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), theme: "dark" }), "utf8");
     expect((await createSettingsStore(settingsPath()).load()).value.theme).toBe("dark");
 
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1, theme: "sepia" }), "utf8");
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config"), theme: "sepia" }), "utf8");
     expect((await createSettingsStore(settingsPath()).load()).value.theme).toBe("system");
   });
 
   it("defaults the launch update check on when absent, and preserves an explicit off", async () => {
-    await writeFile(settingsPath(), JSON.stringify({ formatVersion: 1 }), "utf8");
+    await writeFile(settingsPath(), JSON.stringify({ ...header("config") }), "utf8");
     expect((await createSettingsStore(settingsPath()).load()).value.checkUpdatesAtLaunch).toBe(true);
 
     await writeFile(
       settingsPath(),
-      JSON.stringify({ formatVersion: 1, checkUpdatesAtLaunch: false }),
+      JSON.stringify({ ...header("config"), checkUpdatesAtLaunch: false }),
       "utf8",
     );
     expect((await createSettingsStore(settingsPath()).load()).value.checkUpdatesAtLaunch).toBe(false);
@@ -376,7 +377,7 @@ describe("settings store", () => {
     await writeFile(
       settingsPath(),
       JSON.stringify({
-        formatVersion: 1,
+        ...header("config"),
         outputDirectory: "~/output",
         backupDirectory: "relative/backups",
       }),

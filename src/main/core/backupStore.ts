@@ -1,6 +1,7 @@
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 
+import { appWriter } from "./format-versions";
 import { storageRoot } from "./storage-root";
 
 export type BackupWarn = (message: string, details: Record<string, unknown>) => void;
@@ -111,7 +112,7 @@ function ensureWorker(): Worker {
     ? "./backup-store-worker.ts"
     : "./backup-store-worker.js";
   const created = new Worker(new URL(workerModule, import.meta.url), {
-    workerData: { file: storeFile(), session },
+    workerData: { file: storeFile(), session, writer: appWriter() },
   });
   created.on("message", (message: WorkerResponse) => {
     if (message.type === "warning") warn(message.message, message.details);

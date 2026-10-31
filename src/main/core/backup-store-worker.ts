@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 
 import { BackupStoreEngine } from "./backup-store-engine.ts";
+import type { FileWriter } from "./format-versions.ts";
 
 type WorkerRequest =
   | { type: "record"; path: string; bytes: Uint8Array; writtenAtUtc: string }
@@ -15,8 +16,8 @@ if (parentPort === null) {
 }
 
 const port = parentPort;
-const data = workerData as { file: string; session: string };
-const engine = new BackupStoreEngine(data.file, data.session, (message, details) => {
+const data = workerData as { file: string; session: string; writer: FileWriter };
+const engine = new BackupStoreEngine(data.file, data.session, data.writer, (message, details) => {
   port.postMessage({ type: "warning", message, details } satisfies WorkerResponse);
 });
 

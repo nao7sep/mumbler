@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import { FORMAT_VERSIONS } from "./format-versions.ts";
+import { type FileWriter, FORMATS } from "./format-versions.ts";
 import { openVersionedDatabase } from "./sqlite-store.ts";
 
 export type BackupEngineWarn = (message: string, details: Record<string, unknown>) => void;
@@ -28,12 +28,15 @@ export class BackupStoreEngine {
   private initialized = false;
   private failureReported = false;
   private readonly file: string;
+  private readonly writer: FileWriter;
   private readonly session: string;
   private readonly warn: BackupEngineWarn;
 
-  constructor(file: string, session: string, warn: BackupEngineWarn) {
+  // The worker is not built with the app's version define, so the app passes itself as the writer.
+  constructor(file: string, session: string, writer: FileWriter, warn: BackupEngineWarn) {
     this.file = file;
     this.session = session;
+    this.writer = writer;
     this.warn = warn;
   }
 
@@ -96,7 +99,7 @@ export class BackupStoreEngine {
     try {
       // A history in an unsupported format is left untouched, like any other that
       // cannot be opened: recording stays off for the session.
-      this.db = openVersionedDatabase(this.file, FORMAT_VERSIONS.backups, SCHEMA, (error) => {
+      this.db = openVersionedDatabase(this.file, FORMATS.backups, this.writer, SCHEMA, (error) => {
         this.warnOnce("backup store: initialization cleanup failed", { file: this.file, error: errorInfo(error) });
       });
     } catch (error: unknown) {

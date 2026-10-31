@@ -1,5 +1,5 @@
 import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
-import { NewerFormatError, recordedFormatVersion } from "./format-versions";
+import { type FileFormat, fileHeader, NewerFormatError, recordedFormatVersion, withoutHeader } from "./format-versions";
 
 // Thrown when a persisted file exists but its content cannot be safely loaded:
 // malformed JSON, or a document that does not fit its shape. The store never
@@ -38,21 +38,22 @@ export function loadFailure(filePath: string, error: unknown): CorruptStateError
     : new UnreadableStoreError(filePath, { cause });
 }
 
-// Checks the format version a JSON document records against the one this build
-// reads: a missing or unusable marker is corruption, and a newer one is intact
-// data this build leaves alone (store-recovery-conventions).
-export function assertReadableFormat(filePath: string, document: Record<string, unknown>, supported: number): void {
-  const recorded = recordedFormatVersion(document);
-  if (recorded === null) {
-    throw new CorruptStateError(filePath, "formatVersion is missing or not a positive integer");
+// Checks a JSON document's header against the format this build reads: a
+// missing or malformed header, another owner or kind, or a version this build
+// does not read is corruption, and a newer one is intact data this build leaves
+// alone (file-identity-conventions, store-recovery-conventions).
+export function assertReadableFormat(filePath: string, document: Record<string, unknown>, expected: FileFormat): void {
+  const recorded = recordedFormatVersion(document, expected);
+  if (recorded !== null && recorded > expected.version) {
+    throw new NewerFormatError(filePath, recorded, expected.version);
   }
-  if (recorded > supported) {
-    throw new NewerFormatError(filePath, recorded, supported);
+  if (recorded !== expected.version) {
+    throw new CorruptStateError(filePath, `its format header does not name a Mumbler ${expected.kind} file this build reads`);
   }
 }
 
 /** Explicit reset may set corrupt bytes aside, but never a readable newer store. */
-export async function assertResettableJson(filePath: string, supported: number): Promise<void> {
+export async function assertResettableJson(filePath: string, expected: FileFormat): Promise<void> {
   let document: unknown;
   try {
     document = await readJsonFile<unknown>(filePath);
@@ -61,16 +62,16 @@ export async function assertResettableJson(filePath: string, supported: number):
     throw error;
   }
   if (document === null || typeof document !== "object" || Array.isArray(document)) return;
-  const recorded = recordedFormatVersion(document as Record<string, unknown>);
-  if (recorded !== null && recorded > supported) throw new NewerFormatError(filePath, recorded, supported);
+  const recorded = recordedFormatVersion(document as Record<string, unknown>, expected);
+  if (recorded !== null && recorded > expected.version) throw new NewerFormatError(filePath, recorded, expected.version);
 }
 
 export interface JsonStoreOptions<T> {
   /** Absolute path to the canonical file (e.g. ~/.mumbler/config.json). */
   path: string;
-  /** The format version this build reads and writes, recorded as `formatVersion`. */
-  formatVersion: number;
-  /** Normalize/validate raw parsed JSON into the typed value. Pure, no I/O. */
+  /** The format this build reads and writes, recorded in the file's header. */
+  format: FileFormat;
+  /** Normalize/validate the parsed content, its header removed, into the typed value. Pure, no I/O. */
   validate: (raw: Record<string, unknown>) => T;
   /** Build the in-memory default when no file exists yet. Pure, no I/O. */
   createDefault: () => T;
@@ -81,7 +82,7 @@ export interface JsonStoreOptions<T> {
    * identity, so stores whose in-memory shape is already the on-disk shape omit
    * it. Used to convert in-memory epoch-ms instants to canonical ISO at the
    * persistence edge while keeping the core in epoch-ms. The store adds
-   * `formatVersion` itself.
+   * the header itself.
    */
   serialize?: (value: T) => object;
   /** Whether writes enter backups.sqlite3. Defaults to false: only what the user authors opts in. */
@@ -143,9 +144,9 @@ export class JsonStore<T extends object> {
     }
 
     const record = raw as Record<string, unknown>;
-    assertReadableFormat(this.options.path, record, this.options.formatVersion);
+    assertReadableFormat(this.options.path, record, this.options.format);
 
-    return { value: this.options.validate(record), origin: "loaded" };
+    return { value: this.options.validate(withoutHeader(record)), origin: "loaded" };
   }
 
   async save(value: T): Promise<void> {
@@ -161,7 +162,7 @@ export class JsonStore<T extends object> {
     try {
       await writeJsonFile(
         this.options.path,
-        { formatVersion: this.options.formatVersion, ...wire },
+        { ...fileHeader(this.options.format), ...wire },
         { record: this.options.record },
       );
     } catch (error: unknown) {
@@ -204,7 +205,7 @@ export class JsonStore<T extends object> {
   // Call before save(): it does not go through the write queue, and is meant to
   // run on a fresh store with no writes in flight (as Reset does).
   async admitReset(): Promise<void> {
-    await assertResettableJson(this.options.path, this.options.formatVersion);
+    await assertResettableJson(this.options.path, this.options.format);
   }
 
   async preserveExistingFiles(): Promise<string[]> {

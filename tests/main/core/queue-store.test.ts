@@ -8,6 +8,7 @@ import type { MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
 import { NewerFormatError } from "@main/core/format-versions";
 import type { AppLogger } from "@main/core/logger";
 import { newItemId, QueueStore, recoverInterruptedCard } from "@main/core/queue-store";
+import { header } from "../../support/file-header";
 
 // Tables are built before any test runs, so dir starts as a placeholder.
 let dir = tmpdir();
@@ -126,7 +127,7 @@ describe("the queue on disk", () => {
 
     expect(await readdir(dir)).toEqual(["cards"]);
     const raw = JSON.parse(await readFile(cardPath("z"), "utf8"));
-    expect(raw).toMatchObject({ formatVersion: 1, id: "z", transcription: { text: "every word of an hour" }, metadata: { structured: "## outline" } });
+    expect(raw).toMatchObject({ ...header("card"), id: "z", transcription: { text: "every word of an hour" }, metadata: { structured: "## outline" } });
 
     const { state } = await store.load(logger);
     expect(state.cards.map((entry) => entry.id)).toEqual(["z", "b", "a"]);
@@ -135,7 +136,7 @@ describe("the queue on disk", () => {
 
   it("keeps each pending import's choices in its own folder beside its copy, ordered by when it was imported", async () => {
     await savePending([pending("p2", { createdAtUtc: Date.UTC(2026, 3, 23) }), pending("p1")]);
-    expect(JSON.parse(await readFile(importPath("p1"), "utf8"))).toMatchObject({ formatVersion: 1, id: "p1" });
+    expect(JSON.parse(await readFile(importPath("p1"), "utf8"))).toMatchObject({ ...header("pendingImport"), id: "p1" });
     const { state } = await store.load(logger);
     expect(state.pendingImports.map((item) => item.id)).toEqual(["p1", "p2"]);
     expect(state.pendingImports[0]).toEqual(pending("p1"));
@@ -234,7 +235,7 @@ describe("the queue on disk", () => {
     ["a delete choice that is not true or false", { ...pending("p1"), deleteOriginalOnConfirm: "false" }],
   ])("reports a pending import with %s as unreadable, leaves it untouched and loads the rest", async (_name, shape) => {
     await savePending([pending("p1"), pending("p2")]);
-    const text = JSON.stringify({ formatVersion: 1, ...shape });
+    const text = JSON.stringify({ ...header("pendingImport"), ...shape });
     await writeFile(importPath("p1"), text);
     const loaded = await store.load(logger);
     expect(loaded.state.pendingImports.map((item) => item.id)).toEqual(["p2"]);
@@ -243,7 +244,10 @@ describe("the queue on disk", () => {
   });
 
   it.each([
-    ["no format version", { formatVersion: undefined }],
+    ["no format header", { format: undefined }],
+    ["another owner's header", { format: { owner: "otherapp", kind: "card", version: 1 } }],
+    ["another kind's header", { format: { owner: "mumbler", kind: "pendingImport", version: 1 } }],
+    ["a malformed header", { format: { owner: "mumbler", kind: "card", version: "1" } }],
     ["an id that is not its folder's", { id: "other" }],
     ["a working recording path that is not text", { sourceFilePath: 3 }],
     ["an unknown status", { status: "Busy" }],
@@ -277,7 +281,7 @@ describe("the queue on disk", () => {
   it.each([
     ["damaged JSON", "{ not json"],
     ["a trim number that overflows", null],
-    ["a newer format", JSON.stringify({ formatVersion: 99 })],
+    ["a newer format", JSON.stringify({ ...header("card", 99) })],
   ])("reports a card file with %s with its path, without rewriting it", async (_name, replacement) => {
     await saveCards([card()]);
     const text = replacement ?? (await readFile(cardPath("c1"), "utf8")).replace('"frontMarkerSec": null', '"frontMarkerSec": 1e400');
@@ -495,9 +499,9 @@ describe("accepting, removing and retrying", () => {
     expect((await readdir(join(dir, aside))).sort()).toEqual(["cards", "inbox"]);
 
     await saveCards([card()]);
-    await writeFile(cardPath("c1"), JSON.stringify({ formatVersion: 99 }));
+    await writeFile(cardPath("c1"), JSON.stringify({ ...header("card", 99) }));
     await expect(store.preserveExistingFiles()).rejects.toBeInstanceOf(NewerFormatError);
-    expect(await readFile(cardPath("c1"), "utf8")).toBe(JSON.stringify({ formatVersion: 99 }));
+    expect(await readFile(cardPath("c1"), "utf8")).toBe(JSON.stringify({ ...header("card", 99) }));
   });
 
   it("makes ids in one case, so no two name the same folder on any filesystem", () => {

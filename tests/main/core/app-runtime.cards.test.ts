@@ -12,6 +12,7 @@ import { hasStaleResults } from "@shared/card-status";
 import { formatUtcMarker, getSystemTimezone, recomputeLocalFromUtc } from "@shared/timestamps";
 import { readSavedQueue } from "../../support/saved-queue";
 import { until } from "../../support/until";
+import { header } from "../../support/file-header";
 
 // The card list as the user builds it: confirm what was dropped in, duplicate a
 // card to trim it twice, move the markers, remove one, start over. This drives
@@ -268,7 +269,7 @@ function review(item: PendingImportReviewItem, edits: Partial<PendingImportRevie
 // First launch saves the computer's zone as the import zone, as a concrete zone
 // (timestamp-conventions, Time zones); nothing else is written until the user
 // changes a setting.
-const FIRST_LAUNCH = { formatVersion: 1, defaultTimezone: getSystemTimezone() };
+const FIRST_LAUNCH = { ...header("config"), defaultTimezone: getSystemTimezone() };
 
 async function savedSettings(): Promise<unknown> {
   return JSON.parse(await readFile(join(home, "config.json"), "utf8"));
@@ -480,7 +481,7 @@ describe("first-run setup and user-owned destinations", () => {
   it("keeps existing originals choices and unrelated unsupported settings during setup", async () => {
     await runtime.shutdown();
     const originals = join(root, "existing-originals");
-    await writeFile(join(home, "config.json"), JSON.stringify({ formatVersion: 1, backupDirectory: originals, concurrencyLimit: "future", futureChoice: { keep: true } }));
+    await writeFile(join(home, "config.json"), JSON.stringify({ ...header("config"), backupDirectory: originals, concurrencyLimit: "future", futureChoice: { keep: true } }));
     runtime = await ApplicationRuntime.initialize();
     expect(runtime.getSnapshot().firstRun, "setup the first launch left unfinished is still offered").toBe(true);
     await runtime.saveSetupDirectory(join(root, "chosen"));
@@ -568,7 +569,7 @@ describe("the durable queue store", () => {
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
     const path = join(home, "cards", card.id, "card.json");
-    const newer = JSON.stringify({ formatVersion: 99, id: card.id });
+    const newer = JSON.stringify({ ...header("card", 99), id: card.id });
     afterResetMove.run = () => writeFile(path, newer);
     try {
       const snapshot = await runtime.resetState();
@@ -587,7 +588,7 @@ describe("the durable queue store", () => {
     const [pending] = await dropIn("take.wav");
     await runtime.confirmPendingImports([review(pending)]);
     const path = join(home, "layout.json");
-    const newer = JSON.stringify({ formatVersion: 2, queueWidth: 400 });
+    const newer = JSON.stringify({ ...header("layout", 2), queueWidth: 400 });
     await writeFile(path, newer);
 
     const snapshot = await runtime.resetState();
@@ -605,7 +606,8 @@ describe("the durable queue store", () => {
       await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
       const newerPath = join(home, name);
       await mkdir(dirname(newerPath), { recursive: true });
-      const text = JSON.stringify({ formatVersion: 99, id: "lost", transcription: { text: "future words" } });
+      const kind = name === "config.json" ? "config" : name.startsWith("cards/") ? "card" : "pendingImport";
+      const text = JSON.stringify({ ...header(kind, 99), id: "lost", transcription: { text: "future words" } });
       await writeFile(newerPath, text);
       const storePaths = ["config.json", `cards/${card.id}/card.json`, "layout.json"].map((file) => join(home, file));
       const before = await Promise.all(storePaths.map((path) => readFile(path, "utf8").catch(() => null)));
@@ -1771,10 +1773,10 @@ describe("working with a card", () => {
     const saved = cards(runtime.getSnapshot())[0];
     const stem = join(home, "output", `${formatUtcMarker(new Date(saved.timestamps.effectiveUtc))}-old-title`);
     await mkdir(join(home, "output"), { recursive: true });
-    await writeFile(`${stem}.json`, '{"formatVersion":2}');
+    await writeFile(`${stem}.json`, JSON.stringify(header("sidecar", 2)));
     const result = await runtime.saveCard(card.id, "overwrite");
     expect(result.kind).toBe("saved");
-    expect(JSON.parse(await readFile(`${stem}.json`, "utf8"))).toMatchObject({ formatVersion: 1 });
+    expect(JSON.parse(await readFile(`${stem}.json`, "utf8"))).toMatchObject(header("sidecar"));
   });
 
   it.each([
@@ -2083,7 +2085,7 @@ describe("each card in its own folder", () => {
       transcription: { text: "every word that was said" },
       metadata: { structured: "## what it was about" },
     });
-    expect(await savedCard(card.id)).toMatchObject({ formatVersion: 1, id: card.id, transcription: { text: "every word that was said" } });
+    expect(await savedCard(card.id)).toMatchObject({ ...header("card"), id: card.id, transcription: { text: "every word that was said" } });
     expect((await readdir(join(home, "cards", card.id))).sort()).toEqual(["card.json", "take.wav"]);
   });
 
@@ -2142,7 +2144,8 @@ describe("a store in a newer format", () => {
   /** Rewrites a JSON store as a newer build would have left it, returning its bytes. */
   async function makeNewer(path: string): Promise<string> {
     const current = (await exists(path)) ? JSON.parse(await readFile(path, "utf8")) : {};
-    const newer = JSON.stringify({ ...current, formatVersion: 99 });
+    const kinds: Record<string, string> = { "config.json": "config", "card.json": "card", "import.json": "pendingImport", "dependencies.json": "dependencies", "layout.json": "layout" };
+    const newer = JSON.stringify({ ...current, ...header(kinds[basename(path)]!, 99) });
     await writeFile(path, newer, "utf8");
     return newer;
   }
@@ -2229,7 +2232,8 @@ describe("a store in a newer format", () => {
 describe("settings, secrets and the window's own state", () => {
   it.each([
     ["unparseable", "broken settings"],
-    ["without its format version", JSON.stringify({ concurrencyLimit: 5 })],
+    ["without its format header", JSON.stringify({ concurrencyLimit: 5 })],
+    ["of another kind", JSON.stringify({ ...header("layout"), concurrencyLimit: 5 })],
   ])("sets aside a config.json that is %s, starts on the built-ins and keeps the queue", async (_kind, bytes) => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
@@ -2256,7 +2260,7 @@ describe("settings, secrets and the window's own state", () => {
     await runtime.shutdown();
     const path = join(home, "config.json");
     const unusable = { structured: "no placeholder", title: "{transcript}", slug: "{title}" };
-    await writeFile(path, JSON.stringify({ formatVersion: 1, prompts: unusable, addedLater: "kept" }));
+    await writeFile(path, JSON.stringify({ ...header("config"), prompts: unusable, addedLater: "kept" }));
 
     runtime = await ApplicationRuntime.initialize();
 
@@ -2302,7 +2306,7 @@ describe("settings, secrets and the window's own state", () => {
     expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
     expect(await readFile(path, "utf8"), "launch itself writes nothing").toBe("broken layout");
     await runtime.saveLayout(430);
-    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ formatVersion: 1, queueWidth: 430 });
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ ...header("layout"), queueWidth: 430 });
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
 
@@ -2491,7 +2495,7 @@ describe("settings, secrets and the window's own state", () => {
   it("logs an invalid settings set the store reads after a reset", async () => {
     await runtime.resetState();
     const warn = vi.spyOn(runtime.currentLogger(), "warn");
-    await writeFile(join(home, "config.json"), JSON.stringify({ formatVersion: 1, theme: "sepia" }));
+    await writeFile(join(home, "config.json"), JSON.stringify({ ...header("config"), theme: "sepia" }));
     const { settingsStore } = (runtime as unknown as { runtime: { settingsStore: { load(): Promise<unknown> } } }).runtime;
 
     await settingsStore.load();

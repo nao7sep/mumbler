@@ -97,6 +97,7 @@ import { resolveLatest } from "@main/core/binaries/registry";
 import { createDependenciesStore } from "@main/core/binaries/store";
 import { JsonStore } from "@main/core/json-store";
 import { until } from "../../../support/until";
+import { header } from "../../../support/file-header";
 
 const RESOLVED = {
   version: "8.2",
@@ -715,11 +716,11 @@ describe("committed binary and metadata outcome", () => {
     const tool = join(binDir, "ffmpeg.exe");
     await writeFile(tool, "old binary");
     const sidecar = installedVersion.versionSidecarPath(binDir, "ffmpeg");
-    await writeFile(sidecar, JSON.stringify({ formatVersion: 2, version: "future" }));
+    await writeFile(sidecar, JSON.stringify({ ...header("toolVersion", 2), version: "future" }));
     const manager = await makeManager("win32");
     await manager.installTool("ffmpeg");
     expect(await readFile(tool, "utf8")).not.toBe("old binary");
-    expect(JSON.parse(await readFile(sidecar, "utf8"))).toMatchObject({ formatVersion: 1 });
+    expect(JSON.parse(await readFile(sidecar, "utf8"))).toMatchObject({ ...header("toolVersion") });
     expect(await readdir(tempDir)).toEqual([]);
   });
 

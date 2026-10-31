@@ -7,7 +7,7 @@ import { CARD_STATUSES, type MumblerCard, type MumblerQueue, type PendingImportR
 import { formatUtcIsoCompact, formatUtcMarkerMs, parseUtcMs } from "@shared/timestamps";
 
 import { fileExists, isMissingFileError, readJsonFile, writeJsonFile } from "./file-io";
-import { FORMAT_VERSIONS, NewerFormatError } from "./format-versions";
+import { type FileFormat, fileHeader, FORMATS, NewerFormatError, withoutHeader } from "./format-versions";
 import { assertReadableFormat, assertResettableJson, CorruptStateError, loadFailure, UnreadableStoreError } from "./json-store";
 import { type AppLogger } from "./logger";
 
@@ -357,14 +357,14 @@ function markCardWorkingFileMissing(card: MumblerCard): MumblerCard {
 }
 
 function serializeCard(card: MumblerCard): Record<string, unknown> {
-  return { formatVersion: FORMAT_VERSIONS.card, ...(serializeUtcInstants(card) as Record<string, unknown>) };
+  return { ...fileHeader(FORMATS.card), ...(serializeUtcInstants(card) as Record<string, unknown>) };
 }
 
 function serializeImport(item: PendingImportReviewItem): Record<string, unknown> {
-  return { formatVersion: FORMAT_VERSIONS.pendingImport, ...(serializeUtcInstants(item) as Record<string, unknown>) };
+  return { ...fileHeader(FORMATS.pendingImport), ...(serializeUtcInstants(item) as Record<string, unknown>) };
 }
 
-async function readDocument(path: string, supported: number): Promise<Record<string, unknown> | undefined> {
+async function readDocument(path: string, expected: FileFormat): Promise<Record<string, unknown> | undefined> {
   let raw: unknown;
   try {
     raw = await readJsonFile<unknown>(path);
@@ -374,8 +374,8 @@ async function readDocument(path: string, supported: number): Promise<Record<str
   if (raw === undefined) return undefined;
   const record = asRecord(raw);
   if (record === null) throw new CorruptStateError(path, "file does not contain a JSON object");
-  assertReadableFormat(path, record, supported);
-  return record;
+  assertReadableFormat(path, record, expected);
+  return withoutHeader(record);
 }
 
 async function folderEntries(directory: string): Promise<string[]> {
@@ -506,7 +506,7 @@ export class QueueStore {
       if (id.startsWith(".")) continue;
       const folder = this.importFolder(id);
       const path = join(folder, IMPORT_FILE);
-      const raw = await this.readItem(path, FORMAT_VERSIONS.pendingImport, unreadable);
+      const raw = await this.readItem(path, FORMATS.pendingImport, unreadable);
       if (raw === null) continue;
       if (raw === undefined) {
         await unlisted(folder, "no import.json");
@@ -517,7 +517,7 @@ export class QueueStore {
         await unreadable(path, issue);
         continue;
       }
-      const { formatVersion: _format, ...stored } = raw as unknown as PendingImportReviewItem & { formatVersion: number };
+      const stored = raw as unknown as PendingImportReviewItem;
       // The folder is the authority for where the copy is.
       const workingFilePath = join(folder, basename(stored.workingFilePath));
       if (!(await this.present(workingFilePath))) {
@@ -538,7 +538,7 @@ export class QueueStore {
       if (id.startsWith(".")) continue;
       const folder = this.cardFolder(id);
       const path = join(folder, CARD_FILE);
-      const raw = await this.readItem(path, FORMAT_VERSIONS.card, unreadable);
+      const raw = await this.readItem(path, FORMATS.card, unreadable);
       if (raw === null) continue;
       if (raw === undefined) {
         await unlisted(folder, "no card.json");
@@ -549,7 +549,7 @@ export class QueueStore {
         await unreadable(path, issue);
         continue;
       }
-      const { formatVersion: _format, ...stored } = raw as unknown as MumblerCard & { formatVersion: number };
+      const stored = raw as unknown as MumblerCard;
       const sourceFilePath = join(folder, basename(stored.sourceFilePath));
       const undated = firstRecorded(cardRecordedTimes(stored)) === null
         ? await modifiedTime(sourceFilePath).catch(() => modifiedTime(path))
@@ -581,11 +581,11 @@ export class QueueStore {
   // or newer and was reported. A file that cannot be read at all stops the load.
   private async readItem(
     path: string,
-    supported: number,
+    expected: FileFormat,
     unreadable: (path: string, reason: string) => Promise<void>,
   ): Promise<Record<string, unknown> | null | undefined> {
     try {
-      return await readDocument(path, supported);
+      return await readDocument(path, expected);
     } catch (error: unknown) {
       const reason = unreadableReason(error);
       if (reason === null) throw error;
@@ -698,10 +698,10 @@ export class QueueStore {
   /** Explicit reset may set damaged files aside, but never a readable newer one. */
   async admitReset(): Promise<void> {
     for (const name of await folderEntries(this.cardsDir)) {
-      await assertResettableJson(join(this.cardsDir, name, CARD_FILE), FORMAT_VERSIONS.card);
+      await assertResettableJson(join(this.cardsDir, name, CARD_FILE), FORMATS.card);
     }
     for (const name of await folderEntries(this.inboxDir)) {
-      await assertResettableJson(join(this.inboxDir, name, IMPORT_FILE), FORMAT_VERSIONS.pendingImport);
+      await assertResettableJson(join(this.inboxDir, name, IMPORT_FILE), FORMATS.pendingImport);
     }
   }
 

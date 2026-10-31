@@ -16,7 +16,7 @@ import { isLanguage, normalizeLanguagePreference } from "@shared/i18n/languages"
 import { CONCURRENCY_LIMIT_MAX, isConcurrencyLimitSetting, isPositiveIntegerSetting } from "@shared/settings-validation";
 import { THEME_PREFERENCES } from "@shared/app-shell";
 import { AI_ROLES, defaultModelFor, GEMINI_ENDPOINT, rowFor, thinkingFor, type AiRole } from "@shared/ai-models";
-import { FORMAT_VERSIONS } from "./format-versions";
+import { FORMATS } from "./format-versions";
 import { providerEndpointIssue } from "@shared/provider-endpoint";
 import { JsonStore, type LoadResult } from "./json-store";
 import { OperationError } from "./operation-error";
@@ -139,7 +139,6 @@ function unusableSets(raw: Record<string, unknown>): UnusableSets {
   const unknown: Record<string, unknown> = Object.create(null);
   const invalid: Partial<Record<keyof MumblerSettings, unknown>> = {};
   for (const key of Object.keys(raw)) {
-    if (key === "formatVersion") continue;
     if (!Object.hasOwn(SETTINGS_SETS, key)) unknown[key] = raw[key];
     else if (SETTINGS_SETS[key as keyof MumblerSettings](raw[key]) !== null) invalid[key as keyof MumblerSettings] = raw[key];
   }
@@ -276,7 +275,7 @@ export class SettingsStore {
   ) {
     this.store = new JsonStore({
       path,
-      formatVersion: FORMAT_VERSIONS.config,
+      format: FORMATS.config,
       validate: (raw) => raw,
       createDefault: () => ({}),
       // Settings are what the user authors, the one store the backup history protects.

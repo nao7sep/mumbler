@@ -1,7 +1,7 @@
 import type { MumblerLayout } from "@shared/app-shell";
 import { QUEUE_WIDTH, RECORDS_LIST_WIDTH } from "@shared/layout";
 
-import { FORMAT_VERSIONS } from "./format-versions";
+import { FORMATS } from "./format-versions";
 import { JsonStore } from "./json-store";
 
 // Snap a persisted/candidate width to the queue-pane bounds. A non-finite or
@@ -54,7 +54,7 @@ export function selectExistingCardId(
 export function createLayoutStore(path: string): JsonStore<MumblerLayout> {
   return new JsonStore<MumblerLayout>({
     path,
-    formatVersion: FORMAT_VERSIONS.layout,
+    format: FORMATS.layout,
     validate: (raw) => normalizeLayout(raw),
     createDefault: () => createDefaultLayout(),
     // Volatile state (pane widths, selected card) only: not recorded in backups.sqlite3.

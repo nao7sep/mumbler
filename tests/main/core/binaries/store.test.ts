@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDependenciesStore, launchCheckDue } from "@main/core/binaries/store";
 import { NewerFormatError } from "@main/core/format-versions";
 import { closeBackupStore } from "@main/core/backupStore";
+import { header } from "../../../support/file-header";
 
 let dir: string;
 
@@ -30,7 +31,7 @@ describe("dependencies store — timestamp persistence", () => {
   it.each(["2023-11-14T22:13:20", "2023-11-14T22:13:20.000+09:00", "2023-11-14", "2023-02-30T22:13:20.000Z"])(
     "ignores an invalid or non-UTC check fact: %s", async (time) => {
       await writeFile(storePath(), JSON.stringify({
-        formatVersion: 1, lastCheckAttemptAtUtc: time,
+        ...header("dependencies"), lastCheckAttemptAtUtc: time,
         tools: { ffmpeg: { desiredVersion: "8.2", lastCheckedAtUtc: time } },
       }));
       const loaded = (await createDependenciesStore(storePath()).load()).value;
@@ -59,7 +60,7 @@ describe("dependencies store — timestamp persistence", () => {
     await writeFile(
       storePath(),
       JSON.stringify({
-        formatVersion: 1,
+        ...header("dependencies"),
         tools: {
           ffmpeg: { installedVersion: "8.1", desiredVersion: "8.1", lastCheckedAtUtc: null },
           ffprobe: {},
@@ -77,9 +78,9 @@ describe("dependencies store — timestamp persistence", () => {
   it("writes its format version, and refuses a newer file without touching it", async () => {
     const store = createDependenciesStore(storePath());
     await store.save((await store.load()).value);
-    expect(JSON.parse(await readFile(storePath(), "utf8")).formatVersion).toBe(1);
+    expect(JSON.parse(await readFile(storePath(), "utf8"))).toMatchObject(header("dependencies"));
 
-    const newer = JSON.stringify({ formatVersion: 2, tools: {} });
+    const newer = JSON.stringify({ ...header("dependencies", 2), tools: {} });
     await writeFile(storePath(), newer);
     await expect(createDependenciesStore(storePath()).load()).rejects.toBeInstanceOf(NewerFormatError);
     expect(await readFile(storePath(), "utf8")).toBe(newer);
@@ -119,7 +120,7 @@ describe("the launch check's last attempt", () => {
     expect(JSON.parse(await readFile(storePath(), "utf8")).lastCheckAttemptAtUtc).toBe("2023-11-14T22:13:20.000Z");
     expect((await createDependenciesStore(storePath()).load()).value.lastCheckAttemptAtUtc).toBe(NOW);
 
-    await writeFile(storePath(), JSON.stringify({ formatVersion: 1, tools: {}, lastCheckAttemptAtUtc: "not a time" }));
+    await writeFile(storePath(), JSON.stringify({ ...header("dependencies"), tools: {}, lastCheckAttemptAtUtc: "not a time" }));
     expect((await createDependenciesStore(storePath()).load()).value.lastCheckAttemptAtUtc).toBeNull();
   });
 });

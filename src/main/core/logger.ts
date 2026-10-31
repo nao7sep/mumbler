@@ -4,6 +4,7 @@ import { Worker } from "node:worker_threads";
 
 import { formatUtcMarkerMs } from "@shared/timestamps";
 
+import { appWriter } from "./format-versions";
 import {
   fallbackLine,
   reportRecordsFailure,
@@ -145,6 +146,7 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
   const target: RecordsTarget | null = paths === null ? null : {
     databasePath: paths.recordsPath,
     fallbackPath: join(paths.logsDir, `${formatUtcMarkerMs(sessionStart)}.log`),
+    writer: appWriter(),
   };
 
   let worker: Worker | null = null;

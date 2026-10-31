@@ -8,7 +8,7 @@ import type {
   RecordSummary,
 } from "@shared/records";
 
-import { FORMAT_VERSIONS } from "./format-versions.ts";
+import { type FileWriter, FORMATS } from "./format-versions.ts";
 import { openVersionedDatabase } from "./sqlite-store.ts";
 
 // The records database (data-lifecycle-conventions, Records): one row per log
@@ -118,6 +118,8 @@ const CALL_SEARCHED = [
 export interface RecordsTarget {
   databasePath: string;
   fallbackPath: string;
+  /** The app, passed in: the worker is not built with the app's version define. */
+  writer: FileWriter;
 }
 
 const JSON_FIELDS = new Set(["details", "error", "request", "response"]);
@@ -212,7 +214,7 @@ export class RecordsEngine {
     this.opened = true;
     // A database in a newer format is left untouched: entries go to the
     // fallback file and reads fail, as for any database that cannot be opened.
-    this.db = openVersionedDatabase(this.target.databasePath, FORMAT_VERSIONS.records, SCHEMA, (error) => this.report(recordsFailureText(error)));
+    this.db = openVersionedDatabase(this.target.databasePath, FORMATS.records, this.target.writer, SCHEMA, (error) => this.report(recordsFailureText(error)));
     return this.db;
   }
 

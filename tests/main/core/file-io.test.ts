@@ -204,13 +204,13 @@ describe.skipIf(process.platform === "win32")("writeJsonFile — the replaced fi
 describe("writeJsonFile — a write that changes nothing", () => {
   it("leaves a file that already holds the same bytes untouched", async () => {
     const target = join(dir, "config.json");
-    await writeJsonFile(target, { formatVersion: 1, cards: [] });
+    await writeJsonFile(target, { revision: 1, cards: [] });
     const earlier = new Date(Date.UTC(2024, 4, 6, 7, 8, 9));
     await utimes(target, earlier, earlier);
     capturedRenames.length = 0;
     backupRecord.mockClear();
 
-    await writeJsonFile(target, { formatVersion: 1, cards: [] });
+    await writeJsonFile(target, { revision: 1, cards: [] });
 
     expect((await stat(target)).mtime.getTime()).toBe(earlier.getTime());
     expect(capturedRenames).toEqual([]);
@@ -219,11 +219,11 @@ describe("writeJsonFile — a write that changes nothing", () => {
 
   it("still writes a change", async () => {
     const target = join(dir, "config.json");
-    await writeJsonFile(target, { formatVersion: 1, cards: [] });
+    await writeJsonFile(target, { revision: 1, cards: [] });
 
-    await writeJsonFile(target, { formatVersion: 1, cards: ["x"] });
+    await writeJsonFile(target, { revision: 1, cards: ["x"] });
 
-    expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ formatVersion: 1, cards: ["x"] });
+    expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ revision: 1, cards: ["x"] });
   });
 });
 
@@ -268,7 +268,7 @@ describe("writeJsonFile — data-backup record hook", () => {
   it("records nothing by default: a store opts in at its own write boundary", async () => {
     const target = join(dir, "config.json");
 
-    await writeJsonFile(target, { formatVersion: 1 });
+    await writeJsonFile(target, { revision: 1 });
 
     expect(backupRecord).not.toHaveBeenCalled();
     expect(writeEvents).toEqual([`rename:${target}`]);

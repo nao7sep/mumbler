@@ -51,7 +51,9 @@ describe("staging and supported output markers", () => {
   it.each(["json", "markdown"] as const)("overwrite replaces a newer-format %s like any other output", async (kind) => {
     const t = targets();
     const path = kind === "json" ? t.jsonPath : t.markdownPath;
-    const future = kind === "json" ? '{"formatVersion":2}' : "---\nformat_version: 2\n---\nFuture body";
+    const future = kind === "json"
+      ? '{"format":{"owner":"mumbler","kind":"sidecar","version":2}}'
+      : '---\nformat: { owner: "mumbler", kind: "transcript", version: 2 }\n---\nFuture body';
     await writeFile(path, future);
     await writeFile(t.audioPath, "OLD AUDIO");
     await save();

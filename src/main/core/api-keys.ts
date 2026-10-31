@@ -1,7 +1,7 @@
 import { chmod, stat } from "node:fs/promises";
 
 import { preserveAside, readJsonFile, writeJsonFile } from "./file-io";
-import { FORMAT_VERSIONS, NewerFormatError, recordedFormatVersion } from "./format-versions";
+import { fileHeader, FORMATS, NewerFormatError, recordedFormatVersion } from "./format-versions";
 
 /**
  * API key storage and resolution — the secret store, kept in its own 0600 file
@@ -118,14 +118,14 @@ async function warnIfInsecureMode(filePath: string, warn: WarnFn): Promise<void>
   }
 }
 
-// Validate and canonicalize the on-disk shape: `{ formatVersion, keys: { id: value } }`, ids
+// Validate and canonicalize the on-disk shape: `{ format, writer, keys: { id: value } }`, ids
 // lowercased and matched against the id grammar, values kept only when strings.
 // A hand-edited, otherwise valid container degrades to whatever entries are
 // valid. A wrong root/container shape returns null so the caller can preserve
 // the original bytes before treating the canonical store as empty.
 function normalize(raw: unknown): ApiKeysFile | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-  if (recordedFormatVersion(raw as Record<string, unknown>) === null) return null;
+  if (recordedFormatVersion(raw as Record<string, unknown>, FORMATS.apiKeys) !== FORMATS.apiKeys.version) return null;
   const rawKeys = (raw as { keys?: unknown }).keys;
   if (!rawKeys || typeof rawKeys !== "object" || Array.isArray(rawKeys)) return null;
   const keys: Record<string, string> = {};
@@ -166,10 +166,10 @@ async function readAll(filePath: string, warn: WarnFn): Promise<StoredKeys> {
   }
   if (raw === undefined) return { kind: "absent" };
   const recorded = raw !== null && typeof raw === "object" && !Array.isArray(raw)
-    ? recordedFormatVersion(raw as Record<string, unknown>)
+    ? recordedFormatVersion(raw as Record<string, unknown>, FORMATS.apiKeys)
     : null;
-  if (recorded !== null && recorded > FORMAT_VERSIONS.apiKeys) {
-    const newer = new NewerFormatError(filePath, recorded, FORMAT_VERSIONS.apiKeys);
+  if (recorded !== null && recorded > FORMATS.apiKeys.version) {
+    const newer = new NewerFormatError(filePath, recorded, FORMATS.apiKeys.version);
     warn("api-keys.json is in a newer format; left unchanged and no stored key is available.", {
       path: filePath,
       error: newer.message,
@@ -208,7 +208,7 @@ async function writeAll(filePath: string, data: ApiKeysFile): Promise<void> {
   // secrets out is what keeps backups.sqlite3 no more sensitive than ordinary user text. `record: false` is
   // the explicit opt-out — NOT gated on `mode`, because on Windows the mode is undefined yet the file is
   // still the secret. The live secret keeps its own 0600 protection here; that is where a secret is guarded.
-  await writeJsonFile(filePath, { formatVersion: FORMAT_VERSIONS.apiKeys, ...data }, {
+  await writeJsonFile(filePath, { ...fileHeader(FORMATS.apiKeys), ...data }, {
     mode: ENFORCE_FILE_MODE ? SECRETS_FILE_MODE : undefined,
     record: false,
   });

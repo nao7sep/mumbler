@@ -53,7 +53,7 @@ describe("createDefaultLayout", () => {
 
 describe("normalizeLayout", () => {
   it("clamps a persisted width and keeps the format version out of the layout", () => {
-    expect(normalizeLayout({ formatVersion: 1, queueWidth: 640, recordsListWidth: 9999 })).toEqual({
+    expect(normalizeLayout({ queueWidth: 640, recordsListWidth: 9999 })).toEqual({
       queueWidth: 640,
       recordsListWidth: RECORDS_LIST_WIDTH.max,
       selectedCardId: null,

@@ -91,7 +91,8 @@ describe("buildMarkdownContent", () => {
     expect(content).toBe(
       [
         "---",
-        "format_version: 1",
+        `format: { owner: "mumbler", kind: "transcript", version: 1 }`,
+        `writer: { name: "mumbler", version: "${__APP_VERSION__}" }`,
         'date: "2026-04-22T00:44:00.000Z"',
         'audio: "20260422-004400-my-slug.m4a"',
         "duration: 42",
@@ -141,7 +142,7 @@ describe("computeFinalDuration", () => {
 });
 
 describe("buildOutputPayload", () => {
-  it("emits a format-versioned payload with formatted timestamps and transcription", () => {
+  it("emits a payload opening with its header, with formatted timestamps and transcription", () => {
     const payload = buildOutputPayload({
       card: makeCard(),
       finalProfile: makeCard().audioProfile,
@@ -149,9 +150,10 @@ describe("buildOutputPayload", () => {
       finalizedAtUtc: Date.UTC(2026, 3, 22, 2, 0, 0),
     });
 
-    expect(payload.formatVersion).toBe(1);
-    expect(Object.keys(payload)[0]).toBe("formatVersion");
-    expect(payload.appVersion).toBe(__APP_VERSION__);
+    expect(Object.keys(payload).slice(0, 2)).toEqual(["format", "writer"]);
+    expect(payload.format).toEqual({ owner: "mumbler", kind: "sidecar", version: 1 });
+    expect(payload.writer).toEqual({ name: "mumbler", version: __APP_VERSION__ });
+    expect(payload).not.toHaveProperty("appVersion");
     expect(payload.transcription).toEqual({
       raw: "raw text",
       structured: "## Outline\n\nBody.",

@@ -49,8 +49,17 @@ function connect(target = file): DatabaseSync {
   connections.push(db);
   return db;
 }
-function open(version = 1, ddl = schema, report = vi.fn()): DatabaseSync {
-  const db = openVersionedDatabase(file, version, ddl, report);
+const WRITER = { name: "mumbler", version: "1.0.0" };
+// A database's file header as an earlier session of this format left it.
+function headerSql(owner = "mumbler", kind = "facts", writer = WRITER.name): string {
+  return `CREATE TABLE file_header (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO file_header VALUES ('format.owner', '${owner}'), ('format.kind', '${kind}'), ('writer.name', '${writer}'), ('writer.version', '0.0.1')`;
+}
+function headerRows(db: DatabaseSync): Record<string, string> {
+  return Object.fromEntries((db.prepare("SELECT key, value FROM file_header").all() as { key: string; value: string }[]).map((row) => [row.key, row.value]));
+}
+function open(version = 1, ddl = schema, report = vi.fn(), kind = "facts"): DatabaseSync {
+  const db = openVersionedDatabase(file, { kind, version }, WRITER, ddl, report);
   connections.push(db);
   return db;
 }
@@ -79,6 +88,7 @@ describe("SQLite creation and admission", () => {
     expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
     expect(db.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
     expect(db.prepare("SELECT * FROM facts").all()).toEqual([]);
+    expect(headerRows(db)).toEqual({ "format.owner": "mumbler", "format.kind": "facts", "writer.name": "mumbler", "writer.version": "1.0.0" });
     expect(readdirSync(root).some((name) => name.startsWith(".mumbler-sqlite-"))).toBe(false);
   });
 
@@ -99,16 +109,35 @@ describe("SQLite creation and admission", () => {
   });
 
   it("continues writing an existing current-format database", () => {
-    connect().exec(`PRAGMA user_version = 1; ${schema}; INSERT INTO facts VALUES ('earlier')`);
+    connect().exec(`PRAGMA user_version = 1; ${headerSql()}; ${schema}; INSERT INTO facts VALUES ('earlier')`);
     const db = open();
     db.exec("INSERT INTO facts VALUES ('current')");
     expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
     expect(db.prepare("SELECT value FROM facts ORDER BY rowid").all()).toEqual([{ value: "earlier" }, { value: "current" }]);
   });
 
+  it("rewrites the writer rows at open and never reads them", () => {
+    connect().exec(`PRAGMA user_version = 1; ${headerSql("mumbler", "facts", "someone-else")}; ${schema}`);
+    const db = open();
+    expect(headerRows(db)).toEqual({ "format.owner": "mumbler", "format.kind": "facts", "writer.name": "mumbler", "writer.version": "1.0.0" });
+  });
+
+  it.each([
+    ["no file header", ""],
+    ["another owner", headerSql("otherapp")],
+    ["another kind", headerSql("mumbler", "records")],
+  ])("refuses a database with %s without changing it", (_name, header) => {
+    const db = connect();
+    db.exec(`PRAGMA user_version = 1; ${header}${header === "" ? "" : ";"} ${schema}; INSERT INTO facts VALUES ('kept')`);
+    const bytes = readFileSync(file);
+    expect(() => open()).toThrow("has no file header naming it a Mumbler facts database");
+    expect(readFileSync(file)).toEqual(bytes);
+    expect(db.prepare("SELECT value FROM facts").all()).toEqual([{ value: "kept" }]);
+  });
+
   it("does not change a valid existing database's journal mode", () => {
     const db = connect();
-    db.exec(`PRAGMA user_version = 1; ${schema}`);
+    db.exec(`PRAGMA user_version = 1; ${headerSql()}; ${schema}`);
     open();
     expect(db.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "delete" });
   });
@@ -150,14 +179,15 @@ describe("SQLite creation and admission", () => {
 
   it("rolls back failed schema application on an existing store", () => {
     const db = connect();
-    db.exec("PRAGMA user_version = 1; CREATE TABLE kept (value TEXT)");
+    db.exec(`PRAGMA user_version = 1; ${headerSql()}; CREATE TABLE kept (value TEXT)`);
     expect(() => open(1, `${schema}; NOT VALID SQL`)).toThrow();
-    expect(db.prepare("SELECT name FROM sqlite_master ORDER BY name").all()).toEqual([{ name: "kept" }]);
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).toEqual([{ name: "file_header" }, { name: "kept" }]);
+    expect(headerRows(db)["writer.version"], "the writer rows roll back too").toBe("0.0.1");
   });
 
   it("rechecks admission after acquiring the initialization writer slot", () => {
     const db = connect();
-    db.exec(`PRAGMA user_version = 1; ${schema}`);
+    db.exec(`PRAGMA user_version = 1; ${headerSql()}; ${schema}`);
     const exec = DatabaseSync.prototype.exec;
     let change = true;
     vi.spyOn(DatabaseSync.prototype, "exec").mockImplementation(function (this: DatabaseSync, sql) {
@@ -168,7 +198,7 @@ describe("SQLite creation and admission", () => {
       exec.call(this, sql);
     });
     expect(() => open(1, "CREATE TABLE forbidden (value TEXT)")).toThrow("newer than this build reads");
-    expect(db.prepare("SELECT name FROM sqlite_master").all()).toEqual([{ name: "facts" }]);
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).toEqual([{ name: "facts" }, { name: "file_header" }]);
     expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
   });
 
@@ -212,7 +242,7 @@ describe("SQLite engine admission at open", () => {
   it("leaves a newer backup store untouched and records nothing into it", () => {
     connect().exec("PRAGMA user_version = 3");
     const warn = vi.fn();
-    const engine = new BackupStoreEngine(file, "session", warn);
+    const engine = new BackupStoreEngine(file, "session", WRITER, warn);
     engines.push(engine);
     engine.record("recording", Buffer.from("refused"), "2026-10-07T00:00:00.000Z");
     expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: expect.stringContaining("newer than this build reads") }));
@@ -223,7 +253,7 @@ describe("SQLite engine admission at open", () => {
 
   it("refuses writes and reads of a newer records store at open, leaving it untouched", () => {
     connect().exec("PRAGMA user_version = 2");
-    const engine = new RecordsEngine({ databasePath: file, fallbackPath: join(root, "fallback.log") }, vi.fn());
+    const engine = new RecordsEngine({ databasePath: file, fallbackPath: join(root, "fallback.log"), writer: WRITER }, vi.fn());
     engines.push(engine);
     expect(engine.write(entry("refused")), "the caller writes it to the fallback file").toBe(false);
     expect(() => engine.read({ op: "sources" })).toThrow("records database is unavailable");
@@ -231,7 +261,7 @@ describe("SQLite engine admission at open", () => {
   });
 
   it("keeps multi-query sources in one read snapshot", () => {
-    const engine = new RecordsEngine({ databasePath: file, fallbackPath: join(root, "fallback.log") }, vi.fn());
+    const engine = new RecordsEngine({ databasePath: file, fallbackPath: join(root, "fallback.log"), writer: WRITER }, vi.fn());
     engines.push(engine);
     engine.write(entry("first"));
     const db = connect();

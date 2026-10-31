@@ -7,7 +7,7 @@ import { formatUtcIsoCompact } from "@shared/timestamps";
 
 import { runTool } from "../audio-tools";
 import { writeJsonFile } from "../file-io";
-import { FORMAT_VERSIONS, recordedFormatVersion } from "../format-versions";
+import { fileHeader, FORMATS, recordedFormatVersion } from "../format-versions";
 import { normalizeToolVersion } from "./registry";
 import { sha256OfFile } from "./integrity";
 
@@ -64,8 +64,7 @@ export function versionSidecarPath(binDir: string, name: ToolName): string {
   return join(binDir, `${name}.json`);
 }
 
-interface VersionSidecar {
-  formatVersion: number;
+interface VersionSidecar extends ReturnType<typeof fileHeader> {
   version: string;
   installedAt: string;
   binarySha256: string;
@@ -85,7 +84,7 @@ export async function writeVersionSidecar(
   signal?: AbortSignal,
 ): Promise<void> {
   const payload: VersionSidecar = {
-    formatVersion: FORMAT_VERSIONS.toolVersion,
+    ...fileHeader(FORMATS.toolVersion),
     version,
     installedAt: formatUtcIsoCompact(nowUtc),
     binarySha256: await sha256OfFile(toolPath, signal),
@@ -128,8 +127,7 @@ async function readSidecar(binDir: string, name: ToolName, toolPath: string): Pr
   try {
     const raw: unknown = JSON.parse(await readFile(versionSidecarPath(binDir, name), "utf8"));
     if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-    const recorded = recordedFormatVersion(raw as Record<string, unknown>);
-    if (recorded === null || recorded > FORMAT_VERSIONS.toolVersion) return null;
+    if (recordedFormatVersion(raw as Record<string, unknown>, FORMATS.toolVersion) !== FORMATS.toolVersion.version) return null;
     const sidecar = raw as Partial<VersionSidecar>;
     if (typeof sidecar.version !== "string" || !FFMPEG_BUILD_TAG.test(sidecar.version)
       || typeof sidecar.binarySha256 !== "string" || !/^[a-f0-9]{64}$/.test(sidecar.binarySha256)) return null;

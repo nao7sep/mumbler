@@ -1,7 +1,7 @@
 import type { ToolName } from "@shared/app-shell";
 import { formatUtcIsoCompact, parseUtcMs } from "@shared/timestamps";
 
-import { FORMAT_VERSIONS } from "../format-versions";
+import { FORMATS } from "../format-versions";
 import { JsonStore } from "../json-store";
 import { TOOL_NAMES } from "./registry";
 
@@ -100,7 +100,7 @@ function serializeDependencies(value: DependenciesValue): object {
 export function createDependenciesStore(path: string): JsonStore<DependenciesValue> {
   return new JsonStore<DependenciesValue>({
     path,
-    formatVersion: FORMAT_VERSIONS.dependencies,
+    format: FORMATS.dependencies,
     validate: normalize,
     createDefault: createDefaultDependencies,
     serialize: serializeDependencies,

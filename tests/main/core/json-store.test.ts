@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { NewerFormatError } from "@main/core/format-versions";
 import { CorruptStateError, JsonStore, UnreadableStoreError } from "@main/core/json-store";
+import { header } from "../../support/file-header";
 
 interface Doc {
   value: string;
@@ -24,7 +25,7 @@ afterEach(async () => {
 function makeStore(): JsonStore<Doc> {
   return new JsonStore<Doc>({
     path: join(dir, "doc.json"),
-    formatVersion: 1,
+    format: { kind: "doc", version: 1 },
     validate: (raw) => ({
       value: typeof raw.value === "string" ? raw.value : "fallback",
     }),
@@ -47,7 +48,7 @@ describe("JsonStore.load", () => {
 
   it("validates a present file and reports origin 'loaded'", async () => {
     const store = makeStore();
-    await writeFile(store.path, JSON.stringify({ formatVersion: 1, value: "hi", extra: 1 }), "utf8");
+    await writeFile(store.path, JSON.stringify({ ...header("doc"), value: "hi", extra: 1 }), "utf8");
     const result = await store.load();
     expect(result.origin).toBe("loaded");
     expect(result.value).toEqual({ value: "hi" });
@@ -79,7 +80,7 @@ describe("JsonStore.load", () => {
 
   it("refuses a format version newer than this build as intact, not corrupt, and leaves the file untouched", async () => {
     const store = makeStore();
-    const newer = JSON.stringify({ formatVersion: 2, value: "future" });
+    const newer = JSON.stringify({ ...header("doc", 2), value: "future" });
     await writeFile(store.path, newer, "utf8");
     const error = await store.load().catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(NewerFormatError);
@@ -89,29 +90,51 @@ describe("JsonStore.load", () => {
     expect((await readdir(dir)).sort()).toEqual(["doc.json"]);
   });
 
-  it("treats a missing format version, or one that is not a positive integer, as corruption, untouched", async () => {
+  it.each<[string, Record<string, unknown>]>([
+    ["no header", {}],
+    ["a header that is not an object", { format: "mumbler.doc" }],
+    ["another owner", { format: { owner: "otherapp", kind: "doc", version: 1 } }],
+    ["another kind", { format: { owner: "mumbler", kind: "config", version: 1 } }],
+    ["a kind that is not text", { format: { owner: "mumbler", kind: 1, version: 1 } }],
+    ...[undefined, 0, -1, 1.5, "1", null].map((version) => [`version ${String(version)}`, { format: { owner: "mumbler", kind: "doc", version } }] as [string, Record<string, unknown>]),
+    ["the old marker only", { formatVersion: 1 }],
+  ])("treats a file with %s as corruption, untouched", async (_name, identity) => {
     const store = makeStore();
-    for (const marker of [undefined, 0, -1, 1.5, "1", null]) {
-      const text = JSON.stringify({ formatVersion: marker, value: "odd" });
-      await writeFile(store.path, text, "utf8");
-      await expect(store.load()).rejects.toBeInstanceOf(CorruptStateError);
-      expect(await readFile(store.path, "utf8")).toBe(text);
-    }
+    const text = JSON.stringify({ ...identity, value: "odd" });
+    await writeFile(store.path, text, "utf8");
+    await expect(store.load()).rejects.toBeInstanceOf(CorruptStateError);
+    expect(await readFile(store.path, "utf8")).toBe(text);
   });
 
   it("writes no sidecar file: a successful load leaves only the canonical file", async () => {
     const store = makeStore();
-    await writeFile(store.path, JSON.stringify({ formatVersion: 1, value: "good" }), "utf8");
+    await writeFile(store.path, JSON.stringify({ ...header("doc"), value: "good" }), "utf8");
     await store.load();
     expect((await readdir(dir)).sort()).toEqual(["doc.json"]);
   });
 });
 
 describe("JsonStore.save / flush", () => {
-  it("writes the value atomically, its format version first", async () => {
+  it("writes the value atomically, its header first", async () => {
     const store = makeStore();
     await store.save({ value: "written" });
-    expect(await readFile(store.path, "utf8")).toBe('{\n  "formatVersion": 1,\n  "value": "written"\n}\n');
+    expect(Object.keys(await read(store.path) as object)).toEqual(["format", "writer", "value"]);
+    expect(await read(store.path)).toEqual({ ...header("doc"), value: "written" });
+  });
+
+  it("reads a file whatever its writer says, and hands validate only the content", async () => {
+    let seen: Record<string, unknown> = {};
+    const store = new JsonStore<Doc>({
+      path: join(dir, "doc.json"),
+      format: { kind: "doc", version: 1 },
+      validate: (raw) => { seen = raw; return { value: String(raw.value) }; },
+      createDefault: () => ({ value: "default" }),
+    });
+    for (const writer of [undefined, null, "anything", { name: "otherapp", version: 99 }]) {
+      await writeFile(store.path, JSON.stringify({ format: header("doc").format, writer, value: "read" }), "utf8");
+      expect((await store.load()).value).toEqual({ value: "read" });
+      expect(seen).toEqual({ value: "read" });
+    }
   });
 
   it("serializes overlapping saves so the last one wins and none are lost", async () => {
@@ -120,7 +143,7 @@ describe("JsonStore.save / flush", () => {
       store.save({ value: `v${i}` }),
     );
     await Promise.all(writes);
-    expect(await read(store.path)).toEqual({ formatVersion: 1, value: "v19" });
+    expect(await read(store.path)).toEqual({ ...header("doc"), value: "v19" });
   });
 
   it("flush resolves only after queued writes have landed", async () => {
@@ -128,7 +151,7 @@ describe("JsonStore.save / flush", () => {
     void store.save({ value: "a" });
     void store.save({ value: "b" });
     await store.flush();
-    expect(await read(store.path)).toEqual({ formatVersion: 1, value: "b" });
+    expect(await read(store.path)).toEqual({ ...header("doc"), value: "b" });
   });
 
   it("a failed write rejects but does not wedge the queue, and flush stays resolvable", async () => {
@@ -138,7 +161,7 @@ describe("JsonStore.save / flush", () => {
     await writeFile(blocker, "x", "utf8");
     const store = new JsonStore<Doc>({
       path: join(blocker, "doc.json"),
-      formatVersion: 1,
+      format: { kind: "doc", version: 1 },
       validate: (raw) => ({ value: typeof raw.value === "string" ? raw.value : "fallback" }),
       createDefault: () => ({ value: "default" }),
     });
@@ -150,7 +173,7 @@ describe("JsonStore.save / flush", () => {
     // Unblock and confirm the queue still accepts and lands new writes.
     await rm(blocker);
     await store.save({ value: "ok" });
-    expect(await read(store.path)).toEqual({ formatVersion: 1, value: "ok" });
+    expect(await read(store.path)).toEqual({ ...header("doc"), value: "ok" });
   });
 });
 
@@ -170,7 +193,7 @@ describe("JsonStore.preserveExistingFiles", () => {
     const store = makeStore();
     await store.save({ value: "old" });
     await store.load();
-    const text = JSON.stringify({ formatVersion: 2, value: "future" });
+    const text = JSON.stringify({ ...header("doc", 2), value: "future" });
     await writeFile(store.path, text);
     await expect(store.preserveExistingFiles()).rejects.toBeInstanceOf(NewerFormatError);
     expect(await readFile(store.path, "utf8")).toBe(text);
@@ -183,13 +206,13 @@ describe("JsonStore.preserveExistingFiles", () => {
 
   it("moves the canonical file aside, preserving its contents under a quarantined .invalid name", async () => {
     const store = makeStore();
-    await writeFile(store.path, JSON.stringify({ formatVersion: 1, value: "canonical" }), "utf8");
+    await writeFile(store.path, JSON.stringify({ ...header("doc"), value: "canonical" }), "utf8");
 
     const preserved = await store.preserveExistingFiles();
 
     expect(preserved).toHaveLength(1);
     await expect(readFile(store.path, "utf8")).rejects.toThrow();
-    expect(await read(preserved[0]!)).toEqual({ formatVersion: 1, value: "canonical" });
+    expect(await read(preserved[0]!)).toEqual({ ...header("doc"), value: "canonical" });
     expect(preserved[0]!).toMatch(/doc-\d{8}-\d{6}-\d{3}-utc\.invalid$/);
   });
 
@@ -197,16 +220,16 @@ describe("JsonStore.preserveExistingFiles", () => {
     // Reset sets the original aside and writes defaults. The original data must
     // stay recoverable from the preserved copy, and nothing else should leak.
     const store = makeStore();
-    await writeFile(store.path, JSON.stringify({ formatVersion: 1, value: "real" }), "utf8");
+    await writeFile(store.path, JSON.stringify({ ...header("doc"), value: "real" }), "utf8");
     await store.load();
 
     const preserved = await store.preserveExistingFiles();
     await store.save({ value: "default" });
 
     // The live file is now defaults...
-    expect(await read(store.path)).toEqual({ formatVersion: 1, value: "default" });
+    expect(await read(store.path)).toEqual({ ...header("doc"), value: "default" });
     // ...but the original "real" data is still recoverable from the preserved copy.
-    expect(await read(preserved[0]!)).toEqual({ formatVersion: 1, value: "real" });
+    expect(await read(preserved[0]!)).toEqual({ ...header("doc"), value: "real" });
 
     // And nothing leaked: exactly the canonical and the preserved copy remain.
     const remaining = await readdir(dir);
@@ -220,7 +243,7 @@ describe("JsonStore failed writes", () => {
   function storeIn(folder: string): JsonStore<Doc> {
     return new JsonStore<Doc>({
       path: join(folder, "doc.json"),
-      formatVersion: 1,
+      format: { kind: "doc", version: 1 },
       validate: (raw) => ({ value: String(raw.value) }),
       createDefault: () => ({ value: "default" }),
       record: false,
@@ -243,7 +266,7 @@ describe("JsonStore failed writes", () => {
     await rm(folder);
     await store.retryFailedWrite();
     expect(store.failedWrite).toBeNull();
-    expect(await read(join(folder, "doc.json"))).toEqual({ formatVersion: 1, value: "kept" });
+    expect(await read(join(folder, "doc.json"))).toEqual({ ...header("doc"), value: "kept" });
   });
 
   it("retries nothing when the latest write landed", async () => {
