@@ -17,15 +17,15 @@ export const FORMATS = {
   /** cards/<id>/card.json */
   card: { kind: "card", version: 1 },
   /** inbox/<id>/import.json, a pending import's review choices */
-  pendingImport: { kind: "pendingImport", version: 1 },
+  pendingImport: { kind: "pending-import", version: 1 },
   /** layout.json */
   layout: { kind: "layout", version: 1 },
   /** api-keys.json */
-  apiKeys: { kind: "apiKeys", version: 1 },
+  apiKeys: { kind: "api-keys", version: 1 },
   /** dependencies.json */
   dependencies: { kind: "dependencies", version: 1 },
   /** bin/<tool>.json, the installed version beside a managed tool */
-  toolVersion: { kind: "toolVersion", version: 1 },
+  toolVersion: { kind: "tool-version", version: 1 },
   /** records.sqlite3 */
   records: { kind: "records", version: 1 },
   /** backups.sqlite3, one row per file per launch */

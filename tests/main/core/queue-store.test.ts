@@ -136,7 +136,7 @@ describe("the queue on disk", () => {
 
   it("keeps each pending import's choices in its own folder beside its copy, ordered by when it was imported", async () => {
     await savePending([pending("p2", { createdAtUtc: Date.UTC(2026, 3, 23) }), pending("p1")]);
-    expect(JSON.parse(await readFile(importPath("p1"), "utf8"))).toMatchObject({ ...header("pendingImport"), id: "p1" });
+    expect(JSON.parse(await readFile(importPath("p1"), "utf8"))).toMatchObject({ ...header("pending-import"), id: "p1" });
     const { state } = await store.load(logger);
     expect(state.pendingImports.map((item) => item.id)).toEqual(["p1", "p2"]);
     expect(state.pendingImports[0]).toEqual(pending("p1"));
@@ -235,7 +235,7 @@ describe("the queue on disk", () => {
     ["a delete choice that is not true or false", { ...pending("p1"), deleteOriginalOnConfirm: "false" }],
   ])("reports a pending import with %s as unreadable, leaves it untouched and loads the rest", async (_name, shape) => {
     await savePending([pending("p1"), pending("p2")]);
-    const text = JSON.stringify({ ...header("pendingImport"), ...shape });
+    const text = JSON.stringify({ ...header("pending-import"), ...shape });
     await writeFile(importPath("p1"), text);
     const loaded = await store.load(logger);
     expect(loaded.state.pendingImports.map((item) => item.id)).toEqual(["p2"]);
@@ -246,7 +246,7 @@ describe("the queue on disk", () => {
   it.each([
     ["no format header", { format: undefined }],
     ["another owner's header", { format: { owner: "otherapp", kind: "card", version: 1 } }],
-    ["another kind's header", { format: { owner: "mumbler", kind: "pendingImport", version: 1 } }],
+    ["another kind's header", { format: { owner: "mumbler", kind: "pending-import", version: 1 } }],
     ["a malformed header", { format: { owner: "mumbler", kind: "card", version: "1" } }],
     ["an id that is not its folder's", { id: "other" }],
     ["a working recording path that is not text", { sourceFilePath: 3 }],

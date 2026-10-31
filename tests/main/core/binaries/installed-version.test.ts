@@ -86,7 +86,7 @@ describe("the sidecar", () => {
   it("records when it was installed, in canonical UTC", async () => {
     await writeVersionSidecar(binDir, "ffmpeg", "8.2", 1_700_000_000_000, join(binDir, "ffmpeg.exe"));
     const raw: unknown = JSON.parse(await readFile(versionSidecarPath(binDir, "ffmpeg"), "utf8"));
-    expect(raw).toEqual({ ...header("toolVersion"), version: "8.2", installedAt: "2023-11-14T22:13:20.000Z", binarySha256: createHash("sha256").update("binary bytes").digest("hex") });
+    expect(raw).toEqual({ ...header("tool-version"), version: "8.2", installedAt: "2023-11-14T22:13:20.000Z", binarySha256: createHash("sha256").update("binary bytes").digest("hex") });
   });
 
   it.skipIf(process.platform === "win32")("keeps the mode of the sidecar it replaces", async () => {
@@ -115,7 +115,7 @@ describe("the sidecar", () => {
     await writeFile(versionSidecarPath(binDir, "ffmpeg"), JSON.stringify({ version: tag }), "utf8");
     expect(await read()).toBeNull();
 
-    const newer = JSON.stringify({ ...header("toolVersion", 2), version: tag });
+    const newer = JSON.stringify({ ...header("tool-version", 2), version: tag });
     await writeFile(versionSidecarPath(binDir, "ffmpeg"), newer, "utf8");
     expect(await read()).toBeNull();
     expect(await readFile(versionSidecarPath(binDir, "ffmpeg"), "utf8")).toBe(newer);

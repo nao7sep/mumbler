@@ -716,11 +716,11 @@ describe("committed binary and metadata outcome", () => {
     const tool = join(binDir, "ffmpeg.exe");
     await writeFile(tool, "old binary");
     const sidecar = installedVersion.versionSidecarPath(binDir, "ffmpeg");
-    await writeFile(sidecar, JSON.stringify({ ...header("toolVersion", 2), version: "future" }));
+    await writeFile(sidecar, JSON.stringify({ ...header("tool-version", 2), version: "future" }));
     const manager = await makeManager("win32");
     await manager.installTool("ffmpeg");
     expect(await readFile(tool, "utf8")).not.toBe("old binary");
-    expect(JSON.parse(await readFile(sidecar, "utf8"))).toMatchObject({ ...header("toolVersion") });
+    expect(JSON.parse(await readFile(sidecar, "utf8"))).toMatchObject({ ...header("tool-version") });
     expect(await readdir(tempDir)).toEqual([]);
   });
 

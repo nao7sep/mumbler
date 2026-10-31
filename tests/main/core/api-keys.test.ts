@@ -103,7 +103,7 @@ describe("API key secrets store", () => {
     const stored = await readFile(apiKeysPath, "utf8");
     expect(stored).not.toContain("AIzaSecretKey123"); // obfuscated at rest
     expect(JSON.parse(stored)).toHaveProperty(["keys", "gemini"]);
-    expect(JSON.parse(stored)).toMatchObject(header("apiKeys"));
+    expect(JSON.parse(stored)).toMatchObject(header("api-keys"));
 
     if (process.platform !== "win32") {
       const fileStat = await stat(apiKeysPath);
@@ -137,7 +137,7 @@ describe("API key secrets store", () => {
   });
 
   it("treats an untagged stored value as plaintext (a hand-pasted key)", async () => {
-    await writeFile(apiKeysPath, JSON.stringify({ ...header("apiKeys"), keys: { gemini: "sk-plain-pasted" } }), "utf8");
+    await writeFile(apiKeysPath, JSON.stringify({ ...header("api-keys"), keys: { gemini: "sk-plain-pasted" } }), "utf8");
     expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("sk-plain-pasted");
   });
 
@@ -152,7 +152,7 @@ describe("API key secrets store", () => {
     // non-canonical base64, so it must never reach a provider as a "decoded" key.
     await writeFile(
       apiKeysPath,
-      JSON.stringify({ ...header("apiKeys"), keys: { gemini: "obf:not-valid-base64!!" } }),
+      JSON.stringify({ ...header("api-keys"), keys: { gemini: "obf:not-valid-base64!!" } }),
       "utf8",
     );
 
@@ -165,7 +165,7 @@ describe("API key secrets store", () => {
   });
 
   it("matches stored key ids case-insensitively", async () => {
-    await writeFile(apiKeysPath, JSON.stringify({ ...header("apiKeys"), keys: { Gemini: "case-key" } }), "utf8");
+    await writeFile(apiKeysPath, JSON.stringify({ ...header("api-keys"), keys: { Gemini: "case-key" } }), "utf8");
     expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("case-key");
   });
 
@@ -271,7 +271,7 @@ describe("API key secrets store", () => {
 
   it("never quotes the key file's text in a warning", async () => {
     // Truncated JSON whose parse error message would quote the text around the failure.
-    await writeFile(apiKeysPath, `${JSON.stringify(header("apiKeys")).slice(0, -1)},"keys":{"gemini":"AIzaFAKEFRAGMENT-not-a-real-key`, "utf8");
+    await writeFile(apiKeysPath, `${JSON.stringify(header("api-keys")).slice(0, -1)},"keys":{"gemini":"AIzaFAKEFRAGMENT-not-a-real-key`, "utf8");
     const warn = vi.fn();
 
     await expect(resolveApiKey(apiKeysPath, "gemini", warn)).resolves.toBeNull();
@@ -282,7 +282,7 @@ describe("API key secrets store", () => {
   });
 
   it("sets an unusable key file aside before replacing it, and writes nothing when that fails", async () => {
-    const original = JSON.stringify({ ...header("apiKeys"), keys: "not an object" });
+    const original = JSON.stringify({ ...header("api-keys"), keys: "not an object" });
     await writeFile(apiKeysPath, original, "utf8");
     const spy = vi.spyOn(fileIo, "preserveAside").mockRejectedValueOnce(new Error("rename refused"));
     try {
@@ -300,7 +300,7 @@ describe("API key secrets store", () => {
   });
 
   it("leaves a key file in a newer format in place, reads no key from it, and refuses to write over it", async () => {
-    const newer = JSON.stringify({ ...header("apiKeys", 2), keys: { gemini: "from-a-newer-build" } });
+    const newer = JSON.stringify({ ...header("api-keys", 2), keys: { gemini: "from-a-newer-build" } });
     await writeFile(apiKeysPath, newer, "utf8");
     if (process.platform !== "win32") await chmod(apiKeysPath, 0o644);
     const warn = vi.fn();

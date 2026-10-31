@@ -606,7 +606,7 @@ describe("the durable queue store", () => {
       await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
       const newerPath = join(home, name);
       await mkdir(dirname(newerPath), { recursive: true });
-      const kind = name === "config.json" ? "config" : name.startsWith("cards/") ? "card" : "pendingImport";
+      const kind = name === "config.json" ? "config" : name.startsWith("cards/") ? "card" : "pending-import";
       const text = JSON.stringify({ ...header(kind, 99), id: "lost", transcription: { text: "future words" } });
       await writeFile(newerPath, text);
       const storePaths = ["config.json", `cards/${card.id}/card.json`, "layout.json"].map((file) => join(home, file));
@@ -2144,7 +2144,7 @@ describe("a store in a newer format", () => {
   /** Rewrites a JSON store as a newer build would have left it, returning its bytes. */
   async function makeNewer(path: string): Promise<string> {
     const current = (await exists(path)) ? JSON.parse(await readFile(path, "utf8")) : {};
-    const kinds: Record<string, string> = { "config.json": "config", "card.json": "card", "import.json": "pendingImport", "dependencies.json": "dependencies", "layout.json": "layout" };
+    const kinds: Record<string, string> = { "config.json": "config", "card.json": "card", "import.json": "pending-import", "dependencies.json": "dependencies", "layout.json": "layout" };
     const newer = JSON.stringify({ ...current, ...header(kinds[basename(path)]!, 99) });
     await writeFile(path, newer, "utf8");
     return newer;
