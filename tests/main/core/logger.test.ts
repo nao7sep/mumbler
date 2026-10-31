@@ -419,7 +419,7 @@ describe("readRecords", () => {
     expect(await titles({ search: "5_%" })).toEqual([]);
   });
 
-  it("filters for attention: warning and error lines and failed provider calls", async () => {
+  it("filters for warnings and errors: warning and error lines and failed provider calls", async () => {
     const logger = open();
     const call = (error: unknown, model: string) => logger.providerCall({
       provider: "gemini", operation: "models.generateContent", endpoint: null, model, cardId: null, step: null,
@@ -432,7 +432,7 @@ describe("readRecords", () => {
     await call(null, "succeeded");
     await call(new Error("quota"), "failed");
 
-    const page = await logger.readRecords({ op: "page", query: query({ level: "attention" }) });
+    const page = await logger.readRecords({ op: "page", query: query({ level: "warningsAndErrors" }) });
     expect(page.records.map((record) => record.text).sort()).toEqual(["Broken.", "Careful.", "failed"]);
   });
 

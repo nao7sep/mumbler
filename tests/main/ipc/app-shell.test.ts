@@ -124,7 +124,7 @@ describe("the app-shell IPC boundary", () => {
     ["saveToolSettings", "saveToolSettings", [true]],
     ["saveLayout", "saveLayout", [320]],
     ["readRecordsPage", "readRecordsPage", [recordsQuery()]],
-    ["readRecordsPage", "readRecordsPage", [recordsQuery({ level: "attention" })]],
+    ["readRecordsPage", "readRecordsPage", [recordsQuery({ level: "warningsAndErrors" })]],
     ["readRecordsPage", "readRecordsPage", [recordsQuery({
       session: "2026-10-02T00:00:00.000Z", kind: "log", level: "warn", cardId: "card-1", search: "quota",
       after: { time: "2026-10-02T00:00:01.000Z", kind: "provider-call", id: 7 },

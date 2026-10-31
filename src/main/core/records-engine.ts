@@ -249,7 +249,7 @@ function readPage(db: DatabaseSync, query: RecordsQuery): RecordsPage {
       where.push("session = ?");
       params.push(query.session);
     }
-    if (query.level === "attention") {
+    if (query.level === "warningsAndErrors") {
       where.push(`${level} IN ('warn', 'error')`);
     } else if (query.level !== null) {
       where.push(`${level} = ?`);

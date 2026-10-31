@@ -322,14 +322,12 @@ export interface AppPaths {
   profileDir: string;
   homeDir: string;
   settingsPath: string;
-  // The card order; each card lives in its own folder under cardsDir.
-  queuePath: string;
+  // Each card lives in its own folder under cardsDir, with its card.json.
   cardsDir: string;
-  // The pending imports; each one's working copy lives in its folder under inboxDir.
-  inboxPath: string;
+  // Each pending import lives in its own folder under inboxDir, with its import.json.
   inboxDir: string;
   // Disposable presentation state (pane width and last selection). Its own file,
-  // apart from settingsPath/queuePath, so it self-heals independently.
+  // apart from settingsPath and the cards, so it self-heals independently.
   layoutPath: string;
   // The secrets file. The Gemini API key lives here in its own 0600 file, not in
   // settingsPath (storage-path-conventions, "Secrets and keys").
@@ -540,8 +538,8 @@ export interface DependencyStatus {
   transient: ToolTransient;
 }
 
-// Disposable presentation state, separate from config.json and queue.json (which
-// holds precious card data). queueWidth and recordsListWidth are the user's
+// Disposable presentation state, separate from config.json and the cards'
+// card.json files (which hold precious card data). queueWidth and recordsListWidth are the user's
 // dragged intents in CSS pixels, for the main window's queue pane and the records
 // window's list pane; selectedCardId remembers where the user left the queue view.
 export interface MumblerLayout {

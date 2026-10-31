@@ -113,7 +113,7 @@ describe("a startup diagnostic", () => {
       ...readySnapshot(),
       startupDiagnostic: {
         title: { key: "diagnostic.newerTitle" },
-        message: { key: "diagnostic.newerBody", values: { path: "/home/me/.mumbler/queue.json" } },
+        message: { key: "diagnostic.newerBody", values: { path: "/home/me/.mumbler/config.json" } },
         canReset: false,
       },
     });
@@ -121,7 +121,7 @@ describe("a startup diagnostic", () => {
     await act(async () => root?.render(createElement(App)));
     await until(() => expect(document.body.textContent).toContain("Saved Data Is From a Newer Version"));
 
-    expect(document.body.textContent).toContain("/home/me/.mumbler/queue.json was saved by a newer version of Mumbler");
+    expect(document.body.textContent).toContain("/home/me/.mumbler/config.json was saved by a newer version of Mumbler");
     expect(button("Reset State")).toBeUndefined();
   });
 
@@ -130,7 +130,7 @@ describe("a startup diagnostic", () => {
       ...readySnapshot(),
       startupDiagnostic: {
         title: { key: "diagnostic.unreadableTitle" },
-        message: { key: "diagnostic.unreadableBody", values: { path: "/home/me/.mumbler/queue.json" } },
+        message: { key: "diagnostic.unreadableBody", values: { path: "/home/me/.mumbler/config.json" } },
         canReset: false,
       },
     });
@@ -138,7 +138,7 @@ describe("a startup diagnostic", () => {
     await act(async () => root?.render(createElement(App)));
     await until(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Read"));
 
-    expect(document.body.textContent).toContain("Mumbler could not read /home/me/.mumbler/queue.json.");
+    expect(document.body.textContent).toContain("Mumbler could not read /home/me/.mumbler/config.json.");
     expect(button("Reset State")).toBeUndefined();
   });
 
@@ -147,7 +147,7 @@ describe("a startup diagnostic", () => {
       ...readySnapshot(),
       startupDiagnostic: {
         title: { key: "diagnostic.corruptTitle" },
-        message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/queue.json" } },
+        message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/config.json" } },
         canReset: true,
       },
     });
@@ -155,7 +155,7 @@ describe("a startup diagnostic", () => {
     await act(async () => root?.render(createElement(App)));
     await until(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Loaded"));
 
-    expect(document.body.textContent).toContain("Mumbler could not safely load /home/me/.mumbler/queue.json.");
+    expect(document.body.textContent).toContain("Mumbler could not safely load /home/me/.mumbler/config.json.");
     expect(document.body.textContent).toContain("choose Reset State to set your saved work aside");
     expect(button("Reset State")).toBeDefined();
   });
@@ -165,7 +165,7 @@ describe("a startup diagnostic", () => {
     try {
       firstSnapshot.mockResolvedValue({
         ...readySnapshot(),
-        startupDiagnostic: { title: { key: "diagnostic.corruptTitle" }, message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/queue.json" } }, canReset: true },
+        startupDiagnostic: { title: { key: "diagnostic.corruptTitle" }, message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/config.json" } }, canReset: true },
       });
       window.mumbler.resetState = vi.fn(async () => publish({
         ...readySnapshot(),
@@ -188,14 +188,14 @@ describe("a startup diagnostic", () => {
   it("shows a reset that failed part-way where the Reset button is, naming what it moved, and no success notice", async () => {
     firstSnapshot.mockResolvedValue({
       ...readySnapshot(),
-      startupDiagnostic: { title: { key: "diagnostic.corruptTitle" }, message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/queue.json" } }, canReset: true },
+      startupDiagnostic: { title: { key: "diagnostic.corruptTitle" }, message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/config.json" } }, canReset: true },
     });
     window.mumbler.resetState = vi.fn(async () => publish({
       ...readySnapshot(),
       paths: { homeDir: "/home/me/.mumbler" } as AppPaths,
       startupDiagnostic: {
         title: { key: "diagnostic.resetTitle" },
-        message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json", "queue.json"], folder: "/home/me/.mumbler" } },
+        message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json", "cards"], folder: "/home/me/.mumbler" } },
         canReset: true,
       },
     }));
@@ -206,7 +206,7 @@ describe("a startup diagnostic", () => {
 
     const text = document.body.textContent ?? "";
     expect(text).toContain("Reset Failed");
-    expect(text).toContain("it set these aside in /home/me/.mumbler, under names that include the time of the reset: config.json, queue.json.");
+    expect(text).toContain("it set these aside in /home/me/.mumbler, under names that include the time of the reset: config.json, cards.");
     expect(text).not.toContain("Reset to defaults.");
     expect(text).not.toContain("unchanged");
     expect(button("Reset State"), "the reset can be tried again").toBeDefined();

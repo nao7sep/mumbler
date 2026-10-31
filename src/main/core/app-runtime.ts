@@ -441,7 +441,7 @@ export class ApplicationRuntime {
         recoveredInterruptedCards: queueLoad.recoveredInterruptedCards,
         restoredSavingCards: queueLoad.restoredSavingCards,
         missingWorkingCards: queueLoad.missingWorkingCards,
-        unreadableQueueFiles: queueLoad.unreadable.length,
+        unreadableItemFiles: queueLoad.unreadable.length,
         unlistedFolders: queueLoad.unlistedFolders,
         removedFolders: queueLoad.removedFolders,
       });
@@ -451,8 +451,8 @@ export class ApplicationRuntime {
       const notices = settingsNotice === null ? [] : [settingsNotice];
       if (queueLoad.unreadable.length > 0) {
         notices.push({
-          title: message("diagnostic.queueUnreadableTitle"),
-          message: message("diagnostic.queueUnreadableBody", { items: queueLoad.unreadable.map((file) => file.path) }),
+          title: message("diagnostic.itemsUnreadableTitle"),
+          message: message("diagnostic.itemsUnreadableBody", { items: queueLoad.unreadable.map((file) => file.path) }),
         });
       }
 
@@ -1711,7 +1711,7 @@ export class ApplicationRuntime {
   // and saves, aborts in-flight ones and lets them unwind (a cancelled save
   // rolls back and leaves its card Ready to Save; a cancelled run leaves its
   // card Cancelled), drains the settings writes, then writes the user's own
-  // work that is not on disk: each queue file whose latest write failed, from
+  // work that is not on disk: each card or import file whose latest write failed, from
   // what the app holds, and any settings write that failed, during the quit or
   // before it.
   // Returns what could not be saved; a call while one runs joins it.
@@ -1755,7 +1755,7 @@ export class ApplicationRuntime {
     };
     const state = this.runtime.state;
     if (state !== null && queueStore !== null) {
-      // Each queue file whose latest write failed is written again from what
+      // Each card or import file whose latest write failed is written again from what
       // the app holds; every other one is already on disk.
       await this.command(() => attempt("queue", () => queueStore.retryFailedWrites(state)));
       await retrySettings();

@@ -17,8 +17,6 @@ let logger: AppLogger;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "mumbler-queue-store-"));
   store = new QueueStore({
-    queuePath: join(dir, "queue.json"),
-    inboxPath: join(dir, "inbox.json"),
     cardsDir: join(dir, "cards"),
     inboxDir: join(dir, "inbox"),
   });
@@ -225,39 +223,6 @@ describe("the queue on disk", () => {
     expect(JSON.parse(await readFile(cardPath("run"), "utf8")).status).toBe("Error");
     expect(JSON.parse(await readFile(cardPath("save"), "utf8")).status).toBe("Ready to Save");
     expect(await readFile(cardPath("idle"), "utf8")).toBe(idleBefore);
-  });
-
-  it.each([
-    ["an earlier build's layout, which held whole cards", { formatVersion: 1, pendingImports: [], cards: [{ id: "c1" }] }],
-    ["an order that is not a list", { formatVersion: 2, cardIds: { a: 1 } }],
-    ["an order naming an id twice", { formatVersion: 2, cardIds: ["a", "a"] }],
-    ["a queue.json from a newer Mumbler", { formatVersion: 99 }],
-  ])("reports a queue.json with %s and leaves it untouched, loading the cards", async (_name, shape) => {
-    await saveCards([card()]);
-    const text = JSON.stringify(shape);
-    await writeFile(join(dir, "queue.json"), text);
-    const loaded = await store.load(logger);
-    expect(loaded.state.cards.map((entry) => entry.id)).toEqual(["c1"]);
-    expect(loaded.unreadable.map((file) => file.path)).toEqual([join(dir, "queue.json")]);
-    expect(await readFile(join(dir, "queue.json"), "utf8")).toBe(text);
-  });
-
-  it("deletes an earlier build's queue.json once the cards' folders are read, losing no card", async () => {
-    await saveCards([card({ id: "a" }), card({ id: "b" })]);
-    await writeFile(join(dir, "queue.json"), JSON.stringify({ formatVersion: 2, cardIds: ["b", "a", "gone"] }));
-    const loaded = await store.load(logger);
-    expect(loaded.state.cards.map((entry) => entry.id).sort()).toEqual(["a", "b"]);
-    expect(await readdir(dir)).toEqual(["cards"]);
-    expect(logger.warn).toHaveBeenCalledWith("startup.order-missing", expect.any(String), { cardIds: ["gone"] });
-  });
-
-  it("loses no card when queue.json is deleted", async () => {
-    await saveCards([card({ id: "a" }), card({ id: "b" })]);
-    await writeFile(join(dir, "queue.json"), JSON.stringify({ formatVersion: 2, cardIds: ["a", "b"] }));
-    await rm(join(dir, "queue.json"));
-    const loaded = await store.load(logger);
-    expect(loaded.state.cards.map((entry) => entry.id).sort()).toEqual(["a", "b"]);
-    expect(loaded.unreadable).toEqual([]);
   });
 
   it.each([
@@ -520,15 +485,14 @@ describe("accepting, removing and retrying", () => {
     expect(await readFile(cardPath("a"), "utf8"), "a card whose write landed is not rewritten").toBe(aBefore);
   });
 
-  it("sets both folders, and any earlier list, aside for Reset, and refuses one from a newer Mumbler", async () => {
+  it("sets both folders aside for Reset, and refuses one from a newer Mumbler", async () => {
     await saveCards([card()]);
     await savePending([pending("p")]);
-    await writeFile(join(dir, "queue.json"), "{}");
     const moved = await store.preserveExistingFiles();
-    expect(moved).toHaveLength(3);
+    expect(moved).toHaveLength(2);
     const [aside] = await readdir(dir);
     expect(aside).toMatch(/^queue-.*\.invalid$/);
-    expect((await readdir(join(dir, aside))).sort()).toEqual(["cards", "inbox", "queue.json"]);
+    expect((await readdir(join(dir, aside))).sort()).toEqual(["cards", "inbox"]);
 
     await saveCards([card()]);
     await writeFile(cardPath("c1"), JSON.stringify({ formatVersion: 99 }));
@@ -538,66 +502,6 @@ describe("accepting, removing and retrying", () => {
 
   it("makes ids in one case, so no two name the same folder on any filesystem", () => {
     for (let i = 0; i < 50; i++) expect(newItemId()).toMatch(/^[0-9a-z]{21}$/);
-  });
-});
-
-describe("an earlier build's inbox.json", () => {
-  async function earlierInbox(items: PendingImportReviewItem[]): Promise<void> {
-    for (const item of items) {
-      await mkdir(join(dir, "inbox", item.id), { recursive: true });
-      await writeFile(item.workingFilePath, "audio");
-    }
-    const iso = (item: PendingImportReviewItem) => ({ ...item, createdAtUtc: new Date(item.createdAtUtc).toISOString(), updatedAtUtc: new Date(item.updatedAtUtc).toISOString() });
-    await writeFile(join(dir, "inbox.json"), JSON.stringify({ formatVersion: 1, pendingImports: items.map(iso) }));
-  }
-
-  it("moves each pending import's choices into its folder, then deletes it, losing no pending import", async () => {
-    await earlierInbox([pending("p1", { timezone: "Asia/Tokyo" }), pending("p2")]);
-
-    const loaded = await store.load(logger);
-
-    expect(loaded.state.pendingImports).toEqual([pending("p1", { timezone: "Asia/Tokyo" }), pending("p2")]);
-    expect(await readdir(dir)).toEqual(["inbox"]);
-    expect(JSON.parse(await readFile(importPath("p1"), "utf8"))).toMatchObject({ formatVersion: 1, timezone: "Asia/Tokyo" });
-    expect((await store.load(logger)).state.pendingImports.map((item) => item.id), "a later launch reads them from the folders").toEqual(["p1", "p2"]);
-  });
-
-  it("keeps inbox.json until every choice is written, so an interrupted move loses no choice", async () => {
-    await earlierInbox([pending("p1", { timezone: "Asia/Tokyo" }), pending("p2", { timezone: "Europe/Paris" })]);
-    await chmod(join(dir, "inbox", "p2"), 0o500);
-    try {
-      await expect(store.load(logger)).rejects.toThrow();
-    } finally {
-      await chmod(join(dir, "inbox", "p2"), 0o700);
-    }
-    expect(JSON.parse(await readFile(join(dir, "inbox.json"), "utf8")).pendingImports).toHaveLength(2);
-    // The choice written before the stop is changed in a later session.
-    await writeFile(importPath("p1"), JSON.stringify({ ...JSON.parse(await readFile(importPath("p1"), "utf8")), timezone: "UTC" }));
-
-    const loaded = await store.load(logger);
-
-    expect(loaded.state.pendingImports.map((item) => [item.id, item.timezone])).toEqual([["p1", "UTC"], ["p2", "Europe/Paris"]]);
-    expect(await readdir(dir)).toEqual(["inbox"]);
-  });
-
-  it("brings back an import an earlier build's interrupted confirmation had moved into cards/", async () => {
-    await earlierInbox([pending("p1")]);
-    await mkdir(join(dir, "cards"));
-    await rename(join(dir, "inbox", "p1"), join(dir, "cards", "p1"));
-
-    const loaded = await store.load(logger);
-
-    expect(loaded.state.pendingImports.map((item) => item.id)).toEqual(["p1"]);
-    expect(loaded.state.cards).toEqual([]);
-    expect((await readdir(join(dir, "inbox", "p1"))).sort()).toEqual(["a.m4a", "import.json"]);
-  });
-
-  it("reports a damaged inbox.json and leaves it untouched, loading what the folders hold", async () => {
-    await savePending([pending("p1")]);
-    await writeFile(join(dir, "inbox.json"), JSON.stringify({ formatVersion: 1, pendingImports: [pending("p"), pending("p")] }));
-    const loaded = await store.load(logger);
-    expect(loaded.state.pendingImports.map((item) => item.id)).toEqual(["p1"]);
-    expect(loaded.unreadable.map((file) => file.path)).toEqual([join(dir, "inbox.json")]);
   });
 });
 

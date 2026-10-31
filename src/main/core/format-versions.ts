@@ -4,10 +4,6 @@
 export const FORMAT_VERSIONS = {
   /** config.json */
   config: 1,
-  /** queue.json, an earlier build's card order, read once and deleted; 2 holds only the ids */
-  queue: 2,
-  /** inbox.json, an earlier build's pending imports, moved into their folders once */
-  inbox: 1,
   /** cards/<id>/card.json */
   card: 1,
   /** inbox/<id>/import.json, a pending import's review choices */
@@ -22,7 +18,7 @@ export const FORMAT_VERSIONS = {
   toolVersion: 1,
   /** records.sqlite3 */
   records: 1,
-  /** backups.sqlite3; 2 added session_id, one row per file per launch */
+  /** backups.sqlite3, one row per file per launch */
   backups: 2,
   /** The .json written beside a saved recording */
   outputJson: 1,

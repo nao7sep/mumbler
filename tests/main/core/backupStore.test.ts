@@ -249,7 +249,7 @@ describe("record — format version", () => {
     setBackupStoreWarn(warn);
 
     record(join(root, "config.json"), Buffer.from("x", "utf8"));
-    record(join(root, "queue.json"), Buffer.from("y", "utf8"));
+    record(join(root, "layout.json"), Buffer.from("y", "utf8"));
     await closeBackupStore();
 
     expect(warn).toHaveBeenCalledTimes(1);

@@ -32,9 +32,6 @@ import { type AppLogger } from "./logger";
 // Accepting an import writes its card.json into its folder, then renames the
 // folder from inbox/ into cards/ under the same id: the rename is the commit.
 //
-// Earlier builds listed the cards in queue.json and the pending imports in
-// inbox.json; launch moves what they hold into the folders and deletes them.
-//
 // Not recorded in the backup history: the queue, its review drafts and its
 // text are transient work that ends in exports (data-backup-conventions;
 // developer decision).
@@ -42,8 +39,6 @@ import { type AppLogger } from "./logger";
 // Ids name folders, so they use one case only: two ids differing only in case
 // would name one folder on a case-insensitive filesystem.
 export const newItemId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 21);
-
-const ITEM_ID = /^[0-9a-z_-]+$/;
 
 const CARD_FILE = "card.json";
 const IMPORT_FILE = "import.json";
@@ -211,7 +206,7 @@ function normalizePendingImportRecord(
 
   return {
     ...item,
-    // A review staged before times were collected offers none.
+    // A review that holds no time candidates offers none.
     timeCandidates: Array.isArray(item.timeCandidates) ? item.timeCandidates.filter(isTimeCandidate) : [],
     createdAtUtc: parseUtcMs(item.createdAtUtc) ?? fallback,
     updatedAtUtc: parseUtcMs(item.updatedAtUtc) ?? fallback,
@@ -369,16 +364,6 @@ function serializeImport(item: PendingImportReviewItem): Record<string, unknown>
   return { formatVersion: FORMAT_VERSIONS.pendingImport, ...(serializeUtcInstants(item) as Record<string, unknown>) };
 }
 
-function idListIssue(list: unknown, key: string): string | null {
-  if (!Array.isArray(list)) return `${key} is not a list`;
-  const ids = new Set<string>();
-  for (const id of list) {
-    if (typeof id !== "string" || !ITEM_ID.test(id) || ids.has(id)) return `${key} contains an invalid or duplicate id`;
-    ids.add(id);
-  }
-  return null;
-}
-
 async function readDocument(path: string, supported: number): Promise<Record<string, unknown> | undefined> {
   let raw: unknown;
   try {
@@ -401,8 +386,6 @@ async function folderEntries(directory: string): Promise<string[]> {
     throw new UnreadableStoreError(directory, { cause: error });
   }
 }
-
-
 
 async function folderNames(directory: string): Promise<string[]> {
   try {
@@ -431,7 +414,7 @@ function compareImports(left: PendingImportReviewItem, right: PendingImportRevie
 }
 
 /** A file launch could not read, left as it is. */
-export interface UnreadableQueueFile {
+export interface UnreadableItemFile {
   path: string;
   reason: string;
 }
@@ -442,7 +425,7 @@ export interface QueueLoad {
   restoredSavingCards: number;
   missingWorkingCards: number;
   /** Item files that are damaged or in a newer format, shown with their paths. */
-  unreadable: UnreadableQueueFile[];
+  unreadable: UnreadableItemFile[];
   /** Folders with no item file, or an import with no copy, left in place. */
   unlistedFolders: number;
   /** Removed folders a crash left, deleted. */
@@ -460,17 +443,13 @@ function unreadableReason(error: unknown): string | null {
 }
 
 export class QueueStore {
-  readonly orderPath: string;
-  readonly inboxPath: string;
   readonly cardsDir: string;
   readonly inboxDir: string;
   // The files whose latest write failed. Quit writes them again from what the
   // app then holds; a later write that lands clears one.
   private readonly failed = new Set<FileKey>();
 
-  constructor(paths: { queuePath: string; inboxPath: string; cardsDir: string; inboxDir: string }) {
-    this.orderPath = paths.queuePath;
-    this.inboxPath = paths.inboxPath;
+  constructor(paths: { cardsDir: string; inboxDir: string }) {
     this.cardsDir = paths.cardsDir;
     this.inboxDir = paths.inboxDir;
   }
@@ -491,9 +470,8 @@ export class QueueStore {
   /**
    * Reads every card and pending import from its folder and settles what a
    * previous session left: removed folders are deleted, an interrupted card is
-   * recovered, a card whose audio is missing is marked so, scratch is cleared,
-   * and an earlier build's queue.json and inbox.json are moved into the
-   * folders and deleted. Only what changed is written. An item file that is
+   * recovered, a card whose audio is missing is marked so, and scratch is
+   * cleared. Only what changed is written. An item file that is
    * damaged or in a newer format is left as it is and reported; a folder or
    * file that cannot be read at all stops the load.
    */
@@ -510,7 +488,7 @@ export class QueueStore {
     };
     const unreadable = async (path: string, reason: string) => {
       result.unreadable.push({ path, reason });
-      await logger.warn("startup.item-unreadable", "Left a queue file that could not be read as it is.", { path, reason });
+      await logger.warn("startup.item-unreadable", "Left an item file that could not be read as it is.", { path, reason });
     };
     const unlisted = async (path: string, reason: string) => {
       result.unlistedFolders += 1;
@@ -523,8 +501,6 @@ export class QueueStore {
         await this.clear(join(directory, name), logger, () => { result.removedFolders += 1; });
       }
     }
-
-    await this.moveEarlierInbox(logger, unreadable);
 
     for (const id of await folderNames(this.inboxDir)) {
       if (id.startsWith(".")) continue;
@@ -598,71 +574,7 @@ export class QueueStore {
     for (const card of changedCards) await this.writeCard(card);
     result.state.cards.sort(compareCards);
     result.state.pendingImports.sort(compareImports);
-
-    await this.deleteEarlierOrder(result.state.cards, logger, unreadable);
     return result;
-  }
-
-  // An earlier build's inbox.json: each import's choices are written into its
-  // folder, and the file is deleted only once every one is, so a move cut
-  // short is made again. A choice already in its folder is newer and kept.
-  private async moveEarlierInbox(logger: AppLogger, unreadable: (path: string, reason: string) => Promise<void>): Promise<void> {
-    const inbox = await this.readItem(this.inboxPath, FORMAT_VERSIONS.inbox, unreadable);
-    if (inbox === null || inbox === undefined) return;
-    const items = inbox.pendingImports;
-    if (!Array.isArray(items)) return unreadable(this.inboxPath, "pendingImports is not a list");
-    const ids = new Set<string>();
-    for (const item of items) {
-      const issue = pendingImportIssue(item);
-      const id = (item as PendingImportReviewItem | null)?.id;
-      if (issue !== null) return unreadable(this.inboxPath, issue);
-      if (!ITEM_ID.test(id!) || ids.has(id!)) return unreadable(this.inboxPath, "pendingImports contains an invalid or duplicate id");
-      ids.add(id!);
-    }
-    for (const item of items as PendingImportReviewItem[]) {
-      const folder = this.importFolder(item.id);
-      if (await this.present(join(folder, IMPORT_FILE))) continue;
-      if (await this.present(join(this.cardFolder(item.id), CARD_FILE))) continue;
-      const strayed = this.cardFolder(item.id);
-      if (!(await this.present(folder)) && await this.present(strayed)) {
-        // That build's acceptance moved the folder into cards/ but never
-        // listed the card: the import is still the user's to review.
-        await mkdir(this.inboxDir, { recursive: true });
-        await rename(strayed, folder);
-        await logger.warn("startup.import-returned", "Moved an import an interrupted confirmation had accepted back for review.", {
-          pendingImportId: item.id, originalFilename: item.originalFilename,
-        });
-      }
-      if (!(await this.present(folder))) {
-        await logger.warn("startup.pending-missing", "An earlier pending import's folder is missing; its choices were not kept.", {
-          pendingImportId: item.id, originalFilename: item.originalFilename,
-        });
-        continue;
-      }
-      await writeJsonFile(join(folder, IMPORT_FILE), serializeImport(item));
-    }
-    await rm(this.inboxPath, { force: true });
-    await logger.info("startup.inbox-moved", "Moved the pending imports from inbox.json into their folders.", { count: items.length });
-  }
-
-  // An earlier build's queue.json holds only the cards' ids, which the folders
-  // now give, so it is deleted once they are read. One this build cannot read
-  // is left as it is.
-  private async deleteEarlierOrder(
-    cards: readonly MumblerCard[],
-    logger: AppLogger,
-    unreadable: (path: string, reason: string) => Promise<void>,
-  ): Promise<void> {
-    const order = await this.readItem(this.orderPath, FORMAT_VERSIONS.queue, unreadable);
-    if (order === null || order === undefined) return;
-    const issue = idListIssue(order.cardIds, "cardIds");
-    if (issue !== null) return unreadable(this.orderPath, issue);
-    const loaded = new Set(cards.map((card) => card.id));
-    const missing = (order.cardIds as string[]).filter((id) => !loaded.has(id));
-    if (missing.length > 0) {
-      await logger.warn("startup.order-missing", "queue.json listed cards whose folders hold no readable card.", { cardIds: missing });
-    }
-    await rm(this.orderPath, { force: true });
   }
 
   // Reads one item file: undefined when it is absent, null when it is damaged
@@ -785,8 +697,6 @@ export class QueueStore {
 
   /** Explicit reset may set damaged files aside, but never a readable newer one. */
   async admitReset(): Promise<void> {
-    await assertResettableJson(this.orderPath, FORMAT_VERSIONS.queue);
-    await assertResettableJson(this.inboxPath, FORMAT_VERSIONS.inbox);
     for (const name of await folderEntries(this.cardsDir)) {
       await assertResettableJson(join(this.cardsDir, name, CARD_FILE), FORMAT_VERSIONS.card);
     }
@@ -795,18 +705,17 @@ export class QueueStore {
     }
   }
 
-  /** Sets the queue's folders, and any earlier lists, aside together for
-   * Reset, in one "queue-<time>.invalid" folder beside them, naming each path
-   * to `onMoved` as it moves, so a move that fails part-way still reports the
-   * earlier ones. */
+  /** Sets the queue's folders aside together for Reset, in one
+   * "queue-<time>.invalid" folder beside them, naming each path to `onMoved`
+   * as it moves, so a move that fails part-way still reports the earlier ones. */
   async preserveExistingFiles(onMoved: (path: string) => void = () => undefined): Promise<string[]> {
     await this.admitReset();
     const present: string[] = [];
-    for (const path of [this.orderPath, this.inboxPath, this.cardsDir, this.inboxDir]) {
+    for (const path of [this.cardsDir, this.inboxDir]) {
       if (await fileExists(path)) present.push(path);
     }
     if (present.length > 0) {
-      const aside = join(dirname(this.orderPath), `queue-${formatUtcMarkerMs(new Date())}.invalid`);
+      const aside = join(dirname(this.cardsDir), `queue-${formatUtcMarkerMs(new Date())}.invalid`);
       await mkdir(aside);
       for (const path of present) {
         await rename(path, join(aside, basename(path)));

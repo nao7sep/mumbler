@@ -203,7 +203,7 @@ describe.skipIf(process.platform === "win32")("writeJsonFile — the replaced fi
 
 describe("writeJsonFile — a write that changes nothing", () => {
   it("leaves a file that already holds the same bytes untouched", async () => {
-    const target = join(dir, "queue.json");
+    const target = join(dir, "config.json");
     await writeJsonFile(target, { formatVersion: 1, cards: [] });
     const earlier = new Date(Date.UTC(2024, 4, 6, 7, 8, 9));
     await utimes(target, earlier, earlier);
@@ -218,7 +218,7 @@ describe("writeJsonFile — a write that changes nothing", () => {
   });
 
   it("still writes a change", async () => {
-    const target = join(dir, "queue.json");
+    const target = join(dir, "config.json");
     await writeJsonFile(target, { formatVersion: 1, cards: [] });
 
     await writeJsonFile(target, { formatVersion: 1, cards: ["x"] });
@@ -266,7 +266,7 @@ describe("writeJsonFile — data-backup record hook", () => {
   });
 
   it("records nothing by default: a store opts in at its own write boundary", async () => {
-    const target = join(dir, "queue.json");
+    const target = join(dir, "config.json");
 
     await writeJsonFile(target, { formatVersion: 1 });
 

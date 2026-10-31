@@ -31,7 +31,7 @@ describe("storage admission", () => {
 
   it("does not mistake a root containing existing work for a first launch", async () => {
     await mkdir(paths.homeDir);
-    await writeFile(join(paths.homeDir, "queue.json"), "{}");
+    await writeFile(join(paths.homeDir, "config.json"), "{}");
     expect((await admitStorageRoot(paths)).firstRun).toBe(false);
   });
 

@@ -78,11 +78,11 @@ describe("reset failure presentation", () => {
   });
 
   it("names what a reset set aside before it failed, instead of claiming nothing changed", () => {
-    const presentation = resetFailureDiagnostic(["config.json", "queue.json", "cards"], "/home/me/.mumbler");
+    const presentation = resetFailureDiagnostic(["config.json", "cards", "inbox"], "/home/me/.mumbler");
 
     const text = createTranslator("en").text(presentation.message);
     expect(text).toContain("it set these aside in /home/me/.mumbler");
-    expect(text).toContain("config.json, queue.json, cards.");
+    expect(text).toContain("config.json, cards, inbox.");
     expect(text).not.toContain("unchanged");
   });
 });
@@ -93,7 +93,7 @@ function authoritativeItem(): PendingImportReviewItem {
     originalFilename: "rec.m4a",
     importSource: "drag-and-drop",
     originalSourcePath: "/Users/me/Downloads/rec.m4a",
-    workingFilePath: "/Users/me/.mumbler/working/rec.m4a",
+    workingFilePath: "/Users/me/.mumbler/inbox/import-1/rec.m4a",
     fileSizeBytes: 12345,
     localTimestampText: "",
     timezone: "Asia/Tokyo",
@@ -370,17 +370,17 @@ describe("getAppPaths standard layout", () => {
     expect(paths.settingsPath).toBe(join(ROOT, "config.json"));
   });
 
-  it("keeps config.json separate from the queue, layout, and secrets stores", () => {
+  it("keeps config.json separate from the cards, layout, and secrets stores", () => {
     const paths = withRoot(() => getAppPaths());
-    expect(paths.queuePath).toBe(join(ROOT, "queue.json"));
+    expect(paths.cardsDir).toBe(join(ROOT, "cards"));
     expect(paths.layoutPath).toBe(join(ROOT, "layout.json"));
     expect(paths.apiKeysPath).toBe(join(ROOT, "api-keys.json"));
 
     // Distinct roles, distinct files: durable settings must never collide with the
-    // durable queue, the self-healing layout, or the 0600 secrets file.
+    // durable cards, the self-healing layout, or the 0600 secrets file.
     const distinct = new Set([
       paths.settingsPath,
-      paths.queuePath,
+      paths.cardsDir,
       paths.layoutPath,
       paths.apiKeysPath,
     ]);

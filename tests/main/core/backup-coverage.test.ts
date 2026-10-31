@@ -36,7 +36,7 @@ it("records a settings save", async () => {
 
 it("does not record a pending import or a card", async () => {
   const store = new QueueStore({
-    queuePath: join(dir, "queue.json"), inboxPath: join(dir, "inbox.json"), cardsDir: join(dir, "cards"), inboxDir: join(dir, "inbox"),
+    cardsDir: join(dir, "cards"), inboxDir: join(dir, "inbox"),
   });
   const card = { id: "take", transcription: { text: "words" }, metadata: { structured: null, title: null, slug: null } } as MumblerCard;
   await store.writeCard(card);

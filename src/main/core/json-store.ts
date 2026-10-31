@@ -66,7 +66,7 @@ export async function assertResettableJson(filePath: string, supported: number):
 }
 
 export interface JsonStoreOptions<T> {
-  /** Absolute path to the canonical file (e.g. ~/.mumbler/queue.json). */
+  /** Absolute path to the canonical file (e.g. ~/.mumbler/config.json). */
   path: string;
   /** The format version this build reads and writes, recorded as `formatVersion`. */
   formatVersion: number;
