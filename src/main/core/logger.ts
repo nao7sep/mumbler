@@ -56,6 +56,8 @@ export interface SessionLogger extends AppLogger {
   recordsMissing(): boolean;
   // Stored rows and sticky uncertainty about missing history share this signal.
   onRecordsChanged(listener: (missingRecords: boolean) => void): void;
+  // Called once, when the first entry this session cannot go to the database.
+  onRecordsOff(listener: () => void): void;
   // Masks this credential value in every entry written from now on.
   maskSecret(value: string): void;
 }
@@ -158,11 +160,13 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
   let fallbackTail: Promise<void> = Promise.resolve();
   let termination: Promise<void> = Promise.resolve();
   let storedListener: ((missingRecords: boolean) => void) | null = null;
+  let offListener: (() => void) | null = null;
   let missingRecords = false;
   const markMissing = (): void => {
     if (missingRecords) return;
     missingRecords = true;
     storedListener?.(true);
+    offListener?.();
   };
   const secrets = new Set<string>();
   const mask = (text: string | null): string | null => (text === null || secrets.size === 0 ? text : maskValues(text, secrets));
@@ -380,6 +384,10 @@ export function createLogger(paths: LoggerPaths | null, options: LoggerOptions):
     close,
     onRecordsChanged: (listener) => {
       storedListener = listener;
+    },
+    onRecordsOff: (listener) => {
+      offListener = listener;
+      if (missingRecords) listener();
     },
     maskSecret: (value) => {
       // Too short a value would mask ordinary text; no supported key is.

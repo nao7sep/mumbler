@@ -129,7 +129,6 @@ const api: MumblerShellApi = {
     ipcRenderer.invoke(APP_SHELL_CHANNELS.reportRendererDiagnostic, report) as Promise<void>,
   dismissAppWideError: () =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.dismissAppWideError) as Promise<void>,
-  resetState: () => ipcRenderer.invoke(APP_SHELL_CHANNELS.resetState) as Promise<void>,
   cancelPendingImports: (ids: string[]) =>
     ipcRenderer.invoke(APP_SHELL_CHANNELS.cancelPendingImports, ids) as Promise<void>,
   provisionTool: (name: ToolName) =>

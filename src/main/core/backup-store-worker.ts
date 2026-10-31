@@ -8,7 +8,7 @@ type WorkerRequest =
   | { type: "close" };
 
 type WorkerResponse =
-  | { type: "warning"; message: string; details: Record<string, unknown> }
+  | { type: "warning"; message: string; details: Record<string, unknown>; off: boolean }
   | { type: "closed" };
 
 if (parentPort === null) {
@@ -17,8 +17,8 @@ if (parentPort === null) {
 
 const port = parentPort;
 const data = workerData as { file: string; session: string; writer: FileWriter };
-const engine = new BackupStoreEngine(data.file, data.session, data.writer, (message, details) => {
-  port.postMessage({ type: "warning", message, details } satisfies WorkerResponse);
+const engine = new BackupStoreEngine(data.file, data.session, data.writer, (message, details, off = false) => {
+  port.postMessage({ type: "warning", message, details, off } satisfies WorkerResponse);
 });
 
 port.on("message", (message: WorkerRequest) => {

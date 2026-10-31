@@ -7,7 +7,6 @@ import { customAlphabet, nanoid } from "nanoid";
 // carry (timestamp-conventions, Filenames).
 const lowercaseId = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 8);
 
-import { formatUtcMarkerMs } from "@shared/timestamps";
 import { record } from "./backupStore";
 
 /**
@@ -219,19 +218,4 @@ export function formatError(error: unknown): string {
   }
 
   return String(error);
-}
-
-// Moves an existing file aside to "<stem>-<yyyymmdd-hhmmss-fff-utc>.invalid", in
-// the same directory, returning the new path (or null if there was nothing to
-// move). Used by explicit recovery (Reset, replacing an unusable key file) and by
-// malformed settings, so invalid content is preserved rather than overwritten.
-// A failed read never reaches here: access failure is not damage.
-export async function preserveAside(filePath: string): Promise<string | null> {
-  if (!(await fileExists(filePath))) {
-    return null;
-  }
-  const stem = basename(filePath, extname(filePath));
-  const preserved = join(dirname(filePath), `${stem}-${formatUtcMarkerMs(new Date())}.invalid`);
-  await rename(filePath, preserved);
-  return preserved;
 }

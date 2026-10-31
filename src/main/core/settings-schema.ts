@@ -344,8 +344,6 @@ export class SettingsStore {
     await this.writeTail;
     await this.store.flush();
   }
-  admitReset(): Promise<void> { return this.store.admitReset(); }
-  preserveExistingFiles(): Promise<string[]> { return this.store.preserveExistingFiles(); }
 }
 
 export function createSettingsStore(

@@ -55,6 +55,7 @@ export function createLayoutStore(path: string): JsonStore<MumblerLayout> {
   return new JsonStore<MumblerLayout>({
     path,
     format: FORMATS.layout,
+    disposable: true,
     validate: (raw) => normalizeLayout(raw),
     createDefault: () => createDefaultLayout(),
     // Volatile state (pane widths, selected card) only: not recorded in backups.sqlite3.

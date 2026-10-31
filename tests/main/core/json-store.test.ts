@@ -188,54 +188,41 @@ describe("JsonStore.load — structural edge cases", () => {
   });
 });
 
-describe("JsonStore.preserveExistingFiles", () => {
-  it("refuses to move a newer store aside even after it was loaded", async () => {
+describe("a refused file is never changed", () => {
+  it.each([
+    ["newer", JSON.stringify({ ...header("doc", 2), value: "future" })],
+    ["damaged", "{ half a document"],
+    ["of another kind", JSON.stringify({ ...header("config"), value: "settings" })],
+  ])("refuses every save after loading a %s file, leaving it byte-identical", async (_kind, text) => {
     const store = makeStore();
-    await store.save({ value: "old" });
-    await store.load();
-    const text = JSON.stringify({ ...header("doc", 2), value: "future" });
-    await writeFile(store.path, text);
-    await expect(store.preserveExistingFiles()).rejects.toBeInstanceOf(NewerFormatError);
+    await writeFile(store.path, text, "utf8");
+    await expect(store.load()).rejects.toThrow();
+    await expect(store.save({ value: "over it" })).rejects.toThrow("was refused when it was read");
+    await expect(store.retryFailedWrite()).resolves.toBeUndefined();
     expect(await readFile(store.path, "utf8")).toBe(text);
+    expect(await readdir(dir)).toEqual(["doc.json"]);
   });
 
-  it("returns no paths and throws nothing when the file does not exist", async () => {
-    const store = makeStore();
-    await expect(store.preserveExistingFiles()).resolves.toEqual([]);
-  });
+  it("lets a disposable store's next save replace a damaged file, never a newer one", async () => {
+    const disposable = (): JsonStore<Doc> => new JsonStore<Doc>({
+      path: join(dir, "doc.json"),
+      format: { kind: "doc", version: 1 },
+      disposable: true,
+      validate: (raw) => ({ value: String(raw.value) }),
+      createDefault: () => ({ value: "default" }),
+    });
+    const damaged = disposable();
+    await writeFile(damaged.path, "{ half a document", "utf8");
+    await expect(damaged.load()).rejects.toBeInstanceOf(CorruptStateError);
+    await damaged.save({ value: "replaced" });
+    expect(await read(damaged.path)).toEqual({ ...header("doc"), value: "replaced" });
 
-  it("moves the canonical file aside, preserving its contents under a quarantined .invalid name", async () => {
-    const store = makeStore();
-    await writeFile(store.path, JSON.stringify({ ...header("doc"), value: "canonical" }), "utf8");
-
-    const preserved = await store.preserveExistingFiles();
-
-    expect(preserved).toHaveLength(1);
-    await expect(readFile(store.path, "utf8")).rejects.toThrow();
-    expect(await read(preserved[0]!)).toEqual({ ...header("doc"), value: "canonical" });
-    expect(preserved[0]!).toMatch(/doc-\d{8}-\d{6}-\d{3}-utc\.invalid$/);
-  });
-
-  it("the Reset sequence does not erase the user's last readable copy", async () => {
-    // Reset sets the original aside and writes defaults. The original data must
-    // stay recoverable from the preserved copy, and nothing else should leak.
-    const store = makeStore();
-    await writeFile(store.path, JSON.stringify({ ...header("doc"), value: "real" }), "utf8");
-    await store.load();
-
-    const preserved = await store.preserveExistingFiles();
-    await store.save({ value: "default" });
-
-    // The live file is now defaults...
-    expect(await read(store.path)).toEqual({ ...header("doc"), value: "default" });
-    // ...but the original "real" data is still recoverable from the preserved copy.
-    expect(await read(preserved[0]!)).toEqual({ ...header("doc"), value: "real" });
-
-    // And nothing leaked: exactly the canonical and the preserved copy remain.
-    const remaining = await readdir(dir);
-    expect(remaining.sort()).toEqual(
-      ["doc.json", ...preserved.map((p) => p.slice(dir.length + 1))].sort(),
-    );
+    const newer = disposable();
+    const text = JSON.stringify({ ...header("doc", 2), value: "future" });
+    await writeFile(newer.path, text, "utf8");
+    await expect(newer.load()).rejects.toBeInstanceOf(NewerFormatError);
+    await expect(newer.save({ value: "over it" })).rejects.toThrow();
+    expect(await readFile(newer.path, "utf8")).toBe(text);
   });
 });
 

@@ -5,7 +5,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AppPaths, AppSnapshot, MumblerShellApi } from "@shared/app-shell";
+import type { AppSnapshot, MumblerShellApi } from "@shared/app-shell";
 import { App } from "@renderer/app/App";
 import { createDefaultSettings, summarizeSettings } from "@main/core/settings-schema";
 import { until } from "../../support/until";
@@ -17,8 +17,6 @@ const hostile = new Error(
 );
 // What main sends as the subscription's first snapshot.
 const firstSnapshot = vi.fn<() => Promise<AppSnapshot>>();
-// Sends the window a later snapshot, as main does before a reply.
-let publish: (snapshot: AppSnapshot) => void = () => undefined;
 const reportRendererDiagnostic = vi.fn<MumblerShellApi["reportRendererDiagnostic"]>();
 let root: Root | null = null;
 
@@ -108,108 +106,22 @@ describe("App startup snapshot gate", () => {
 });
 
 describe("a startup diagnostic", () => {
-  it("names a store from a newer version and offers no reset", async () => {
+  it("names every refused file, newer and unreadable apart, with no way to set them aside", async () => {
     firstSnapshot.mockResolvedValue({
       ...readySnapshot(),
       startupDiagnostic: {
-        title: { key: "diagnostic.newerTitle" },
-        message: { key: "diagnostic.newerBody", values: { path: "/home/me/.mumbler/config.json" } },
-        canReset: false,
+        title: { key: "diagnostic.refusedTitle" },
+        message: { key: "diagnostic.refusedBothBody", values: { newer: ["/home/me/.mumbler/layout.json"], unreadable: ["/home/me/.mumbler/config.json"] } },
       },
     });
 
     await act(async () => root?.render(createElement(App)));
-    await until(() => expect(document.body.textContent).toContain("Saved Data Is From a Newer Version"));
-
-    expect(document.body.textContent).toContain("/home/me/.mumbler/config.json was saved by a newer version of Mumbler");
-    expect(button("Reset State")).toBeUndefined();
-  });
-
-  it("names a work file it could not read and offers no reset", async () => {
-    firstSnapshot.mockResolvedValue({
-      ...readySnapshot(),
-      startupDiagnostic: {
-        title: { key: "diagnostic.unreadableTitle" },
-        message: { key: "diagnostic.unreadableBody", values: { path: "/home/me/.mumbler/config.json" } },
-        canReset: false,
-      },
-    });
-
-    await act(async () => root?.render(createElement(App)));
-    await until(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Read"));
-
-    expect(document.body.textContent).toContain("Mumbler could not read /home/me/.mumbler/config.json.");
-    expect(button("Reset State")).toBeUndefined();
-  });
-
-  it("offers a reset when a damaged work file stopped launch", async () => {
-    firstSnapshot.mockResolvedValue({
-      ...readySnapshot(),
-      startupDiagnostic: {
-        title: { key: "diagnostic.corruptTitle" },
-        message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/config.json" } },
-        canReset: true,
-      },
-    });
-
-    await act(async () => root?.render(createElement(App)));
-    await until(() => expect(document.body.textContent).toContain("Saved Data Could Not Be Loaded"));
-
-    expect(document.body.textContent).toContain("Mumbler could not safely load /home/me/.mumbler/config.json.");
-    expect(document.body.textContent).toContain("choose Reset State to set your saved work aside");
-    expect(button("Reset State")).toBeDefined();
-  });
-
-  it("says where a reset set the previous queue and recordings aside, and keeps saying it", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout"] });
-    try {
-      firstSnapshot.mockResolvedValue({
-        ...readySnapshot(),
-        startupDiagnostic: { title: { key: "diagnostic.corruptTitle" }, message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/config.json" } }, canReset: true },
-      });
-      window.mumbler.resetState = vi.fn(async () => publish({
-        ...readySnapshot(),
-        paths: { homeDir: "/home/me/.mumbler" } as AppPaths,
-      }));
-
-      await act(async () => root?.render(createElement(App)));
-      await until(() => expect(button("Reset State")).toBeDefined());
-      await act(async () => button("Reset State")!.click());
-      await act(async () => vi.advanceTimersByTime(10_000));
-
-      expect(document.body.textContent).toContain(
-        "The previous queue and its recordings were set aside in /home/me/.mumbler,",
-      );
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("shows a reset that failed part-way where the Reset button is, naming what it moved, and no success notice", async () => {
-    firstSnapshot.mockResolvedValue({
-      ...readySnapshot(),
-      startupDiagnostic: { title: { key: "diagnostic.corruptTitle" }, message: { key: "diagnostic.corruptBody", values: { path: "/home/me/.mumbler/config.json" } }, canReset: true },
-    });
-    window.mumbler.resetState = vi.fn(async () => publish({
-      ...readySnapshot(),
-      paths: { homeDir: "/home/me/.mumbler" } as AppPaths,
-      startupDiagnostic: {
-        title: { key: "diagnostic.resetTitle" },
-        message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json", "cards"], folder: "/home/me/.mumbler" } },
-        canReset: true,
-      },
-    }));
-
-    await act(async () => root?.render(createElement(App)));
-    await until(() => expect(button("Reset State")).toBeDefined());
-    await act(async () => button("Reset State")!.click());
+    await until(() => expect(document.body.textContent).toContain("Mumbler Could Not Start"));
 
     const text = document.body.textContent ?? "";
-    expect(text).toContain("Reset Failed");
-    expect(text).toContain("it set these aside in /home/me/.mumbler, under names that include the time of the reset: config.json, cards.");
-    expect(text).not.toContain("Reset to defaults.");
-    expect(text).not.toContain("unchanged");
-    expect(button("Reset State"), "the reset can be tried again").toBeDefined();
+    expect(text).toContain("A newer version of Mumbler saved these files: /home/me/.mumbler/layout.json.");
+    expect(text).toContain("Mumbler could not read these: /home/me/.mumbler/config.json.");
+    expect(button("Reset State")).toBeUndefined();
   });
 });
 
@@ -219,7 +131,6 @@ function rendererApi(): MumblerShellApi {
     {
       getInterfaceLanguage: async () => ({ language: "en", locale: "en-US" }),
       subscribeSnapshot: async (listener: (snapshot: AppSnapshot) => void) => {
-        publish = listener;
         listener(await firstSnapshot());
         return unsubscribe;
       },

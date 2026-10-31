@@ -20,6 +20,7 @@ import {
   closeBackupStore,
   record,
   setBackupStoreSession,
+  setBackupStoreOffListener,
   setBackupStoreWarn,
   type BackupWarn,
 } from "@main/core/backupStore";
@@ -239,18 +240,25 @@ describe("record — format version", () => {
   it.each([
     ["in a newer format", "CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 2;", "newer than this build reads"],
     ["without its format version", "CREATE TABLE backups (id INTEGER PRIMARY KEY);", "records no format version"],
-  ])("leaves a history %s untouched, warning once and recording nothing", async (_kind, setup, reported) => {
+    ["without a file header", "CREATE TABLE backups (id INTEGER PRIMARY KEY); PRAGMA user_version = 1;", "no file header"],
+    ["of another kind", "CREATE TABLE file_header (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO file_header VALUES ('format.owner', 'mumbler'), ('format.kind', 'records'); PRAGMA user_version = 1;", "no file header"],
+  ])("leaves a history %s untouched, warning once, recording nothing and saying it is off", async (_kind, setup, reported) => {
     const existing = new DatabaseSync(storeFilePath);
     existing.exec(setup);
     existing.close();
     const before = createHash("sha256").update(readFileSync(storeFilePath)).digest("hex");
     const warn = vi.fn<BackupWarn>();
     setBackupStoreWarn(warn);
+    const off = vi.fn();
+    setBackupStoreOffListener(off);
 
-    record(join(root, "config.json"), Buffer.from("x", "utf8"));
-    record(join(root, "layout.json"), Buffer.from("y", "utf8"));
-    await closeBackupStore();
+    try {
+      record(join(root, "config.json"), Buffer.from("x", "utf8"));
+      record(join(root, "layout.json"), Buffer.from("y", "utf8"));
+      await closeBackupStore();
+    } finally { setBackupStoreOffListener(null); }
 
+    expect(off).toHaveBeenCalledExactlyOnceWith(storeFilePath);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("could not open"),

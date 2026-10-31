@@ -123,6 +123,23 @@ export async function probeToolVersion(name: ToolName, toolPath: string, signal?
   return version;
 }
 
+/** The tool sidecars in `binDir` that a newer Mumbler wrote, which stop launch. Nothing is written. */
+export async function newerVersionSidecars(binDir: string, names: readonly ToolName[]): Promise<string[]> {
+  const newer: string[] = [];
+  for (const name of names) {
+    const path = versionSidecarPath(binDir, name);
+    try {
+      const raw: unknown = JSON.parse(await readFile(path, "utf8"));
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const recorded = recordedFormatVersion(raw as Record<string, unknown>, FORMATS.toolVersion);
+      if (recorded !== null && recorded > FORMATS.toolVersion.version) newer.push(path);
+    } catch {
+      // Absent or unreadable: a cache, rebuilt by the next install.
+    }
+  }
+  return newer;
+}
+
 async function readSidecar(binDir: string, name: ToolName, toolPath: string): Promise<string | null> {
   try {
     const raw: unknown = JSON.parse(await readFile(versionSidecarPath(binDir, name), "utf8"));

@@ -4,9 +4,8 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiKeyEnvVar, clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "@main/core/api-keys";
+import { apiKeyEnvVar, checkApiKeysFile, clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "@main/core/api-keys";
 import { closeBackupStore } from "@main/core/backupStore";
-import * as fileIo from "@main/core/file-io";
 import { NewerFormatError } from "@main/core/format-versions";
 import { header } from "../../support/file-header";
 
@@ -199,39 +198,34 @@ describe("API key secrets store", () => {
     expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("general-env");
   });
 
-  it("preserves a wrong-shaped valid-JSON key file before rebuilding it", async () => {
-    const original = '{"unexpected":{"secret":"hand-authored"}}\n';
+  it.each([
+    ["a wrong-shaped", '{"unexpected":{"secret":"hand-authored"}}\n'],
+    ["a JSON null", "null\n"],
+    ["an unparseable", "not json at all"],
+    ["an unmarked", JSON.stringify({ keys: { gemini: "hand-pasted" } })],
+    ["another kind's", JSON.stringify({ ...header("config"), keys: { gemini: "elsewhere" } })],
+  ])("refuses to save or clear a key over %s key file, leaving it byte-identical with its mode", async (_kind, original) => {
     await writeFile(apiKeysPath, original, "utf8");
+    if (process.platform !== "win32") await chmod(apiKeysPath, 0o644);
 
-    const warn = vi.fn();
-    await writeApiKey(apiKeysPath, "gemini", "replacement-key", warn);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("unexpected shape"),
-      expect.objectContaining({ path: apiKeysPath }),
-    );
+    await expect(writeApiKey(apiKeysPath, "gemini", "replacement-key")).rejects.toThrow("left as it is");
+    await expect(clearApiKey(apiKeysPath, "gemini")).rejects.toThrow("left as it is");
 
-    const preservedName = (await readdir(home)).find((entry) =>
-      /^api-keys-\d{8}-\d{6}-\d{3}-utc\.invalid$/.test(entry),
-    );
-    expect(preservedName).toBeDefined();
-    expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
-
-    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("replacement-key");
-    expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
+    expect(await readFile(apiKeysPath, "utf8")).toBe(original);
+    if (process.platform !== "win32") expect((await stat(apiKeysPath)).mode & 0o777, "an unusable file is not tightened").toBe(0o644);
+    expect(await readdir(home)).toEqual(["api-keys.json"]);
   });
 
-  it("preserves a valid JSON null instead of mistaking it for a missing key file", async () => {
-    const original = "null\n";
-    await writeFile(apiKeysPath, original, "utf8");
-
-    await writeApiKey(apiKeysPath, "gemini", "replacement-key");
-
-    const preservedName = (await readdir(home)).find((entry) =>
-      /^api-keys-\d{8}-\d{6}-\d{3}-utc\.invalid$/.test(entry),
-    );
-    expect(preservedName).toBeDefined();
-    expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
-    expect(await resolveApiKey(apiKeysPath, "gemini")).toBe("replacement-key");
+  it("checks the key file at launch, naming one that is newer or unusable and changing nothing", async () => {
+    expect(await checkApiKeysFile(apiKeysPath)).toBeNull();
+    await writeApiKey(apiKeysPath, "gemini", "stored-key");
+    expect(await checkApiKeysFile(apiKeysPath)).toBeNull();
+    await writeFile(apiKeysPath, "not json", "utf8");
+    expect(await checkApiKeysFile(apiKeysPath)).toEqual({ path: apiKeysPath, newer: false });
+    const newer = JSON.stringify({ ...header("api-keys", 2), keys: {} });
+    await writeFile(apiKeysPath, newer, "utf8");
+    expect(await checkApiKeysFile(apiKeysPath)).toEqual({ path: apiKeysPath, newer: true });
+    expect(await readFile(apiKeysPath, "utf8")).toBe(newer);
   });
 
   it("leaves a corrupt (unparseable) key file in place and resolves to no key instead of throwing", async () => {
@@ -275,28 +269,10 @@ describe("API key secrets store", () => {
     const warn = vi.fn();
 
     await expect(resolveApiKey(apiKeysPath, "gemini", warn)).resolves.toBeNull();
-    await writeApiKey(apiKeysPath, "gemini", "replacement-key", warn);
+    await expect(writeApiKey(apiKeysPath, "gemini", "replacement-key", warn)).rejects.toThrow();
 
     expect(warn).toHaveBeenCalled();
     expect(JSON.stringify(warn.mock.calls)).not.toContain("FAKEFRAGMENT");
-  });
-
-  it("sets an unusable key file aside before replacing it, and writes nothing when that fails", async () => {
-    const original = JSON.stringify({ ...header("api-keys"), keys: "not an object" });
-    await writeFile(apiKeysPath, original, "utf8");
-    const spy = vi.spyOn(fileIo, "preserveAside").mockRejectedValueOnce(new Error("rename refused"));
-    try {
-      await expect(writeApiKey(apiKeysPath, "gemini", "replacement-key")).rejects.toThrow("rename refused");
-    } finally { spy.mockRestore(); }
-    expect(await readFile(apiKeysPath, "utf8")).toBe(original);
-    expect(await readdir(home)).toEqual(["api-keys.json"]);
-
-    // Clearing over it sets it aside and leaves no key file behind.
-    await clearApiKey(apiKeysPath, "gemini");
-    const entries = await readdir(home);
-    expect(entries).not.toContain("api-keys.json");
-    const preservedName = entries.find((entry) => /^api-keys-.*\.invalid$/.test(entry));
-    expect(await readFile(join(home, preservedName!), "utf8")).toBe(original);
   });
 
   it("leaves a key file in a newer format in place, reads no key from it, and refuses to write over it", async () => {

@@ -1,4 +1,4 @@
-import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, renameSync, rmSync } from "node:fs";
+import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -119,5 +119,33 @@ export function openVersionedDatabase(
       try { reportCleanup(secondary); } catch { /* Preserve the admission/initialization failure. */ }
     }
     throw error;
+  }
+}
+
+const SQLITE_MAGIC = "SQLite format 3\0";
+
+/**
+ * The format version a database file records, read from its file header
+ * without opening it, so nothing about the file changes: undefined when there
+ * is no file, null when it is not a SQLite database. Launch uses it to stop on
+ * a database from a newer Mumbler before any worker opens it.
+ */
+export function databaseFormatVersion(file: string): number | null | undefined {
+  let fd: number;
+  try {
+    fd = openSync(file, "r");
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    return null;
+  }
+  try {
+    const header = Buffer.alloc(100);
+    const read = readSync(fd, header, 0, 100, 0);
+    if (read < 100 || header.toString("latin1", 0, 16) !== SQLITE_MAGIC) return null;
+    return header.readInt32BE(60);
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
   }
 }

@@ -4,7 +4,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { type FileWriter, FORMATS } from "./format-versions.ts";
 import { openVersionedDatabase } from "./sqlite-store.ts";
 
-export type BackupEngineWarn = (message: string, details: Record<string, unknown>) => void;
+// `off` says recording is off for the session, which the app shows the user.
+export type BackupEngineWarn = (message: string, details: Record<string, unknown>, off?: boolean) => void;
 
 // One row per file per session (one process launch): the session's first save
 // of a path inserts its row, and later saves that session replace its content
@@ -106,16 +107,16 @@ export class BackupStoreEngine {
       this.warnOnce("backup store: could not open; recording disabled for this session", {
         file: this.file,
         error: errorInfo(error),
-      });
+      }, true);
       this.db = null;
     }
     return this.db;
   }
 
-  private warnOnce(message: string, details: Record<string, unknown>): void {
+  private warnOnce(message: string, details: Record<string, unknown>, off = false): void {
     if (this.failureReported) return;
     this.failureReported = true;
-    this.warn(message, details);
+    this.warn(message, details, off);
   }
 }
 

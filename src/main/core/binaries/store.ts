@@ -101,6 +101,7 @@ export function createDependenciesStore(path: string): JsonStore<DependenciesVal
   return new JsonStore<DependenciesValue>({
     path,
     format: FORMATS.dependencies,
+    disposable: true,
     validate: normalize,
     createDefault: createDefaultDependencies,
     serialize: serializeDependencies,

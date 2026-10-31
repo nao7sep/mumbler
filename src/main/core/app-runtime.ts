@@ -58,7 +58,9 @@ import {
 } from "./recording-times";
 import { outputBaseName } from "@shared/output-name";
 import { isCancelledError } from "./cancellation";
+import { newerVersionSidecars } from "./binaries/installed-version";
 import { ToolManager } from "./binaries/manager";
+import { TOOL_NAMES } from "./binaries/registry";
 import { createDefaultDependencies, createDependenciesStore, type DependenciesValue } from "./binaries/store";
 import {
   parseUtcFromDisplay,
@@ -71,12 +73,12 @@ import {
   recomputeUtcFromLocal,
   resolveTimezone,
 } from "@shared/timestamps";
-import { abandonBackupStore, closeBackupStore, setBackupStoreSession, setBackupStoreWarn } from "./backupStore";
-import { NewerFormatError } from "./format-versions";
-import { CorruptStateError, UnreadableStoreError, type JsonStore } from "./json-store";
+import { abandonBackupStore, backupStoreFile, closeBackupStore, setBackupStoreOffListener, setBackupStoreSession, setBackupStoreWarn } from "./backupStore";
+import { FORMATS, NewerFormatError } from "./format-versions";
+import { CorruptStateError, refusal, type JsonStore, type LoadResult, type RefusedFile } from "./json-store";
 import { resolveStorageRoot } from "./storage-root";
 import { copyIntoWorking, copyOriginalToBackup, deleteImportedSource, sourceFileIdentity } from "./working-files";
-import { cardScratchFolder, compareCards, createEmptyQueue, newItemId, QueueStore } from "./queue-store";
+import { cardScratchFolder, compareCards, newItemId, QueueStore } from "./queue-store";
 import {
   buildMarkdownContent,
   buildOutputPayload,
@@ -98,7 +100,8 @@ import {
   createLayoutStore,
   selectExistingCardId,
 } from "./layout-store";
-import { clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
+import { checkApiKeysFile, clearApiKey, hasApiKey, resolveApiKey, writeApiKey } from "./api-keys";
+import { databaseFormatVersion } from "./sqlite-store";
 import { type AppLogger, createLogger, serializeError, type SessionLogger } from "./logger";
 import { OperationError } from "./operation-error";
 import { applyThemePreference, currentSystemTheme } from "./theme";
@@ -134,45 +137,28 @@ function rendererReportError(report: RendererErrorReport): Error {
   return build(report);
 }
 
-/** Stable presentation for a failed user-commanded reset, naming what it had
- * already set aside in `folder`; the error itself is only logged. */
-export function resetFailureDiagnostic(movedAside: readonly string[], folder: string): StartupFailure {
+// A launch stop names every refused file it found, says which a newer
+// Mumbler wrote and which could not be read, and what the user can do; every
+// one is left exactly as it is (store-recovery-conventions, What a refused
+// file does).
+export function refusedFilesDiagnostic(files: readonly RefusedFile[]): StartupFailure {
+  const newer = files.filter((file) => file.newer).map((file) => file.path);
+  const unreadable = files.filter((file) => !file.newer).map((file) => file.path);
   return {
-    title: message("diagnostic.resetTitle"),
-    message: movedAside.length === 0
-      ? message("diagnostic.resetBody")
-      : message("diagnostic.resetMovedBody", { items: [...movedAside], folder }),
-    canReset: true,
+    title: message("diagnostic.refusedTitle"),
+    message: newer.length === 0
+      ? message("diagnostic.refusedUnreadableBody", { items: unreadable })
+      : unreadable.length === 0
+        ? message("diagnostic.refusedNewerBody", { items: newer })
+        : message("diagnostic.refusedBothBody", { newer, unreadable }),
   };
 }
 
-// Reset, which sets the saved work aside and starts empty, is offered only when
-// damaged content in a work store stopped launch: that is the one stop it can
-// clear. A file that could not be read or is from a newer Mumbler is named and
-// left exactly in place, and any other failure is left for a reopen, with no
-// Reset (developer decision; store-recovery-conventions).
 export function startupFailureDiagnostic(error: unknown): StartupFailure {
-  if (error instanceof NewerFormatError) {
-    return {
-      title: message("diagnostic.newerTitle"),
-      message: message("diagnostic.newerBody", { path: error.filePath }),
-      canReset: false,
-    };
-  }
-  if (error instanceof UnreadableStoreError) {
-    return {
-      title: message("diagnostic.unreadableTitle"),
-      message: message("diagnostic.unreadableBody", { path: error.filePath }),
-      canReset: false,
-    };
-  }
-  return error instanceof CorruptStateError
-    ? {
-        title: message("diagnostic.corruptTitle"),
-        message: message("diagnostic.corruptBody", { path: error.filePath }),
-        canReset: true,
-      }
-    : { title: message("diagnostic.startupTitle"), message: message("diagnostic.startupBody"), canReset: false };
+  const file = refusal(error);
+  return file !== null
+    ? refusedFilesDiagnostic([file])
+    : { title: message("diagnostic.startupTitle"), message: message("diagnostic.startupBody") };
 }
 
 // A source that is not importable, with the reason the interface shows (in the
@@ -316,7 +302,6 @@ export class ApplicationRuntime {
         startupDiagnostic: {
           title: message("diagnostic.storageTitle"),
           message: message("diagnostic.storageBody"),
-          canReset: false,
         },
         appWideError: null,
         laterNotices: [],
@@ -341,32 +326,45 @@ export class ApplicationRuntime {
     const queueStore = new QueueStore(paths);
 
     try {
+      // Every file launch opens is checked before anything is written. Any
+      // file a newer Mumbler wrote, and any valuable file that cannot be read
+      // (settings, the API key file, a card or import), stops launch with each
+      // one named and left exactly as it is. Disposable state that cannot be
+      // read (layout, tool facts) takes its defaults instead; records and the
+      // backup history that cannot be used are switched off with a notice
+      // (store-recovery-conventions, What a refused file does).
+      const refused: RefusedFile[] = [];
+      const refuse = (error: unknown): void => {
+        const file = refusal(error);
+        if (file === null) throw error;
+        refused.push(file);
+      };
+      const settingsLoad = await settingsStore.load().catch((error: unknown) => { refuse(error); return null; });
+      const keysFile = await checkApiKeysFile(paths.apiKeysPath, makeApiKeyWarn(logger));
+      if (keysFile !== null) refused.push(keysFile);
+      const layoutStore = createLayoutStore(paths.layoutPath);
+      const layoutLoad: LoadResult<MumblerLayout> | Error = await layoutStore.load().catch((error: unknown) => {
+        if (error instanceof NewerFormatError) refuse(error);
+        return error instanceof Error ? error : new Error(String(error));
+      });
+      const dependenciesLoad = await createDependenciesStore(paths.dependenciesPath).load().then(() => null, (error: unknown) => error);
+      if (dependenciesLoad instanceof NewerFormatError) refuse(dependenciesLoad);
+      for (const path of await newerVersionSidecars(paths.binDir, TOOL_NAMES)) refused.push({ path, newer: true });
+      for (const [path, format] of [[paths.recordsPath, FORMATS.records], [backupStoreFile(), FORMATS.backups]] as const) {
+        const recorded = databaseFormatVersion(path);
+        if (typeof recorded === "number" && recorded > format.version) refused.push({ path, newer: true });
+      }
+      const queueLoad = refused.length === 0 ? await queueStore.load(logger) : null;
+      if (queueLoad !== null) refused.push(...queueLoad.refused);
+      if (refused.length > 0 || settingsLoad === null || queueLoad === null) {
+        await logger.error("app.startup-refused", "Launch stopped on files this build cannot use; each was left as it is.", null, { refused });
+        await loadInterfaceCatalogue(settingsLoad?.value.language ?? "system");
+        return ApplicationRuntime.stopped(paths, logger, refusedFilesDiagnostic(refused), shellReadyAtUtc);
+      }
+
       await ensureDirectories(paths);
 
-      // Authored settings with damaged content are set aside and the app starts on
-      // the built-ins, leaving the work stores alone (store-recovery-conventions).
-      // A file that could not be read or is in a newer format halts launch below,
-      // left in place; a failed set-aside propagates.
-      let settingsLoad;
       let settingsNotice: AppSnapshot["appWideError"] = null;
-      try {
-        settingsLoad = await settingsStore.load();
-      } catch (error: unknown) {
-        if (!(error instanceof CorruptStateError)) throw error;
-        const [quarantinedTo] = await settingsStore.preserveExistingFiles();
-        await logger.warn(
-          "settings.corrupt-quarantined",
-          "config.json was damaged; quarantined aside and started with the built-in settings.",
-          { path: paths.settingsPath, quarantinedTo, reason: error.message },
-        );
-        if (quarantinedTo !== undefined) {
-          settingsNotice = {
-            title: message("diagnostic.settingsResetTitle"),
-            message: message("diagnostic.settingsResetBody", { path: quarantinedTo }),
-          };
-        }
-        settingsLoad = await settingsStore.load();
-      }
       // Sets whose saved value this build cannot use run on their built-ins and
       // stay in the file until the user saves Settings; the user is told which.
       if (settingsLoad.unusable.length > 0) {
@@ -397,29 +395,20 @@ export class ApplicationRuntime {
         makeApiKeyWarn(logger),
       );
 
-      // Reads each card and pending import from its folder, settling what a
-      // previous session left; only what changed is written.
-      const queueLoad = await queueStore.load(logger);
-
-      // Presentation state (disposable, volatile). No layout problem halts launch:
-      // the session runs on defaults, and nothing is set aside. A missing or
-      // damaged layout.json is written only once the user changes the pane width
-      // or card selection, which replaces a damaged one. One that could not be
-      // read or is in a newer format is left as it is and not written this session.
-      let layoutStore: JsonStore<MumblerLayout> | null = createLayoutStore(paths.layoutPath);
+      // Presentation state (disposable). A damaged layout.json runs on the
+      // defaults with no notice and is replaced by the next layout save; one that
+      // could not be read at all is not written this session.
       let layout: MumblerLayout;
-      try {
-        layout = (await layoutStore.load()).value;
-      } catch (error: unknown) {
+      let liveLayoutStore: JsonStore<MumblerLayout> | null = layoutStore;
+      if (layoutLoad instanceof Error) {
         layout = createDefaultLayout();
-        const damaged = error instanceof CorruptStateError;
-        if (!damaged) layoutStore = null;
-        await logger.warn("app.layout-defaults", damaged
-          ? "Layout file was damaged; using defaults until the next layout save replaces it."
-          : "Layout file could not be used; using defaults and not saving it this session.", {
+        if (!(layoutLoad instanceof CorruptStateError)) liveLayoutStore = null;
+        await logger.warn("app.layout-defaults", "Layout file could not be used; using defaults.", {
           layoutPath: paths.layoutPath,
-          error: error instanceof Error ? error.message : String(error),
+          error: layoutLoad.message,
         });
+      } else {
+        layout = layoutLoad.value;
       }
       layout = {
         ...layout,
@@ -441,20 +430,11 @@ export class ApplicationRuntime {
         recoveredInterruptedCards: queueLoad.recoveredInterruptedCards,
         restoredSavingCards: queueLoad.restoredSavingCards,
         missingWorkingCards: queueLoad.missingWorkingCards,
-        unreadableItemFiles: queueLoad.unreadable.length,
         unlistedFolders: queueLoad.unlistedFolders,
         removedFolders: queueLoad.removedFolders,
       });
 
-      // A card or import whose file cannot be read is left as it is, and the
-      // user is told where it is.
       const notices = settingsNotice === null ? [] : [settingsNotice];
-      if (queueLoad.unreadable.length > 0) {
-        notices.push({
-          title: message("diagnostic.itemsUnreadableTitle"),
-          message: message("diagnostic.itemsUnreadableBody", { items: queueLoad.unreadable.map((file) => file.path) }),
-        });
-      }
 
       if (queueLoad.recoveredInterruptedCards > 0) {
         await logger.warn(
@@ -468,7 +448,7 @@ export class ApplicationRuntime {
       // a quit partway through brings it back rather than losing it.
       if (firstRun && !layout.setupPending) {
         layout = { ...layout, setupPending: true };
-        await layoutStore?.save(layout).catch((error: unknown) => logger.warn(
+        await liveLayoutStore?.save(layout).catch((error: unknown) => logger.warn(
           "setup.pending-save", "Could not record that first-run setup is pending; it shows this session only.", {
             error: serializeError(error),
           },
@@ -482,7 +462,7 @@ export class ApplicationRuntime {
         layout,
         settingsStore,
         queueStore,
-        layoutStore,
+        layoutStore: liveLayoutStore,
         logger,
         startupDiagnostic: null,
         appWideError: notices[0] ?? null,
@@ -494,6 +474,7 @@ export class ApplicationRuntime {
       });
 
       runtime.firstRun = layout.setupPending;
+      runtime.watchSideStores();
 
       await runtime.initializeTools();
 
@@ -507,24 +488,50 @@ export class ApplicationRuntime {
       // Root admission already succeeded; later startup failures may use it.
       await logger.error("app.startup-failed", "Application runtime failed to start.", error);
       await loadInterfaceCatalogue("system");
-      return new ApplicationRuntime({
-        paths,
-        settings: null,
-        state: null,
-        layout: null,
-        settingsStore: null,
-        queueStore: null,
-        layoutStore: null,
-        logger,
-        startupDiagnostic: startupFailureDiagnostic(error),
-        appWideError: null,
-        laterNotices: [],
-        recoveredInterruptedCards: 0,
-        shellReadyAtUtc,
-        toolManager: null,
-        hasGeminiApiKey: false,
-      });
+      return ApplicationRuntime.stopped(paths, logger, startupFailureDiagnostic(error), shellReadyAtUtc);
     }
+  }
+
+  // A launch that stopped: the window shows the diagnostic, and nothing runs.
+  private static stopped(paths: AppPaths, logger: SessionLogger, startupDiagnostic: StartupFailure, shellReadyAtUtc: number): ApplicationRuntime {
+    return new ApplicationRuntime({
+      paths,
+      settings: null,
+      state: null,
+      layout: null,
+      settingsStore: null,
+      queueStore: null,
+      layoutStore: null,
+      logger,
+      startupDiagnostic,
+      appWideError: null,
+      laterNotices: [],
+      recoveredInterruptedCards: 0,
+      shellReadyAtUtc,
+      toolManager: null,
+      hasGeminiApiKey: false,
+    });
+  }
+
+  // Records or a backup history that cannot be used stay untouched and off for
+  // the session, and the user is told once for each.
+  private watchSideStores(): void {
+    const { paths, logger } = this.runtime;
+    if (paths === null) return;
+    logger.onRecordsOff(() => this.showNotice({
+      title: message("diagnostic.recordsOffTitle"),
+      message: message("diagnostic.recordsOffBody", { path: paths.recordsPath, folder: paths.logsDir }),
+    }));
+    setBackupStoreOffListener((file) => this.showNotice({
+      title: message("diagnostic.backupsOffTitle"),
+      message: message("diagnostic.backupsOffBody", { path: file }),
+    }));
+  }
+
+  private showNotice(notice: NonNullable<AppSnapshot["appWideError"]>): void {
+    if (this.runtime.appWideError === null) this.runtime.appWideError = notice;
+    else this.runtime.laterNotices.push(notice);
+    this.emitDependenciesChanged();
   }
 
   private async initializeTools(): Promise<void> {
@@ -535,11 +542,10 @@ export class ApplicationRuntime {
     // notifies the runtime to re-emit the snapshot as state changes. The tool
     // resolver is wired so audio-tools can find the managed binaries; a missing
     // tool surfaces through the Audio Tools surface, never a hard startup failure.
-    // dependencies.json is a re-derivable facts cache, so no problem with it
-    // blocks launch and nothing is set aside. A damaged file starts from the
-    // defaults and is replaced by the next facts save. One that could not be
-    // read or is in a newer format is left as it is: this session keeps its
-    // facts in memory only.
+    // dependencies.json is a re-derivable facts cache. One from a newer
+    // Mumbler stopped launch before this. A damaged file starts from the
+    // defaults and is replaced by the next facts save; one that could not be
+    // read at all is left as it is, and this session keeps its facts in memory.
     const dependenciesFile = createDependenciesStore(paths.dependenciesPath);
     let dependenciesStore: Pick<JsonStore<DependenciesValue>, "save"> = dependenciesFile;
     let dependenciesValue: DependenciesValue;
@@ -812,81 +818,6 @@ export class ApplicationRuntime {
       dismissedTitle: title,
     });
     return this.getSnapshot();
-  }
-
-  // A reset that fails part-way is reported in the snapshot it returns, naming
-  // what it had already set aside, rather than thrown.
-  async resetState(): Promise<AppSnapshot> {
-    const previousPreference = this.languagePreference();
-    const previousLanguage = this.interfaceLanguage().language;
-    const paths = this.runtime.paths ?? getAppPaths();
-    const settingsStore = createLoggedSettingsStore(paths.settingsPath, this.runtime.logger);
-    const queueStore = new QueueStore(paths);
-    const layoutStore = createLayoutStore(paths.layoutPath);
-    const settings = createDefaultSettings();
-    const state = createEmptyQueue();
-    const layout = createDefaultLayout();
-
-    // The names of what has been set aside so far.
-    const movedAside: string[] = [];
-    const moved = <T extends string[] | string | null>(path: string, result: T): T => {
-      if (result !== null && result.length > 0) movedAside.push(basename(path));
-      return result;
-    };
-    try {
-      // Admit every reset-owned store before moving any sibling aside. The
-      // layout is disposable: one from a newer Mumbler is left as it is and not
-      // written this session, rather than blocking the reset of saved work.
-      await settingsStore.admitReset();
-      await queueStore.admitReset();
-      const layoutNewer = await layoutStore.admitReset().then(() => false, (error: unknown) => {
-        if (error instanceof NewerFormatError) return true;
-        throw error;
-      });
-      await loadInterfaceCatalogue(settings.language);
-      await ensureDirectories(paths);
-      // Preserve each store before the user-commanded reset returns to built-ins.
-      const preservedSettingsFiles = moved(paths.settingsPath, await settingsStore.preserveExistingFiles());
-      // The queue's lists and folders are set aside together, so the cards'
-      // text and recordings stay beside their order; a reset deletes no audio.
-      const preservedStateFiles = await queueStore.preserveExistingFiles((path) => movedAside.push(basename(path)));
-      const preservedLayoutFiles = layoutNewer ? [] : moved(paths.layoutPath, await layoutStore.preserveExistingFiles());
-      // Reuse the per-launch session logger rather than building a new one, so a
-      // reset keeps writing to the same file as the rest of the launch.
-      const logger = this.runtime.logger;
-      await logger.warn("app.reset-state", "Reset settings and state from diagnostic recovery.", {
-        preservedSettingsFiles,
-        preservedStateFiles,
-        preservedLayoutFiles,
-      });
-
-      this.runtime.paths = paths;
-      this.runtime.settings = settings;
-      this.runtime.state = state;
-      this.runtime.layout = layout;
-      this.runtime.settingsStore = settingsStore;
-      this.runtime.queueStore = queueStore;
-      this.runtime.layoutStore = layoutNewer ? null : layoutStore;
-      this.runtime.hasGeminiApiKey = await hasApiKey(paths.apiKeysPath, "gemini", makeApiKeyWarn(logger));
-      if (this.runtime.toolManager === null) await this.initializeTools();
-      this.runtime.startupDiagnostic = null;
-      this.runtime.appWideError = null;
-      this.runtime.laterNotices = [];
-      this.runtime.recoveredInterruptedCards = 0;
-      applyThemePreference(settings.theme);
-      this.followLanguageChange(previousPreference, previousLanguage);
-      void this.startToolMaintenance();
-
-      return this.getSnapshot();
-    } catch (error: unknown) {
-      await this.runtime.logger.error("app.reset-failed", "Reset of settings and state failed.", error, { movedAside });
-      this.runtime.startupDiagnostic = error instanceof NewerFormatError
-        ? movedAside.length === 0
-          ? startupFailureDiagnostic(error)
-          : { ...resetFailureDiagnostic(movedAside, paths.homeDir), canReset: false }
-        : resetFailureDiagnostic(movedAside, paths.homeDir);
-      return this.getSnapshot();
-    }
   }
 
   getSettingsDraft(): SettingsDraft {

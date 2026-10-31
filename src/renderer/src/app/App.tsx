@@ -340,7 +340,6 @@ function LoadedShell({
     target: GenerateTarget;
     body: Message;
   } | null>(null);
-  const [isResettingState, setIsResettingState] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
@@ -760,29 +759,6 @@ function LoadedShell({
     }
   }
 
-  async function handleResetState(): Promise<void> {
-    setIsResettingState(true);
-    try {
-      await window.mumbler.resetState();
-      // A reset that failed part-way says so, and what it moved, where the Reset
-      // button is. A finished one says where the previous queue and recordings
-      // went, so it stays until dismissed.
-      const reset = latestSnapshot();
-      if (reset.startupDiagnostic === null) {
-        addPersistent("state-reset", message("notice.reset", { folder: pathValue(reset.paths!.homeDir) }));
-      }
-    } catch (error: unknown) {
-      // The call itself failed, before the reset could move anything.
-      addPersistent(
-        "state-reset",
-        presentFailure(error, message("error.resetState"), "state reset failed"),
-        "error",
-      );
-    } finally {
-      setIsResettingState(false);
-    }
-  }
-
   // Audio-tool operations. The main process records per-tool progress/errors in
   // the snapshot (live, with each one sent), while a thrown failure (for
   // example an operation already in flight) belongs to the still-open modal that
@@ -1152,18 +1128,6 @@ function LoadedShell({
             <section className="panel panel--nested queue-empty">
               <p className="empty-state__title">{i18n.text(snapshot.startupDiagnostic.title)}</p>
               <p className="empty-state__body">{i18n.text(snapshot.startupDiagnostic.message)}</p>
-              {snapshot.startupDiagnostic.canReset ? (
-                <div className="toolbar">
-                  <button
-                    type="button"
-                    className="button button--danger"
-                    onClick={() => void handleResetState()}
-                    disabled={isResettingState}
-                  >
-                    {isResettingState ? t("queue.resetting") : t("queue.resetState")}
-                  </button>
-                </div>
-              ) : null}
             </section>
           ) : snapshot?.state?.cards.length ? (
             <QueueList

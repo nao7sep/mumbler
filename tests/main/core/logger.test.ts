@@ -236,7 +236,8 @@ describe("createLogger", () => {
   it.each([
     ["in a newer format", "CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 2;", "newer than this build reads"],
     ["without its format version", "CREATE TABLE logs (id INTEGER PRIMARY KEY);", "records no format version"],
-  ])("leaves a database %s untouched, and keeps its lines in the fallback file", async (_kind, setup, reported) => {
+    ["without a file header", "CREATE TABLE logs (id INTEGER PRIMARY KEY); PRAGMA user_version = 1;", "no file header"],
+  ])("leaves a database %s untouched, keeps its lines in the fallback file and says records are off", async (_kind, setup, reported) => {
     const existing = new DatabaseSync(recordsPath);
     existing.exec(setup);
     existing.close();
@@ -244,9 +245,13 @@ describe("createLogger", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     try {
       const logger = open();
+      const off = vi.fn();
+      logger.onRecordsOff(off);
       await logger.info("startup", "kept anyway");
+      await logger.info("startup", "and again");
       await logger.close();
 
+      expect(off).toHaveBeenCalledOnce();
       expect((await fallbackLines())[0]).toMatchObject({ kind: "log", message: "kept anyway" });
       expect(stderr.mock.calls.some(([text]) => String(text).includes(reported))).toBe(true);
       expect(await readFile(recordsPath)).toEqual(before);

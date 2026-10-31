@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   installedVersionSource,
+  newerVersionSidecars,
   parseVersionBanner,
   readInstalledVersion,
   versionSidecarPath,
@@ -159,5 +160,15 @@ describe("sidecar publication admission and identity", () => {
     await expect(writeVersionSidecar(binDir, "ffmpeg", "8.2", 0, join(binDir, "ffmpeg.exe"), controller.signal)).rejects.toBe(primary);
     expect(await readFile(path, "utf8")).toBe("previous");
     expect(await readdir(binDir)).toEqual(["ffmpeg.exe", "ffmpeg.json"]);
+  });
+});
+
+describe("newer tool sidecars at launch", () => {
+  it("names only a sidecar a newer Mumbler wrote, reading the rest as rebuildable caches", async () => {
+    await writeFile(versionSidecarPath(binDir, "ffmpeg"), JSON.stringify({ ...header("tool-version", 2), version: "future" }));
+    await writeFile(versionSidecarPath(binDir, "ffprobe"), "{ damaged");
+    expect(await newerVersionSidecars(binDir, ["ffmpeg", "ffprobe"])).toEqual([versionSidecarPath(binDir, "ffmpeg")]);
+    await rm(versionSidecarPath(binDir, "ffmpeg"));
+    expect(await newerVersionSidecars(binDir, ["ffmpeg", "ffprobe"])).toEqual([]);
   });
 });

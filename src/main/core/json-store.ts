@@ -1,4 +1,4 @@
-import { formatError, preserveAside, readJsonFile, writeJsonFile } from "./file-io";
+import { formatError, readJsonFile, writeJsonFile } from "./file-io";
 import { type FileFormat, fileHeader, NewerFormatError, recordedFormatVersion, withoutHeader } from "./format-versions";
 
 // Thrown when a persisted file exists but its content cannot be safely loaded:
@@ -52,18 +52,17 @@ export function assertReadableFormat(filePath: string, document: Record<string, 
   }
 }
 
-/** Explicit reset may set corrupt bytes aside, but never a readable newer store. */
-export async function assertResettableJson(filePath: string, expected: FileFormat): Promise<void> {
-  let document: unknown;
-  try {
-    document = await readJsonFile<unknown>(filePath);
-  } catch (error: unknown) {
-    if (error instanceof Error && error.cause instanceof SyntaxError) return;
-    throw error;
-  }
-  if (document === null || typeof document !== "object" || Array.isArray(document)) return;
-  const recorded = recordedFormatVersion(document as Record<string, unknown>, expected);
-  if (recorded !== null && recorded > expected.version) throw new NewerFormatError(filePath, recorded, expected.version);
+/** A file the app refused: from a newer Mumbler, or one it could not read. */
+export interface RefusedFile {
+  path: string;
+  newer: boolean;
+}
+
+/** The refused file a failed load names, or null for a failure that is not a refusal. */
+export function refusal(error: unknown): RefusedFile | null {
+  if (error instanceof NewerFormatError) return { path: error.filePath, newer: true };
+  if (error instanceof CorruptStateError || error instanceof UnreadableStoreError) return { path: error.filePath, newer: false };
+  return null;
 }
 
 export interface JsonStoreOptions<T> {
@@ -87,6 +86,8 @@ export interface JsonStoreOptions<T> {
   serialize?: (value: T) => object;
   /** Whether writes enter backups.sqlite3. Defaults to false: only what the user authors opts in. */
   record?: boolean;
+  /** Disposable state, whose damaged file the next save may replace. */
+  disposable?: boolean;
 }
 
 export interface LoadResult<T> {
@@ -109,13 +110,16 @@ export interface LoadResult<T> {
 // There is no `.bak` last-good copy: save() is atomic (temp + rename), so a write
 // can never tear the canonical file into a state that would need one. A logically
 // bad file (hand-edited, or a newer format) is left untouched for the user to repair
-// or delete, and Reset (preserveExistingFiles) sets it aside before writing
-// defaults so the original is always recoverable.
+// or move away (store-recovery-conventions, A refused file is never changed).
+// Once a load refuses the file, every later write to it is refused at the write
+// itself, except that a damaged disposable store may be replaced.
 export class JsonStore<T extends object> {
   private queue: Promise<void> = Promise.resolve();
   // The latest write, when it failed: the value it could not write. A write
   // that lands clears it.
   private failure: { readonly value: T } | null = null;
+  // The file's last load refused it; writes to it are refused.
+  private refused: { damaged: boolean } | null = null;
 
   constructor(private readonly options: JsonStoreOptions<T>) {}
 
@@ -124,6 +128,17 @@ export class JsonStore<T extends object> {
   }
 
   async load(): Promise<LoadResult<T>> {
+    try {
+      const result = await this.read();
+      this.refused = null;
+      return result;
+    } catch (error: unknown) {
+      if (refusal(error) !== null) this.refused = { damaged: error instanceof CorruptStateError };
+      throw error;
+    }
+  }
+
+  private async read(): Promise<LoadResult<T>> {
     let raw: unknown;
     try {
       raw = await readJsonFile<unknown>(this.options.path);
@@ -158,6 +173,9 @@ export class JsonStore<T extends object> {
   }
 
   private async write(value: T): Promise<void> {
+    if (this.refused !== null && !(this.refused.damaged && this.options.disposable === true)) {
+      throw new Error(`${this.options.path} was refused when it was read and is left as it is.`);
+    }
     const wire = this.options.serialize ? this.options.serialize(value) : value;
     try {
       await writeJsonFile(
@@ -195,22 +213,5 @@ export class JsonStore<T extends object> {
   // shutdown. This is deliberate control flow, not a swallowed failure.
   async flush(): Promise<void> {
     await this.queue.catch(() => undefined);
-  }
-
-  // Sets the canonical file aside to a quarantined "<stem>-<stamp>.invalid" name,
-  // returning the path it moved to (or [] if there was nothing to move). This is
-  // the explicit-recovery (Reset) escape hatch: the user's original data is
-  // preserved before defaults are written over it.
-  //
-  // Call before save(): it does not go through the write queue, and is meant to
-  // run on a fresh store with no writes in flight (as Reset does).
-  async admitReset(): Promise<void> {
-    await assertResettableJson(this.options.path, this.options.format);
-  }
-
-  async preserveExistingFiles(): Promise<string[]> {
-    await this.admitReset();
-    const movedTo = await preserveAside(this.options.path);
-    return movedTo !== null ? [movedTo] : [];
   }
 }

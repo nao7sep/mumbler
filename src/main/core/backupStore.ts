@@ -7,7 +7,7 @@ import { storageRoot } from "./storage-root";
 export type BackupWarn = (message: string, details: Record<string, unknown>) => void;
 
 type WorkerResponse =
-  | { type: "warning"; message: string; details: Record<string, unknown> }
+  | { type: "warning"; message: string; details: Record<string, unknown>; off: boolean }
   | { type: "closed" };
 
 let warn: BackupWarn = (message, details) => {
@@ -26,6 +26,20 @@ let failureReported = false;
 
 export function setBackupStoreWarn(sink: BackupWarn): void {
   warn = sink;
+}
+
+// Told once, with the history's path, when recording is off for the session.
+let offListener: ((file: string) => void) | null = null;
+let offReported = false;
+
+export function setBackupStoreOffListener(listener: ((file: string) => void) | null): void {
+  offListener = listener;
+}
+
+function reportOff(): void {
+  if (offReported) return;
+  offReported = true;
+  offListener?.(storeFile());
 }
 
 export function setBackupStoreSession(id: string): void {
@@ -115,7 +129,13 @@ function ensureWorker(): Worker {
     workerData: { file: storeFile(), session, writer: appWriter() },
   });
   created.on("message", (message: WorkerResponse) => {
-    if (message.type === "warning") warn(message.message, message.details);
+    if (message.type === "warning") {
+      warn(message.message, message.details);
+      if (message.off) {
+        disabled = true;
+        reportOff();
+      }
+    }
   });
   created.on("error", (error) => {
     disableAfterFailure("backup store: worker failed; recording disabled for this session", {
@@ -138,12 +158,18 @@ function ensureWorker(): Worker {
   return created;
 }
 
+/** Where the backup history is, under the storage root. */
+export function backupStoreFile(): string {
+  return storeFile();
+}
+
 function storeFile(): string {
   return path.join(storageRoot(), "backups.sqlite3");
 }
 
 function disableAfterFailure(message: string, details: Record<string, unknown>): void {
   disabled = true;
+  reportOff();
   if (!failureReported) {
     failureReported = true;
     warn(message, details);
@@ -156,6 +182,7 @@ function resetSession(): void {
   disabled = false;
   abandoned = false;
   failureReported = false;
+  offReported = false;
 }
 
 function errorInfo(error: unknown): string {

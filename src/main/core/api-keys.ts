@@ -1,6 +1,6 @@
 import { chmod, stat } from "node:fs/promises";
 
-import { preserveAside, readJsonFile, writeJsonFile } from "./file-io";
+import { readJsonFile, writeJsonFile } from "./file-io";
 import { fileHeader, FORMATS, NewerFormatError, recordedFormatVersion } from "./format-versions";
 
 /**
@@ -176,9 +176,12 @@ async function readAll(filePath: string, warn: WarnFn): Promise<StoredKeys> {
     });
     return { kind: "newer", error: newer };
   }
-  await warnIfInsecureMode(filePath, warn);
   const normalized = normalize(raw);
-  if (normalized !== null) return { kind: "keys", file: normalized };
+  if (normalized !== null) {
+    // Only a file that passed its checks has its mode tightened.
+    await warnIfInsecureMode(filePath, warn);
+    return { kind: "keys", file: normalized };
+  }
   warn("api-keys.json has an unexpected shape; left unchanged and no stored key is available.", { path: filePath });
   return { kind: "unusable", problem: "malformed" };
 }
@@ -189,17 +192,26 @@ function errorCode(error: unknown): string | undefined {
     : undefined;
 }
 
-// The keys a save or clear starts from. A newer file is refused; a file that
-// could not be used is set aside first, so its bytes survive the replacement,
-// and a failed set-aside stops the write.
-async function keysToReplace(filePath: string, stored: StoredKeys, warn: WarnFn): Promise<ApiKeysFile> {
+// The keys a save or clear starts from. A file that is newer or could not be
+// used is refused and left exactly as it is: the key is not saved
+// (store-recovery-conventions, A refused file is never changed).
+function keysToReplace(filePath: string, stored: StoredKeys): ApiKeysFile {
   if (stored.kind === "keys") return stored.file;
   if (stored.kind === "newer") throw stored.error;
-  if (stored.kind === "unusable") {
-    const preserved = await preserveAside(filePath);
-    warn("api-keys.json was set aside before replacing it.", { path: filePath, preserved, problem: stored.problem });
-  }
+  if (stored.kind === "unusable") throw new Error(`${filePath} could not be used, so it was left as it is and the key was not saved.`);
   return { keys: {} };
+}
+
+/**
+ * Checks the secrets file at launch: null when it is absent or usable, or the
+ * refused file when it is newer or cannot be used, which stops launch. Nothing
+ * is written, moved or tightened.
+ */
+export async function checkApiKeysFile(filePath: string, warn: WarnFn = noopWarn): Promise<{ path: string; newer: boolean } | null> {
+  const stored = await readAll(filePath, warn);
+  if (stored.kind === "newer") return { path: filePath, newer: true };
+  if (stored.kind === "unusable") return { path: filePath, newer: false };
+  return null;
 }
 
 async function writeAll(filePath: string, data: ApiKeysFile): Promise<void> {
@@ -274,7 +286,7 @@ export async function writeApiKey(
 ): Promise<void> {
   assertKeyId(id);
   const trimmed = apiKey.trim();
-  const all = await keysToReplace(filePath, await readAll(filePath, warn), warn);
+  const all = keysToReplace(filePath, await readAll(filePath, warn));
   if (trimmed.length === 0) {
     delete all.keys[id];
   } else {
@@ -292,7 +304,7 @@ export async function clearApiKey(
   assertKeyId(id);
   const stored = await readAll(filePath, warn);
   if (stored.kind === "absent") return;
-  const all = await keysToReplace(filePath, stored, warn);
+  const all = keysToReplace(filePath, stored);
   if (id in all.keys) {
     delete all.keys[id];
     await writeAll(filePath, all);

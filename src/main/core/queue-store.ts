@@ -1,14 +1,14 @@
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 
 import { customAlphabet } from "nanoid";
 
 import { CARD_STATUSES, type MumblerCard, type MumblerQueue, type PendingImportReviewItem, type RecordingTimeCandidate } from "@shared/app-shell";
-import { formatUtcIsoCompact, formatUtcMarkerMs, parseUtcMs } from "@shared/timestamps";
+import { formatUtcIsoCompact, parseUtcMs } from "@shared/timestamps";
 
 import { fileExists, isMissingFileError, readJsonFile, writeJsonFile } from "./file-io";
-import { type FileFormat, fileHeader, FORMATS, NewerFormatError, withoutHeader } from "./format-versions";
-import { assertReadableFormat, assertResettableJson, CorruptStateError, loadFailure, UnreadableStoreError } from "./json-store";
+import { type FileFormat, fileHeader, FORMATS, withoutHeader } from "./format-versions";
+import { assertReadableFormat, CorruptStateError, loadFailure, refusal, type RefusedFile, UnreadableStoreError } from "./json-store";
 import { type AppLogger } from "./logger";
 
 
@@ -26,8 +26,8 @@ import { type AppLogger } from "./logger";
 // card's effective time; the pending imports are the folders under inbox/ that
 // hold an import.json, ordered by when they were imported. A change writes only
 // the files it changed. Launch never deletes an item's folder: one whose file
-// cannot be read is reported with its path, and one with no file is left and
-// logged. Removing an item renames its folder to a hidden removed name in one
+// cannot be read or is newer stops launch with its path named, and one with no
+// file is left and logged. Removing an item renames its folder to a hidden removed name in one
 // step, then deletes it; a removed folder a crash left is deleted at launch.
 // Accepting an import writes its card.json into its folder, then renames the
 // folder from inbox/ into cards/ under the same id: the rename is the commit.
@@ -413,19 +413,14 @@ function compareImports(left: PendingImportReviewItem, right: PendingImportRevie
   return left.createdAtUtc - right.createdAtUtc || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
 }
 
-/** A file launch could not read, left as it is. */
-export interface UnreadableItemFile {
-  path: string;
-  reason: string;
-}
-
 export interface QueueLoad {
   state: MumblerQueue;
   recoveredInterruptedCards: number;
   restoredSavingCards: number;
   missingWorkingCards: number;
-  /** Item files that are damaged or in a newer format, shown with their paths. */
-  unreadable: UnreadableItemFile[];
+  /** Item files that are damaged, unreadable or in a newer format. When any
+   * is, launch stops and nothing was written. */
+  refused: RefusedFile[];
   /** Folders with no item file, or an import with no copy, left in place. */
   unlistedFolders: number;
   /** Removed folders a crash left, deleted. */
@@ -436,10 +431,11 @@ export interface QueueLoad {
 
 type FileKey = `card:${string}` | `import:${string}`;
 
-function unreadableReason(error: unknown): string | null {
-  if (error instanceof CorruptStateError) return error.reason;
-  if (error instanceof NewerFormatError) return error.message;
-  return null;
+interface ReadItem<T> {
+  id: string;
+  folder: string;
+  path: string;
+  stored: T;
 }
 
 export class QueueStore {
@@ -471,9 +467,10 @@ export class QueueStore {
    * Reads every card and pending import from its folder and settles what a
    * previous session left: removed folders are deleted, an interrupted card is
    * recovered, a card whose audio is missing is marked so, and scratch is
-   * cleared. Only what changed is written. An item file that is
-   * damaged or in a newer format is left as it is and reported; a folder or
-   * file that cannot be read at all stops the load.
+   * cleared. Only what changed is written. Every item file is read before
+   * anything is written: when one is damaged, unreadable or in a newer format,
+   * the load returns the refused files and writes nothing, so launch can stop
+   * with each one named and left as it is (store-recovery-conventions).
    */
   async load(logger: AppLogger): Promise<QueueLoad> {
     const result: QueueLoad = {
@@ -481,19 +478,19 @@ export class QueueStore {
       recoveredInterruptedCards: 0,
       restoredSavingCards: 0,
       missingWorkingCards: 0,
-      unreadable: [],
+      refused: [],
       unlistedFolders: 0,
       removedFolders: 0,
       clearedLeftovers: 0,
-    };
-    const unreadable = async (path: string, reason: string) => {
-      result.unreadable.push({ path, reason });
-      await logger.warn("startup.item-unreadable", "Left an item file that could not be read as it is.", { path, reason });
     };
     const unlisted = async (path: string, reason: string) => {
       result.unlistedFolders += 1;
       await logger.warn("startup.folder-unlisted", "Left a folder that holds no readable item in place.", { path, reason });
     };
+
+    const imports = await this.readItems<PendingImportReviewItem>(this.inboxDir, IMPORT_FILE, FORMATS.pendingImport, pendingImportIssue, result.refused);
+    const cards = await this.readItems<MumblerCard>(this.cardsDir, CARD_FILE, FORMATS.card, cardIssue, result.refused);
+    if (result.refused.length > 0) return result;
 
     for (const directory of [this.cardsDir, this.inboxDir]) {
       for (const name of await folderNames(directory)) {
@@ -502,22 +499,12 @@ export class QueueStore {
       }
     }
 
-    for (const id of await folderNames(this.inboxDir)) {
-      if (id.startsWith(".")) continue;
-      const folder = this.importFolder(id);
-      const path = join(folder, IMPORT_FILE);
-      const raw = await this.readItem(path, FORMATS.pendingImport, unreadable);
-      if (raw === null) continue;
-      if (raw === undefined) {
-        await unlisted(folder, "no import.json");
+    for (const item of imports) {
+      if (item.stored === null) {
+        await unlisted(item.folder, "no import.json");
         continue;
       }
-      const issue = pendingImportIssue(raw) ?? (raw.id !== id ? "id does not match the import's folder" : null);
-      if (issue !== null) {
-        await unreadable(path, issue);
-        continue;
-      }
-      const stored = raw as unknown as PendingImportReviewItem;
+      const { folder, path, stored } = item;
       // The folder is the authority for where the copy is.
       const workingFilePath = join(folder, basename(stored.workingFilePath));
       if (!(await this.present(workingFilePath))) {
@@ -534,22 +521,12 @@ export class QueueStore {
     }
 
     const changedCards: MumblerCard[] = [];
-    for (const id of await folderNames(this.cardsDir)) {
-      if (id.startsWith(".")) continue;
-      const folder = this.cardFolder(id);
-      const path = join(folder, CARD_FILE);
-      const raw = await this.readItem(path, FORMATS.card, unreadable);
-      if (raw === null) continue;
-      if (raw === undefined) {
-        await unlisted(folder, "no card.json");
+    for (const item of cards) {
+      if (item.stored === null) {
+        await unlisted(item.folder, "no card.json");
         continue;
       }
-      const issue = cardIssue(raw) ?? (raw.id !== id ? "id does not match the card's folder" : null);
-      if (issue !== null) {
-        await unreadable(path, issue);
-        continue;
-      }
-      const stored = raw as unknown as MumblerCard;
+      const { id, folder, path, stored } = item;
       const sourceFilePath = join(folder, basename(stored.sourceFilePath));
       const undated = firstRecorded(cardRecordedTimes(stored)) === null
         ? await modifiedTime(sourceFilePath).catch(() => modifiedTime(path))
@@ -577,21 +554,38 @@ export class QueueStore {
     return result;
   }
 
-  // Reads one item file: undefined when it is absent, null when it is damaged
-  // or newer and was reported. A file that cannot be read at all stops the load.
-  private async readItem(
-    path: string,
+  // Reads the item file in each folder of `directory`, writing nothing: a
+  // folder with no file gives a null `stored`, and a file that is damaged,
+  // unreadable, in a newer format or not the item its folder names is added
+  // to `refused`.
+  private async readItems<T extends { id: string }>(
+    directory: string,
+    fileName: string,
     expected: FileFormat,
-    unreadable: (path: string, reason: string) => Promise<void>,
-  ): Promise<Record<string, unknown> | null | undefined> {
-    try {
-      return await readDocument(path, expected);
-    } catch (error: unknown) {
-      const reason = unreadableReason(error);
-      if (reason === null) throw error;
-      await unreadable(path, reason);
-      return null;
+    issueOf: (raw: unknown) => string | null,
+    refused: RefusedFile[],
+  ): Promise<ReadItem<T | null>[]> {
+    const items: ReadItem<T | null>[] = [];
+    for (const id of await folderNames(directory)) {
+      if (id.startsWith(".")) continue;
+      const folder = join(directory, id);
+      const path = join(folder, fileName);
+      let raw: Record<string, unknown> | undefined;
+      try {
+        raw = await readDocument(path, expected);
+      } catch (error: unknown) {
+        const file = refusal(error);
+        if (file === null) throw error;
+        refused.push(file);
+        continue;
+      }
+      if (raw !== undefined && (issueOf(raw) !== null || raw.id !== id)) {
+        refused.push({ path, newer: false });
+        continue;
+      }
+      items.push({ id, folder, path, stored: (raw ?? null) as T | null });
     }
+    return items;
   }
 
   // Scratch and a staged write a crash left are temporary by location; so are
@@ -693,37 +687,6 @@ export class QueueStore {
     }
     // The item is gone once renamed; a folder left here is deleted at launch.
     await rm(removed, { recursive: true, force: true }).catch(() => undefined);
-  }
-
-  /** Explicit reset may set damaged files aside, but never a readable newer one. */
-  async admitReset(): Promise<void> {
-    for (const name of await folderEntries(this.cardsDir)) {
-      await assertResettableJson(join(this.cardsDir, name, CARD_FILE), FORMATS.card);
-    }
-    for (const name of await folderEntries(this.inboxDir)) {
-      await assertResettableJson(join(this.inboxDir, name, IMPORT_FILE), FORMATS.pendingImport);
-    }
-  }
-
-  /** Sets the queue's folders aside together for Reset, in one
-   * "queue-<time>.invalid" folder beside them, naming each path to `onMoved`
-   * as it moves, so a move that fails part-way still reports the earlier ones. */
-  async preserveExistingFiles(onMoved: (path: string) => void = () => undefined): Promise<string[]> {
-    await this.admitReset();
-    const present: string[] = [];
-    for (const path of [this.cardsDir, this.inboxDir]) {
-      if (await fileExists(path)) present.push(path);
-    }
-    if (present.length > 0) {
-      const aside = join(dirname(this.cardsDir), `queue-${formatUtcMarkerMs(new Date())}.invalid`);
-      await mkdir(aside);
-      for (const path of present) {
-        await rename(path, join(aside, basename(path)));
-        onMoved(path);
-      }
-    }
-    this.failed.clear();
-    return present;
   }
 
   private async write(key: FileKey, path: string, document: Record<string, unknown>): Promise<void> {

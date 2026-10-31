@@ -379,7 +379,6 @@ export function registerAppShellIpc(runtime: ApplicationRuntime, windows: AppShe
   );
 
   change(APP_SHELL_CHANNELS.dismissAppWideError, () => runtime.dismissAppWideError());
-  change(APP_SHELL_CHANNELS.resetState, () => runtime.resetState());
   change(APP_SHELL_CHANNELS.cancelPendingImports, (_event, ids: string[]) => {
     assertStringArray(ids, "ids");
     return runtime.cancelPendingImports(ids);

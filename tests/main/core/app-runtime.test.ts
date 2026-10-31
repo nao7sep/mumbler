@@ -58,7 +58,7 @@ const {
   applyFrontTrimOffset,
   resolveStorageRoot,
   getAppPaths,
-  resetFailureDiagnostic,
+  refusedFilesDiagnostic,
 } = await import("@main/core/app-runtime");
 
 const { QueueStore } = await import("@main/core/queue-store");
@@ -68,22 +68,24 @@ const workingFiles = await import("@main/core/working-files");
 const audioTools = await import("@main/core/audio-tools");
 const cardPipeline = await import("@main/core/card-pipeline");
 
-describe("reset failure presentation", () => {
-  it("says existing files were left unchanged when the reset moved nothing", () => {
-    const presentation = resetFailureDiagnostic([], "/home/me/.mumbler");
-
+describe("launch stop presentation", () => {
+  it("names the files a newer Mumbler wrote and says to use that version", () => {
+    const presentation = refusedFilesDiagnostic([{ path: "/home/me/.mumbler/config.json", newer: true }]);
     const english = createTranslator("en");
-    expect(english.text(presentation.title)).toBe("Reset Failed");
-    expect(english.text(presentation.message)).toContain("Existing files were left unchanged");
+    expect(english.text(presentation.title)).toBe("Mumbler Could Not Start");
+    expect(english.text(presentation.message)).toContain("A newer version of Mumbler saved these files: /home/me/.mumbler/config.json.");
+    expect(presentation).not.toHaveProperty("canReset");
   });
 
-  it("names what a reset set aside before it failed, instead of claiming nothing changed", () => {
-    const presentation = resetFailureDiagnostic(["config.json", "cards", "inbox"], "/home/me/.mumbler");
-
-    const text = createTranslator("en").text(presentation.message);
-    expect(text).toContain("it set these aside in /home/me/.mumbler");
-    expect(text).toContain("config.json, cards, inbox.");
-    expect(text).not.toContain("unchanged");
+  it("names unreadable files and newer ones apart when both stopped launch", () => {
+    const text = createTranslator("en").text(refusedFilesDiagnostic([
+      { path: "/m/config.json", newer: false },
+      { path: "/m/layout.json", newer: true },
+      { path: "/m/api-keys.json", newer: false },
+    ]).message);
+    expect(text).toContain("saved these files: /m/layout.json.");
+    expect(text).toContain("could not read these: /m/config.json, /m/api-keys.json.");
+    expect(text).toContain("left them all as they are");
   });
 });
 
@@ -1017,7 +1019,7 @@ describe("ApplicationRuntime confirmed import commit", () => {
       let runtime: Awaited<ReturnType<typeof ApplicationRuntime.initialize>> | undefined;
       try {
         runtime = await ApplicationRuntime.initialize();
-        expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({ canReset: false });
+        expect(runtime.getSnapshot().startupDiagnostic).toMatchObject({ title: { key: "diagnostic.storageTitle" } });
         expect(runtime.getSnapshot().paths).toBeNull();
         await runtime.shutdown();
         expect(await import("node:fs/promises").then(({ readdir }) => readdir(root))).toEqual([]);

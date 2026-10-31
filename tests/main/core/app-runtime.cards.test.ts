@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { dialog, shell } from "electron";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pathValue } from "@shared/i18n/translate";
+import { createTranslator, pathValue } from "@shared/i18n/translate";
 import { CancelledError } from "@main/core/cancellation";
 
 import type { AppSnapshot, MumblerCard, PendingImportReviewItem } from "@shared/app-shell";
@@ -35,7 +35,6 @@ const outputFaults = vi.hoisted(() => ({
 const undeletable = vi.hoisted(() => new Set<string>());
 // Paths a rename refuses to move, the way a folder held open by another program can.
 const unmovable = vi.hoisted(() => new Set<string>());
-const afterResetMove = vi.hoisted(() => ({ run: null as (() => Promise<void>) | null }));
 // Files a write cannot replace, the way a full disk refuses them: an atomic
 // write's final rename onto the file fails. A held write waits at that rename
 // until released, so a test can act while it is in flight.
@@ -101,13 +100,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         await held.release;
       }
       if (unwritable.refuses(String(to))) throw new Error("ENOSPC: no space left on device");
-      const result = await actual.rename(from, to);
-      if (basename(String(from)) === "config.json") {
-        const run = afterResetMove.run;
-        afterResetMove.run = null;
-        await run?.();
-      }
-      return result;
+      return actual.rename(from, to);
     },
   };
 });
@@ -244,7 +237,7 @@ vi.mock("@main/core/audio-tools", async (importOriginal) => {
   };
 });
 
-const { ApplicationRuntime, startupFailureDiagnostic } = await import("@main/core/app-runtime");
+const { ApplicationRuntime, refusedFilesDiagnostic, startupFailureDiagnostic } = await import("@main/core/app-runtime");
 const { createDefaultSettings } = await import("@main/core/settings-schema");
 const { QueueStore } = await import("@main/core/queue-store");
 const cardPipeline = await import("@main/core/card-pipeline");
@@ -544,66 +537,12 @@ describe("the durable queue store", () => {
     expect(await exists(aside)).toBe(false);
   });
 
-  it("restores audio-tool availability and surviving key presence after Reset from failed startup", async () => {
-    await runtime.setGeminiApiKey("retained-test-key");
-    await runtime.shutdown();
-    // No card or import file halts launch as damaged, so the store's load stands in.
-    const { QueueStore } = await import("@main/core/queue-store");
-    const { CorruptStateError } = await import("@main/core/json-store");
-    vi.spyOn(QueueStore.prototype, "load").mockRejectedValueOnce(new CorruptStateError(join(home, "cards"), "damaged"));
-    runtime = await ApplicationRuntime.initialize();
-    expect(runtime.getSnapshot().startupDiagnostic?.canReset).toBe(true);
-    expect(runtime.getSnapshot().dependencies).toBeNull();
-
-    const snapshot = await runtime.resetState();
-
-    expect(snapshot.startupDiagnostic).toBeNull();
-    expect(snapshot.dependencies).not.toBeNull();
-    expect(snapshot.settingsSummary?.hasGeminiApiKey).toBe(true);
-    expect(runtime.getSettingsDraft().hasGeminiApiKey).toBe(true);
-    expect((await dropIn("after-reset.wav"))).toHaveLength(1);
-  });
-
-  it("reports completed reset moves when a later store becomes newer before its move", async () => {
-    const [pending] = await dropIn("take.wav");
-    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
-    const path = join(home, "cards", card.id, "card.json");
-    const newer = JSON.stringify({ ...header("card", 99), id: card.id });
-    afterResetMove.run = () => writeFile(path, newer);
-    try {
-      const snapshot = await runtime.resetState();
-      expect(snapshot.startupDiagnostic).toEqual({
-        title: { key: "diagnostic.resetTitle" },
-        message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json"], folder: home } },
-        canReset: false,
-      });
-      expect(await readFile(path, "utf8")).toBe(newer);
-      expect((await readdir(home)).filter((name) => name.endsWith(".invalid")).map((name) => name.replace(/-\d.*$/, ""))).toEqual(["config"]);
-      expect(await exists(card.sourceFilePath)).toBe(true);
-    } finally { afterResetMove.run = null; }
-  });
-
-  it("resets saved work around a newer layout.json, leaving it as it is and unwritten", async () => {
-    const [pending] = await dropIn("take.wav");
-    await runtime.confirmPendingImports([review(pending)]);
-    const path = join(home, "layout.json");
-    const newer = JSON.stringify({ ...header("layout", 2), queueWidth: 400 });
-    await writeFile(path, newer);
-
-    const snapshot = await runtime.resetState();
-
-    expect(snapshot.startupDiagnostic).toBeNull();
-    expect(cards(snapshot)).toEqual([]);
-    await runtime.saveLayout(430);
-    expect(await readFile(path, "utf8")).toBe(newer);
-  });
-
   it.each(["config.json", "cards/lost/card.json", "inbox/lost/import.json"])(
-    "refuses reset before moving any sibling when %s is newer", async (name) => {
+    "stops launch on a newer %s, writing nothing to any store", async (name) => {
       const [pending] = await dropIn("take.wav");
       const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
       await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
+      await runtime.shutdown();
       const newerPath = join(home, name);
       await mkdir(dirname(newerPath), { recursive: true });
       const kind = name === "config.json" ? "config" : name.startsWith("cards/") ? "card" : "pending-import";
@@ -611,64 +550,34 @@ describe("the durable queue store", () => {
       await writeFile(newerPath, text);
       const storePaths = ["config.json", `cards/${card.id}/card.json`, "layout.json"].map((file) => join(home, file));
       const before = await Promise.all(storePaths.map((path) => readFile(path, "utf8").catch(() => null)));
-      const snapshot = await runtime.resetState();
-      expect(snapshot.startupDiagnostic).toEqual({
-        title: { key: "diagnostic.newerTitle" },
-        message: { key: "diagnostic.newerBody", values: { path: newerPath } },
-        canReset: false,
-      });
+      runtime = await ApplicationRuntime.initialize();
+      const snapshot = runtime.getSnapshot();
+      expect(snapshot.startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path: newerPath, newer: true }]));
+      expect(snapshot.state).toBeNull();
+      await runtime.shutdown();
       expect(await Promise.all(storePaths.map((path) => readFile(path, "utf8").catch(() => null)))).toEqual(before);
       expect(await readFile(newerPath, "utf8")).toBe(text);
       expect((await readdir(home)).filter((file) => file.endsWith(".invalid"))).toEqual([]);
       expect(await exists(card.sourceFilePath)).toBe(true);
-      expect(cards(snapshot)).toHaveLength(1);
     },
   );
 
-  it("sets the queue's folders aside together on reset", async () => {
-    const [pending, other] = await dropIn("take.wav", "other.wav");
-    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    await runtime.resetState();
-    expect(await exists(join(home, "cards"))).toBe(false);
-    expect(await exists(join(home, "inbox"))).toBe(false);
-    const preserved = (await readdir(home)).find((name) => /^queue-.*\.invalid$/.test(name));
-    expect(preserved).toBeDefined();
-    expect(await readFile(join(home, preserved!, "cards", card.id, basename(card.sourceFilePath)), "utf8")).toBe("audio for take.wav");
-    expect(await exists(join(home, preserved!, "inbox", other.id, "import.json"))).toBe(true);
-  });
-
-  it("names a damaged card at launch with its path, leaves it untouched and loads the others", async () => {
+  it("stops launch on a damaged card, naming it and leaving it and the other cards untouched", async () => {
     const [first, second] = await dropIn("take.wav", "next.wav");
     const [kept, damaged] = cards((await runtime.confirmPendingImports([review(first), review(second, { localTimestampText: "2026-03-01 08:30:00" })])).snapshot);
     await runtime.shutdown();
     const path = join(home, "cards", damaged.id, "card.json");
     await writeFile(path, "{ half a card");
+    const keptBefore = await readFile(join(home, "cards", kept.id, "card.json"), "utf8");
     runtime = await ApplicationRuntime.initialize();
-    expect(cards(runtime.getSnapshot()).map((entry) => entry.id)).toEqual([kept.id]);
-    expect(runtime.getSnapshot().appWideError?.message).toEqual({ key: "diagnostic.itemsUnreadableBody", values: { items: [path] } });
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path, newer: false }]));
+    expect(runtime.getSnapshot().state).toBeNull();
     expect(await readFile(path, "utf8")).toBe("{ half a card");
     expect(await readFile(damaged.sourceFilePath, "utf8")).toBe("audio for next.wav");
-    await runtime.dismissAppWideError();
-    expect(runtime.getSnapshot().appWideError).toBeNull();
+    expect(await readFile(join(home, "cards", kept.id, "card.json"), "utf8")).toBe(keptBefore);
   });
 
-  it("shows the unreadable files after the settings notice, one after the other", async () => {
-    const [pending] = await dropIn("take.wav");
-    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    await runtime.shutdown();
-    const config = JSON.parse(await readFile(join(home, "config.json"), "utf8"));
-    await writeFile(join(home, "config.json"), JSON.stringify({ ...config, concurrencyLimit: "future" }));
-    await writeFile(join(home, "cards", card.id, "card.json"), "{ half a card");
-    runtime = await ApplicationRuntime.initialize();
-
-    expect(runtime.getSnapshot().appWideError?.title).toEqual({ key: "diagnostic.settingsUnusableTitle" });
-    await runtime.dismissAppWideError();
-    expect(runtime.getSnapshot().appWideError?.title).toEqual({ key: "diagnostic.itemsUnreadableTitle" });
-    await runtime.dismissAppWideError();
-    expect(runtime.getSnapshot().appWideError).toBeNull();
-  });
-
-  it("halts on a card file it cannot read, moving nothing and offering no Reset", async () => {
+  it("halts on a card file it cannot read, moving nothing", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
@@ -676,11 +585,7 @@ describe("the durable queue store", () => {
     await rm(path, { force: true });
     await mkdir(path);
     runtime = await ApplicationRuntime.initialize();
-    expect(runtime.getSnapshot().startupDiagnostic).toEqual({
-      title: { key: "diagnostic.unreadableTitle" },
-      message: { key: "diagnostic.unreadableBody", values: { path } },
-      canReset: false,
-    });
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path: path, newer: false }]));
     expect((await stat(path)).isDirectory()).toBe(true);
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
@@ -693,11 +598,7 @@ describe("the durable queue store", () => {
     await chmod(folder, 0o000);
     try {
       runtime = await ApplicationRuntime.initialize();
-      expect(runtime.getSnapshot().startupDiagnostic).toEqual({
-        title: { key: "diagnostic.unreadableTitle" },
-        message: { key: "diagnostic.unreadableBody", values: { path: join(folder, "import.json") } },
-        canReset: false,
-      });
+      expect(runtime.getSnapshot().startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path: join(folder, "import.json"), newer: false }]));
       expect(runtime.getSnapshot().state).toBeNull();
     } finally { await chmod(folder, 0o700); }
     expect(await readFile(join(folder, "import.json"), "utf8")).toBe(before);
@@ -710,11 +611,7 @@ describe("the durable queue store", () => {
     // readdir on a file returns the real Node ENOTDIR/scandir error.
     await writeFile(join(home, "cards"), "not a folder");
     runtime = await ApplicationRuntime.initialize();
-    expect(runtime.getSnapshot().startupDiagnostic).toEqual({
-      title: { key: "diagnostic.unreadableTitle" },
-      message: { key: "diagnostic.unreadableBody", values: { path: join(home, "cards") } },
-      canReset: false,
-    });
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path: join(home, "cards"), newer: false }]));
     expect(await readFile(join(home, "cards"), "utf8")).toBe("not a folder");
   });
 
@@ -739,17 +636,15 @@ describe("the durable queue store", () => {
       expect(runtime.getSnapshot().startupDiagnostic).toEqual({
         title: { key: "diagnostic.startupTitle" },
         message: { key: "diagnostic.startupBody" },
-        canReset: false,
       });
       expect(await readFile(join(dirname(pending.workingFilePath), "import.json"), "utf8")).toBe(before);
     } finally { restoreWarn(); failingLogger.mockRestore(); }
   });
 
-  it("offers no Reset for a startup failure that is not a damaged work file", () => {
+  it("names no file for a startup failure that is not a refused file", () => {
     expect(startupFailureDiagnostic(new Error("storage could not be prepared"))).toEqual({
       title: { key: "diagnostic.startupTitle" },
       message: { key: "diagnostic.startupBody" },
-      canReset: false,
     });
   });
 
@@ -2157,7 +2052,7 @@ describe("a store in a newer format", () => {
   }
 
   it.each(["config.json"])(
-    "halts launch naming %s, leaves it untouched and offers no reset",
+    "halts launch naming %s and leaves it untouched",
     async (name) => {
       await confirmedCard();
       await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), concurrencyLimit: 5 });
@@ -2167,11 +2062,7 @@ describe("a store in a newer format", () => {
 
       runtime = await ApplicationRuntime.initialize();
 
-      expect(runtime.getSnapshot().startupDiagnostic).toEqual({
-        title: { key: "diagnostic.newerTitle" },
-        message: { key: "diagnostic.newerBody", values: { path } },
-        canReset: false,
-      });
+      expect(runtime.getSnapshot().startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path: path, newer: true }]));
       expect(runtime.getSnapshot().state).toBeNull();
       await runtime.shutdown();
       expect(await readFile(path, "utf8")).toBe(newer);
@@ -2179,7 +2070,7 @@ describe("a store in a newer format", () => {
     },
   );
 
-  it.each(["card", "pending import"])("names a %s from a newer build at launch, leaves it untouched and loads the rest", async (name) => {
+  it.each(["card", "pending import"])("stops launch on a %s from a newer build, naming it and leaving it untouched", async (name) => {
     const card = await confirmedCard();
     const [pending] = await dropIn("waiting.wav");
     await runtime.shutdown();
@@ -2188,15 +2079,13 @@ describe("a store in a newer format", () => {
 
     runtime = await ApplicationRuntime.initialize();
 
-    expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
-    expect(runtime.getSnapshot().appWideError?.message).toEqual({ key: "diagnostic.itemsUnreadableBody", values: { items: [path] } });
-    expect(cards(runtime.getSnapshot()).map((entry) => entry.id)).toEqual(name === "card" ? [] : [card.id]);
-    expect(runtime.getSnapshot().state!.pendingImports.map((entry) => entry.id)).toEqual(name === "pending import" ? [] : [pending.id]);
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path, newer: true }]));
+    expect(runtime.getSnapshot().state).toBeNull();
     await runtime.shutdown();
     expect(await readFile(path, "utf8")).toBe(newer);
   });
 
-  it("opens on default tool facts and never writes a dependencies.json from a newer build", async () => {
+  it("stops launch on a dependencies.json from a newer build and never writes it", async () => {
     await confirmedCard();
     await runtime.shutdown();
     const path = join(home, "dependencies.json");
@@ -2204,14 +2093,14 @@ describe("a store in a newer format", () => {
 
     runtime = await ApplicationRuntime.initialize();
 
-    expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path, newer: true }]));
     await runtime.shutdown();
     expect(await readFile(path, "utf8")).toBe(newer);
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
 
-  it("opens on a default layout and never writes a layout.json from a newer build", async () => {
-    const card = await confirmedCard();
+  it("stops launch on a layout.json from a newer build and never writes it", async () => {
+    await confirmedCard();
     await runtime.saveLayout(420);
     await runtime.shutdown();
     const path = join(home, "layout.json");
@@ -2219,13 +2108,74 @@ describe("a store in a newer format", () => {
 
     runtime = await ApplicationRuntime.initialize();
 
-    expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
-    expect(runtime.getSnapshot().layout?.queueWidth).not.toBe(420);
-    await runtime.saveLayout(430);
-    await runtime.saveRecordsListWidth(500);
-    await runtime.selectCard(card.id);
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path, newer: true }]));
     await runtime.shutdown();
     expect(await readFile(path, "utf8")).toBe(newer);
+  });
+
+  it("runs with records and the backup history off, saying so once each, when their databases cannot be used", async () => {
+    await runtime.shutdown();
+    const { DatabaseSync } = await import("node:sqlite");
+    const stores = [join(home, "records.sqlite3"), join(home, "backups.sqlite3")];
+    for (const path of stores) {
+      for (const suffix of ["", "-wal", "-shm"]) await rm(`${path}${suffix}`, { force: true });
+      const db = new DatabaseSync(path);
+      db.exec("CREATE TABLE other (id INTEGER PRIMARY KEY); PRAGMA user_version = 1");
+      db.close();
+    }
+    const before = await Promise.all(stores.map((path) => readFile(path)));
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      runtime = await ApplicationRuntime.initialize();
+      expect(runtime.getSnapshot().startupDiagnostic).toBeNull();
+      await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), concurrencyLimit: 5 });
+      await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), concurrencyLimit: 6 });
+      const shown: unknown[] = [];
+      await until(async () => {
+        while (runtime.getSnapshot().appWideError !== null) {
+          shown.push(runtime.getSnapshot().appWideError);
+          await runtime.dismissAppWideError();
+        }
+        expect(shown).toHaveLength(2);
+      });
+      expect(shown).toEqual(expect.arrayContaining([
+        { title: { key: "diagnostic.recordsOffTitle" }, message: { key: "diagnostic.recordsOffBody", values: { path: stores[0], folder: join(home, "logs") } } },
+        { title: { key: "diagnostic.backupsOffTitle" }, message: { key: "diagnostic.backupsOffBody", values: { path: stores[1] } } },
+      ]));
+      await runtime.shutdown();
+    } finally { stderr.mockRestore(); }
+    expect(await Promise.all(stores.map((path) => readFile(path)))).toEqual(before);
+  });
+
+  it("names every refused file in one stop, newer and unreadable alike, before writing anything", async () => {
+    const card = await confirmedCard();
+    await runtime.setGeminiApiKey("stored-test-key");
+    await runtime.shutdown();
+    const layout = await makeNewer(join(home, "layout.json"));
+    await writeFile(join(home, "config.json"), "broken settings");
+    await writeFile(join(home, "api-keys.json"), "broken keys");
+    const cardFile = join(home, "cards", card.id, "card.json");
+    const cardBefore = await readFile(cardFile, "utf8");
+    const records = join(home, "records.sqlite3");
+    await rm(records, { force: true });
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(records);
+    db.exec("PRAGMA user_version = 2");
+    db.close();
+    const recordsBefore = await readFile(records);
+
+    runtime = await ApplicationRuntime.initialize();
+
+    const text = createTranslator("en").text(runtime.getSnapshot().startupDiagnostic!.message);
+    expect(text).toContain(`saved these files: ${join(home, "layout.json")}, ${records}.`);
+    expect(text).toContain(`could not read these: ${join(home, "config.json")}, ${join(home, "api-keys.json")}.`);
+    await runtime.shutdown();
+    expect(await readFile(join(home, "layout.json"), "utf8")).toBe(layout);
+    expect(await readFile(join(home, "config.json"), "utf8")).toBe("broken settings");
+    expect(await readFile(join(home, "api-keys.json"), "utf8")).toBe("broken keys");
+    expect(await readFile(cardFile, "utf8")).toBe(cardBefore);
+    expect(await readFile(records)).toEqual(recordsBefore);
+    expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
 });
 
@@ -2234,7 +2184,7 @@ describe("settings, secrets and the window's own state", () => {
     ["unparseable", "broken settings"],
     ["without its format header", JSON.stringify({ concurrencyLimit: 5 })],
     ["of another kind", JSON.stringify({ ...header("layout"), concurrencyLimit: 5 })],
-  ])("sets aside a config.json that is %s, starts on the built-ins and keeps the queue", async (_kind, bytes) => {
+  ])("stops launch on a config.json that is %s, leaving it and the queue untouched", async (_kind, bytes) => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
@@ -2243,16 +2193,11 @@ describe("settings, secrets and the window's own state", () => {
     runtime = await ApplicationRuntime.initialize();
 
     const snapshot = runtime.getSnapshot();
-    const quarantined = (await readdir(home)).find((name) => /^config-.*\.invalid$/.test(name));
-    expect(quarantined).toBeDefined();
-    expect(await readFile(join(home, quarantined!), "utf8")).toBe(bytes);
-    expect(await savedSettings(), "only the first-launch zone is saved until the user changes a setting").toEqual(FIRST_LAUNCH);
-    expect(snapshot.startupDiagnostic).toBeNull();
-    expect(snapshot.appWideError).toEqual({
-      title: { key: "diagnostic.settingsResetTitle" },
-      message: { key: "diagnostic.settingsResetBody", values: { path: join(home, quarantined!) } },
-    });
-    expect(cards(snapshot).map((entry) => entry.id)).toEqual([card.id]);
+    expect(snapshot.startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path: join(home, "config.json"), newer: false }]));
+    expect(snapshot.state).toBeNull();
+    await runtime.shutdown();
+    expect(await readFile(join(home, "config.json"), "utf8")).toBe(bytes);
+    expect((await readdir(home)).filter((name) => name.endsWith(".invalid"))).toEqual([]);
     expect(await exists(card.sourceFilePath)).toBe(true);
   });
 
@@ -2280,18 +2225,14 @@ describe("settings, secrets and the window's own state", () => {
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...FIRST_LAUNCH, checkUpdatesAtLaunch: false, addedLater: "kept" });
   });
 
-  it("halts on a config.json it cannot read, moving nothing and offering no Reset", async () => {
+  it("halts on a config.json it cannot read, moving nothing", async () => {
     await runtime.shutdown();
     await rm(join(home, "config.json"), { force: true });
     await mkdir(join(home, "config.json"));
 
     runtime = await ApplicationRuntime.initialize();
 
-    expect(runtime.getSnapshot().startupDiagnostic).toEqual({
-      title: { key: "diagnostic.unreadableTitle" },
-      message: { key: "diagnostic.unreadableBody", values: { path: join(home, "config.json") } },
-      canReset: false,
-    });
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path: join(home, "config.json"), newer: false }]));
     expect((await stat(join(home, "config.json"))).isDirectory()).toBe(true);
     expect((await readdir(home)).filter((entry) => entry.endsWith(".invalid"))).toEqual([]);
   });
@@ -2492,8 +2433,7 @@ describe("settings, secrets and the window's own state", () => {
     expect((await runtime.dismissAppWideError()).appWideError).toBeNull();
   });
 
-  it("logs an invalid settings set the store reads after a reset", async () => {
-    await runtime.resetState();
+  it("logs an invalid settings set the store reads", async () => {
     const warn = vi.spyOn(runtime.currentLogger(), "warn");
     await writeFile(join(home, "config.json"), JSON.stringify({ ...header("config"), theme: "sepia" }));
     const { settingsStore } = (runtime as unknown as { runtime: { settingsStore: { load(): Promise<unknown> } } }).runtime;
@@ -2502,91 +2442,10 @@ describe("settings, secrets and the window's own state", () => {
 
     expect(warn).toHaveBeenCalledWith("settings.invalid-set", expect.any(String), { key: "theme" });
   });
-
-  it("rebuilds what speaks the interface language when a reset returns to System", async () => {
-    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), language: "ja" });
-    const languageChanged = vi.fn();
-    runtime.onLanguageChanged(languageChanged);
-
-    await runtime.resetState();
-
-    expect(runtime.interfaceLanguage().language).toBe("en");
-    expect(languageChanged).toHaveBeenCalledOnce();
-  });
-
-  it("returns the app to the System theme on a reset", async () => {
-    const { nativeTheme } = await import("electron");
-    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), theme: "dark" });
-    expect(nativeTheme.themeSource).toBe("dark");
-
-    await runtime.resetState();
-
-    expect(nativeTheme.themeSource).toBe("system");
-  });
-
-  it("starts over on request, keeping the files the user made", async () => {
-    const [pending] = await dropIn("take.wav");
-    await runtime.confirmPendingImports([review(pending, { deleteOriginalOnConfirm: false })]);
-    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
-
-    const snapshot = await runtime.resetState();
-
-    expect(cards(snapshot)).toEqual([]);
-    expect(snapshot.settingsSummary?.defaultTimezone).not.toBe("Europe/Berlin");
-    expect(await exists(join(home, "config.json"))).toBe(false);
-    expect(await exists(join(home, "layout.json"))).toBe(false);
-    expect(await exists(join(home, "cards"))).toBe(false);
-    expect(await exists(pending.workingFilePath), "the recording left the working folder").toBe(false);
-    expect(await exists(pending.originalSourcePath), "the user's own file is untouched").toBe(true);
-  });
-
-  it("moves every card and pending import aside together, and deletes none", async () => {
-    const [kept, waiting] = await dropIn("take.wav", "waiting.wav");
-    const [card] = cards((await runtime.confirmPendingImports([review(kept)])).snapshot);
-
-    await runtime.resetState();
-
-    const setAside = (await readdir(home)).find((name) => /^queue-.*\.invalid$/.test(name));
-    expect(setAside, "the queue is set aside").toBeDefined();
-    expect(await readFile(join(home, setAside!, "cards", card.id, basename(card.sourceFilePath)), "utf8")).toBe("audio for take.wav");
-    expect(await readFile(join(home, setAside!, "inbox", waiting.id, basename(waiting.workingFilePath)), "utf8")).toBe("audio for waiting.wav");
-    expect((await readdir(join(home, setAside!))).sort()).toEqual(["cards", "inbox"]);
-    expect(await exists(join(home, "cards")), "the new queue starts with no cards").toBe(false);
-  });
-
-  it("says what a reset that failed part-way had already set aside, and keeps the old queue", async () => {
-    const [pending] = await dropIn("take.wav");
-    const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
-    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
-    unmovable.add(join(home, "cards"));
-
-    const snapshot = await runtime.resetState();
-
-    expect(snapshot.startupDiagnostic).toEqual({
-      title: { key: "diagnostic.resetTitle" },
-      message: { key: "diagnostic.resetMovedBody", values: { items: ["config.json"], folder: home } },
-      canReset: true,
-    });
-    const names = await readdir(home);
-    expect(names.filter((name) => name.endsWith(".invalid")).map((name) => name.replace(/-\d.*$/, "")).sort())
-      .toEqual(["config", "queue"]);
-    expect(await exists(card.sourceFilePath), "the recording stays where it was").toBe(true);
-    expect(cards(snapshot), "the session keeps the queue it had").toHaveLength(1);
-  });
-
-  it("says nothing was changed when a reset failed before moving anything", async () => {
-    await runtime.saveSettingsDraft({ ...runtime.getSettingsDraft(), defaultTimezone: "Europe/Berlin" });
-    unmovable.add(join(home, "config.json"));
-
-    const snapshot = await runtime.resetState();
-
-    expect(snapshot.startupDiagnostic?.message).toEqual({ key: "diagnostic.resetBody" });
-    expect((await readdir(home)).filter((name) => name.endsWith(".invalid"))).toEqual([]);
-  });
 });
 
 describe("an unreadable work store", () => {
-  it("names a card.json holding the JSON literal null at launch and keeps the working recording", async () => {
+  it("stops launch on a card.json holding the JSON literal null and keeps the working recording", async () => {
     const [pending] = await dropIn("take.wav");
     const [card] = cards((await runtime.confirmPendingImports([review(pending)])).snapshot);
     await runtime.shutdown();
@@ -2595,8 +2454,7 @@ describe("an unreadable work store", () => {
 
     runtime = await ApplicationRuntime.initialize();
 
-    expect(runtime.getSnapshot().appWideError?.title).toEqual({ key: "diagnostic.itemsUnreadableTitle" });
-    expect(cards(runtime.getSnapshot())).toEqual([]);
+    expect(runtime.getSnapshot().startupDiagnostic).toEqual(refusedFilesDiagnostic([{ path, newer: false }]));
     expect(await readFile(path, "utf8")).toBe("null");
     expect(await exists(card.sourceFilePath), "the working recording is kept").toBe(true);
   });

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BackupStoreEngine } from "@main/core/backup-store-engine";
 import { RecordsEngine, type LogEntry } from "@main/core/records-engine";
-import { openVersionedDatabase } from "@main/core/sqlite-store";
+import { databaseFormatVersion, openVersionedDatabase } from "@main/core/sqlite-store";
 
 const faults = vi.hoisted(() => ({
   beforePublish: null as (() => void) | null,
@@ -238,6 +238,22 @@ describe("SQLite creation and admission", () => {
   });
 });
 
+describe("reading a database's format version at launch", () => {
+  it("reads user_version from the file header without changing the file", () => {
+    expect(databaseFormatVersion(file)).toBeUndefined();
+    connect().exec("PRAGMA user_version = 7; CREATE TABLE kept (value TEXT)");
+    const bytes = readFileSync(file);
+    expect(databaseFormatVersion(file)).toBe(7);
+    expect(readFileSync(file)).toEqual(bytes);
+    expect(readdirSync(root)).toEqual(["store.sqlite3"]);
+  });
+
+  it("reads a file that is not a SQLite database as having none", () => {
+    writeFileSync(file, "not a database at all, just some text that is long enough to fill a header and then some more");
+    expect(databaseFormatVersion(file)).toBeNull();
+  });
+});
+
 describe("SQLite engine admission at open", () => {
   it("leaves a newer backup store untouched and records nothing into it", () => {
     connect().exec("PRAGMA user_version = 3");
@@ -245,7 +261,7 @@ describe("SQLite engine admission at open", () => {
     const engine = new BackupStoreEngine(file, "session", WRITER, warn);
     engines.push(engine);
     engine.record("recording", Buffer.from("refused"), "2026-10-07T00:00:00.000Z");
-    expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: expect.stringContaining("newer than this build reads") }));
+    expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ error: expect.stringContaining("newer than this build reads") }), true);
     const db = connect();
     expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 3 });
     expect(db.prepare("SELECT name FROM sqlite_master").all()).toEqual([]);

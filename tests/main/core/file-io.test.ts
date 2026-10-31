@@ -52,7 +52,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-const { fileExists, preserveAside, sameFileBytes, uniquePathInDirectory, writeJsonFile } = await import("@main/core/file-io");
+const { fileExists, sameFileBytes, uniquePathInDirectory, writeJsonFile } = await import("@main/core/file-io");
 const { buildUniqueSuffixedTargets, pathsConflict } = await import("@main/core/file-output");
 
 let dir: string;
@@ -110,7 +110,6 @@ describe("file presence and its name-selection consumers", () => {
   // POSIX directory search/read permissions are the subject; Windows uses ACLs.
   const presenceConsumers: Array<[string, (directory: string, target: string) => Promise<unknown>]> = [
     ["file presence", (_directory, target) => fileExists(target)],
-    ["preserving an existing file", (_directory, target) => preserveAside(target)],
     ["output conflicts", (directory, target) => pathsConflict({
       audioPath: target,
       jsonPath: join(directory, "clip.json"),
@@ -274,27 +273,6 @@ describe("writeJsonFile — data-backup record hook", () => {
     expect(writeEvents).toEqual([`rename:${target}`]);
   });
 });
-
-describe("preserveAside", () => {
-  it("quarantines an existing file as <stem>-<yyyymmdd-hhmmss-fff-utc>.invalid in the same directory", async () => {
-    const target = join(dir, "state.json");
-    await writeFile(target, "not valid json");
-
-    const preserved = await preserveAside(target);
-
-    expect(preserved).not.toBeNull();
-    expect(dirname(preserved!)).toBe(dir);
-    expect(basename(preserved!)).toMatch(/^state-\d{8}-\d{6}-\d{3}-utc\.invalid$/);
-    expect(await readFile(preserved!, "utf8")).toBe("not valid json");
-  });
-
-  it("returns null without renaming anything when the file does not exist", async () => {
-    const target = join(dir, "missing.json");
-    expect(await preserveAside(target)).toBeNull();
-    expect(capturedRenames).toEqual([]);
-  });
-});
-
 
 it.skipIf(process.platform === "win32")("creates an owner-only stage before writing any secret bytes", async () => {
   await writeJsonFile(join(dir, "secret.json"), { secret: "key" }, { mode: 0o600, record: false });

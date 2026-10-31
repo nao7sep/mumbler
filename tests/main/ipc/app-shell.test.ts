@@ -32,7 +32,7 @@ const RUNTIME_METHODS = [
   "selectCard", "duplicateCard", "updateCardTrim", "getCardMediaSource", "generateCardStep",
   "cancelCardProcessing", "pickOutputDirectory", "pickBackupDirectory", "openOutputDirectory", "saveSettingsDraft",
   "setGeminiApiKey", "clearGeminiApiKey", "chooseOutputDirectory", "saveCard", "removeCard",
-  "reportRendererError", "reportRendererDiagnostic", "dismissAppWideError", "resetState",
+  "reportRendererError", "reportRendererDiagnostic", "dismissAppWideError",
   "cancelPendingImports", "provisionTool", "cancelToolProvision", "checkTools", "cancelToolCheck",
   "saveToolSettings", "saveLayout", "readRecordsPage", "readRecordDetail", "readRecordSources",
   "recordsListWidth", "saveRecordsListWidth",
@@ -115,7 +115,6 @@ describe("the app-shell IPC boundary", () => {
     ["reportRendererError", "reportRendererError", [{ message: "boom" }]],
     ["reportRendererDiagnostic", "reportRendererDiagnostic", [{ message: "note" }]],
     ["dismissAppWideError", "dismissAppWideError", []],
-    ["resetState", "resetState", []],
     ["cancelPendingImports", "cancelPendingImports", [["pending-1"]]],
     ["provisionTool", "provisionTool", ["ffmpeg"]],
     ["cancelToolProvision", "cancelToolProvision", ["ffprobe"]],
@@ -146,7 +145,7 @@ describe("the app-shell IPC boundary", () => {
     };
     const changes = new Set(["dismissFirstRunSetup", "updatePendingImportDrafts", "selectCard", "duplicateCard", "updateCardTrim",
       "generateCardStep", "cancelCardProcessing", "saveSettingsDraft", "removeCard", "reportRendererError", "dismissAppWideError",
-      "resetState", "cancelPendingImports", "provisionTool", "cancelToolProvision", "checkTools", "cancelToolCheck",
+      "cancelPendingImports", "provisionTool", "cancelToolProvision", "checkTools", "cancelToolCheck",
       "saveToolSettings", "saveLayout"]);
     expect(result).toEqual(channel in reply ? reply[channel] : changes.has(channel) ? undefined : `${method} result`);
   });
@@ -283,10 +282,10 @@ describe("the app-shell IPC boundary", () => {
 
   it("logs an unexpected failure with the error, and still rejects", async () => {
     const failure = new Error("disk gone");
-    runtime.resetState.mockRejectedValueOnce(failure);
-    await expect(invoke(APP_SHELL_CHANNELS.resetState)).rejects.toBe(failure);
+    runtime.dismissAppWideError.mockRejectedValueOnce(failure);
+    await expect(invoke(APP_SHELL_CHANNELS.dismissAppWideError)).rejects.toBe(failure);
     expect(logger.error).toHaveBeenCalledExactlyOnceWith("ipc.failed", "Unhandled failure in IPC handler.", failure, {
-      channel: APP_SHELL_CHANNELS.resetState,
+      channel: APP_SHELL_CHANNELS.dismissAppWideError,
     });
     expect(logger.debug).not.toHaveBeenCalled();
   });

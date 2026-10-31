@@ -38,7 +38,6 @@ export const APP_SHELL_CHANNELS = {
   reportRendererError: "app-shell:report-renderer-error",
   reportRendererDiagnostic: "app-shell:report-renderer-diagnostic",
   dismissAppWideError: "app-shell:dismiss-app-wide-error",
-  resetState: "app-shell:reset-state",
   cancelPendingImports: "app-shell:cancel-pending-imports",
   provisionTool: "app-shell:provision-tool",
   cancelToolProvision: "app-shell:cancel-tool-provision",
@@ -432,11 +431,8 @@ export interface StartupDiagnostic {
   message: Message;
 }
 
-// Why the stores did not load. Reset sets them aside and starts empty, so it is
-// offered only where nothing must stay exactly in place.
-export interface StartupFailure extends StartupDiagnostic {
-  canReset: boolean;
-}
+// Why launch stopped. The files it names are left exactly as they are.
+export type StartupFailure = StartupDiagnostic;
 
 export interface RendererErrorReport {
   message: string;
@@ -685,7 +681,6 @@ export interface MumblerShellApi {
   reportRendererError(report: RendererErrorReport): Promise<void>;
   reportRendererDiagnostic(report: RendererErrorReport): Promise<void>;
   dismissAppWideError(): Promise<void>;
-  resetState(): Promise<void>;
   cancelPendingImports(ids: string[]): Promise<void>;
   // Managed audio-tool operations. Each returns a fresh snapshot so the surface
   // reflects the new state; live progress arrives with each snapshot.
