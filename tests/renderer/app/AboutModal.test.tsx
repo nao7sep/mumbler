@@ -45,7 +45,7 @@ describe("AboutModal external results", () => {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    await act(async () => root?.render(React.createElement(AboutModal, { version: "0.1.0", onClose: vi.fn() })));
+    await act(async () => root?.render(React.createElement(AboutModal, { version: "1.0.0", onClose: vi.fn() })));
 
     const links = Array.from(document.querySelectorAll<HTMLAnchorElement>(".about-links a"));
     const hostile = new Error("EACCES /private/tmp/browser-handler");
@@ -67,7 +67,7 @@ describe("AboutModal external results", () => {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    await act(async () => root?.render(React.createElement(AboutModal, { version: "0.1.0", onClose: vi.fn() })));
+    await act(async () => root?.render(React.createElement(AboutModal, { version: "1.0.0", onClose: vi.fn() })));
 
     const first = deferred<void>();
     const second = deferred<void>();
@@ -88,7 +88,7 @@ describe("AboutModal copyright", () => {
     const container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
-    await act(async () => root?.render(React.createElement(AboutModal, { version: "0.1.0", onClose: vi.fn() })));
+    await act(async () => root?.render(React.createElement(AboutModal, { version: "1.0.0", onClose: vi.fn() })));
 
     const meta = document.querySelector(".about-meta");
     expect(meta?.textContent).toBe("© 2026 Yoshinao Inoguchi · GNU GPL v3 or later");

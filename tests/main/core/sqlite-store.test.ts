@@ -98,24 +98,11 @@ describe("SQLite creation and admission", () => {
     expect(readFileSync(file).byteLength).toBe(0);
   });
 
-  it("refuses an older database without changing its bytes, schema or rows", () => {
-    const db = connect();
-    db.exec(`PRAGMA user_version = 1; ${schema}; INSERT INTO facts VALUES ('kept')`);
-    const bytes = readFileSync(file);
-    const existingSchema = db.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY name").all();
-    expect(() => open(2, "CREATE TABLE forbidden (value TEXT)")).toThrow("is in format 1, which this build does not read");
-    expect(readFileSync(file)).toEqual(bytes);
-    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
-    expect(db.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY name").all()).toEqual(existingSchema);
-    expect(db.prepare("SELECT value FROM facts").all()).toEqual([{ value: "kept" }]);
-    expect(db.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "delete" });
-  });
-
   it("continues writing an existing current-format database", () => {
-    connect().exec(`PRAGMA user_version = 2; ${schema}; INSERT INTO facts VALUES ('earlier')`);
-    const db = open(2);
+    connect().exec(`PRAGMA user_version = 1; ${schema}; INSERT INTO facts VALUES ('earlier')`);
+    const db = open();
     db.exec("INSERT INTO facts VALUES ('current')");
-    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
     expect(db.prepare("SELECT value FROM facts ORDER BY rowid").all()).toEqual([{ value: "earlier" }, { value: "current" }]);
   });
 

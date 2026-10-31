@@ -11,8 +11,7 @@ import { NewerFormatError } from "./format-versions.ts";
 function admitDatabaseFormat(db: DatabaseSync, file: string, supported: number): void {
   const { user_version: recorded } = db.prepare("PRAGMA user_version").get() as { user_version: number };
   if (recorded > supported) throw new NewerFormatError(file, recorded, supported);
-  if (recorded < 1) throw new Error(`${file} records no format version (user_version ${recorded}).`);
-  if (recorded < supported) throw new Error(`${file} is in format ${recorded}, which this build does not read.`);
+  if (recorded !== supported) throw new Error(`${file} records no format version this build reads (user_version ${recorded}).`);
 }
 
 type ReportCleanup = (error: unknown) => void;

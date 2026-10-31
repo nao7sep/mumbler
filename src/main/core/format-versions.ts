@@ -19,7 +19,7 @@ export const FORMAT_VERSIONS = {
   /** records.sqlite3 */
   records: 1,
   /** backups.sqlite3, one row per file per launch */
-  backups: 2,
+  backups: 1,
   /** The .json written beside a saved recording */
   outputJson: 1,
   /** The front matter of the .md written beside a saved recording */

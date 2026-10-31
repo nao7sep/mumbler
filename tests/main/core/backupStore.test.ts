@@ -23,7 +23,6 @@ import {
   setBackupStoreWarn,
   type BackupWarn,
 } from "@main/core/backupStore";
-import { createDefaultSettings, createSettingsStore } from "@main/core/settings-schema";
 
 let root: string;
 let storeFilePath: string;
@@ -231,14 +230,14 @@ describe("record — format version", () => {
     await closeBackupStore();
     const db = new DatabaseSync(storeFilePath);
     try {
-      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
     } finally {
       db.close();
     }
   });
 
   it.each([
-    ["in a newer format", "CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 3;", "newer than this build reads"],
+    ["in a newer format", "CREATE TABLE future (id INTEGER PRIMARY KEY); PRAGMA user_version = 2;", "newer than this build reads"],
     ["without its format version", "CREATE TABLE backups (id INTEGER PRIMARY KEY);", "records no format version"],
   ])("leaves a history %s untouched, warning once and recording nothing", async (_kind, setup, reported) => {
     const existing = new DatabaseSync(storeFilePath);
@@ -259,51 +258,6 @@ describe("record — format version", () => {
     );
     expect(createHash("sha256").update(readFileSync(storeFilePath)).digest("hex")).toBe(before);
     expect(readdirSync(root)).not.toContain("backups.sqlite3-wal");
-  });
-});
-
-describe("record — unsupported history written before sessions", () => {
-  it("preserves its bytes, schema and rows and disables recording for the session", async () => {
-    const file = join(root, "config.json");
-    const old = new DatabaseSync(storeFilePath);
-    old.exec(`CREATE TABLE backups (
-      id INTEGER PRIMARY KEY, path TEXT NOT NULL, content BLOB NOT NULL, content_sha256 TEXT NOT NULL,
-      byte_size INTEGER NOT NULL, written_at_utc TEXT NOT NULL);
-      CREATE INDEX idx_backups_path_id ON backups (path, id);
-      PRAGMA user_version = 1;`);
-    const insert = old.prepare("INSERT INTO backups (path, content, content_sha256, byte_size, written_at_utc) VALUES (?, ?, ?, ?, ?)");
-    for (const value of ["one", "two"]) {
-      const bytes = Buffer.from(value, "utf8");
-      insert.run(file, bytes, createHash("sha256").update(bytes).digest("hex"), bytes.byteLength, "2026-10-01T00:00:00.000Z");
-    }
-    const schema = old.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY name").all();
-    const rows = old.prepare("SELECT * FROM backups ORDER BY id").all();
-    old.close();
-    const before = readFileSync(storeFilePath);
-    const warn = vi.fn<BackupWarn>();
-    setBackupStoreWarn(warn);
-
-    const settings = createSettingsStore(file, root);
-    await settings.save({ ...createDefaultSettings(), concurrencyLimit: 4 });
-    await settings.save({ ...createDefaultSettings(), concurrencyLimit: 5 });
-    await closeBackupStore();
-
-    expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ concurrencyLimit: 5 });
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("recording disabled for this session"),
-      expect.objectContaining({ error: expect.stringContaining("is in format 1, which this build does not read") }),
-    );
-    expect(readFileSync(storeFilePath)).toEqual(before);
-    expect(readdirSync(root).sort()).toEqual(["backups.sqlite3", "config.json"]);
-    const db = new DatabaseSync(storeFilePath);
-    try {
-      expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
-      expect(db.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY name").all()).toEqual(schema);
-      expect(db.prepare("SELECT * FROM backups ORDER BY id").all()).toEqual(rows);
-    } finally {
-      db.close();
-    }
   });
 });
 

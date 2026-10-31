@@ -1,6 +1,6 @@
 {
   "name": "mumbler",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "packageManager": "npm@12.2.0",
   "description": "Transcribe voice recordings with AI, structure the transcript, and generate titles and slugs ready to publish.",
